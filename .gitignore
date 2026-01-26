@@ -153,3 +153,4 @@ check_*.py
 PROJECT.md
 CLAUDE.md
 PLAN.md
+*.jsonl
