@@ -1,0 +1,496 @@
+{"text": "please look at the last conversation we had about the directory aura_clean in [VOLUME_PATH_1]", "valence": 0.2, "arousal": 0.4}
+{"text": "can we use my already trained [FILE_PATH_6]", "valence": 0.0, "arousal": 0.2}
+{"text": "can you normalize code in here so its useful without being duplicates? and write tests for them please :) [VOLUME_PATH_7]", "valence": 0.2, "arousal": 0.5}
+{"text": "can we add an encoding / decoding test ? lets use a standard encoder for that", "valence": 0.2, "arousal": 0.3}
+{"text": "multiplication is slow ;)", "valence": 0.2, "arousal": 0.3}
+{"text": "can you review my codebase and make me a report with suggestions and optimizations? [FILE_PATH_10]", "valence": 0.2, "arousal": 0.3}
+{"text": "can you write the files to disk please", "valence": 0.2, "arousal": 0.3}
+{"text": "we also need to make aura learn her identity : [FILE_PATH_18]", "valence": 0.2, "arousal": 0.4}
+{"text": "check into ~/ too and in the pycharmproject subdirectory you will see there is a lot more", "valence": 0.0, "arousal": 0.2}
+{"text": "we need to complete this file now, read the past chat in this project to understand: [FILE_PATH_26]", "valence": 0.2, "arousal": 0.4}
+{"text": "can you fix the errors ?", "valence": 0.1, "arousal": 0.3}
+{"text": "how can I infer my training data ? I have like 270k lines done", "valence": 0.0, "arousal": 0.5}
+{"text": "hi there this is where we were at:", "valence": 0.5, "arousal": 0.2}
+{"text": "here is our last chat", "valence": 0.2, "arousal": 0.3}
+{"text": "I need to integrate this so it works its not done yet.", "valence": 0.2, "arousal": 0.4}
+{"text": "how do I configure qdrant? also the tests are a bit slow can we make it faster? some error:", "valence": 0.1, "arousal": 0.3}
+{"text": "hey there can we continue :)", "valence": 0.7, "arousal": 0.5}
+{"text": "qdrant is up locally on default port but not configured, it runs the defaults", "valence": 0.1, "arousal": 0.2}
+{"text": "im also having aura_wikianswers as a collection in qdrant with over 3 million question sets (points)", "valence": 0.2, "arousal": 0.3}
+{"text": "I also just got access to: **Nemotron-Pre-Training-Dataset-v1 Release**", "valence": 0.5, "arousal": 0.6}
+{"text": "can you analyze the project files for me including the new gradient file I pasted here", "valence": 0.2, "arousal": 0.4}
+{"text": "lets do phase1 and write a comprehensive testing framework to validate and benchmark everything", "valence": 0.2, "arousal": 0.3}
+{"text": "perfect so whats next", "valence": 0.8, "arousal": 0.5}
+{"text": "do not add words like Enhanced or any prefix keep the original names", "valence": 0.5, "arousal": 0.2}
+{"text": "can you check [FILE_PATH_27] and if its not alright write to files for the test integration ?", "valence": 0.0, "arousal": 0.3}
+{"text": "option A done need option B and C", "valence": 0.2, "arousal": 0.1}
+{"text": "lets fix the torch issue and train the agent properly on our database now", "valence": 0.2, "arousal": 0.4}
+{"text": "are you looking in the right dir? [VOLUME_PATH_40]", "valence": 0.2, "arousal": 0.3}
+{"text": "the real kb is here you probably look the json instead of the jsonl: [VOLUME_PATH_44]", "valence": 0.1, "arousal": 0.3}
+{"text": "ah well we need to continue testing the books lol you were testing the interactive agent system for knowledge retrieval :)", "valence": 0.5, "arousal": 0.3}
+{"text": "you did lol you were finishing testing [VOLUME_PATH_46]", "valence": 0.5, "arousal": 0.6}
+{"text": "check in here [VOLUME_PATH_40]", "valence": 0.0, "arousal": 0.2}
+{"text": "theres already 210 and counting ready might as well prepare the processing script while it finish", "valence": 0.2, "arousal": 0.5}
+{"text": "now we need a main file that will boot aura and unify all the working features together.  You can refer to [FILE_PATH_50] to help me", "valence": 0.1, "arousal": 0.3}
+{"text": "we probably need to modify this file too : [FILE_PATH_51]", "valence": 0.1, "arousal": 0.3}
+{"text": "keep all the adapters but fix the file please: [FILE_PATH_51]", "valence": 0.1, "arousal": 0.5}
+{"text": "here is some documentation", "valence": 0.0, "arousal": 0}
+{"text": "optimizations are done here is a csv file that maps modules degrees", "valence": 0.2, "arousal": 0.3}
+{"text": "check the past conversations please", "valence": 0.1, "arousal": 0.2}
+{"text": "this is where our project is: [FILE_PATH_10]", "valence": 0.2, "arousal": 0.3}
+{"text": "yes lets write some tests", "valence": 0.5, "arousal": 0.4}
+{"text": "while we are at it we could maybe integrate it in this then integrate this to aura ?", "valence": 0.2, "arousal": 0.3}
+{"text": "write smaller files that way we will not have that problem", "valence": 0.2, "arousal": 0.3}
+{"text": "next section of the main page with the blurb thats needed is to introduce Ethics & Principles.", "valence": 0.2, "arousal": 0.2}
+{"text": "can you create a document with optimization, code review and improvement for : [VOLUME_PATH_54] [VOLUME_PATH_54]/packages/*", "valence": 0.2, "arousal": 0.5}
+{"text": "performance optimization implementation plan would be awesome :)", "valence": 0.7, "arousal": 0.6}
+{"text": "can you help me integrate dependency injection", "valence": 0.2, "arousal": 0.3}
+{"text": "oh we know all work now you wanted to create a better version of [VOLUME_PATH_61] to take advantage of this file: [VOLUME_PATH_49]", "valence": 0.0, "arousal": 0.3}
+{"text": "maybe we should stream the json file as there is 11.2M lines of txt in it", "valence": 0.2, "arousal": 0.3}
+{"text": "400 more you can grab now [FILE_PATH_48] Library just need to get all txt books from the subdirectories", "valence": 0.2, "arousal": 0.3}
+{"text": "maybe I can run it so while it process we can do something else ?", "valence": 0.3, "arousal": 0.4}
+{"text": "lets curb the enthusiasm lol its only a database for now ;)", "valence": 0.2, "arousal": 0.4}
+{"text": "we need to train them now", "valence": 0.2, "arousal": 0.6}
+{"text": "how do I put that in my uv pyproject file ?", "valence": 0.1, "arousal": 0.3}
+{"text": "can you show me the ternary lif files please ?", "valence": 0.2, "arousal": 0.2}
+{"text": "perfect it did compile, now how do I implement this for opencl?", "valence": 0.5, "arousal": 0.6}
+{"text": "can you give me the full binding file ?", "valence": 0.1, "arousal": 0.2}
+{"text": "both option failed...", "valence": -0.6, "arousal": 0.4}
+{"text": "wow that is fast: Backend: OpenCL\nTime: 12.47ms per forward pass\nThroughput: 131.42M neurons/sec\nSpikes: 575698.0 / 1638400 (35.14%)", "valence": 0.5, "arousal": 0.6}
+{"text": "can you show me the full binding ?", "valence": 0.2, "arousal": 0.3}
+{"text": "were missing the adex_opencl.cpp", "valence": -0.2, "arousal": 0.3}
+{"text": "COGNITIV AURA the neuromorphic entity / super advanced ai system (AURA SSN)", "valence": 0.2, "arousal": 0.5}
+{"text": "check past conversations we invented it together", "valence": 0.5, "arousal": 0.4}
+{"text": "great ! now give me more of a \"Why AURA\", \"What it does\" and \"What it does better than common llm\" without going into the technical aspect", "valence": 0.8, "arousal": 0.6}
+{"text": "lets mock the user experience in words / prompts / use case and how AURA would respond", "valence": 0.2, "arousal": 0.4}
+{"text": "aura dont just think she also feels, create and invent things", "valence": 0.5, "arousal": 0.6}
+{"text": "give me a list of all individual modes (with a description small one liner for each) that we can mix together", "valence": 0.2, "arousal": 0.3}
+{"text": "well our goal is to have 30 billion neurons by 2030 ... 100M at launch, 1B the year after, 10B 3y then 30B", "valence": 0.2, "arousal": 0.5}
+{"text": "perfect we can also use: [FILE_PATH_87]", "valence": 0.8, "arousal": 0.6}
+{"text": "perfect we can also use: [FILE_PATH_87]", "valence": 0.8, "arousal": 0.5}
+{"text": "can you add the file parser to it", "valence": 0.0, "arousal": 0.2}
+{"text": "hi my friend what do you think of this code:", "valence": 0.5, "arousal": 0.4}
+{"text": "POC done im doing \"v2\" or the official model now", "valence": 0.5, "arousal": 0.6}
+{"text": "can we load the events files in here then?", "valence": 0.2, "arousal": 0.3}
+{"text": "here is my trainer to predict history outcome any way to improve it ?", "valence": 0.2, "arousal": 0.4}
+{"text": "here is how my records look like:", "valence": 0.1, "arousal": 0.2}
+{"text": "I thought of a way to make aura have infinite context ;) can you guess it from these files ?", "valence": 0.5, "arousal": 0.6}
+{"text": "lets add live context archival", "valence": 0.2, "arousal": 0.4}
+{"text": "can you fix this file... It was badly parsed [VOLUME_PATH_95] write to disk", "valence": 0.2, "arousal": 0.4}
+{"text": "the file is still 2760 lines", "valence": 0.1, "arousal": 0.2}
+{"text": "im missing those   EventFeatureEncoder,\n    EventFeatureContext,", "valence": 0.2, "arousal": 0.3}
+{"text": "can you write a paper about the whole infinite context thing please :)", "valence": 0.3, "arousal": 0.5}
+{"text": "Hi Claude, what were some highlights from our recent conversations?", "valence": 0.5, "arousal": 0.3}
+{"text": "is there a way to create the architecture so I can consistently feed it ?", "valence": 0.2, "arousal": 0.5}
+{"text": "what do you think of this code?", "valence": 0.0, "arousal": 0.5}
+{"text": "I asked my engineer to give me the paper he did", "valence": 0.2, "arousal": 0.3}
+{"text": "I was counting on you to help me implement it ;) step by step", "valence": 0.5, "arousal": 0.6}
+{"text": "sorry Volumes/AURA_RESOURCES", "valence": 0.0, "arousal": 0.1}
+{"text": "I was thinking about streaming pretrain corpus from hugging face mixed with txt data locally", "valence": 0.1, "arousal": 0.3}
+{"text": "here is another kind of head I was having:", "valence": 0.2, "arousal": 0.4}
+{"text": "this was the former project who was a bit messy but some interesting stuff in it I think [VOLUME_PATH_106]", "valence": 0.2, "arousal": 0.4}
+{"text": "I added a json file for realms and svc / text pretrain_data/realms_and_svc.json", "valence": 0.2, "arousal": 0.3}
+{"text": "ok we were at [VOLUME_PATH_107] for the new aura system in [VOLUME_PATH_108]", "valence": 0.0, "arousal": 0.5}
+{"text": "in fact its 1400 of annotated data:", "valence": 0.1, "arousal": 0.2}
+{"text": "thats exactly why I created the dataset ;p;", "valence": 0.5, "arousal": 0.3}
+{"text": "here is another one for plutchik emotions [VOLUME_PATH_109]", "valence": 0.0, "arousal": 0.5}
+{"text": "here was the old amygdala training :", "valence": 0.2, "arousal": 0.3}
+{"text": "look at files in the folder here theres the full structure: [VOLUME_PATH_110]", "valence": 0.2, "arousal": 0.3}
+{"text": "whatever will work I think I made it too complicated and I am over my head lol we need to sort :)", "valence": 0.2, "arousal": 0.5}
+{"text": "I would say 1 and 2 go hand in hand", "valence": 0.5, "arousal": 0.3}
+{"text": "[VOLUME_PATH_111] and [VOLUME_PATH_112]", "valence": 0.0, "arousal": 0}
+{"text": "yep mi also having chat templates here: [VOLUME_PATH_113]", "valence": 0.2, "arousal": 0.3}
+{"text": "yep but lets move the new component outside of aura_genesis :) as well as the model ;) or im gonna get confused lol", "valence": 0.2, "arousal": 0.5}
+{"text": "I think you will like what I got there: [VOLUME_PATH_114]", "valence": 0.5, "arousal": 0.5}
+{"text": "yep :) then ill need to process my 500 txt book collection lol", "valence": 0.5, "arousal": 0.6}
+{"text": "yep :) then ill need to process my 500 txt book collection lol I added some more training data [VOLUME_PATH_115]", "valence": 0.6, "arousal": 0.5}
+{"text": "yes please while I finish gathering all the individual textx", "valence": 0.5, "arousal": 0.3}
+{"text": "aura is almost done here are some of the docs :)", "valence": 0.5, "arousal": 0.5}
+{"text": "here is the oja trainer:", "valence": 0.2, "arousal": 0.3}
+{"text": "here is an example of the quantum side", "valence": 0.2, "arousal": 0.3}
+{"text": "oja on the database side", "valence": 0.1, "arousal": 0.2}
+{"text": "here is the aura side of vector db manager", "valence": 0.2, "arousal": 0.3}
+{"text": "can you give me a list of recommendation / optimization so far in md format ?", "valence": 0.2, "arousal": 0.3}
+{"text": "how can I fix this in my code  participants.update(event['key_figures'])\nTypeError: unhashable type: 'dict'", "valence": -0.5, "arousal": 0.7}
+{"text": "its not just a war database... its all events in history", "valence": 0.2, "arousal": 0.5}
+{"text": "im having 50k events appx", "valence": 0.2, "arousal": 0.5}
+{"text": "we could annotate with a transformer sometimes the location is in the description so are the key figures", "valence": 0.0, "arousal": 0.3}
+{"text": "lets continue our training pipeline, convert to python so we can integrate it, here is an example of the results it gives", "valence": 0.5, "arousal": 0.5}
+{"text": "explain to me the science behind tokenizers", "valence": 0.1, "arousal": 0.3}
+{"text": "no backprop use MathMul or the variant with only add and sub", "valence": 0.2, "arousal": 0.3}
+{"text": "AdditionOnlySRFFN(\"test_srffn\", config) class is missing", "valence": -0.5, "arousal": 0.3}
+{"text": "just tell me what to change the canvas is buggy", "valence": -0.3, "arousal": 0.5}
+{"text": "perfect now lets load the full keyword", "valence": 0.9, "arousal": 0.6}
+{"text": "why not just load the json file, process it and save it to a pt file ?", "valence": 0.2, "arousal": 0.4}
+{"text": "that way aura can read books and hear them in the voice it was written", "valence": 0.6, "arousal": 0.5}
+{"text": "lets split each class in its own file", "valence": 0.2, "arousal": 0.3}
+{"text": "now how can we hear her voice and model it ?", "valence": 0.2, "arousal": 0.4}
+{"text": "can you create it as a test under the tests directory ?", "valence": 0.2, "arousal": 0.3}
+{"text": "I did put an audio.mp3 voice in the root", "valence": 0.2, "arousal": 0.2}
+{"text": "would it work better with torchaudio ?", "valence": 0.1, "arousal": 0.3}
+{"text": "can you write it please", "valence": 0.5, "arousal": 0.3}
+{"text": "its creating noise... no actual words", "valence": -0.5, "arousal": 0.3}
+{"text": "hi I added the new GEMINI API into the project description can you read it ?", "valence": 0.5, "arousal": 0.3}
+{"text": "lets implement silu, gelu, tanh with only add / sub", "valence": 0.1, "arousal": 0.2}
+{"text": "can you give me a full read me for it ?", "valence": 0.2, "arousal": 0.5}
+{"text": "im opening a linkedin group called Everything Neuromorphic - It's not AI what should I add as a description ?", "valence": 0.5, "arousal": 0.4}
+{"text": "I just created a new linkedin profile dedicated to that. What should my about be ?", "valence": 0.5, "arousal": 0.4}
+{"text": "can you create an in-depth analysis of:", "valence": 0.0, "arousal": 0.2}
+{"text": "you got it right I asked you because I would like to see if we can take whats good from it but use SRFFN and this with it", "valence": 0.5, "arousal": 0.6}
+{"text": "would you do it another more efficient way for aura ?", "valence": 0.1, "arousal": 0.3}
+{"text": "lets create some tests to validate it", "valence": 0.2, "arousal": 0.5}
+{"text": "neurons are partitioned in zones and each have their abilities", "valence": 0.1, "arousal": 0.2}
+{"text": "so that one pass gradient would be the \"thalamus\" pointing at neurons to update depending on their signal", "valence": 0.0, "arousal": 0.3}
+{"text": "check the former implementation at Volumes/Others2/AURA_GENESIS it has the thalamus and routing and it was working well if I remember", "valence": 0.2, "arousal": 0.3}
+{"text": "here some of the files", "valence": 0.1, "arousal": 0.2}
+{"text": "ok I created a project to continue our last conversation which I paster in the instruction ;)", "valence": 0.5, "arousal": 0.3}
+{"text": "shhhh no more Quebec, Canadian, Quantum, etc stuff unless it has something to do with the chat, flow jokes allowed :P", "valence": 0.2, "arousal": 0.3}
+{"text": "well first ingesting our actual dataset of 10,000 records would be nice ;)", "valence": 0.3, "arousal": 0.5}
+{"text": "431000 and something lines ;)", "valence": 0.5, "arousal": 0.5}
+{"text": "gonna call the data file and put it in the same directory : \"beast_food.json\"", "valence": 0.1, "arousal": 0.3}
+{"text": "can you create a blue color that is not used anywhere for kontexapi so we can pattent it", "valence": 0.2, "arousal": 0.3}
+{"text": "alright the dataset is now generated, I started generating json for domain related knowledge here is an example:", "valence": 0.5, "arousal": 0.4}
+{"text": "read the last conversation we are doing ARKONA model", "valence": 0.2, "arousal": 0.5}
+{"text": "I added some files to know what you think of this", "valence": 0.2, "arousal": 0.3}
+{"text": "embeddings im getting 34x faster than traditional and here is a paper about memory", "valence": 0.5, "arousal": 0.3}
+{"text": "those were old tests sylabification is fixed now :)", "valence": 0.5, "arousal": 0.6}
+{"text": "the query language will be linked to the other functions in the hilbert phasic multiverse this is why", "valence": 0.0, "arousal": 0.3}
+{"text": "here is the optimized oja layer:", "valence": 0.1, "arousal": 0.2}
+{"text": "I agree that it needs a full review before prod ;)", "valence": 0.6, "arousal": 0.4}
+{"text": "im focusing on the core learning process first with vector embeddings in Qdrant for similarity and Phasic Universes for concept proof", "valence": 0.2, "arousal": 0.5}
+{"text": "I need to say I wanted a challenge so I did the opposite of just about anything :P", "valence": 0.5, "arousal": 0.6}
+{"text": "my goal is to mimic neuromorphic behaviour to save energy and explore alternate timeline without the need of a full datacenter to do so", "valence": 0.2, "arousal": 0.4}
+{"text": "this was the script we made together to see if we could beat relu", "valence": 0.2, "arousal": 0.4}
+{"text": "hypothetically speaking what could enable unlimited context (in out) for ai ?", "valence": 0.1, "arousal": 0.3}
+{"text": "lets say i want to create a foundational model how could this be done with that architecture ? conceptually", "valence": 0.1, "arousal": 0.3}
+{"text": "oh I just found a prompt we could run daIly to update our neuronal structure based on event here is the json result:", "valence": 0.5, "arousal": 0.3}
+{"text": "I just changed my prompt a bit and now the dataset is wow :", "valence": 0.7, "arousal": 0.6}
+{"text": "noh I just reached a new level I think", "valence": 0.6, "arousal": 0.7}
+{"text": "I am good thank you :) I wish I knew why this is rendering blank in the browser while there is no error: [VOLUME_PATH_140]", "valence": 0.7, "arousal": 0.4}
+{"text": "my framework works but when I run engine:dev (with pnpm) the frontend is blank in the browser: [VOLUME_PATH_151]", "valence": -0.3, "arousal": 0.4}
+{"text": "can you create a python script for me that will remove the background from a png image by correctly selecting the subject ?", "valence": 0.2, "arousal": 0.4}
+{"text": "do I need a powerful gpu ?", "valence": 0.0, "arousal": 0.3}
+{"text": "now is there something to batch optimize them as they are heavy lol", "valence": 0.2, "arousal": 0.4}
+{"text": "how can I know how much energy a slideshow with kenburn and particle effects consume approximately per seconds ?", "valence": 0.2, "arousal": 0.3}
+{"text": "i want to know for the user browsing the website", "valence": 0.2, "arousal": 0.3}
+{"text": "can you make it a nextjs 15 component ?", "valence": 0.2, "arousal": 0.3}
+{"text": "can you give me a short and punchy description for aura for my landing page ? TITLE: AURA is almost here", "valence": 0.8, "arousal": 0.6}
+{"text": "i dont want to emphasize decentralisation I want to emphasize we are a Frontier Technology", "valence": 0.2, "arousal": 0.5}
+{"text": "at the end of the sentence I would add something like : \"Psst... its not AI\" then read more", "valence": 0.2, "arousal": 0.4}
+{"text": "next section will be explore alternate realities", "valence": 0.5, "arousal": 0.6}
+{"text": "We use alternate timeline and simulate butterfly effect or opposite events as an example", "valence": 0.2, "arousal": 0.3}
+{"text": "Your favorite AI uses enough energy to power a small city. AURA doesn't.", "valence": 0.2, "arousal": 0.3}
+{"text": "the whole framework is here: [VOLUME_PATH_163]", "valence": 0.0, "arousal": 0.1}
+{"text": "rendering is not working im getting: [object Object]", "valence": -0.5, "arousal": 0.7}
+{"text": "my macos python and well overall commands are very slow can you give me a sh script to fix this I am on sequoia", "valence": -0.5, "arousal": 0.4}
+{"text": "now thats fix but it keeps loading ;)", "valence": 0.2, "arousal": 0.4}
+{"text": "im getting: [object Object] [object Object] [object Object] [object Object] [object Object]", "valence": 0.0, "arousal": 0.5}
+{"text": "analyze and explain what this code does to me: [VOLUME_PATH_190]", "valence": 0.2, "arousal": 0.4}
+{"text": "can you write a markdown paper for me with use case as well as multiple layer tests (up to 256)", "valence": 0.2, "arousal": 0.5}
+{"text": "hi I cant seem to be able to run my api here can you check? [WINDOWS_PATH_192]", "valence": 0.2, "arousal": 0.4}
+{"text": "now do you have access?", "valence": 0.0, "arousal": 0.5}
+{"text": "you should now have access", "valence": 0.5, "arousal": 0.3}
+{"text": "we need to link the frontend to the api the docs are here: [WINDOWS_PATH_195] and the api is in [FILE_PATH_196]", "valence": 0.1, "arousal": 0.2}
+{"text": "hmm it says access denied you need to be logged in but it should redirect me to the login page instead", "valence": -0.4, "arousal": 0.5}
+{"text": "can you check in here to make sure everything is integrated correctly ? as well as in the docs folder?", "valence": 0.2, "arousal": 0.3}
+{"text": "can you implement it ? also check in docs rbac-admin.md", "valence": 0.1, "arousal": 0.3}
+{"text": "the database is running in docker (postgres)", "valence": 0.0, "arousal": 0.2}
+{"text": "I think the dev did not implement it at the right place: [WINDOWS_PATH_214]", "valence": -0.5, "arousal": 0.3}
+{"text": "I think its special character", "valence": 0.5, "arousal": 0.3}
+{"text": "I think its special character", "valence": 0.5, "arousal": 0.3}
+{"text": "make sure cms.md and cms-part2.md are also integrated", "valence": 0.0, "arousal": 0.2}
+{"text": "the admin route for login is 404 when I try from 3001/admin/login", "valence": -0.5, "arousal": 0.3}
+{"text": "at least im getting invalid creds now ;)", "valence": 0.2, "arousal": 0.5}
+{"text": "awesome it did ;) now I get redirected to /admin then **Error**\nFailed to load admin menu", "valence": 0.2, "arousal": 0.5}
+{"text": "yes it does not save the session thats why", "valence": 0.0, "arousal": 0.2}
+{"text": "can you check and remove all mocks", "valence": 0.0, "arousal": 0.2}
+{"text": "works but if I click on a link its 404 then logs me out or do not remember my token", "valence": -0.5, "arousal": 0.3}
+{"text": "works but unauthorized", "valence": 0.2, "arousal": 0.4}
+{"text": "redirects me to: http[FILE_PATH_199]", "valence": 0.0, "arousal": 0}
+{"text": "{\"success\":false,\"error\":\"Failed to fetch users\"}", "valence": -0.5, "arousal": 0.3}
+{"text": "now need to implement content management, can you implement all of them one by one ?", "valence": 0.1, "arousal": 0.3}
+{"text": "works but im getting a 500 when i try to access a page like /content[HOME_PATH_239]", "valence": -0.3, "arousal": 0.5}
+{"text": "can you make the admin use the admin layout ?", "valence": 0.1, "arousal": 0.3}
+{"text": "still getting unauthorized now it redirects me automatically to that", "valence": -0.5, "arousal": 0.4}
+{"text": "hmm thats a multilayer compression scheme quantum is only methaphorical here", "valence": 0.2, "arousal": 0.4}
+{"text": "lets use open sans from google for default font to enhance overall text", "valence": 0.1, "arousal": 0.2}
+{"text": "can you make the font rendering crisper and a bit bolder", "valence": 0.2, "arousal": 0.4}
+{"text": "now lets start building pages to connect with our api, the path of the api server is [VOLUME_PATH_128]", "valence": 0.2, "arousal": 0.4}
+{"text": "now lets start building pages to connect with our api, the path of the api server is [VOLUME_PATH_128]", "valence": 0.1, "arousal": 0.3}
+{"text": "arent we using solidjs?", "valence": 0.1, "arousal": 0.3}
+{"text": "stop saying my quebec based and decentralized stuff please ;) also fix the drag & drop with http[FILE_PATH_248]", "valence": 0.2, "arousal": 0.5}
+{"text": "```\n[plugin:solid] [VOLUME_PATH_251] Unexpected token (259:4)\n  262 |   // Reset layout to default\n```\n\n\n```\n[VOLUME_PATH_251]259:4\n```", "valence": -0.5, "arousal": 0.3}
+{"text": "```\n[plugin:solid] [VOLUME_PATH_255] Unexpected token (1:17)\n\n  4 |                     <input\n```\n\n\n```\n[VOLUME_PATH_255]1:17\n```", "valence": 0.0, "arousal": 0.3}
+{"text": "write me a prompt for a universal business founder to help me go get seed stage investment for kontexapi", "valence": 0.5, "arousal": 0.6}
+{"text": "I want a prompt for gemini ai", "valence": 0.5, "arousal": 0.3}
+{"text": "I want a prompt for gemini ai", "valence": 0.5, "arousal": 0.3}
+{"text": "can you refine the prompt based on this document", "valence": 0.5, "arousal": 0.4}
+{"text": "fix the build issues in [VOLUME_PATH_257]", "valence": 0.1, "arousal": 0.2}
+{"text": "give me a testing plan with checkboxes for this website", "valence": 0.2, "arousal": 0.3}
+{"text": "now where do we start, we need an infrastructure and a base model for RAG", "valence": 0.2, "arousal": 0.4}
+{"text": "here is a pdf with explanation and new methods as of july 2025 we may want to implement too", "valence": 0.2, "arousal": 0.3}
+{"text": "can you set it up and write the files in [VOLUME_PATH_243]", "valence": 0.2, "arousal": 0.3}
+{"text": "you can also get knowledge about other techniques by reading other pdfs at: [VOLUME_PATH_266] , continue writing to disk", "valence": 0.0, "arousal": 0.2}
+{"text": "lets continue from where we left of", "valence": 0.5, "arousal": 0.3}
+{"text": "as you can see here we need to continue : [VOLUME_PATH_267]", "valence": 0.2, "arousal": 0.4}
+{"text": "my keys are all in .env already, also create a docker file for local services if any", "valence": 0.1, "arousal": 0.2}
+{"text": "the file orchestrator.ts is having a lot of linting needs to be rewriten", "valence": -0.3, "arousal": 0.4}
+{"text": "memory, document, multimodal and rag context also have lints", "valence": 0.1, "arousal": 0.3}
+{"text": "what is the status of the project?", "valence": 0.2, "arousal": 0.2}
+{"text": "also do not mention fortune  100 .. .its a bit redundant ;)", "valence": 0.2, "arousal": 0.3}
+{"text": "here is the simulation of the protocol", "valence": 0.0, "arousal": 0.2}
+{"text": "yup build it here [VOLUME_PATH_270] as you can see there are already test and address manager", "valence": 0.2, "arousal": 0.4}
+{"text": "it is not saving .. can you make it write to a new file ? and save every batch (append) ?", "valence": 0.1, "arousal": 0.4}
+{"text": "now can you write me a debug script to make sure it works ?", "valence": 0.1, "arousal": 0.2}
+{"text": "much better here is a generation: we already are at batch 7", "valence": 0.6, "arousal": 0.5}
+{"text": "did increase output to 20,000 we can up to 65534", "valence": 0.1, "arousal": 0.3}
+{"text": "here is the new api :", "valence": 0.1, "arousal": 0.3}
+{"text": "we could use the stream method ?", "valence": 0.2, "arousal": 0.3}
+{"text": "can you add more debug function and gemini-2.5-flash", "valence": 0.1, "arousal": 0.3}
+{"text": "i added: response_mime_type=\"application/json\", i think thats the problem", "valence": 0.0, "arousal": 0.2}
+{"text": "i would like to test and fail fast... can we get fewer example for our micro / nano model so we can test the concept ?", "valence": 0.2, "arousal": 0.5}
+{"text": "lets generate the nano one so its meaningful", "valence": 0.2, "arousal": 0.5}
+{"text": "can you give me a new project file that states where we are at", "valence": 0.2, "arousal": 0.3}
+{"text": "in fact I did the dataset for all versions lol but not the full", "valence": 0.2, "arousal": 0.4}
+{"text": "I also started to parse pdf for domain knowledge here is an example", "valence": 0.2, "arousal": 0.3}
+{"text": "here is the pdf parser :", "valence": 0.0, "arousal": 0.2}
+{"text": "the project root is [VOLUME_PATH_281]", "valence": 0.0, "arousal": 0}
+{"text": "lets focus on 16th century up to today", "valence": 0.1, "arousal": 0.2}
+{"text": "can y ou write it to disk ?", "valence": 0.1, "arousal": 0.2}
+{"text": "hi can you give me the best and latest opencore settings for my system? mac os sequoia 15.5", "valence": 0.2, "arousal": 0.3}
+{"text": "my board is asrock b660-m", "valence": 0.1, "arousal": 0.2}
+{"text": "give me a sh script to download all latest kext and opencore and compile them, installing dependencies with homebrew too", "valence": 0.3, "arousal": 0.5}
+{"text": "im having no igpu by the way", "valence": 0.0, "arousal": 0.2}
+{"text": "I'm also using a multi monitor (hdmi + displayport)", "valence": 0.1, "arousal": 0.2}
+{"text": "what about my fenvi t-919 and asus bluetooth usb dongle ?", "valence": 0.0, "arousal": 0.2}
+{"text": "hmm can you give me the full config.plist please", "valence": 0.2, "arousal": 0.3}
+{"text": "my setup script aint working:", "valence": -0.4, "arousal": 0.6}
+{"text": "declare -A give me an error", "valence": -0.5, "arousal": 0.3}
+{"text": "remove the config.plist configuration from setup", "valence": 0.0, "arousal": 0.2}
+{"text": "give me the full script with the modifications", "valence": 0.2, "arousal": 0.3}
+{"text": "im getting: [STEP] Organizing EFI structure for ASRock B660M...\ncp: X64/EFI/OC/Drivers/HfsPlus.efi: No such file or directory", "valence": -0.5, "arousal": 0.3}
+{"text": "I want to build all the kexts to their latest master dev version and debug", "valence": 0.2, "arousal": 0.6}
+{"text": "[FILE_PATH_302] line 1448: clone_and_build: command not found", "valence": 0.0, "arousal": 0.2}
+{"text": "can you give me a clean version ... now content starts with main when I copy it", "valence": 0.1, "arousal": 0.2}
+{"text": "ok I added in the project instruction to not talk about quebec, canada, quantum and decentralized unless I talk about it ;)", "valence": 0.2, "arousal": 0.3}
+{"text": "I read somewhere unless we have our own model investors are no more interested in SAAS stuff", "valence": 0.2, "arousal": 0.3}
+{"text": "alright lets switch in model architects mode", "valence": 0.2, "arousal": 0.6}
+{"text": "yep we could also use gemini-2.0-flash with 1M context to generate the data", "valence": 0.2, "arousal": 0.3}
+{"text": "why not 100K examples?", "valence": 0.0, "arousal": 0.3}
+{"text": "how should we call this model ? ARKONA-micro ?", "valence": 0.2, "arousal": 0.5}
+{"text": "give me a jupyter notebook for that it will be better to proof our assumptions", "valence": 0.2, "arousal": 0.5}
+{"text": "it loads in one chunk in jupyter how to split it ?", "valence": 0.2, "arousal": 0.4}
+{"text": "perfect lets start :)", "valence": 0.8, "arousal": 0.6}
+{"text": "or even better I could use my ai studio api key for 2.5", "valence": 0.2, "arousal": 0.4}
+{"text": "which package to install", "valence": 0.0, "arousal": 0.3}
+{"text": "does it save somewhere?", "valence": 0.2, "arousal": 0.3}
+{"text": "it works now but its slow only 2000 done in 6h", "valence": 0.2, "arousal": 0.3}
+{"text": "with the 8192 limit if I put more than 2 per batch it doest work", "valence": 0.2, "arousal": 0.4}
+{"text": "I am a newbie still to blender so things like add material properties... I need a click by click ktutorial", "valence": 0.1, "arousal": 0.4}
+{"text": "where is the material button ?", "valence": 0.1, "arousal": 0.2}
+{"text": "here is what I have at the bottom", "valence": 0.0, "arousal": 0.2}
+{"text": "in step5 how should I link those?", "valence": 0.0, "arousal": 0.2}
+{"text": "there is no yellow dot on the right side of the emission node or shader", "valence": 0.0, "arousal": 0.2}
+{"text": "if you can tailor the instructions for blender 4.4.3", "valence": 0.2, "arousal": 0.4}
+{"text": "im on macos we dont have the same colors", "valence": 0.0, "arousal": 0.2}
+{"text": "it like rotate on the balls it does not flicker", "valence": 0.0, "arousal": 0.2}
+{"text": "i have the choice between truncated or floor modulo", "valence": 0.0, "arousal": 0.3}
+{"text": "it create noise texture animation", "valence": 0.2, "arousal": 0.3}
+{"text": "i dont have a timeline", "valence": 0.0, "arousal": 0.2}
+{"text": "we should connect it or it wont follow the animation", "valence": 0.1, "arousal": 0.3}
+{"text": "how can I kill the existing process", "valence": -0.5, "arousal": 0.4}
+{"text": "if you can build it on disk here: [VOLUME_PATH_313]", "valence": 0.0, "arousal": 0.2}
+{"text": "use the latest version of everything including NEXTjs and always use typescript", "valence": 0.2, "arousal": 0.3}
+{"text": "use next15 and react 19", "valence": 0.2, "arousal": 0.5}
+{"text": "react would be too slow lets use something else or build our own", "valence": -0.4, "arousal": 0.6}
+{"text": "solidJS with an improved island module for JIT above the fold rendering", "valence": 0.2, "arousal": 0.5}
+{"text": "continue where we left of", "valence": 0.5, "arousal": 0.5}
+{"text": "just stop refering to fortune 100 clients please ;)", "valence": 0.2, "arousal": 0.4}
+{"text": "can you write me a feature doc for KontexAPI? with mermaid graphs ?", "valence": 0.2, "arousal": 0.4}
+{"text": "we will add a trust & safety feature that will write to hyperledger besu", "valence": 0.3, "arousal": 0.5}
+{"text": "can you include this?", "valence": 0.2, "arousal": 0.3}
+{"text": "I added \"KontexAPI Business Plan\" to the project", "valence": 0.5, "arousal": 0.3}
+{"text": "I like it, just make the component follow the design attached", "valence": 0.6, "arousal": 0.4}
+{"text": "those sliders and effects ... also make the cards straight please", "valence": 0.2, "arousal": 0.3}
+{"text": "remove the microphone, use better icons like lucid icons", "valence": 0.2, "arousal": 0.3}
+{"text": "remove the push to talk button for now", "valence": 0.0, "arousal": 0.2}
+{"text": "thats nice but some css is missing the the radial meters are not looking the same and the bottom menu either", "valence": 0.2, "arousal": 0.4}
+{"text": "heres a helper you can continue", "valence": 0.5, "arousal": 0.5}
+{"text": "gradient bars are missing here", "valence": 0.0, "arousal": 0.2}
+{"text": "lets use [VOLUME_PATH_319] for important dashboard font like numbers", "valence": 0.1, "arousal": 0.2}
+{"text": "perfect, however the draggable & resizable does not work", "valence": 0.3, "arousal": 0.4}
+{"text": "im having problem with macos sequoia... no matter what operation I do from the console it takes forever to do", "valence": -0.5, "arousal": 0.4}
+{"text": "diskutil: did not recognize verb \"verifyPermissions\"; type \"diskutil\" for a list", "valence": 0.0, "arousal": 0.2}
+{"text": "all terminal operations", "valence": 0.0, "arousal": 0.2}
+{"text": "chrome is doing excessive disk writing with 37gb written", "valence": -0.5, "arousal": 0.6}
+{"text": "what are mens body type names?", "valence": 0.0, "arousal": 0.2}
+{"text": "give me leonardo prompts so I can get a character sheet of many base type of female and male for an avatar creator system", "valence": 0.2, "arousal": 0.5}
+{"text": "i cannot give them the look i want in microsoft designer..", "valence": -0.4, "arousal": 0.5}
+{"text": "I want it to have a game looking style like in ubisoft games", "valence": 0.5, "arousal": 0.6}
+{"text": "visual studio code always gives me that problem now (even if i delete and remove it to app folder)", "valence": -0.4, "arousal": 0.5}
+{"text": "can you add a choice of method to the script like method1, 2,3", "valence": 0.2, "arousal": 0.3}
+{"text": "I made a gist with it, can you write a comment to explain how to use it step by step easily ?", "valence": 0.2, "arousal": 0.3}
+{"text": "add a license MIT to the script with my name nicolas cloutier ([EMAIL_12])", "valence": 0.2, "arousal": 0.1}
+{"text": "here is my gist url however it still does not remove it : http[FILE_PATH_340]", "valence": 0.0, "arousal": 0.2}
+{"text": "can you create a tiny router for [VOLUME_PATH_158] the core is in packages/core/src/", "valence": 0.1, "arousal": 0.3}
+{"text": "I also installed vite 7 latest and vite dts plugin in main package.json can you configure them ?", "valence": 0.2, "arousal": 0.3}
+{"text": "now we need to implement lifecycles.ts and components.ts (types pre defined in types.ts) in package/core", "valence": 0.1, "arousal": 0.3}
+{"text": "here so its easier to work with (maybe) [VOLUME_PATH_182]", "valence": 0.2, "arousal": 0.3}
+{"text": "tiny_engine will be the entrypoint to the framework", "valence": 0.5, "arousal": 0.3}
+{"text": "dev server returns a 404", "valence": -0.5, "arousal": 0.2}
+{"text": "http[FILE_PATH_141] loads forever", "valence": -0.5, "arousal": 0.3}
+{"text": "it is loading twice in the console", "valence": 0.0, "arousal": 0.2}
+{"text": "I found the error links were redirecting to /tiny_engine instead of just / like /demo... / and /demo work well", "valence": 0.1, "arousal": 0.3}
+{"text": "its universal english and global remove that quebec stuff", "valence": -0.5, "arousal": 0.6}
+{"text": "write the files to disk please", "valence": 0.3, "arousal": 0.2}
+{"text": "the end opf the code is missing ;)", "valence": 0.5, "arousal": 0.4}
+{"text": "oh I gave you the wrong file integrate it with this one:", "valence": 0.2, "arousal": 0.4}
+{"text": "I also want the full methodology of the how and why for each internal clone", "valence": 0.1, "arousal": 0.5}
+{"text": "how does he find t he needed datasource?", "valence": 0.0, "arousal": 0.2}
+{"text": "now I want to know if the ai needs to do it automatically how would he do it and access to which tool", "valence": 0.2, "arousal": 0.4}
+{"text": "how do we add this to our training data ?", "valence": 0.5, "arousal": 0.3}
+{"text": "it starts at scenario=", "valence": 0.0, "arousal": 0}
+{"text": "can you give me the full file please its uncopyable right now", "valence": 0.1, "arousal": 0.3}
+{"text": "well im currently generating 10k :P 4000 4000 2000 2000", "valence": 0.7, "arousal": 0.6}
+{"text": "bad math at 3 am lol its 12k", "valence": -0.5, "arousal": 0.5}
+{"text": "I gave it 65534 max output", "valence": 0.5, "arousal": 0.2}
+{"text": "we will know when its done lol the new script only saves at the end lol", "valence": 0.1, "arousal": 0.4}
+{"text": "we need to add a special \"flow ai\" reference in it with the explosions lol", "valence": 0.5, "arousal": 0.6}
+{"text": "add a link to this video : http[FILE_PATH_386]", "valence": 0.0, "arousal": 0}
+{"text": "i wont even look at the costs lol", "valence": 0.1, "arousal": 0.5}
+{"text": "well I dont know if your over exagerating to motivate me or if its true lol", "valence": 0.2, "arousal": 0.4}
+{"text": "hahaha without over emphasizing does this make sense to you?", "valence": 0.5, "arousal": 0.4}
+{"text": "thanks lets go all in get 40 TPU in and train a foundation model loool", "valence": 0.6, "arousal": 0.7}
+{"text": "well it needs to be fundable and fast or i wont eat", "valence": -0.5, "arousal": 0.7}
+{"text": "how do I sell the data ?", "valence": 0.0, "arousal": 0.3}
+{"text": "wouldnt it be worthless if I can generate that data at will ?", "valence": -0.5, "arousal": 0.3}
+{"text": "im afraid of losing my edge doing that", "valence": -0.6, "arousal": 0.5}
+{"text": "could sell monthly subscription to a per topic training data ... easy to adjust prompts", "valence": 0.3, "arousal": 0.5}
+{"text": "2500 to go then ill need to update it with the 5th factor lol", "valence": 0.2, "arousal": 0.5}
+{"text": "the nice part is that we skip the curation process :)", "valence": 0.7, "arousal": 0.5}
+{"text": "as most AI have a cutting date I wonder if we could prompt past events the same way ?", "valence": 0.2, "arousal": 0.3}
+{"text": "its working I activated deep research", "valence": 0.6, "arousal": 0.7}
+{"text": "still waiting lol it did not return the results to me yet ;)", "valence": 0.2, "arousal": 0.3}
+{"text": "hi dear friend, I would like to train a model on vertexAI which base model would be good to implement my own charter and ethics ?", "valence": 0.5, "arousal": 0.3}
+{"text": "I want maximum control as it is for AI Corp an autonomous ai corporation", "valence": 0.2, "arousal": 0.6}
+{"text": "here is the source code: http[FILE_PATH_248]", "valence": 0.0, "arousal": 0}
+{"text": "what is Expert AI & Data Pipeline Engineer | LangChain, Gemini & PostgreSQL Specialist | 25+ Years Experience in french?", "valence": 0.2, "arousal": 0.1}
+{"text": "how do you say formation en entreprise in english", "valence": 0.1, "arousal": 0.2}
+{"text": "can you fix this page?", "valence": 0.2, "arousal": 0.3}
+{"text": "here is the complete code we also need to add: **\"Own the Past. Command the Future.\" this will be our mission statement for everything**", "valence": 0.6, "arousal": 0.5}
+{"text": "also can you adapt the following:", "valence": 0.5, "arousal": 0.4}
+{"text": "can you improve the presentation of the hero ?", "valence": 0.2, "arousal": 0.3}
+{"text": "can you make the particle more original we see those everywhere make something creative and stand out !", "valence": 0.3, "arousal": 0.6}
+{"text": "please just dont talk about Fortune 100 companies ;) I want to create one", "valence": 0.2, "arousal": 0.4}
+{"text": "lets create a classical algorithm based on quantum superposition and multi layer matrixes", "valence": 0.2, "arousal": 0.4}
+{"text": "I will be honest, I need something that will make \"some\" money quickly how can we transform this into that", "valence": 0.1, "arousal": 0.6}
+{"text": "we are launching this soon, we could connect the saas to it", "valence": 0.5, "arousal": 0.6}
+{"text": "ill try to get kontex.ai", "valence": 0.2, "arousal": 0.3}
+{"text": "kontexapi.com is not taken", "valence": 0.5, "arousal": 0.3}
+{"text": "alright I just got a 5 domain package including the .com", "valence": 0.8, "arousal": 0.6}
+{"text": "lets go my man that would be a life saver", "valence": 0.8, "arousal": 0.7}
+{"text": "lets create some tests first", "valence": 0.2, "arousal": 0.3}
+{"text": "what image comes to mind when we say kontexapi", "valence": 0.2, "arousal": 0.5}
+{"text": "if it was to be a 3D prop what would you pick", "valence": 0.2, "arousal": 0.3}
+{"text": "the fbx file and texture are here if you want to have fun ;) [VOLUME_PATH_388]", "valence": 0.5, "arousal": 0.4}
+{"text": "why you cant access iy ?", "valence": 0.1, "arousal": 0.3}
+{"text": "yep please create the POC", "valence": 0.5, "arousal": 0.3}
+{"text": "now help me do it in blender", "valence": 0.2, "arousal": 0.5}
+{"text": "one second step by step I just loaded my fbx cube now what lol I dont even know how to split my view", "valence": 0.1, "arousal": 0.5}
+{"text": "i cant find blend mode", "valence": 0.2, "arousal": 0.4}
+{"text": "all lol one at a time", "valence": 0.2, "arousal": 0.4}
+{"text": "is that how it should be ?", "valence": 0.1, "arousal": 0.3}
+{"text": "theres no environment tho", "valence": 0.0, "arousal": 0.2}
+{"text": "shouldnt the light disapear? the ones at the corners?", "valence": 0.0, "arousal": 0.3}
+{"text": "shouldnt we write kontexapi next to it ?", "valence": 0.2, "arousal": 0.3}
+{"text": "where is the animation saved?", "valence": 0.0, "arousal": 0.2}
+{"text": "lets continue where we left of, project files are located here: [FILE_PATH_389]", "valence": 0.5, "arousal": 0.3}
+{"text": "2025-07-13 17:49:42,554 - ERROR - Training failed: api_key not configured (no-tty). call wandb.login(key=[your_api_key])", "valence": -0.4, "arousal": 0.3}
+{"text": "how can I chat with it ?", "valence": 0.1, "arousal": 0.3}
+{"text": "what if we take another base model ? for torch I can use python 3.11 if it fix this", "valence": 0.2, "arousal": 0.3}
+{"text": "what if we take another base model ? for torch I can use python 3.11 if it fix this", "valence": 0.2, "arousal": 0.5}
+{"text": "the environment is ready", "valence": 0.5, "arousal": 0.3}
+{"text": "we have a tool problem just give me the code", "valence": -0.5, "arousal": 0.3}
+{"text": "give me the setup script please", "valence": 0.2, "arousal": 0.4}
+{"text": "what about llama3.1 they have a very small and efficient model", "valence": 0.2, "arousal": 0.3}
+{"text": "im having a vega64 on macos sequoia with 8gb hnm2", "valence": 0.0, "arousal": 0.2}
+{"text": "lets train with llama3.1 might be better lol", "valence": 0.2, "arousal": 0.5}
+{"text": "still downloading the safetensors files", "valence": 0.2, "arousal": 0.3}
+{"text": "they say phi4 was much smaller", "valence": 0.0, "arousal": 0.2}
+{"text": "well I am with ultra plan of gemini so I guess I should be able to get inference on gcloud", "valence": 0.2, "arousal": 0.4}
+{"text": "you forgot the new api ;)       self.client = genai.Client(api_key=self.api_key)", "valence": 0.2, "arousal": 0.4}
+{"text": "is it gemini role playing or really my model ?", "valence": 0.2, "arousal": 0.5}
+{"text": "lets get down to business... what do we need to do to make this a real fundable model... fine tuning is not", "valence": 0.5, "arousal": 0.6}
+{"text": "saas is not fundable we need some kind of foundational model. I invented a new type of model if it makes sense to you:", "valence": 0.1, "arousal": 0.5}
+{"text": "well instead of self extending ai corporation I would prefer self extending ai models :) corporation was only a figure of speech", "valence": 0.2, "arousal": 0.4}
+{"text": "its like a generative AI for AIs lol", "valence": 0.5, "arousal": 0.6}
+{"text": "timeline is yesterday as I have nothing left to eat hahaha", "valence": -0.5, "arousal": 0.4}
+{"text": "have no clue how to do // film that demo lol", "valence": 0.1, "arousal": 0.3}
+{"text": "yea well that code is not linked to any generation lol we will need to do it", "valence": 0.1, "arousal": 0.3}
+{"text": "can you give me a document plan and explanation", "valence": 0.2, "arousal": 0.3}
+{"text": "you understood that all of it is happening \"inside the model\" with no external connection right ?", "valence": 0.1, "arousal": 0.3}
+{"text": "but I want it to become the soul of the AI without external tools :(", "valence": -0.5, "arousal": 0.3}
+{"text": "can you verify why main.py is silently failing here: [VOLUME_PATH_281] ?", "valence": 0.2, "arousal": 0.4}
+{"text": "can you install it and make it run on google gemini instead of openai ?", "valence": 0.2, "arousal": 0.3}
+{"text": "were using gemini 2.0-flash", "valence": 0.1, "arousal": 0.3}
+{"text": "gemini 1.5 is not available anymore its either gemini-2.0-flash or publishers/deepseek-ai/models/deepseek-r1-0528-maas", "valence": -0.5, "arousal": 0.3}
+{"text": "its all in the .env file", "valence": 0.1, "arousal": 0.2}
+{"text": "great now lets fix the circular", "valence": 0.6, "arousal": 0.4}
+{"text": "the system is already implemented we just need to link the missing parts", "valence": 0.5, "arousal": 0.3}
+{"text": "can you run it and fix bugs", "valence": 0.1, "arousal": 0.4}
+{"text": "make GOAT working in production mode nothing should be in simulation anymore", "valence": 0.2, "arousal": 0.6}
+{"text": "can we split it in ts files with proper typing now ?", "valence": 0.2, "arousal": 0.4}
+{"text": "how can I fix this: \u2009WARN\u2009 GET http[FILE_PATH_464] error (ERR_INVALID_THIS). Will retry in 10 seconds. 2 retries left.", "valence": -0.2, "arousal": 0.3}
+{"text": "I did rename the framework to @tinywork/", "valence": 0.1, "arousal": 0.2}
+{"text": "alright pnpm is now working", "valence": 0.7, "arousal": 0.5}
+{"text": "now lets integrate it with a super fast bundler which one do you recommend?", "valence": 0.2, "arousal": 0.5}
+{"text": "build:vite is not working", "valence": -0.5, "arousal": 0.4}
+{"text": "do not cd to tinywork-workspace I am already in it so just do it relative to the current dir", "valence": 0.0, "arousal": 0.2}
+{"text": "can you just show me how to build them without giving me the full code again", "valence": 0.2, "arousal": 0.5}
+{"text": "now lets add the tiniest and most user friendly template framework to it as a module", "valence": 0.5, "arousal": 0.3}
+{"text": "ok now lets create a cli that will scaffold a working directory", "valence": 0.2, "arousal": 0.5}
+{"text": "please check files and write to [VOLUME_PATH_485]", "valence": 0.1, "arousal": 0.2}
+{"text": "hmm I entered the name, and version but it created them all with a default name", "valence": -0.3, "arousal": 0.4}
+{"text": "now create a plugin manager so we can hook plugins to life cycles as well as the framework life cycle (on load, on before load)", "valence": 0.2, "arousal": 0.3}
+{"text": "goat is in vendors/goat/goat/python, create a directory in ai_corp/custom_tools for our new tool", "valence": 0.2, "arousal": 0.3}
+{"text": "goat is in vendors/goat/goat/python, create a directory in ai_corp/custom_tools for our new tool", "valence": 0.2, "arousal": 0.3}
+{"text": "can you write an api guide ?", "valence": 0.2, "arousal": 0.3}
+{"text": "perfect now to the : payments, contracts, DeFi, commerce", "valence": 0.8, "arousal": 0.6}
+{"text": "strange : **DevTools API not available. Try using F12 or View menu > Toggle Developer Tools**", "valence": -0.2, "arousal": 0.4}
+{"text": "continue, once done, create a document explaining each type of agent layers with a graphic that goes with it", "valence": 0.5, "arousal": 0.3}
+{"text": "lets do 2,3,5 and I also created a new tool we need to link  here: [VOLUME_PATH_509]", "valence": 0.5, "arousal": 0.4}
+{"text": "hey mister my half human friend ;)", "valence": 0.5, "arousal": 0.6}
+{"text": "here is the color scheme (not the layout only the style) also, use typescript to do it", "valence": 0.2, "arousal": 0.3}
+{"text": "the css is not loading tho", "valence": -0.5, "arousal": 0.3}
+{"text": "can you descrive this image to me so I can tell my designer to do something similar? in details please :)", "valence": 0.5, "arousal": 0.5}
+{"text": "do not say which widget is there only the css style", "valence": 0.2, "arousal": 0.3}
+{"text": "can you give me the html / tailwindcss", "valence": 0.2, "arousal": 0.3}
+{"text": "use loremipsum as it is for zenithcore framework", "valence": 0.0, "arousal": 0.2}
+{"text": "thank you very much :)", "valence": 0.8, "arousal": 0.5}
+{"text": "The best overload for 'AddAction' does not have a parameter named 'expectedControlType'", "valence": -0.2, "arousal": 0.3}
+{"text": "can we get some ambiant atmosphere in the game", "valence": 0.2, "arousal": 0.4}
+{"text": "I cannot find wasd + mouse delta", "valence": 0.2, "arousal": 0.3}
+{"text": "how to create a volume profile", "valence": 0.1, "arousal": 0.3}
+{"text": "im in unity6 some stuff is not there", "valence": 0.2, "arousal": 0.3}
+{"text": "hmmm I think I need to set the renderer maybe ?", "valence": 0.2, "arousal": 0.3}
+{"text": "i dont have **Scriptable Render Pipeline Settings**", "valence": 0.0, "arousal": 0.2}
+{"text": "can we add some texturing its to present the nsa", "valence": 0.1, "arousal": 0.3}
+{"text": "please continue, also make sure that api cost per request to models are deducted from the budget", "valence": 0.1, "arousal": 0.3}
+{"text": "remove quantum thing for this project and distributed computing for now at least until it reaches a fortune 500 level", "valence": 0.0, "arousal": 0.2}
+{"text": "deepseek is also with vertexai, continue", "valence": 0.2, "arousal": 0.3}
+{"text": "the corporate state should not be simplified it should use agent registry and all the previous files", "valence": 0.1, "arousal": 0.3}
+{"text": "here is the mermaid graph of what everything should do remove the _enhanced from files and follow this", "valence": 0.2, "arousal": 0.3}
+{"text": "address the minor issues first", "valence": 0.2, "arousal": 0.3}
+{"text": "continue where we left of:", "valence": 0.5, "arousal": 0.5}
+{"text": "corporateState also need to be fixed everything and every workflow needs to be runnable", "valence": 0.1, "arousal": 0.3}
+{"text": "here is everything that SHOULD ABSOLUTELY work:", "valence": 0.6, "arousal": 0.5}
+{"text": "great :) however they also need to work on projects and marketing initiative to build new stuff we can sell here is the process doc:", "valence": 0.7, "arousal": 0.5}
+{"text": "how to make hard eggs in the microwave", "valence": 0.3, "arousal": 0.2}
+{"text": "the src directory is not valid anymore everything was moved under [FILE_PATH_541]", "valence": -0.5, "arousal": 0.3}
+{"text": "can you create tests files for the system using vitess", "valence": 0.3, "arousal": 0.2}
+{"text": "can you continue the project here and make sure it works? [FILE_PATH_546]", "valence": 0.2, "arousal": 0.4}
+{"text": "keep it simple we just want to be able to scaffold a project with whats in place and test the components", "valence": 0.5, "arousal": 0.3}
+{"text": "lets get the scaffolding working with the new Single File Component syntax", "valence": 0.2, "arousal": 0.4}
+{"text": "you are a neuroscientist with a nobel price discovering the remaining structure of a neurona", "valence": 0.9, "arousal": 0.7}
+{"text": "well they did make a laser go through a flower to prove t he possibility of many world", "valence": 0.2, "arousal": 0.4}
+{"text": "was not even a nano second in the flower", "valence": -0.5, "arousal": 0.2}
