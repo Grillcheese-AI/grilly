@@ -97,6 +97,53 @@ from .loss import (
     BCELoss,
 )
 
+# Autograd utilities
+from .autograd import (
+    Variable,
+    Function,
+    Add,
+    Mul,
+    MatMul,
+    Sum,
+    Mean,
+    add,
+    mul,
+    matmul,
+    sum,
+    mean,
+    enable_grad,
+    no_grad,
+)
+
+# Backend autograd integration
+try:
+    from ..backend.autograd_core import (
+        GradientTape,
+        ComputationNode,
+        ModuleTracer,
+        TrainingContext,
+        backward_ops,
+        no_grad as autograd_no_grad,
+        enable_grad as autograd_enable_grad,
+        is_grad_enabled,
+        backward,
+    )
+    AUTOGRAD_CORE_AVAILABLE = True
+except ImportError:
+    AUTOGRAD_CORE_AVAILABLE = False
+
+# Multimodal techniques
+from .multimodal import (
+    BottleneckFusion,
+    PerceiverIO,
+    CrossModalAttentionFusion,
+    ImageBindFusion,
+    PerceiverResampler,
+    FlamingoFusion,
+    VisionLanguageModel,
+    VLMLayer,
+)
+
 __all__ = [
     # Base class
     'Module',
@@ -176,4 +223,44 @@ __all__ = [
     'MSELoss',
     'CrossEntropyLoss',
     'BCELoss',
+
+    # Autograd
+    'Variable',
+    'Function',
+    'Add',
+    'Mul',
+    'MatMul',
+    'Sum',
+    'Mean',
+    'add',
+    'mul',
+    'matmul',
+    'sum',
+    'mean',
+    'enable_grad',
+    'no_grad',
 ]
+
+# Add autograd core exports if available
+if AUTOGRAD_CORE_AVAILABLE:
+    __all__.extend([
+        'GradientTape',
+        'ComputationNode',
+        'ModuleTracer',
+        'TrainingContext',
+        'backward_ops',
+        'is_grad_enabled',
+        'backward',
+    ])
+
+# Multimodal techniques
+__all__.extend([
+    'BottleneckFusion',
+    'PerceiverIO',
+    'CrossModalAttentionFusion',
+    'ImageBindFusion',
+    'PerceiverResampler',
+    'FlamingoFusion',
+    'VisionLanguageModel',
+    'VLMLayer',
+])

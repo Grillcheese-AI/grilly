@@ -94,9 +94,11 @@ class VulkanCompute:
         # Expose optimizer operations
         self.adam_update = self.learning.adam_update
         
-        # Expose GELU backward
+        # Expose backward passes for training
         self.activation_gelu_backward = self.fnn.activation_gelu_backward
-        
+        self.layernorm_backward = self.fnn.layernorm_backward
+        self.softmax_backward = self.fnn.softmax_backward
+
         # Expose all activation functions
         self.activation_relu = self.fnn.activation_relu
         self.activation_gelu = self.fnn.activation_gelu

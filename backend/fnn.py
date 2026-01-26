@@ -773,6 +773,246 @@ class VulkanFNN:
         return grad_input, grad_weight, grad_bias
 
     # ------------------------------------------------------------------
+    # LayerNorm backward pass (GPU accelerated)
+    # ------------------------------------------------------------------
+    def layernorm_backward(
+        self,
+        grad_output: np.ndarray,
+        x: np.ndarray,
+        gamma: np.ndarray,
+        mean: np.ndarray = None,
+        var: np.ndarray = None,
+        eps: float = 1e-5
+    ) -> tuple:
+        """
+        GPU-accelerated LayerNorm backward pass using fnn-layernorm-backward.glsl.
+
+        Args:
+            grad_output: Gradient w.r.t. output (same shape as input)
+            x: Original input tensor
+            gamma: Scale parameter
+            mean: Mean from forward pass (if not provided, will be computed)
+            var: Variance from forward pass (if not provided, will be computed)
+            eps: Epsilon for numerical stability
+
+        Returns:
+            (grad_input, grad_gamma, grad_beta)
+        """
+        original_shape = x.shape
+        features = original_shape[-1]
+
+        # Compute mean/var if not provided
+        if mean is None:
+            mean = x.mean(axis=-1, keepdims=True)
+        if var is None:
+            var = x.var(axis=-1, keepdims=True)
+
+        # Check if shader is available
+        if 'fnn-layernorm-backward' not in self.shaders:
+            # CPU fallback
+            std = np.sqrt(var + eps)
+            x_norm = (x - mean) / std
+
+            # Gradients w.r.t. gamma and beta
+            grad_gamma = np.sum(grad_output * x_norm, axis=tuple(range(len(original_shape) - 1)))
+            grad_beta = np.sum(grad_output, axis=tuple(range(len(original_shape) - 1)))
+
+            # Gradient w.r.t. input
+            N = features
+            dx_norm = grad_output * gamma
+
+            dvar = np.sum(dx_norm * (x - mean) * (-0.5) * (var + eps) ** (-1.5), axis=-1, keepdims=True)
+            dmean = np.sum(dx_norm * (-1.0 / std), axis=-1, keepdims=True) + dvar * np.mean(-2.0 * (x - mean), axis=-1, keepdims=True)
+
+            grad_input = dx_norm / std + dvar * 2.0 * (x - mean) / N + dmean / N
+
+            return grad_input.astype(np.float32), grad_gamma.astype(np.float32), grad_beta.astype(np.float32)
+
+        # Handle different input shapes
+        if len(original_shape) == 1:
+            batch_size, seq_len = 1, 1
+            x = x.reshape(1, 1, features)
+            grad_output = grad_output.reshape(1, 1, features)
+        elif len(original_shape) == 2:
+            batch_size, features = original_shape
+            seq_len = 1
+            x = x.reshape(batch_size, 1, features)
+            grad_output = grad_output.reshape(batch_size, 1, features)
+        else:
+            batch_size, seq_len, features = original_shape
+
+        # Flatten arrays
+        grad_out_flat = grad_output.astype(np.float32).flatten()
+        x_flat = x.astype(np.float32).flatten()
+        gamma_flat = gamma.astype(np.float32).flatten()
+        mean_flat = mean.astype(np.float32).flatten()
+        var_flat = var.astype(np.float32).flatten()
+
+        total_positions = batch_size * seq_len
+        total_elements = batch_size * seq_len * features
+
+        # Create buffers
+        buf_grad_out, mem_grad_out = self.core._create_buffer(grad_out_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_input, mem_input = self.core._create_buffer(x_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_gamma, mem_gamma = self.core._create_buffer(gamma_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_mean, mem_mean = self.core._create_buffer(mean_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_var, mem_var = self.core._create_buffer(var_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_grad_in, mem_grad_in = self.core._create_buffer(x_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_grad_gamma, mem_grad_gamma = self.core._create_buffer(gamma_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_grad_beta, mem_grad_beta = self.core._create_buffer(gamma_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+
+        # Upload data
+        self.core._upload_buffer(buf_grad_out, mem_grad_out, grad_out_flat)
+        self.core._upload_buffer(buf_input, mem_input, x_flat)
+        self.core._upload_buffer(buf_gamma, mem_gamma, gamma_flat)
+        self.core._upload_buffer(buf_mean, mem_mean, mean_flat)
+        self.core._upload_buffer(buf_var, mem_var, var_flat)
+
+        # Initialize grad buffers to zero
+        self.core._upload_buffer(buf_grad_in, mem_grad_in, np.zeros(total_elements, dtype=np.float32))
+        self.core._upload_buffer(buf_grad_gamma, mem_grad_gamma, np.zeros(features, dtype=np.float32))
+        self.core._upload_buffer(buf_grad_beta, mem_grad_beta, np.zeros(features, dtype=np.float32))
+
+        # Get or create pipeline (8 buffers, push constants: 4 uints + 1 float = 20 bytes)
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'fnn-layernorm-backward', 8, push_constant_size=20
+        )
+
+        buffers = [
+            (buf_grad_out, grad_out_flat.nbytes),
+            (buf_input, x_flat.nbytes),
+            (buf_gamma, gamma_flat.nbytes),
+            (buf_mean, mean_flat.nbytes),
+            (buf_var, var_flat.nbytes),
+            (buf_grad_in, x_flat.nbytes),
+            (buf_grad_gamma, gamma_flat.nbytes),
+            (buf_grad_beta, gamma_flat.nbytes),
+        ]
+
+        # Create descriptor set
+        descriptor_set = self.pipelines._create_descriptor_set(desc_layout, buffers)
+
+        # Pass 0: Compute intermediate sums
+        push_constants = struct.pack('IIIfI', batch_size, seq_len, features, eps, 0)
+        workgroups = (total_positions + 255) // 256
+        self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+
+        # Pass 1: Compute grad_input
+        push_constants = struct.pack('IIIfI', batch_size, seq_len, features, eps, 1)
+        workgroups = (total_elements + 255) // 256
+        self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+
+        # Pass 2: Compute grad_gamma and grad_beta
+        push_constants = struct.pack('IIIfI', batch_size, seq_len, features, eps, 2)
+        workgroups = (features + 255) // 256
+        self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+
+        # Download results
+        grad_input = self.core._download_buffer(mem_grad_in, x_flat.nbytes, dtype=np.float32)
+        grad_gamma = self.core._download_buffer(mem_grad_gamma, gamma_flat.nbytes, dtype=np.float32)
+        grad_beta = self.core._download_buffer(mem_grad_beta, gamma_flat.nbytes, dtype=np.float32)
+
+        # Cleanup
+        vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])
+        for buf in [buf_grad_out, buf_input, buf_gamma, buf_mean, buf_var, buf_grad_in, buf_grad_gamma, buf_grad_beta]:
+            vkDestroyBuffer(self.core.device, buf, None)
+        for mem in [mem_grad_out, mem_input, mem_gamma, mem_mean, mem_var, mem_grad_in, mem_grad_gamma, mem_grad_beta]:
+            vkFreeMemory(self.core.device, mem, None)
+
+        return grad_input.reshape(original_shape), grad_gamma[:features], grad_beta[:features]
+
+    # ------------------------------------------------------------------
+    # Softmax backward pass (GPU accelerated)
+    # ------------------------------------------------------------------
+    def softmax_backward(
+        self,
+        grad_output: np.ndarray,
+        softmax_output: np.ndarray,
+        dim: int = -1
+    ) -> np.ndarray:
+        """
+        GPU-accelerated softmax backward pass using activation-softmax-backward.glsl.
+
+        Args:
+            grad_output: Gradient w.r.t. softmax output
+            softmax_output: Output from forward softmax pass
+            dim: Dimension along which softmax was applied
+
+        Returns:
+            Gradient w.r.t. input (pre-softmax logits)
+        """
+        original_shape = grad_output.shape
+
+        # Check if shader is available
+        if 'activation-softmax-backward' not in self.shaders:
+            # CPU fallback: grad_input = s * (grad_output - sum(grad_output * s, dim))
+            sum_term = np.sum(grad_output * softmax_output, axis=dim, keepdims=True)
+            grad_input = softmax_output * (grad_output - sum_term)
+            return grad_input.astype(np.float32)
+
+        # Handle different input shapes
+        if len(original_shape) == 1:
+            batch_size, seq_len, num_classes = 1, 1, original_shape[0]
+        elif len(original_shape) == 2:
+            batch_size, num_classes = original_shape
+            seq_len = 1
+        else:
+            # Assume (batch, seq, classes) or flatten all but last dim
+            num_classes = original_shape[-1]
+            batch_size = int(np.prod(original_shape[:-1]))
+            seq_len = 1
+
+        # Flatten arrays
+        grad_out_flat = grad_output.astype(np.float32).flatten()
+        softmax_flat = softmax_output.astype(np.float32).flatten()
+
+        total_rows = batch_size * seq_len
+
+        # Create buffers
+        buf_grad_out, mem_grad_out = self.core._create_buffer(grad_out_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_softmax, mem_softmax = self.core._create_buffer(softmax_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_grad_in, mem_grad_in = self.core._create_buffer(grad_out_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+
+        # Upload data
+        self.core._upload_buffer(buf_grad_out, mem_grad_out, grad_out_flat)
+        self.core._upload_buffer(buf_softmax, mem_softmax, softmax_flat)
+
+        # Get or create pipeline (3 buffers, push constants: 3 uints = 12 bytes)
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'activation-softmax-backward', 3, push_constant_size=12
+        )
+
+        # Get cached descriptor set
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'activation-softmax-backward',
+            [
+                (buf_grad_out, grad_out_flat.nbytes),
+                (buf_softmax, softmax_flat.nbytes),
+                (buf_grad_in, grad_out_flat.nbytes),
+            ]
+        )
+
+        # Push constants: batch_size, seq_len, num_classes
+        push_constants = struct.pack('III', batch_size, seq_len, num_classes)
+
+        # Dispatch: one thread per row
+        workgroups = (total_rows + 255) // 256
+        self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+
+        # Download results
+        grad_input = self.core._download_buffer(mem_grad_in, grad_out_flat.nbytes, dtype=np.float32)
+
+        # Cleanup
+        vkDestroyBuffer(self.core.device, buf_grad_out, None)
+        vkDestroyBuffer(self.core.device, buf_softmax, None)
+        vkDestroyBuffer(self.core.device, buf_grad_in, None)
+        vkFreeMemory(self.core.device, mem_grad_out, None)
+        vkFreeMemory(self.core.device, mem_softmax, None)
+        vkFreeMemory(self.core.device, mem_grad_in, None)
+
+        return grad_input.reshape(original_shape)
+
+    # ------------------------------------------------------------------
     # Dropout (CPU fallback)
     # ------------------------------------------------------------------
     def dropout(self, x: np.ndarray, dropout_prob: float = 0.1, is_training: bool = True, seed: Optional[int] = None) -> np.ndarray:
