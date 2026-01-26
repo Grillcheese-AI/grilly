@@ -115,7 +115,7 @@ See the `examples/` directory for more usage examples.
 
 ## Documentation
 
-Full API documentation: https://docs.grillcheeseai.com/grilly
+Full API documentation: (COMING SOON)
 
 ## License
 
@@ -129,4 +129,4 @@ Contributions welcome! Please see CONTRIBUTING.md for guidelines.
 
 - **Homepage**: https://grillcheeseai.com
 - **GitHub**: https://github.com/grillcheese-ai/grilly
-- **Documentation**: https://docs.grillcheeseai.com/grilly
+- **Documentation**: (COMING SOON)
