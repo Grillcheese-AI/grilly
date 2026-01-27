@@ -1,6 +1,11 @@
 """
 Feedforward Neural Network operations for Vulkan backend.
 GPU-accelerated FNN operations: activations, layer normalization, linear layers, dropout.
+
+Performance hierarchy:
+1. Vulkan GPU shader (fastest)
+2. Numba JIT (fast CPU fallback)
+3. Pure numpy (baseline fallback)
 """
 
 import numpy as np
@@ -10,6 +15,26 @@ from .base import VULKAN_AVAILABLE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
 
 if VULKAN_AVAILABLE:
     from vulkan import *
+
+# Try to import numba-accelerated operations for CPU fallback
+try:
+    from ..utils.numba_ops import (
+        layernorm as numba_layernorm,
+        softmax as numba_softmax,
+        linear as numba_linear,
+        gelu as numba_gelu,
+        silu as numba_silu,
+        relu as numba_relu,
+        NUMBA_AVAILABLE,
+    )
+except ImportError:
+    NUMBA_AVAILABLE = False
+    numba_layernorm = None
+    numba_softmax = None
+    numba_linear = None
+    numba_gelu = None
+    numba_silu = None
+    numba_relu = None
 
 
 class VulkanFNN:
@@ -426,11 +451,14 @@ class VulkanFNN:
 
         # Check if shader is available
         if 'fnn-layernorm' not in self.shaders:
-            # CPU fallback
-            mean = x.mean(axis=-1, keepdims=True)
-            var = x.var(axis=-1, keepdims=True)
-            normalized = (x - mean) / np.sqrt(var + eps)
-            return normalized * gamma + beta
+            # CPU fallback (numba-accelerated if available)
+            if NUMBA_AVAILABLE and numba_layernorm is not None:
+                return numba_layernorm(x, gamma, beta, eps)
+            else:
+                mean = x.mean(axis=-1, keepdims=True)
+                var = x.var(axis=-1, keepdims=True)
+                normalized = (x - mean) / np.sqrt(var + eps)
+                return normalized * gamma + beta
 
         # Handle different input shapes: (features,) or (batch, features) or (batch, seq, features)
         if len(original_shape) == 1:

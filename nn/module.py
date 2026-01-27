@@ -55,15 +55,16 @@ class Module:
     def _convert_input(self, x: Union[np.ndarray, Any]) -> np.ndarray:
         """
         Convert input to Vulkan-compatible numpy array.
-        
+
         Automatically handles PyTorch tensors, converting them to numpy.
         For VulkanTensor, extracts numpy array (handles GPU download if needed).
-        
+        Preserves integer dtypes for index arrays (e.g., token IDs).
+
         Args:
             x: Input (PyTorch tensor, numpy array, VulkanTensor, or other)
-        
+
         Returns:
-            numpy array (float32) ready for Vulkan operations
+            numpy array ready for Vulkan operations (preserves integer dtypes)
         """
         # Handle VulkanTensor (GPU-resident)
         if TENSOR_CONVERSION_AVAILABLE:
@@ -73,13 +74,21 @@ class Module:
                 return x.numpy()
             return ensure_vulkan_compatible(x)
         else:
-            # Fallback conversion
+            # Fallback conversion - preserve integer types for indexing
             if isinstance(x, np.ndarray):
+                # Preserve integer dtypes (needed for embedding lookups, etc.)
+                if np.issubdtype(x.dtype, np.integer):
+                    return x
                 return x.astype(np.float32) if x.dtype != np.float32 else x
             elif hasattr(x, 'cpu'):  # PyTorch tensor
-                return x.detach().cpu().numpy().astype(np.float32)
+                arr = x.detach().cpu().numpy()
+                if np.issubdtype(arr.dtype, np.integer):
+                    return arr
+                return arr.astype(np.float32)
             elif hasattr(x, 'numpy'):  # TensorFlow tensor or VulkanTensor
                 result = x.numpy()
+                if np.issubdtype(result.dtype, np.integer):
+                    return result
                 return result.astype(np.float32) if result.dtype != np.float32 else result
             else:
                 return np.array(x, dtype=np.float32)

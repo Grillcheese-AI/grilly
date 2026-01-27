@@ -6,7 +6,7 @@ Uses: affect-mlp-forward.glsl, affect-mlp-backward.glsl
 Reference: ref/brain/amygdala.py
 """
 import numpy as np
-from typing import Optional
+from typing import Optional, Tuple, Dict
 from .module import Module
 from .modules import Linear, Dropout, GELU
 

@@ -89,87 +89,308 @@ def to_vulkan_gpu(tensor: Union[np.ndarray, Any]) -> 'VulkanTensor':
 class VulkanTensor:
     """
     GPU-resident tensor wrapper for Vulkan operations.
-    
-    Keeps data on GPU memory, avoiding CPU round-trips for better performance on AMD GPUs.
+
+    Features:
+    - Lazy transfer: Only uploads to GPU when actually needed
+    - Dirty tracking: Knows when CPU/GPU copies are out of sync
+    - Buffer pooling: Reuses GPU buffers for efficiency
+    - PyTorch bridge: Seamless conversion to/from PyTorch tensors
+
+    Example:
+        >>> x = VulkanTensor(np.random.randn(10, 128).astype(np.float32))
+        >>> # Data stays on CPU until needed
+        >>> result = model(x)  # Triggers upload to GPU
+        >>> result_np = result.numpy()  # Downloads from GPU (lazy)
     """
-    
-    def __init__(self, data: np.ndarray):
+
+    def __init__(self, data: np.ndarray, lazy: bool = True):
         """
         Initialize VulkanTensor from numpy array.
-        
+
         Args:
-            data: numpy array (will be uploaded to GPU)
+            data: numpy array (will be uploaded to GPU lazily)
+            lazy: If True (default), defer GPU upload until needed
         """
-        self._cpu_data = np.ascontiguousarray(data.astype(np.float32))
+        # Handle integer types - preserve them
+        if np.issubdtype(data.dtype, np.integer):
+            self._cpu_data = np.ascontiguousarray(data)
+        else:
+            self._cpu_data = np.ascontiguousarray(data.astype(np.float32))
+
         self._gpu_buffer = None
         self._gpu_memory = None
+        self._pooled_buffer = None  # For buffer pool integration
         self._shape = self._cpu_data.shape
         self._dtype = self._cpu_data.dtype
-        self._uploaded = False
-    
+
+        # State tracking
+        self._gpu_valid = False   # GPU has valid copy
+        self._cpu_valid = True    # CPU has valid copy
+        self._uploaded = False    # Backwards compatibility
+
+        # Lazy upload
+        if not lazy:
+            self._ensure_uploaded()
+
+    @classmethod
+    def from_torch(cls, tensor, lazy: bool = True) -> 'VulkanTensor':
+        """
+        Create VulkanTensor from PyTorch tensor.
+
+        Optimized path that avoids unnecessary copies when possible.
+
+        Args:
+            tensor: PyTorch tensor (CPU or CUDA)
+            lazy: If True, defer GPU upload
+
+        Returns:
+            VulkanTensor
+        """
+        if TORCH_AVAILABLE and isinstance(tensor, torch.Tensor):
+            # Get numpy array efficiently
+            if tensor.is_cuda:
+                # CUDA tensor - must go through CPU
+                arr = tensor.detach().cpu().numpy()
+            else:
+                # CPU tensor - try to avoid copy
+                arr = tensor.detach().numpy()
+                if not arr.flags['C_CONTIGUOUS']:
+                    arr = np.ascontiguousarray(arr)
+        else:
+            arr = np.asarray(tensor)
+
+        return cls(arr, lazy=lazy)
+
+    @classmethod
+    def empty(cls, shape: tuple, dtype=np.float32) -> 'VulkanTensor':
+        """
+        Create uninitialized VulkanTensor.
+
+        Useful for output buffers where data will be written by GPU.
+
+        Args:
+            shape: Tensor shape
+            dtype: Data type
+
+        Returns:
+            VulkanTensor with uninitialized data
+        """
+        data = np.empty(shape, dtype=dtype)
+        tensor = cls(data, lazy=True)
+        tensor._cpu_valid = False  # CPU data is garbage
+        return tensor
+
+    @classmethod
+    def zeros(cls, shape: tuple, dtype=np.float32) -> 'VulkanTensor':
+        """Create zero-initialized VulkanTensor"""
+        return cls(np.zeros(shape, dtype=dtype), lazy=True)
+
+    @classmethod
+    def ones(cls, shape: tuple, dtype=np.float32) -> 'VulkanTensor':
+        """Create ones-initialized VulkanTensor"""
+        return cls(np.ones(shape, dtype=dtype), lazy=True)
+
     def _ensure_uploaded(self):
-        """Ensure data is uploaded to GPU"""
-        if not self._uploaded:
+        """Ensure data is uploaded to GPU (lazy upload)"""
+        if self._gpu_valid:
+            return  # Already valid on GPU
+
+        if not self._cpu_valid:
+            raise RuntimeError("Cannot upload: no valid CPU data")
+
+        try:
+            from grilly import Compute
+            backend = Compute()
+
+            size = self._cpu_data.nbytes
+
+            # Try to use buffer pool if available
             try:
-                from grilly import Compute
-                backend = Compute()
-                
-                # Create GPU buffer
-                size = self._cpu_data.nbytes
+                from grilly.backend.buffer_pool import acquire_buffer
+                self._pooled_buffer = acquire_buffer(size, core=backend.core)
+                self._gpu_buffer = self._pooled_buffer.handle
+                self._gpu_memory = self._pooled_buffer.memory
+            except (ImportError, Exception):
+                # Fallback to direct allocation
                 self._gpu_buffer, self._gpu_memory = backend.create_buffer(
                     size, usage='storage'
                 )
-                
-                # Upload to GPU
-                backend.upload_buffer(self._gpu_buffer, self._gpu_memory, self._cpu_data)
-                self._uploaded = True
-            except Exception as e:
-                # If GPU upload fails, fall back to CPU
-                self._uploaded = False
-                raise RuntimeError(f"Failed to upload to GPU: {e}")
-    
+
+            # Upload to GPU
+            backend.upload_buffer(self._gpu_buffer, self._gpu_memory, self._cpu_data)
+            self._gpu_valid = True
+            self._uploaded = True  # Backwards compatibility
+
+        except Exception as e:
+            self._gpu_valid = False
+            raise RuntimeError(f"Failed to upload to GPU: {e}")
+
+    def _ensure_downloaded(self):
+        """Ensure CPU data is current (lazy download)"""
+        if self._cpu_valid:
+            return  # Already valid on CPU
+
+        if not self._gpu_valid:
+            raise RuntimeError("Cannot download: no valid GPU data")
+
+        try:
+            from grilly import Compute
+            backend = Compute()
+
+            # Download from GPU
+            self._cpu_data = backend.read_buffer(
+                self._gpu_memory,
+                size=self._cpu_data.nbytes,
+                dtype=self._dtype
+            ).reshape(self._shape)
+            self._cpu_valid = True
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to download from GPU: {e}")
+
+    def mark_gpu_modified(self):
+        """Mark that GPU data has been modified (CPU copy is now stale)"""
+        self._gpu_valid = True
+        self._cpu_valid = False
+
+    def mark_cpu_modified(self):
+        """Mark that CPU data has been modified (GPU copy is now stale)"""
+        self._cpu_valid = True
+        self._gpu_valid = False
+
     @property
     def shape(self):
         """Get tensor shape"""
         return self._shape
-    
+
     @property
     def dtype(self):
         """Get tensor dtype"""
         return self._dtype
-    
+
+    @property
+    def ndim(self):
+        """Get number of dimensions"""
+        return len(self._shape)
+
+    @property
+    def nbytes(self):
+        """Get size in bytes"""
+        return self._cpu_data.nbytes
+
+    @property
+    def on_gpu(self) -> bool:
+        """Check if tensor has valid GPU copy"""
+        return self._gpu_valid
+
+    @property
+    def gpu_buffer(self):
+        """Get GPU buffer handle (ensures upload)"""
+        self._ensure_uploaded()
+        return self._gpu_buffer
+
+    @property
+    def gpu_memory(self):
+        """Get GPU memory handle (ensures upload)"""
+        self._ensure_uploaded()
+        return self._gpu_memory
+
     def numpy(self) -> np.ndarray:
         """
         Convert to numpy array (downloads from GPU if needed).
-        
+
+        Uses lazy download - only transfers if GPU has newer data.
+
         Returns:
             numpy array
         """
-        if self._uploaded:
-            try:
-                from grilly import Compute
-                backend = Compute()
-                # Download from GPU
-                return backend.read_buffer(
-                    self._gpu_memory, 
-                    size=self._cpu_data.nbytes,
-                    dtype=self._dtype
-                ).reshape(self._shape)
-            except Exception:
-                # Fall back to CPU data
-                pass
+        self._ensure_downloaded()
         return self._cpu_data.copy()
-    
+
     def cpu(self) -> np.ndarray:
-        """Get CPU copy"""
+        """Get CPU copy (alias for numpy())"""
         return self.numpy()
-    
+
+    def to_torch(self, device: str = 'cpu'):
+        """
+        Convert to PyTorch tensor.
+
+        Args:
+            device: Target device ('cpu', 'cuda', etc.)
+
+        Returns:
+            PyTorch tensor
+        """
+        if not TORCH_AVAILABLE:
+            raise RuntimeError("PyTorch not available")
+
+        self._ensure_downloaded()
+        tensor = torch.from_numpy(self._cpu_data)
+
+        if device != 'cpu':
+            tensor = tensor.to(device)
+
+        return tensor
+
+    def upload(self):
+        """Force upload to GPU"""
+        self._ensure_uploaded()
+        return self
+
+    def download(self):
+        """Force download from GPU"""
+        self._ensure_downloaded()
+        return self
+
+    def release_gpu(self):
+        """Release GPU buffer (return to pool if using pooling)"""
+        if self._pooled_buffer is not None:
+            self._pooled_buffer.release()
+            self._pooled_buffer = None
+        self._gpu_buffer = None
+        self._gpu_memory = None
+        self._gpu_valid = False
+        self._uploaded = False
+
     def __array__(self):
         """Numpy array interface"""
         return self.numpy()
-    
+
+    def __len__(self):
+        """Length (first dimension)"""
+        return self._shape[0] if self._shape else 0
+
+    def __getitem__(self, key):
+        """Indexing (operates on CPU data)"""
+        self._ensure_downloaded()
+        return self._cpu_data[key]
+
+    def __setitem__(self, key, value):
+        """Assignment (operates on CPU data, marks GPU stale)"""
+        self._ensure_downloaded()
+        self._cpu_data[key] = value
+        self.mark_cpu_modified()
+
+    def reshape(self, *shape) -> 'VulkanTensor':
+        """Reshape tensor (returns new VulkanTensor)"""
+        self._ensure_downloaded()
+        new_shape = shape[0] if len(shape) == 1 and isinstance(shape[0], tuple) else shape
+        return VulkanTensor(self._cpu_data.reshape(new_shape), lazy=True)
+
     def __repr__(self):
-        return f"VulkanTensor(shape={self.shape}, dtype={self.dtype}, on_gpu={self._uploaded})"
+        status = []
+        if self._gpu_valid:
+            status.append("gpu")
+        if self._cpu_valid:
+            status.append("cpu")
+        return f"VulkanTensor(shape={self.shape}, dtype={self.dtype}, valid=[{','.join(status)}])"
+
+    def __del__(self):
+        """Cleanup - release GPU buffer on destruction"""
+        try:
+            self.release_gpu()
+        except Exception:
+            pass  # Ignore cleanup errors
 
 
 def to_vulkan_batch(tensors: Union[List, Tuple, Any]) -> Union[np.ndarray, List[np.ndarray], Tuple[np.ndarray, ...]]:
@@ -250,23 +471,27 @@ def auto_convert_to_vulkan(func):
 
 def ensure_vulkan_compatible(data: Union[np.ndarray, Any]) -> np.ndarray:
     """
-    Ensure data is Vulkan-compatible (numpy array, float32).
-    
+    Ensure data is Vulkan-compatible numpy array.
+
     Handles VulkanTensor by extracting numpy array.
-    
+    Preserves integer dtypes for index arrays (e.g., token IDs).
+
     Args:
         data: Any tensor-like data (including VulkanTensor)
-    
+
     Returns:
-        numpy array (float32) ready for Vulkan
+        numpy array ready for Vulkan (float32 for floats, preserved for integers)
     """
     # Handle VulkanTensor
     if isinstance(data, VulkanTensor):
         return data.numpy()
-    
+
     arr = to_vulkan(data, keep_on_gpu=False)  # Get numpy, not GPU tensor
     if isinstance(arr, VulkanTensor):
         arr = arr.numpy()
+    # Preserve integer dtypes (needed for embedding lookups, indices, etc.)
+    if np.issubdtype(arr.dtype, np.integer):
+        return arr
     if arr.dtype != np.float32:
         arr = arr.astype(np.float32)
     return arr

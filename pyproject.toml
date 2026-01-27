@@ -45,6 +45,12 @@ dev = [
     "isort>=5.12.0",
     "mypy>=1.5.0",
 ]
+accel = [
+    "numba>=0.59.0",  # JIT-compiled CPU fallbacks
+]
+all = [
+    "grilly[dev,accel]",
+]
 
 [project.urls]
 Homepage = "https://grillcheeseai.com"

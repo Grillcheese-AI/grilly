@@ -124,13 +124,8 @@ class Linear(Module):
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using fnn-linear.glsl"""
         backend = self._get_backend()
-        # Extract numpy array from Parameter or wrapper
-        weight = self.weight.data if hasattr(self.weight, 'data') else self.weight
-        bias = self.bias.data if (self.bias is not None and hasattr(self.bias, 'data')) else self.bias
-        # Ensure they are numpy arrays (not memoryviews)
-        weight = np.asarray(weight, dtype=np.float32)
-        if bias is not None:
-            bias = np.asarray(bias, dtype=np.float32)
+        weight = _get_param_array(self.weight)
+        bias = _get_param_array(self.bias) if self.bias is not None else None
         return backend.fnn.linear(x, weight, bias)
     
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
@@ -147,11 +142,11 @@ class Linear(Module):
             grad_input: Gradient w.r.t. input (batch, in_features)
         """
         backend = self._get_backend()
-        
+
         # Extract numpy arrays for computation
-        weight = self.weight.data if hasattr(self.weight, 'data') else self.weight
-        bias = self.bias.data if (self.bias is not None and hasattr(self.bias, 'data')) else self.bias
-        
+        weight = _get_param_array(self.weight)
+        bias = _get_param_array(self.bias) if self.bias is not None else None
+
         # Try GPU shader if available
         if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'linear_backward'):
             try:
@@ -201,6 +196,29 @@ class Linear(Module):
 
 
 # Helper function to create Parameter wrapper
+def _get_param_array(param) -> np.ndarray:
+    """
+    Extract numpy array from a parameter (ParamWrapper, Parameter, or numpy array).
+
+    Handles:
+    - ParamWrapper: returns .data (numpy array)
+    - Parameter (np.ndarray subclass): returns the array directly
+    - numpy array: returns directly
+    - memoryview: converts to numpy array
+    """
+    if isinstance(param, np.ndarray):
+        # Parameter is a numpy subclass, or plain numpy array
+        return param
+    elif hasattr(param, 'data') and not isinstance(param.data, memoryview):
+        # ParamWrapper with .data as numpy array
+        return param.data
+    elif hasattr(param, '__array__'):
+        # Has __array__ method
+        return np.asarray(param)
+    else:
+        return np.asarray(param)
+
+
 def _create_param_wrapper(data: np.ndarray):
     """Create a Parameter wrapper with .grad support"""
     if _PARAMETER_AVAILABLE and ParameterClass is not None:
@@ -272,8 +290,8 @@ class LayerNorm(Module):
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using fnn-layernorm.glsl"""
         backend = self._get_backend()
-        weight = self.weight.data if hasattr(self.weight, 'data') else self.weight
-        bias = self.bias.data if hasattr(self.bias, 'data') else self.bias
+        weight = _get_param_array(self.weight)
+        bias = _get_param_array(self.bias)
         return backend.fnn.layernorm(x, weight, bias, eps=self.eps)
     
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
@@ -303,8 +321,7 @@ class LayerNorm(Module):
         normalized_x = (x - mean) / std
         
         # Get weight
-        weight = self.weight.data if hasattr(self.weight, 'data') else self.weight
-        weight = np.array(weight, dtype=np.float32) if not isinstance(weight, np.ndarray) else weight
+        weight = _get_param_array(self.weight)
         
         # Compute gradients w.r.t. weight and bias
         # Sum over all dimensions except the last (normalized dimension)
@@ -617,19 +634,18 @@ class Embedding(Module):
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using embedding-lookup.glsl"""
         backend = self._get_backend()
-        weight = self.weight.data if hasattr(self.weight, 'data') else self.weight
-        
+        weight = _get_param_array(self.weight)
+
         if hasattr(backend, 'learning') and hasattr(backend.learning, 'embedding_lookup'):
             try:
                 return backend.learning.embedding_lookup(x, weight)
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
-        weight_array = np.asarray(weight, dtype=np.float32)
         if isinstance(x, np.ndarray):
-            return weight_array[x.astype(np.int32)]
-        return weight_array[x]
+            return weight[x.astype(np.int32)]
+        return weight[x]
     
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
@@ -668,7 +684,7 @@ class Embedding(Module):
                     pass  # Fall back to CPU
             
             # CPU fallback: accumulate gradients for each token
-            grad_weight = np.zeros_like(self.weight.data if hasattr(self.weight, 'data') else self.weight)
+            grad_weight = np.zeros_like(_get_param_array(self.weight))
             
             x_flat = x.flatten()
             grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
@@ -1022,7 +1038,7 @@ class MultiheadAttention(Module):
             grad_attn_output = grad_attn_output_flat.reshape(batch_size, seq_len_q, self.embed_dim)
         else:
             # Simplified: assume linear projection
-            weight = self.out_proj.weight.data if hasattr(self.out_proj.weight, 'data') else self.out_proj.weight
+            weight = _get_param_array(self.out_proj.weight)
             grad_attn_output = grad_output @ weight.T
         
         # Reshape grad_attn_output: (batch, seq_len_q, embed_dim) -> (batch, num_heads, seq_len_q, head_dim)
