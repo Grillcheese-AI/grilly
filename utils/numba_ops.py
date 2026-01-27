@@ -534,6 +534,260 @@ def embedding_lookup(indices: np.ndarray, weight: np.ndarray) -> np.ndarray:
 
 
 # ============================================================================
+# RoPE (Rotary Position Embeddings)
+# ============================================================================
+
+if NUMBA_AVAILABLE:
+    @jit(nopython=True, parallel=True, fastmath=True, cache=True)
+    def _rope_numba(q_or_k: np.ndarray, position_ids: np.ndarray,
+                    rope_base: float, rope_scaling: float) -> np.ndarray:
+        """
+        Numba-accelerated RoPE using PyTorch's rotate_half approach.
+
+        ModernBERT uses: q_embed = (q * cos) + (rotate_half(q) * sin)
+        where rotate_half(q) = [-q[head_dim//2:], q[:head_dim//2]]
+
+        Args:
+            q_or_k: Query or Key tensor (batch, seq_len, num_heads, head_dim)
+            position_ids: Position indices (batch, seq_len)
+            rope_base: Base frequency for RoPE
+            rope_scaling: Scaling factor for extended context
+
+        Returns:
+            Rotated Q or K tensor (same shape)
+        """
+        batch_size, seq_len, num_heads, head_dim = q_or_k.shape
+        half_dim = head_dim // 2
+
+        result = np.empty_like(q_or_k)
+
+        # Precompute inv_freq
+        inv_freq = np.empty(half_dim, dtype=np.float32)
+        for i in range(half_dim):
+            inv_freq[i] = 1.0 / (rope_base ** (float(i * 2) / head_dim))
+
+        for b in prange(batch_size):
+            for s in range(seq_len):
+                pos = float(position_ids[b, s]) / rope_scaling
+                for h in range(num_heads):
+                    # Apply RoPE with rotate_half
+                    for d in range(half_dim):
+                        freq = pos * inv_freq[d]
+                        cos_val = np.cos(freq)
+                        sin_val = np.sin(freq)
+
+                        # First half: uses d and d + half_dim
+                        qk_d = q_or_k[b, s, h, d]
+                        qk_d_half = q_or_k[b, s, h, d + half_dim]
+
+                        # rotate_half: [-second_half, first_half]
+                        # For position d: rotated = -qk_d_half
+                        # For position d+half_dim: rotated = qk_d
+                        result[b, s, h, d] = qk_d * cos_val - qk_d_half * sin_val
+                        result[b, s, h, d + half_dim] = qk_d_half * cos_val + qk_d * sin_val
+
+        return result
+
+else:
+    def _rope_numba(q_or_k: np.ndarray, position_ids: np.ndarray,
+                    rope_base: float, rope_scaling: float) -> np.ndarray:
+        """Pure numpy fallback for RoPE"""
+        batch_size, seq_len, num_heads, head_dim = q_or_k.shape
+        half_dim = head_dim // 2
+
+        # Compute inv_freq
+        inv_freq = 1.0 / (rope_base ** (np.arange(0, head_dim, 2, dtype=np.float32) / head_dim))
+
+        result = np.empty_like(q_or_k)
+
+        for b in range(batch_size):
+            for s in range(seq_len):
+                pos = float(position_ids[b, s]) / rope_scaling
+                freqs = pos * inv_freq
+                cos_vals = np.cos(freqs)
+                sin_vals = np.sin(freqs)
+
+                for h in range(num_heads):
+                    qk_first = q_or_k[b, s, h, :half_dim]
+                    qk_second = q_or_k[b, s, h, half_dim:]
+
+                    result[b, s, h, :half_dim] = qk_first * cos_vals - qk_second * sin_vals
+                    result[b, s, h, half_dim:] = qk_second * cos_vals + qk_first * sin_vals
+
+        return result
+
+
+def rope(q_or_k: np.ndarray, position_ids: np.ndarray = None,
+         rope_base: float = 10000.0, rope_scaling: float = 1.0) -> np.ndarray:
+    """
+    Apply RoPE (Rotary Position Embeddings) with numba acceleration.
+
+    Args:
+        q_or_k: Query or Key tensor (batch, seq_len, num_heads, head_dim)
+        position_ids: Position indices (batch, seq_len). If None, uses [0, 1, 2, ...]
+        rope_base: Base frequency for RoPE (default: 10000.0)
+        rope_scaling: Scaling factor for extended context (default: 1.0)
+
+    Returns:
+        Rotated Q or K tensor (same shape)
+    """
+    batch_size, seq_len = q_or_k.shape[:2]
+
+    if position_ids is None:
+        position_ids = np.arange(seq_len, dtype=np.int32)
+        position_ids = np.tile(position_ids, (batch_size, 1))
+
+    q_or_k = np.ascontiguousarray(q_or_k, dtype=np.float32)
+    position_ids = np.ascontiguousarray(position_ids, dtype=np.int32)
+
+    return _rope_numba(q_or_k, position_ids, rope_base, rope_scaling)
+
+
+# ============================================================================
+# Prosody Modulation
+# ============================================================================
+
+if NUMBA_AVAILABLE:
+    @jit(nopython=True, parallel=True, fastmath=True, cache=True)
+    def _prosody_modulation_numba(attention_scores: np.ndarray,
+                                   prosody_features: np.ndarray,
+                                   prosody_weights: np.ndarray,
+                                   prosody_strength: float) -> np.ndarray:
+        """
+        Numba-accelerated prosody modulation.
+
+        Args:
+            attention_scores: Attention scores (batch, num_heads, seq_len, seq_len)
+            prosody_features: Prosody features (batch, seq_len, prosody_dim)
+            prosody_weights: Prosody projection weights (num_heads, prosody_dim)
+            prosody_strength: Modulation strength
+
+        Returns:
+            Modulated attention scores (same shape)
+        """
+        batch_size, num_heads, seq_len, _ = attention_scores.shape
+        prosody_dim = prosody_features.shape[2]
+
+        result = attention_scores.copy()
+
+        for b in prange(batch_size):
+            for h in range(num_heads):
+                for q_pos in range(seq_len):
+                    for k_pos in range(seq_len):
+                        # Compute prosody bias from key position
+                        prosody_bias = 0.0
+                        for d in range(prosody_dim):
+                            prosody_bias += prosody_features[b, k_pos, d] * prosody_weights[h, d]
+
+                        # Apply modulation
+                        result[b, h, q_pos, k_pos] += prosody_strength * prosody_bias
+
+        return result
+
+else:
+    def _prosody_modulation_numba(attention_scores: np.ndarray,
+                                   prosody_features: np.ndarray,
+                                   prosody_weights: np.ndarray,
+                                   prosody_strength: float) -> np.ndarray:
+        """Pure numpy fallback for prosody modulation"""
+        batch_size, num_heads, seq_len, _ = attention_scores.shape
+
+        # prosody_features: (batch, seq_len, prosody_dim)
+        # prosody_weights: (num_heads, prosody_dim)
+        # Compute: prosody_bias = prosody_features @ prosody_weights.T -> (batch, seq_len, num_heads)
+        prosody_bias = np.einsum('bsd,hd->bsh', prosody_features, prosody_weights)
+
+        # Broadcast to attention shape: (batch, num_heads, seq_len, seq_len)
+        # prosody_bias[:, :, h] applies to all query positions for head h at key position
+        prosody_bias = prosody_bias.transpose(0, 2, 1)  # (batch, num_heads, seq_len)
+        prosody_bias = prosody_bias[:, :, np.newaxis, :]  # (batch, num_heads, 1, seq_len)
+
+        return attention_scores + prosody_strength * prosody_bias
+
+
+def prosody_modulation(attention_scores: np.ndarray,
+                       prosody_features: np.ndarray,
+                       prosody_weights: np.ndarray,
+                       prosody_strength: float = 0.3) -> np.ndarray:
+    """
+    Apply prosody modulation to attention scores with numba acceleration.
+
+    Args:
+        attention_scores: Attention scores (batch, num_heads, seq_len, seq_len)
+        prosody_features: Prosody features (batch, seq_len, prosody_dim)
+        prosody_weights: Prosody projection weights (num_heads, prosody_dim)
+        prosody_strength: Modulation strength (default: 0.3)
+
+    Returns:
+        Modulated attention scores (same shape)
+    """
+    attention_scores = np.ascontiguousarray(attention_scores, dtype=np.float32)
+    prosody_features = np.ascontiguousarray(prosody_features, dtype=np.float32)
+    prosody_weights = np.ascontiguousarray(prosody_weights, dtype=np.float32)
+
+    return _prosody_modulation_numba(attention_scores, prosody_features,
+                                      prosody_weights, prosody_strength)
+
+
+# ============================================================================
+# Attention Output (Weighted Sum)
+# ============================================================================
+
+if NUMBA_AVAILABLE:
+    @jit(nopython=True, parallel=True, fastmath=True, cache=True)
+    def _attention_output_numba(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
+        """
+        Numba-accelerated attention output computation.
+
+        Computes: output = weights @ values
+
+        Args:
+            weights: Attention weights (batch, num_heads, seq_len, seq_len)
+            values: Value tensor (batch, num_heads, seq_len, head_dim)
+
+        Returns:
+            Attention output (batch, num_heads, seq_len, head_dim)
+        """
+        batch, num_heads, seq_len, _ = weights.shape
+        head_dim = values.shape[3]
+
+        output = np.zeros((batch, num_heads, seq_len, head_dim), dtype=np.float32)
+
+        for b in prange(batch):
+            for h in range(num_heads):
+                for q in range(seq_len):
+                    for d in range(head_dim):
+                        acc = 0.0
+                        for k in range(seq_len):
+                            acc += weights[b, h, q, k] * values[b, h, k, d]
+                        output[b, h, q, d] = acc
+
+        return output
+
+else:
+    def _attention_output_numba(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
+        """Pure numpy fallback for attention output"""
+        return np.matmul(weights, values)
+
+
+def attention_output(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """
+    Compute attention output with numba acceleration.
+
+    Args:
+        weights: Attention weights (batch, num_heads, seq_len, seq_len)
+        values: Value tensor (batch, num_heads, seq_len, head_dim)
+
+    Returns:
+        Attention output (batch, num_heads, seq_len, head_dim)
+    """
+    weights = np.ascontiguousarray(weights, dtype=np.float32)
+    values = np.ascontiguousarray(values, dtype=np.float32)
+
+    return _attention_output_numba(weights, values)
+
+
+# ============================================================================
 # Utility: Check if numba is available
 # ============================================================================
 

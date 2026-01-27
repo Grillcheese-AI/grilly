@@ -11,6 +11,20 @@ from .shader_registry import get_shader
 
 logger = logging.getLogger(__name__)
 
+# Import numba-accelerated CPU fallbacks
+try:
+    from ..utils.numba_ops import (
+        NUMBA_AVAILABLE,
+        rope as numba_rope,
+        prosody_modulation as numba_prosody_modulation,
+        attention_output as numba_attention_output,
+    )
+except ImportError:
+    NUMBA_AVAILABLE = False
+    numba_rope = None
+    numba_prosody_modulation = None
+    numba_attention_output = None
+
 if VULKAN_AVAILABLE:
     from vulkan import *
 
@@ -220,8 +234,14 @@ class VulkanAttention:
             # weights: (batch, num_heads, seq_len, seq_len)
             # v: (batch, seq_len, num_heads, head_dim) -> transpose to (batch, num_heads, seq_len, head_dim)
             v_transposed = v.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
-            # Compute: weights @ v_transposed -> (batch, num_heads, seq_len, head_dim)
-            result = np.einsum('bhqk,bhkd->bhqd', weights, v_transposed)
+
+            if NUMBA_AVAILABLE and numba_attention_output is not None:
+                # Use numba-accelerated attention output
+                result = numba_attention_output(weights, v_transposed)
+            else:
+                # Pure numpy fallback
+                result = np.einsum('bhqk,bhkd->bhqd', weights, v_transposed)
+
             # Transpose back to (batch, seq_len, num_heads, head_dim)
             result = result.transpose(0, 2, 1, 3)
             return result
@@ -749,71 +769,69 @@ class VulkanAttention:
         prosody_weights: np.ndarray,
         prosody_strength: float
     ) -> np.ndarray:
-        """CPU fallback for prosody modulation"""
+        """CPU fallback for prosody modulation (numba-accelerated if available)"""
+        if NUMBA_AVAILABLE and numba_prosody_modulation is not None:
+            return numba_prosody_modulation(
+                attention_scores.astype(np.float32),
+                prosody_features.astype(np.float32),
+                prosody_weights.astype(np.float32),
+                prosody_strength
+            )
+
+        # Pure numpy fallback
         batch_size, num_heads, seq_len, _ = attention_scores.shape
-        prosody_dim = prosody_features.shape[-1]
-        
-        result = attention_scores.copy()
-        
-        for b in range(batch_size):
-            for h in range(num_heads):
-                for q_pos in range(seq_len):
-                    for k_pos in range(seq_len):
-                        # Compute prosody bias from key position
-                        prosody_bias = 0.0
-                        for d in range(prosody_dim):
-                            prosody_val = prosody_features[b, k_pos, d]
-                            weight_val = prosody_weights[h, d]
-                            prosody_bias += prosody_val * weight_val
-                        
-                        # Apply modulation
-                        result[b, h, q_pos, k_pos] += prosody_strength * prosody_bias
-        
-        return result
+
+        # prosody_features: (batch, seq_len, prosody_dim)
+        # prosody_weights: (num_heads, prosody_dim)
+        # Compute: prosody_bias = prosody_features @ prosody_weights.T -> (batch, seq_len, num_heads)
+        prosody_bias = np.einsum('bsd,hd->bsh', prosody_features, prosody_weights)
+
+        # Broadcast to attention shape: (batch, num_heads, seq_len, seq_len)
+        prosody_bias = prosody_bias.transpose(0, 2, 1)  # (batch, num_heads, seq_len)
+        prosody_bias = prosody_bias[:, :, np.newaxis, :]  # (batch, num_heads, 1, seq_len)
+
+        return attention_scores + prosody_strength * prosody_bias
     
     def _rope_cpu(self, q_or_k: np.ndarray, position_ids: np.ndarray = None, rope_base: float = 10000.0, rope_scaling: float = 1.0) -> np.ndarray:
         """
-        CPU fallback for RoPE using PyTorch's rotate_half approach.
-        
+        CPU fallback for RoPE using PyTorch's rotate_half approach (numba-accelerated if available).
+
         ModernBERT uses: q_embed = (q * cos) + (rotate_half(q) * sin)
         where rotate_half(q) = [-q[head_dim//2:], q[:head_dim//2]]
         """
         batch_size, seq_len, num_heads, head_dim = q_or_k.shape
-        
+
         if position_ids is None:
             position_ids = np.arange(seq_len, dtype=np.int32)
             position_ids = np.tile(position_ids, (batch_size, 1))
-        
-        result = q_or_k.copy()
-        
-        # Compute inv_freq (same as ModernBERT)
+
+        if NUMBA_AVAILABLE and numba_rope is not None:
+            return numba_rope(
+                q_or_k.astype(np.float32),
+                position_ids.astype(np.int32),
+                rope_base,
+                rope_scaling
+            )
+
+        # Pure numpy fallback
+        half_dim = head_dim // 2
         inv_freq = 1.0 / (rope_base ** (np.arange(0, head_dim, 2, dtype=np.float32) / head_dim))
-        
-        # Apply RoPE to each position
+        result = np.empty_like(q_or_k)
+
         for b in range(batch_size):
             for s in range(seq_len):
                 pos = float(position_ids[b, s]) / rope_scaling
+                freqs = pos * inv_freq
+                cos_vals = np.cos(freqs)
+                sin_vals = np.sin(freqs)
+
                 for h in range(num_heads):
-                    # Compute cos/sin for this position
-                    # freqs = pos * inv_freq  (shape: head_dim//2)
-                    freqs = pos * inv_freq
-                    # Expand to full head_dim: [freqs, freqs]
-                    freqs_full = np.concatenate([freqs, freqs])
-                    cos_vals = np.cos(freqs_full)
-                    sin_vals = np.sin(freqs_full)
-                    
-                    # Get current q/k vector
-                    qk_vec = q_or_k[b, s, h, :]
-                    
-                    # rotate_half: split into two halves and rotate
-                    # rotate_half(q) = [-q[head_dim//2:], q[:head_dim//2]]
-                    qk_first_half = qk_vec[:head_dim//2]
-                    qk_second_half = qk_vec[head_dim//2:]
-                    rotated = np.concatenate([-qk_second_half, qk_first_half])
-                    
-                    # Apply: q_embed = (q * cos) + (rotate_half(q) * sin)
-                    result[b, s, h, :] = (qk_vec * cos_vals) + (rotated * sin_vals)
-        
+                    qk_first = q_or_k[b, s, h, :half_dim]
+                    qk_second = q_or_k[b, s, h, half_dim:]
+
+                    result[b, s, h, :half_dim] = qk_first * cos_vals - qk_second * sin_vals
+                    result[b, s, h, half_dim:] = qk_second * cos_vals + qk_first * sin_vals
+
         return result
 
 

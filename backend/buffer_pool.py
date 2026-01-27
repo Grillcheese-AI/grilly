@@ -9,6 +9,28 @@ Key Features:
 2. LRU eviction for memory management
 3. Thread-safe operations
 4. Automatic cleanup on context destruction
+
+STATUS: DISABLED - This manual buffer pool has issues with AMD GPUs causing
+Vulkan memory access violations when buffers are reused after release.
+
+RECOMMENDED FUTURE IMPROVEMENT:
+Use PyVMA (Python wrapper for Vulkan Memory Allocator) instead.
+
+PyVMA Installation (requires building VMA library first):
+1. Install vcpkg: git clone https://github.com/microsoft/vcpkg && bootstrap-vcpkg.bat
+2. Install VMA: vcpkg install vulkan-memory-allocator:x64-windows
+3. Set VCPKG_ROOT and add vk_mem_alloc.lib to the build path
+4. pip install pyvma
+
+PyVMA/VMA provides:
+- Automatic sub-allocation from large memory blocks
+- AMD-optimized memory heap selection
+- Persistent mapping support for frequent updates
+- Better fragmentation handling
+
+See: https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
+
+For now, using direct allocation which works reliably on all GPUs.
 """
 
 import numpy as np
@@ -34,7 +56,7 @@ class PooledBuffer:
 
     Automatically returns to pool when released or garbage collected.
     """
-    __slots__ = ('handle', 'memory', 'size', 'bucket_size', 'pool', 'in_use',
+    __slots__ = ('handle', 'memory', 'size', 'bucket_size', 'in_use',
                  'last_used', 'usage_flags', '_weak_pool')
 
     def __init__(self, handle, memory, size: int, bucket_size: int,
