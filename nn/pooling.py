@@ -4,8 +4,9 @@ Pooling layers for neural networks.
 
 import numpy as np
 from .module import Module
-from ..backend.compute import get_compute
 
+def get_compute():
+    pass
 
 class MaxPool2d(Module):
     """
@@ -49,7 +50,7 @@ class MaxPool2d(Module):
         x = np.asarray(x, dtype=np.float32)
         self._cached_input_shape = x.shape
 
-        compute = get_compute()
+        compute = self._get_backend()
         output, indices = compute.pooling.maxpool2d(
             x, self.kernel_size, self.stride, self.padding, self.dilation
         )
@@ -65,7 +66,7 @@ class MaxPool2d(Module):
         if self._cached_indices is None or self._cached_input_shape is None:
             raise RuntimeError("Must call forward before backward")
 
-        compute = get_compute()
+        compute = self._get_backend()
         grad_input = compute.pooling.maxpool2d_backward(
             grad_output, self._cached_indices, self._cached_input_shape
         )
@@ -117,7 +118,7 @@ class AvgPool2d(Module):
         x = np.asarray(x, dtype=np.float32)
         self._cached_input_shape = x.shape
 
-        compute = get_compute()
+        compute = self._get_backend()
         output = compute.pooling.avgpool2d(
             x, self.kernel_size, self.stride, self.padding, self.count_include_pad
         )
@@ -129,7 +130,7 @@ class AvgPool2d(Module):
         if self._cached_input_shape is None:
             raise RuntimeError("Must call forward before backward")
 
-        compute = get_compute()
+        compute = self._get_backend()
         grad_input = compute.pooling.avgpool2d_backward(
             grad_output, self._cached_input_shape, self.kernel_size,
             self.stride, self.padding, self.count_include_pad
