@@ -155,3 +155,10 @@ CLAUDE.md
 PLAN.md
 *.jsonl
 pyvma
+*.gz
+VulkanMemoryAllocator
+datasets/cifar-10-python.tar.gz
+VulkanMemoryAllocator
+datasets/cifar-10-python.tar.gz
+datasets/cifar-10-python.tar.gz
+/datasets

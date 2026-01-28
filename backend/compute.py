@@ -51,6 +51,13 @@ class VulkanCompute:
 
     def cleanup(self):
         """Clean up Vulkan resources"""
+        # Clear buffer pools first (before device is destroyed)
+        if hasattr(self, 'fnn') and self.fnn._pool is not None:
+            try:
+                self.fnn._pool.clear()
+                self.fnn._pool = None
+            except Exception:
+                pass
         if hasattr(self, 'pipelines'):
             self.pipelines.cleanup()
         if hasattr(self, 'core'):

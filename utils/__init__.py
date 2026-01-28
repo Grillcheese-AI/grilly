@@ -3,7 +3,31 @@ Utilities Module
 
 Helper functions for data loading, visualization, checkpointing, device management, etc.
 """
-from .data import DataLoader, BatchSampler
+from .data import (
+    # Dataset classes
+    Dataset,
+    TensorDataset,
+    ArrayDataset,
+    Subset,
+    ConcatDataset,
+    # Samplers
+    RandomSampler,
+    SequentialSampler,
+    BatchSampler,
+    # DataLoader
+    DataLoader,
+    default_collate,
+    random_split,
+    # Transforms
+    Compose,
+    ToFloat32,
+    Normalize,
+    Flatten,
+    RandomNoise,
+    RandomFlip,
+    OneHot,
+    Lambda,
+)
 from .checkpoint import save_checkpoint, load_checkpoint
 from .device import get_device, set_device, device_count
 from .initialization import xavier_uniform_, xavier_normal_, kaiming_uniform_, kaiming_normal_
@@ -71,9 +95,29 @@ except Exception:
     to_numpy = None
 
 __all__ = [
-    # Data
-    'DataLoader',
+    # Dataset classes
+    'Dataset',
+    'TensorDataset',
+    'ArrayDataset',
+    'Subset',
+    'ConcatDataset',
+    # Samplers
+    'RandomSampler',
+    'SequentialSampler',
     'BatchSampler',
+    # DataLoader
+    'DataLoader',
+    'default_collate',
+    'random_split',
+    # Transforms
+    'Compose',
+    'ToFloat32',
+    'Normalize',
+    'Flatten',
+    'RandomNoise',
+    'RandomFlip',
+    'OneHot',
+    'Lambda',
     # Checkpoint
     'save_checkpoint',
     'load_checkpoint',

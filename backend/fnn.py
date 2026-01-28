@@ -38,12 +38,15 @@ except ImportError:
 
 # Import buffer pool for GPU buffer reuse
 try:
-    from .buffer_pool import get_buffer_pool, PooledBuffer
+    from .buffer_pool import get_buffer_pool, PooledBuffer, VMABuffer, VMABufferPool, BufferPool
     BUFFER_POOL_AVAILABLE = True
 except ImportError:
     BUFFER_POOL_AVAILABLE = False
     get_buffer_pool = None
     PooledBuffer = None
+    VMABuffer = None
+    VMABufferPool = None
+    BufferPool = None
 
 
 class _DirectBuffer:
@@ -80,15 +83,17 @@ class VulkanFNN:
 
     @property
     def buffer_pool(self):
-        """Get or initialize the buffer pool"""
-        # Temporarily disabled for debugging - always use direct allocation
-        return None
-        # if self._pool is None and BUFFER_POOL_AVAILABLE:
-        #     try:
-        #         self._pool = get_buffer_pool(self.core)
-        #     except Exception:
-        #         pass  # Pool initialization failed, will use direct allocation
-        # return self._pool
+        """Get or initialize the buffer pool (per-instance pool)"""
+        if self._pool is None and BUFFER_POOL_AVAILABLE:
+            try:
+                # Use per-instance pool instead of global pool
+                # This avoids issues with stale device references across tests
+                self._pool = BufferPool(self.core)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(f"Buffer pool init failed: {e}")
+                pass  # Pool initialization failed, will use direct allocation
+        return self._pool
 
     def _acquire_buffer(self, size: int, usage: int = None) -> 'PooledBuffer':
         """
@@ -111,7 +116,9 @@ class VulkanFNN:
     def _release_buffers(self, buffers: List):
         """Release multiple buffers back to pool or destroy directly"""
         for buf in buffers:
-            if isinstance(buf, PooledBuffer):
+            if VMABuffer is not None and isinstance(buf, VMABuffer):
+                buf.release()
+            elif PooledBuffer is not None and isinstance(buf, PooledBuffer):
                 buf.release()
             elif isinstance(buf, _DirectBuffer):
                 buf.destroy(self.core.device)
@@ -120,6 +127,37 @@ class VulkanFNN:
                 handle, memory = buf
                 vkDestroyBuffer(self.core.device, handle, None)
                 vkFreeMemory(self.core.device, memory, None)
+
+    def _is_vma_buffer(self, buf) -> bool:
+        """Check if buffer is a VMA-allocated buffer"""
+        return VMABuffer is not None and isinstance(buf, VMABuffer)
+
+    def _upload_buffer(self, buf, data: np.ndarray):
+        """Upload data to buffer, handling VMA and direct buffers appropriately"""
+        if self._is_vma_buffer(buf):
+            # Use VMA's memory mapping for VMA buffers
+            pool = self.buffer_pool
+            if pool is not None and isinstance(pool, VMABufferPool):
+                pool.upload_data(buf, data)
+                return
+        # Direct buffer or PooledBuffer - use core's upload
+        self.core._upload_buffer(buf.handle, buf.memory, data)
+
+    def _download_buffer(self, buf, size: int, dtype=np.float32) -> np.ndarray:
+        """Download data from buffer, handling VMA and direct buffers appropriately"""
+        if self._is_vma_buffer(buf):
+            # Use VMA's memory mapping for VMA buffers
+            pool = self.buffer_pool
+            if pool is not None and isinstance(pool, VMABufferPool):
+                return pool.download_data(buf, size, dtype)
+        # Direct buffer or PooledBuffer - use core's download
+        return self.core._download_buffer(buf.memory, size, dtype)
+
+    def _get_buffer_handle(self, buf):
+        """Get Vulkan-compatible buffer handle"""
+        if self._is_vma_buffer(buf):
+            return buf.get_vulkan_handle()
+        return buf.handle
 
     def activation_relu(self, input_data):
         """Apply ReLU activation: max(0, x)"""
@@ -137,18 +175,22 @@ class VulkanFNN:
         buf_in = self._acquire_buffer(data.nbytes)
         buf_out = self._acquire_buffer(data.nbytes)
 
-        # Upload data
-        self.core._upload_buffer(buf_in.handle, buf_in.memory, data)
+        # Upload data (uses VMA memory mapping for VMA buffers)
+        self._upload_buffer(buf_in, data)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
             'activation-relu', 2, push_constant_size=4
         )
 
+        # Get buffer handles (converts VMA handles to vulkan-compatible handles)
+        in_handle = self._get_buffer_handle(buf_in)
+        out_handle = self._get_buffer_handle(buf_out)
+
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'activation-relu',
-            [(buf_in.handle, data.nbytes), (buf_out.handle, data.nbytes)]
+            [(in_handle, data.nbytes), (out_handle, data.nbytes)]
         )
 
         # Pack push constants
@@ -161,8 +203,8 @@ class VulkanFNN:
             workgroups, push_constants
         )
 
-        # Download results
-        result = self.core._download_buffer(buf_out.memory, data.nbytes, dtype=np.float32)
+        # Download results (uses VMA memory mapping for VMA buffers)
+        result = self._download_buffer(buf_out, data.nbytes, np.float32)
         result = result[:total_elements]
 
         # Release buffers back to pool
@@ -189,7 +231,7 @@ class VulkanFNN:
         buf_out = self._acquire_buffer(data.nbytes)
 
         # Upload data
-        self.core._upload_buffer(buf_in.handle, buf_in.memory, data)
+        self._upload_buffer(buf_in, data)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -199,7 +241,7 @@ class VulkanFNN:
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'activation-gelu',
-            [(buf_in.handle, data.nbytes), (buf_out.handle, data.nbytes)]
+            [(self._get_buffer_handle(buf_in), data.nbytes), (self._get_buffer_handle(buf_out), data.nbytes)]
         )
 
         # Pack push constants
@@ -213,7 +255,7 @@ class VulkanFNN:
         )
 
         # Download results
-        result = self.core._download_buffer(buf_out.memory, data.nbytes, dtype=np.float32)
+        result = self._download_buffer(buf_out, data.nbytes, np.float32)
         result = result[:total_elements]
 
         # Check for NaN/Inf and fallback to CPU if needed
@@ -246,7 +288,7 @@ class VulkanFNN:
         buf_out = self._acquire_buffer(data.nbytes)
 
         # Upload data
-        self.core._upload_buffer(buf_in.handle, buf_in.memory, data)
+        self._upload_buffer(buf_in, data)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -256,7 +298,7 @@ class VulkanFNN:
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'activation-silu',
-            [(buf_in.handle, data.nbytes), (buf_out.handle, data.nbytes)]
+            [(self._get_buffer_handle(buf_in), data.nbytes), (self._get_buffer_handle(buf_out), data.nbytes)]
         )
 
         # Pack push constants
@@ -270,7 +312,7 @@ class VulkanFNN:
         )
 
         # Download results
-        result = self.core._download_buffer(buf_out.memory, data.nbytes, dtype=np.float32)
+        result = self._download_buffer(buf_out, data.nbytes, np.float32)
         result = result[:total_elements]
 
         # Release buffers back to pool
@@ -319,7 +361,7 @@ class VulkanFNN:
         buf_sum = self._acquire_buffer(batch_size * seq_len * 4)
 
         # Upload data
-        self.core._upload_buffer(buf_in.handle, buf_in.memory, data_flat)
+        self._upload_buffer(buf_in, data_flat)
 
         # Get or create pipeline - 4 buffers, 24 bytes push constants (5 uints + padding)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -330,10 +372,10 @@ class VulkanFNN:
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'activation-softmax',
             [
-                (buf_in.handle, data_flat.nbytes),
-                (buf_out.handle, data_flat.nbytes),
-                (buf_max.handle, batch_size * seq_len * 4),
-                (buf_sum.handle, batch_size * seq_len * 4)
+                (self._get_buffer_handle(buf_in), data_flat.nbytes),
+                (self._get_buffer_handle(buf_out), data_flat.nbytes),
+                (self._get_buffer_handle(buf_max), batch_size * seq_len * 4),
+                (self._get_buffer_handle(buf_sum), batch_size * seq_len * 4)
             ]
         )
 
@@ -361,7 +403,7 @@ class VulkanFNN:
         )
 
         # Download results
-        result = self.core._download_buffer(buf_out.memory, data_flat.nbytes, dtype=np.float32)
+        result = self._download_buffer(buf_out, data_flat.nbytes, np.float32)
         result = result[:len(data_flat)].reshape(original_shape)
 
         # Release buffers back to pool
@@ -404,7 +446,7 @@ class VulkanFNN:
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'fnn-xavier-init',
-            [(buf_weights.handle, weights_flat.nbytes)]
+            [(self._get_buffer_handle(buf_weights), weights_flat.nbytes)]
         )
 
         # Pack push constants: input_dim, output_dim, scale, seed
@@ -420,7 +462,7 @@ class VulkanFNN:
         )
 
         # Download results
-        result = self.core._download_buffer(buf_weights.memory, weights_flat.nbytes, dtype=np.float32)
+        result = self._download_buffer(buf_weights, weights_flat.nbytes, np.float32)
         result = result[:input_dim * output_dim]
 
         # Release buffer back to pool
@@ -467,8 +509,8 @@ class VulkanFNN:
         buf_grad_in = self._acquire_buffer(input_flat.nbytes)
 
         # Upload data
-        self.core._upload_buffer(buf_grad_out.handle, buf_grad_out.memory, grad_out)
-        self.core._upload_buffer(buf_input.handle, buf_input.memory, input_flat)
+        self._upload_buffer(buf_grad_out, grad_out)
+        self._upload_buffer(buf_input, input_flat)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -479,9 +521,9 @@ class VulkanFNN:
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'activation-gelu-backward',
             [
-                (buf_grad_out.handle, grad_out.nbytes),
-                (buf_input.handle, input_flat.nbytes),
-                (buf_grad_in.handle, input_flat.nbytes)
+                (self._get_buffer_handle(buf_grad_out), grad_out.nbytes),
+                (self._get_buffer_handle(buf_input), input_flat.nbytes),
+                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes)
             ]
         )
 
@@ -496,11 +538,244 @@ class VulkanFNN:
         )
 
         # Download results
-        result = self.core._download_buffer(buf_grad_in.memory, input_flat.nbytes, dtype=np.float32)
+        result = self._download_buffer(buf_grad_in, input_flat.nbytes, np.float32)
         result = result[:total_elements].reshape(input_data.shape)
 
         # Release buffers back to pool
         self._release_buffers([buf_grad_out, buf_input, buf_grad_in])
+
+        return result
+
+    def activation_relu_backward(self, grad_output, input_data):
+        """
+        GPU-accelerated ReLU backward pass
+
+        Args:
+            grad_output: Gradient from next layer (same shape as input_data)
+            input_data: Input to ReLU (for computing derivative)
+
+        Returns:
+            Gradient w.r.t. input
+        """
+        grad_out = grad_output.astype(np.float32).flatten()
+        input_flat = input_data.astype(np.float32).flatten()
+        total_elements = len(input_flat)
+
+        if len(grad_out) != total_elements:
+            raise ValueError(f"grad_output size {len(grad_out)} != input_data size {total_elements}")
+
+        # Check if shader is available
+        if 'activation-relu-backward' not in self.shaders:
+            # CPU fallback
+            relu_grad = (input_flat > 0.0).astype(np.float32)
+            grad_in = grad_out * relu_grad
+            return grad_in.reshape(input_data.shape)
+
+        # Acquire buffers from pool
+        buf_grad_out = self._acquire_buffer(grad_out.nbytes)
+        buf_input = self._acquire_buffer(input_flat.nbytes)
+        buf_grad_in = self._acquire_buffer(input_flat.nbytes)
+
+        # Upload data
+        self._upload_buffer(buf_grad_out, grad_out)
+        self._upload_buffer(buf_input, input_flat)
+
+        # Get or create pipeline
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'activation-relu-backward', 3, push_constant_size=4
+        )
+
+        # Get cached descriptor set
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'activation-relu-backward',
+            [
+                (self._get_buffer_handle(buf_grad_out), grad_out.nbytes),
+                (self._get_buffer_handle(buf_input), input_flat.nbytes),
+                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes)
+            ]
+        )
+
+        # Pack push constants
+        push_constants = struct.pack('I', total_elements)
+
+        # Dispatch
+        workgroups = (total_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set,
+            workgroups, push_constants
+        )
+
+        # Download results
+        result = self._download_buffer(buf_grad_in, input_flat.nbytes, np.float32)
+        result = result[:total_elements].reshape(input_data.shape)
+
+        # Release buffers back to pool
+        self._release_buffers([buf_grad_out, buf_input, buf_grad_in])
+
+        return result
+
+    def activation_silu_backward(self, grad_output, input_data):
+        """
+        GPU-accelerated SiLU (Swish) backward pass
+
+        SiLU(x) = x * sigmoid(x)
+        d/dx SiLU(x) = sigmoid(x) * (1 + x * (1 - sigmoid(x)))
+
+        Args:
+            grad_output: Gradient from next layer (same shape as input_data)
+            input_data: Input to SiLU (for computing derivative)
+
+        Returns:
+            Gradient w.r.t. input
+        """
+        grad_out = grad_output.astype(np.float32).flatten()
+        input_flat = input_data.astype(np.float32).flatten()
+        total_elements = len(input_flat)
+
+        if len(grad_out) != total_elements:
+            raise ValueError(f"grad_output size {len(grad_out)} != input_data size {total_elements}")
+
+        # Check if shader is available
+        if 'activation-silu-backward' not in self.shaders:
+            # CPU fallback
+            x = input_flat
+            sigmoid_x = 1.0 / (1.0 + np.exp(-x))
+            silu_grad = sigmoid_x * (1.0 + x * (1.0 - sigmoid_x))
+            grad_in = grad_out * silu_grad
+            return grad_in.reshape(input_data.shape)
+
+        # Acquire buffers from pool
+        buf_grad_out = self._acquire_buffer(grad_out.nbytes)
+        buf_input = self._acquire_buffer(input_flat.nbytes)
+        buf_grad_in = self._acquire_buffer(input_flat.nbytes)
+
+        # Upload data
+        self._upload_buffer(buf_grad_out, grad_out)
+        self._upload_buffer(buf_input, input_flat)
+
+        # Get or create pipeline
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'activation-silu-backward', 3, push_constant_size=4
+        )
+
+        # Get cached descriptor set
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'activation-silu-backward',
+            [
+                (self._get_buffer_handle(buf_grad_out), grad_out.nbytes),
+                (self._get_buffer_handle(buf_input), input_flat.nbytes),
+                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes)
+            ]
+        )
+
+        # Pack push constants
+        push_constants = struct.pack('I', total_elements)
+
+        # Dispatch
+        workgroups = (total_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set,
+            workgroups, push_constants
+        )
+
+        # Download results
+        result = self._download_buffer(buf_grad_in, input_flat.nbytes, np.float32)
+        result = result[:total_elements].reshape(input_data.shape)
+
+        # Release buffers back to pool
+        self._release_buffers([buf_grad_out, buf_input, buf_grad_in])
+
+        return result
+
+    def cross_entropy_backward(self, logits, targets):
+        """
+        GPU-accelerated cross-entropy backward pass (combined with softmax)
+
+        Computes gradient of cross-entropy loss w.r.t. logits directly:
+        grad = softmax(logits) - one_hot(targets)
+
+        This is more numerically stable than computing softmax and
+        cross-entropy gradients separately.
+
+        Args:
+            logits: Raw logits (batch_size, num_classes)
+            targets: Target class indices (batch_size,) as integers or floats
+
+        Returns:
+            Gradient w.r.t. logits (batch_size, num_classes)
+        """
+        logits = logits.astype(np.float32)
+        original_shape = logits.shape
+
+        if logits.ndim == 1:
+            batch_size, num_classes = 1, logits.shape[0]
+            logits = logits.reshape(1, -1)
+        else:
+            batch_size, num_classes = logits.shape
+
+        targets = np.asarray(targets).astype(np.float32).flatten()
+
+        # Check if shader is available
+        if 'cross-entropy-backward' not in self.shaders:
+            # CPU fallback: softmax - one_hot
+            logits_max = np.max(logits, axis=1, keepdims=True)
+            exp_logits = np.exp(logits - logits_max)
+            softmax = exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
+
+            # Create one-hot encoding
+            one_hot = np.zeros_like(softmax)
+            for i in range(batch_size):
+                target_idx = int(targets[i])
+                if 0 <= target_idx < num_classes:
+                    one_hot[i, target_idx] = 1.0
+
+            grad = softmax - one_hot
+            return grad.reshape(original_shape)
+
+        # Flatten logits
+        logits_flat = logits.flatten()
+        grad_size = batch_size * num_classes * 4
+
+        # Acquire buffers from pool
+        buf_logits = self._acquire_buffer(logits_flat.nbytes)
+        buf_targets = self._acquire_buffer(targets.nbytes)
+        buf_grad = self._acquire_buffer(grad_size)
+
+        # Upload data
+        self._upload_buffer(buf_logits, logits_flat)
+        self._upload_buffer(buf_targets, targets)
+
+        # Get or create pipeline (3 buffers, push constants: 2 uints = 8 bytes)
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'cross-entropy-backward', 3, push_constant_size=8
+        )
+
+        # Get cached descriptor set
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'cross-entropy-backward',
+            [
+                (self._get_buffer_handle(buf_logits), logits_flat.nbytes),
+                (self._get_buffer_handle(buf_targets), targets.nbytes),
+                (self._get_buffer_handle(buf_grad), grad_size)
+            ]
+        )
+
+        # Pack push constants: batch_size, num_classes
+        push_constants = struct.pack('II', batch_size, num_classes)
+
+        # Dispatch: one workgroup per batch element
+        workgroups = batch_size
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set,
+            workgroups, push_constants
+        )
+
+        # Download results
+        result = self._download_buffer(buf_grad, grad_size, np.float32)
+        result = result[:batch_size * num_classes].reshape(original_shape)
+
+        # Release buffers back to pool
+        self._release_buffers([buf_logits, buf_targets, buf_grad])
 
         return result
 
@@ -565,9 +840,9 @@ class VulkanFNN:
         buf_var = self._acquire_buffer(total_positions * 4)
 
         # Upload data
-        self.core._upload_buffer(buf_input.handle, buf_input.memory, x_flat)
-        self.core._upload_buffer(buf_gamma.handle, buf_gamma.memory, gamma_flat)
-        self.core._upload_buffer(buf_beta.handle, buf_beta.memory, beta_flat)
+        self._upload_buffer(buf_input, x_flat)
+        self._upload_buffer(buf_gamma, gamma_flat)
+        self._upload_buffer(buf_beta, beta_flat)
 
         # Get or create pipeline (6 buffers, push constants: 4 uints + 1 float = 20 bytes)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -578,12 +853,12 @@ class VulkanFNN:
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'fnn-layernorm',
             [
-                (buf_input.handle, x_flat.nbytes),
-                (buf_output.handle, x_flat.nbytes),
-                (buf_gamma.handle, gamma_flat.nbytes),
-                (buf_beta.handle, beta_flat.nbytes),
-                (buf_mean.handle, total_positions * 4),
-                (buf_var.handle, total_positions * 4),
+                (self._get_buffer_handle(buf_input), x_flat.nbytes),
+                (self._get_buffer_handle(buf_output), x_flat.nbytes),
+                (self._get_buffer_handle(buf_gamma), gamma_flat.nbytes),
+                (self._get_buffer_handle(buf_beta), beta_flat.nbytes),
+                (self._get_buffer_handle(buf_mean), total_positions * 4),
+                (self._get_buffer_handle(buf_var), total_positions * 4),
             ]
         )
 
@@ -606,7 +881,7 @@ class VulkanFNN:
             )
 
         # Download result
-        result = self.core._download_buffer(buf_output.memory, x_flat.nbytes, dtype=np.float32)
+        result = self._download_buffer(buf_output, x_flat.nbytes, np.float32)
 
         # Release buffers back to pool
         self._release_buffers([buf_input, buf_output, buf_gamma, buf_beta, buf_mean, buf_var])
@@ -668,15 +943,15 @@ class VulkanFNN:
         if bias is not None:
             bias_flat = bias.astype(np.float32).flatten()
             buf_bias = self._acquire_buffer(bias_flat.nbytes)
-            self.core._upload_buffer(buf_bias.handle, buf_bias.memory, bias_flat)
+            self._upload_buffer(buf_bias, bias_flat)
         else:
             # Create dummy bias buffer (shader expects 4 buffers)
             buf_bias = self._acquire_buffer(4)
             bias_flat = None
 
         # Upload data
-        self.core._upload_buffer(buf_input.handle, buf_input.memory, x_flat)
-        self.core._upload_buffer(buf_weights.handle, buf_weights.memory, w_flat)
+        self._upload_buffer(buf_input, x_flat)
+        self._upload_buffer(buf_weights, w_flat)
 
         # Get or create pipeline (4 buffers, push constants: 4 uints = 16 bytes)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -687,10 +962,10 @@ class VulkanFNN:
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'fnn-linear',
             [
-                (buf_input.handle, x_flat.nbytes),
-                (buf_weights.handle, w_flat.nbytes),
-                (buf_bias.handle, bias_flat.nbytes if bias_flat is not None else 4),
-                (buf_output.handle, output_size),
+                (self._get_buffer_handle(buf_input), x_flat.nbytes),
+                (self._get_buffer_handle(buf_weights), w_flat.nbytes),
+                (self._get_buffer_handle(buf_bias), bias_flat.nbytes if bias_flat is not None else 4),
+                (self._get_buffer_handle(buf_output), output_size),
             ]
         )
 
@@ -708,7 +983,7 @@ class VulkanFNN:
         )
 
         # Download result
-        result = self.core._download_buffer(buf_output.memory, output_size, dtype=np.float32)
+        result = self._download_buffer(buf_output, output_size, np.float32)
 
         # Release buffers back to pool
         self._release_buffers([buf_input, buf_weights, buf_bias, buf_output])
@@ -773,29 +1048,29 @@ class VulkanFNN:
 
         buffers_list = [buf_grad_out, buf_x, buf_w, buf_grad_in, buf_grad_w]
         buffers = [
-            (buf_grad_out.handle, grad_out_flat.nbytes),
-            (buf_x.handle, x_flat.nbytes),
-            (buf_w.handle, w_flat.nbytes),
-            (buf_grad_in.handle, grad_input_size),
-            (buf_grad_w.handle, grad_weight_size),
+            (self._get_buffer_handle(buf_grad_out), grad_out_flat.nbytes),
+            (self._get_buffer_handle(buf_x), x_flat.nbytes),
+            (self._get_buffer_handle(buf_w), w_flat.nbytes),
+            (self._get_buffer_handle(buf_grad_in), grad_input_size),
+            (self._get_buffer_handle(buf_grad_w), grad_weight_size),
         ]
 
         if bias is not None:
             buf_grad_b = self._acquire_buffer(grad_bias_size)
             buffers_list.append(buf_grad_b)
-            buffers.append((buf_grad_b.handle, grad_bias_size))
+            buffers.append((self._get_buffer_handle(buf_grad_b), grad_bias_size))
         else:
             buf_grad_b = None
 
         # Upload data
-        self.core._upload_buffer(buf_grad_out.handle, buf_grad_out.memory, grad_out_flat)
-        self.core._upload_buffer(buf_x.handle, buf_x.memory, x_flat)
-        self.core._upload_buffer(buf_w.handle, buf_w.memory, w_flat)
+        self._upload_buffer(buf_grad_out, grad_out_flat)
+        self._upload_buffer(buf_x, x_flat)
+        self._upload_buffer(buf_w, w_flat)
         # Initialize output buffers to zero
-        self.core._upload_buffer(buf_grad_in.handle, buf_grad_in.memory, np.zeros(batch_seq * input_dim, dtype=np.float32))
-        self.core._upload_buffer(buf_grad_w.handle, buf_grad_w.memory, np.zeros(output_dim * input_dim, dtype=np.float32))
+        self._upload_buffer(buf_grad_in, np.zeros(batch_seq * input_dim, dtype=np.float32))
+        self._upload_buffer(buf_grad_w, np.zeros(output_dim * input_dim, dtype=np.float32))
         if bias is not None:
-            self.core._upload_buffer(buf_grad_b.handle, buf_grad_b.memory, np.zeros(output_dim, dtype=np.float32))
+            self._upload_buffer(buf_grad_b, np.zeros(output_dim, dtype=np.float32))
 
         # Get or create pipeline
         num_bindings = 6 if bias is not None else 5
@@ -834,10 +1109,10 @@ class VulkanFNN:
             )
 
         # Download results
-        grad_input_flat = self.core._download_buffer(buf_grad_in.memory, grad_input_size, dtype=np.float32)
-        grad_weight_flat = self.core._download_buffer(buf_grad_w.memory, grad_weight_size, dtype=np.float32)
+        grad_input_flat = self._download_buffer(buf_grad_in, grad_input_size, np.float32)
+        grad_weight_flat = self._download_buffer(buf_grad_w, grad_weight_size, np.float32)
         if bias is not None:
-            grad_bias_flat = self.core._download_buffer(buf_grad_b.memory, grad_bias_size, dtype=np.float32)
+            grad_bias_flat = self._download_buffer(buf_grad_b, grad_bias_size, np.float32)
         else:
             grad_bias_flat = None
 
@@ -944,16 +1219,16 @@ class VulkanFNN:
         buffers_list = [buf_grad_out, buf_input, buf_gamma, buf_mean, buf_var, buf_grad_in, buf_grad_gamma, buf_grad_beta]
 
         # Upload data
-        self.core._upload_buffer(buf_grad_out.handle, buf_grad_out.memory, grad_out_flat)
-        self.core._upload_buffer(buf_input.handle, buf_input.memory, x_flat)
-        self.core._upload_buffer(buf_gamma.handle, buf_gamma.memory, gamma_flat)
-        self.core._upload_buffer(buf_mean.handle, buf_mean.memory, mean_flat)
-        self.core._upload_buffer(buf_var.handle, buf_var.memory, var_flat)
+        self._upload_buffer(buf_grad_out, grad_out_flat)
+        self._upload_buffer(buf_input, x_flat)
+        self._upload_buffer(buf_gamma, gamma_flat)
+        self._upload_buffer(buf_mean, mean_flat)
+        self._upload_buffer(buf_var, var_flat)
 
         # Initialize grad buffers to zero
-        self.core._upload_buffer(buf_grad_in.handle, buf_grad_in.memory, np.zeros(total_elements, dtype=np.float32))
-        self.core._upload_buffer(buf_grad_gamma.handle, buf_grad_gamma.memory, np.zeros(features, dtype=np.float32))
-        self.core._upload_buffer(buf_grad_beta.handle, buf_grad_beta.memory, np.zeros(features, dtype=np.float32))
+        self._upload_buffer(buf_grad_in, np.zeros(total_elements, dtype=np.float32))
+        self._upload_buffer(buf_grad_gamma, np.zeros(features, dtype=np.float32))
+        self._upload_buffer(buf_grad_beta, np.zeros(features, dtype=np.float32))
 
         # Get or create pipeline (8 buffers, push constants: 4 uints + 1 float = 20 bytes)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -961,14 +1236,14 @@ class VulkanFNN:
         )
 
         buffers = [
-            (buf_grad_out.handle, grad_out_flat.nbytes),
-            (buf_input.handle, x_flat.nbytes),
-            (buf_gamma.handle, gamma_flat.nbytes),
-            (buf_mean.handle, mean_flat.nbytes),
-            (buf_var.handle, var_flat.nbytes),
-            (buf_grad_in.handle, x_flat.nbytes),
-            (buf_grad_gamma.handle, gamma_flat.nbytes),
-            (buf_grad_beta.handle, gamma_flat.nbytes),
+            (self._get_buffer_handle(buf_grad_out), grad_out_flat.nbytes),
+            (self._get_buffer_handle(buf_input), x_flat.nbytes),
+            (self._get_buffer_handle(buf_gamma), gamma_flat.nbytes),
+            (self._get_buffer_handle(buf_mean), mean_flat.nbytes),
+            (self._get_buffer_handle(buf_var), var_flat.nbytes),
+            (self._get_buffer_handle(buf_grad_in), x_flat.nbytes),
+            (self._get_buffer_handle(buf_grad_gamma), gamma_flat.nbytes),
+            (self._get_buffer_handle(buf_grad_beta), gamma_flat.nbytes),
         ]
 
         # Create descriptor set
@@ -990,9 +1265,9 @@ class VulkanFNN:
         self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
 
         # Download results
-        grad_input = self.core._download_buffer(buf_grad_in.memory, x_flat.nbytes, dtype=np.float32)
-        grad_gamma = self.core._download_buffer(buf_grad_gamma.memory, gamma_flat.nbytes, dtype=np.float32)
-        grad_beta = self.core._download_buffer(buf_grad_beta.memory, gamma_flat.nbytes, dtype=np.float32)
+        grad_input = self._download_buffer(buf_grad_in, x_flat.nbytes, np.float32)
+        grad_gamma = self._download_buffer(buf_grad_gamma, gamma_flat.nbytes, np.float32)
+        grad_beta = self._download_buffer(buf_grad_beta, gamma_flat.nbytes, np.float32)
 
         # Free descriptor set and release buffers
         vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])
@@ -1053,8 +1328,8 @@ class VulkanFNN:
         buf_grad_in = self._acquire_buffer(grad_out_flat.nbytes)
 
         # Upload data
-        self.core._upload_buffer(buf_grad_out.handle, buf_grad_out.memory, grad_out_flat)
-        self.core._upload_buffer(buf_softmax.handle, buf_softmax.memory, softmax_flat)
+        self._upload_buffer(buf_grad_out, grad_out_flat)
+        self._upload_buffer(buf_softmax, softmax_flat)
 
         # Get or create pipeline (3 buffers, push constants: 3 uints = 12 bytes)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -1065,9 +1340,9 @@ class VulkanFNN:
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'activation-softmax-backward',
             [
-                (buf_grad_out.handle, grad_out_flat.nbytes),
-                (buf_softmax.handle, softmax_flat.nbytes),
-                (buf_grad_in.handle, grad_out_flat.nbytes),
+                (self._get_buffer_handle(buf_grad_out), grad_out_flat.nbytes),
+                (self._get_buffer_handle(buf_softmax), softmax_flat.nbytes),
+                (self._get_buffer_handle(buf_grad_in), grad_out_flat.nbytes),
             ]
         )
 
@@ -1079,7 +1354,7 @@ class VulkanFNN:
         self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
 
         # Download results
-        grad_input = self.core._download_buffer(buf_grad_in.memory, grad_out_flat.nbytes, dtype=np.float32)
+        grad_input = self._download_buffer(buf_grad_in, grad_out_flat.nbytes, np.float32)
 
         # Release buffers back to pool
         self._release_buffers([buf_grad_out, buf_softmax, buf_grad_in])
@@ -1133,8 +1408,8 @@ class VulkanFNN:
         buf_out = self._acquire_buffer(x_flat.nbytes)
 
         # Upload data
-        self.core._upload_buffer(buf_x.handle, buf_x.memory, x_flat)
-        self.core._upload_buffer(buf_module.handle, buf_module.memory, module_flat)
+        self._upload_buffer(buf_x, x_flat)
+        self._upload_buffer(buf_module, module_flat)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -1145,9 +1420,9 @@ class VulkanFNN:
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'fnn-residual',
             [
-                (buf_x.handle, x_flat.nbytes),
-                (buf_module.handle, module_flat.nbytes),
-                (buf_out.handle, x_flat.nbytes)
+                (self._get_buffer_handle(buf_x), x_flat.nbytes),
+                (self._get_buffer_handle(buf_module), module_flat.nbytes),
+                (self._get_buffer_handle(buf_out), x_flat.nbytes)
             ]
         )
 
@@ -1162,7 +1437,7 @@ class VulkanFNN:
         )
 
         # Download results
-        result = self.core._download_buffer(buf_out.memory, x_flat.nbytes, dtype=np.float32)
+        result = self._download_buffer(buf_out, x_flat.nbytes, np.float32)
         result = result[:total_elements].reshape(x.shape)
 
         # Release buffers back to pool
@@ -1234,9 +1509,9 @@ class VulkanFNN:
         buf_output = self._acquire_buffer(output_size)
 
         # Upload data
-        self.core._upload_buffer(buf_input.handle, buf_input.memory, x_flat)
-        self.core._upload_buffer(buf_weights.handle, buf_weights.memory, w_flat)
-        self.core._upload_buffer(buf_bias.handle, buf_bias.memory, b_flat)
+        self._upload_buffer(buf_input, x_flat)
+        self._upload_buffer(buf_weights, w_flat)
+        self._upload_buffer(buf_bias, b_flat)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -1247,10 +1522,10 @@ class VulkanFNN:
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'fused-linear-gelu',
             [
-                (buf_input.handle, x_flat.nbytes),
-                (buf_weights.handle, w_flat.nbytes),
-                (buf_bias.handle, b_flat.nbytes),
-                (buf_output.handle, output_size)
+                (self._get_buffer_handle(buf_input), x_flat.nbytes),
+                (self._get_buffer_handle(buf_weights), w_flat.nbytes),
+                (self._get_buffer_handle(buf_bias), b_flat.nbytes),
+                (self._get_buffer_handle(buf_output), output_size)
             ]
         )
 
@@ -1267,7 +1542,7 @@ class VulkanFNN:
         )
 
         # Download result
-        result = self.core._download_buffer(buf_output.memory, output_size, dtype=np.float32)
+        result = self._download_buffer(buf_output, output_size, np.float32)
 
         # Release buffers
         self._release_buffers([buf_input, buf_weights, buf_bias, buf_output])
@@ -1331,9 +1606,9 @@ class VulkanFNN:
         buf_bias = self._acquire_buffer(b_flat.nbytes)
         buf_output = self._acquire_buffer(output_size)
 
-        self.core._upload_buffer(buf_input.handle, buf_input.memory, x_flat)
-        self.core._upload_buffer(buf_weights.handle, buf_weights.memory, w_flat)
-        self.core._upload_buffer(buf_bias.handle, buf_bias.memory, b_flat)
+        self._upload_buffer(buf_input, x_flat)
+        self._upload_buffer(buf_weights, w_flat)
+        self._upload_buffer(buf_bias, b_flat)
 
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
             'fused-linear-relu', 4, push_constant_size=16
@@ -1342,10 +1617,10 @@ class VulkanFNN:
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'fused-linear-relu',
             [
-                (buf_input.handle, x_flat.nbytes),
-                (buf_weights.handle, w_flat.nbytes),
-                (buf_bias.handle, b_flat.nbytes),
-                (buf_output.handle, output_size)
+                (self._get_buffer_handle(buf_input), x_flat.nbytes),
+                (self._get_buffer_handle(buf_weights), w_flat.nbytes),
+                (self._get_buffer_handle(buf_bias), b_flat.nbytes),
+                (self._get_buffer_handle(buf_output), output_size)
             ]
         )
 
@@ -1359,7 +1634,7 @@ class VulkanFNN:
             workgroups_x, push_constants, workgroups_y
         )
 
-        result = self.core._download_buffer(buf_output.memory, output_size, dtype=np.float32)
+        result = self._download_buffer(buf_output, output_size, np.float32)
         self._release_buffers([buf_input, buf_weights, buf_bias, buf_output])
 
         if len(original_shape) > 2:
@@ -1422,9 +1697,9 @@ class VulkanFNN:
         buf_bias = self._acquire_buffer(b_flat.nbytes)
         buf_output = self._acquire_buffer(output_size)
 
-        self.core._upload_buffer(buf_input.handle, buf_input.memory, x_flat)
-        self.core._upload_buffer(buf_weights.handle, buf_weights.memory, w_flat)
-        self.core._upload_buffer(buf_bias.handle, buf_bias.memory, b_flat)
+        self._upload_buffer(buf_input, x_flat)
+        self._upload_buffer(buf_weights, w_flat)
+        self._upload_buffer(buf_bias, b_flat)
 
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
             'fused-linear-silu', 4, push_constant_size=16
@@ -1433,10 +1708,10 @@ class VulkanFNN:
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'fused-linear-silu',
             [
-                (buf_input.handle, x_flat.nbytes),
-                (buf_weights.handle, w_flat.nbytes),
-                (buf_bias.handle, b_flat.nbytes),
-                (buf_output.handle, output_size)
+                (self._get_buffer_handle(buf_input), x_flat.nbytes),
+                (self._get_buffer_handle(buf_weights), w_flat.nbytes),
+                (self._get_buffer_handle(buf_bias), b_flat.nbytes),
+                (self._get_buffer_handle(buf_output), output_size)
             ]
         )
 
@@ -1450,7 +1725,7 @@ class VulkanFNN:
             workgroups_x, push_constants, workgroups_y
         )
 
-        result = self.core._download_buffer(buf_output.memory, output_size, dtype=np.float32)
+        result = self._download_buffer(buf_output, output_size, np.float32)
         self._release_buffers([buf_input, buf_weights, buf_bias, buf_output])
 
         if len(original_shape) > 2:
