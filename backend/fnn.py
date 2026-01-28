@@ -25,6 +25,9 @@ try:
         gelu as numba_gelu,
         silu as numba_silu,
         relu as numba_relu,
+        gcu as numba_gcu,
+        roswish as numba_roswish,
+        swiglu as numba_swiglu,
         NUMBA_AVAILABLE,
     )
 except ImportError:
@@ -35,6 +38,9 @@ except ImportError:
     numba_gelu = None
     numba_silu = None
     numba_relu = None
+    numba_gcu = None
+    numba_roswish = None
+    numba_swiglu = None
 
 # Import buffer pool for GPU buffer reuse
 try:
@@ -319,7 +325,188 @@ class VulkanFNN:
         self._release_buffers([buf_in, buf_out])
 
         return result.reshape(input_data.shape) if input_data.ndim > 1 else result
-    
+
+    def activation_gcu(self, input_data):
+        """Apply GCU (Growing Cosine Unit) activation: x * cos(x)"""
+        # Check if shader is available
+        if 'activation-gcu' not in self.shaders:
+            # CPU fallback (numba if available)
+            if NUMBA_AVAILABLE and numba_gcu is not None:
+                return numba_gcu(input_data.astype(np.float32))
+            return input_data * np.cos(input_data)
+
+        data = input_data.astype(np.float32).flatten()
+        total_elements = len(data)
+
+        # Acquire buffers from pool
+        buf_in = self._acquire_buffer(data.nbytes)
+        buf_out = self._acquire_buffer(data.nbytes)
+
+        # Upload data
+        self._upload_buffer(buf_in, data)
+
+        # Get or create pipeline
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'activation-gcu', 2, push_constant_size=4
+        )
+
+        # Get cached descriptor set
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'activation-gcu',
+            [(self._get_buffer_handle(buf_in), data.nbytes), (self._get_buffer_handle(buf_out), data.nbytes)]
+        )
+
+        # Pack push constants
+        push_constants = struct.pack('I', total_elements)
+
+        # Dispatch
+        workgroups = (total_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set,
+            workgroups, push_constants
+        )
+
+        # Download results
+        result = self._download_buffer(buf_out, data.nbytes, np.float32)
+        result = result[:total_elements]
+
+        # Release buffers back to pool
+        self._release_buffers([buf_in, buf_out])
+
+        return result.reshape(input_data.shape) if input_data.ndim > 1 else result
+
+    def activation_roswish(self, input_data, alpha=1.0, beta=1.0):
+        """
+        Apply RoSwish activation: (x + α) * sigmoid(β * x) - 0.5 * α
+
+        Args:
+            input_data: Input array
+            alpha: Rotation parameter (learnable, default 1.0)
+            beta: Gating parameter (learnable, default 1.0)
+        """
+        # Check if shader is available
+        if 'activation-roswish' not in self.shaders:
+            # CPU fallback (numba if available)
+            if NUMBA_AVAILABLE and numba_roswish is not None:
+                return numba_roswish(input_data.astype(np.float32), alpha, beta)
+            sigmoid_bx = 1.0 / (1.0 + np.exp(-beta * input_data))
+            return (input_data + alpha) * sigmoid_bx - 0.5 * alpha
+
+        data = input_data.astype(np.float32).flatten()
+        total_elements = len(data)
+
+        # Acquire buffers from pool
+        buf_in = self._acquire_buffer(data.nbytes)
+        buf_out = self._acquire_buffer(data.nbytes)
+
+        # Upload data
+        self._upload_buffer(buf_in, data)
+
+        # Get or create pipeline (12 bytes push constants: uint + 2 floats)
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'activation-roswish', 2, push_constant_size=12
+        )
+
+        # Get cached descriptor set
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'activation-roswish',
+            [(self._get_buffer_handle(buf_in), data.nbytes), (self._get_buffer_handle(buf_out), data.nbytes)]
+        )
+
+        # Pack push constants: total_elements (uint32), alpha (float32), beta (float32)
+        push_constants = struct.pack('Iff', total_elements, float(alpha), float(beta))
+
+        # Dispatch
+        workgroups = (total_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set,
+            workgroups, push_constants
+        )
+
+        # Download results
+        result = self._download_buffer(buf_out, data.nbytes, np.float32)
+        result = result[:total_elements]
+
+        # Release buffers back to pool
+        self._release_buffers([buf_in, buf_out])
+
+        return result.reshape(input_data.shape) if input_data.ndim > 1 else result
+
+    def activation_swiglu(self, input_data):
+        """
+        Apply SwiGLU (Swish-Gated Linear Unit) activation: x1 * silu(x2)
+
+        Input is split along the last dimension into [x1, x2].
+        Output = x1 * silu(x2) where silu(x) = x * sigmoid(x)
+
+        Args:
+            input_data: Input array of shape (..., 2*hidden_dim)
+
+        Returns:
+            Output array of shape (..., hidden_dim)
+        """
+        # Check if shader is available
+        if 'activation-swiglu' not in self.shaders:
+            # CPU fallback (numba if available)
+            if NUMBA_AVAILABLE and numba_swiglu is not None:
+                return numba_swiglu(input_data.astype(np.float32))
+            # Pure numpy fallback
+            hidden_dim = input_data.shape[-1] // 2
+            x1 = input_data[..., :hidden_dim]
+            x2 = input_data[..., hidden_dim:]
+            sigmoid_x2 = 1.0 / (1.0 + np.exp(-x2))
+            silu_x2 = x2 * sigmoid_x2
+            return x1 * silu_x2
+
+        original_shape = input_data.shape
+        data = input_data.astype(np.float32).reshape(-1, original_shape[-1])
+        batch_size = data.shape[0]
+        input_dim = data.shape[1]
+        hidden_dim = input_dim // 2
+        output_elements = batch_size * hidden_dim
+
+        data_flat = data.flatten()
+
+        # Acquire buffers from pool
+        buf_in = self._acquire_buffer(data_flat.nbytes)
+        buf_out = self._acquire_buffer(output_elements * 4)  # float32 = 4 bytes
+
+        # Upload data
+        self._upload_buffer(buf_in, data_flat)
+
+        # Get or create pipeline (8 bytes push constants: 2 uints)
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'activation-swiglu', 2, push_constant_size=8
+        )
+
+        # Get cached descriptor set
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'activation-swiglu',
+            [(self._get_buffer_handle(buf_in), data_flat.nbytes),
+             (self._get_buffer_handle(buf_out), output_elements * 4)]
+        )
+
+        # Pack push constants: output_elements (uint32), hidden_dim (uint32)
+        push_constants = struct.pack('II', output_elements, hidden_dim)
+
+        # Dispatch
+        workgroups = (output_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set,
+            workgroups, push_constants
+        )
+
+        # Download results
+        result = self._download_buffer(buf_out, output_elements * 4, np.float32)
+        result = result[:output_elements]
+
+        # Release buffers back to pool
+        self._release_buffers([buf_in, buf_out])
+
+        # Reshape to match expected output shape
+        output_shape = original_shape[:-1] + (hidden_dim,)
+        return result.reshape(output_shape)
+
     def activation_softmax(self, input_data, axis=-1):
         """
         Apply softmax activation: exp(x) / sum(exp(x))
@@ -681,6 +868,255 @@ class VulkanFNN:
         # Download results
         result = self._download_buffer(buf_grad_in, input_flat.nbytes, np.float32)
         result = result[:total_elements].reshape(input_data.shape)
+
+        # Release buffers back to pool
+        self._release_buffers([buf_grad_out, buf_input, buf_grad_in])
+
+        return result
+
+    def activation_gcu_backward(self, grad_output, input_data):
+        """
+        GPU-accelerated GCU (Growing Cosine Unit) backward pass
+
+        GCU(x) = x * cos(x)
+        d/dx GCU(x) = cos(x) - x * sin(x)
+
+        Args:
+            grad_output: Gradient from next layer (same shape as input_data)
+            input_data: Input to GCU (for computing derivative)
+
+        Returns:
+            Gradient w.r.t. input
+        """
+        grad_out = grad_output.astype(np.float32).flatten()
+        input_flat = input_data.astype(np.float32).flatten()
+        total_elements = len(input_flat)
+
+        if len(grad_out) != total_elements:
+            raise ValueError(f"grad_output size {len(grad_out)} != input_data size {total_elements}")
+
+        # Check if shader is available
+        if 'activation-gcu-backward' not in self.shaders:
+            # CPU fallback
+            x = input_flat
+            gcu_grad = np.cos(x) - x * np.sin(x)
+            grad_in = grad_out * gcu_grad
+            return grad_in.reshape(input_data.shape)
+
+        # Acquire buffers from pool
+        buf_grad_out = self._acquire_buffer(grad_out.nbytes)
+        buf_input = self._acquire_buffer(input_flat.nbytes)
+        buf_grad_in = self._acquire_buffer(input_flat.nbytes)
+
+        # Upload data
+        self._upload_buffer(buf_grad_out, grad_out)
+        self._upload_buffer(buf_input, input_flat)
+
+        # Get or create pipeline
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'activation-gcu-backward', 3, push_constant_size=4
+        )
+
+        # Get cached descriptor set
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'activation-gcu-backward',
+            [
+                (self._get_buffer_handle(buf_grad_out), grad_out.nbytes),
+                (self._get_buffer_handle(buf_input), input_flat.nbytes),
+                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes)
+            ]
+        )
+
+        # Pack push constants
+        push_constants = struct.pack('I', total_elements)
+
+        # Dispatch
+        workgroups = (total_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set,
+            workgroups, push_constants
+        )
+
+        # Download results
+        result = self._download_buffer(buf_grad_in, input_flat.nbytes, np.float32)
+        result = result[:total_elements].reshape(input_data.shape)
+
+        # Release buffers back to pool
+        self._release_buffers([buf_grad_out, buf_input, buf_grad_in])
+
+        return result
+
+    def activation_roswish_backward(self, grad_output, input_data, alpha=1.0, beta=1.0):
+        """
+        GPU-accelerated RoSwish backward pass
+
+        RoSwish(x) = (x + α) * sigmoid(β * x) - 0.5 * α
+        d/dx RoSwish = sigmoid(β*x) + β*(x + α)*sigmoid(β*x)*(1 - sigmoid(β*x))
+
+        Args:
+            grad_output: Gradient from next layer (same shape as input_data)
+            input_data: Input to RoSwish (for computing derivative)
+            alpha: Rotation parameter
+            beta: Gating parameter
+
+        Returns:
+            Gradient w.r.t. input
+        """
+        grad_out = grad_output.astype(np.float32).flatten()
+        input_flat = input_data.astype(np.float32).flatten()
+        total_elements = len(input_flat)
+
+        if len(grad_out) != total_elements:
+            raise ValueError(f"grad_output size {len(grad_out)} != input_data size {total_elements}")
+
+        # Check if shader is available
+        if 'activation-roswish-backward' not in self.shaders:
+            # CPU fallback
+            x = input_flat
+            beta_x = beta * x
+            # Numerically stable sigmoid
+            sigmoid_bx = np.where(beta_x >= 0,
+                                  1.0 / (1.0 + np.exp(-beta_x)),
+                                  np.exp(beta_x) / (1.0 + np.exp(beta_x)))
+            roswish_grad = sigmoid_bx + beta * (x + alpha) * sigmoid_bx * (1.0 - sigmoid_bx)
+            grad_in = grad_out * roswish_grad
+            return grad_in.reshape(input_data.shape)
+
+        # Acquire buffers from pool
+        buf_grad_out = self._acquire_buffer(grad_out.nbytes)
+        buf_input = self._acquire_buffer(input_flat.nbytes)
+        buf_grad_in = self._acquire_buffer(input_flat.nbytes)
+
+        # Upload data
+        self._upload_buffer(buf_grad_out, grad_out)
+        self._upload_buffer(buf_input, input_flat)
+
+        # Get or create pipeline
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'activation-roswish-backward', 3, push_constant_size=12
+        )
+
+        # Get cached descriptor set
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'activation-roswish-backward',
+            [
+                (self._get_buffer_handle(buf_grad_out), grad_out.nbytes),
+                (self._get_buffer_handle(buf_input), input_flat.nbytes),
+                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes)
+            ]
+        )
+
+        # Pack push constants
+        push_constants = struct.pack('Iff', total_elements, float(alpha), float(beta))
+
+        # Dispatch
+        workgroups = (total_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set,
+            workgroups, push_constants
+        )
+
+        # Download results
+        result = self._download_buffer(buf_grad_in, input_flat.nbytes, np.float32)
+        result = result[:total_elements].reshape(input_data.shape)
+
+        # Release buffers back to pool
+        self._release_buffers([buf_grad_out, buf_input, buf_grad_in])
+
+        return result
+
+    def activation_swiglu_backward(self, grad_output, input_data):
+        """
+        GPU-accelerated SwiGLU backward pass
+
+        Forward: output = x1 * silu(x2) where input = [x1, x2]
+        d/dx1 = silu(x2)
+        d/dx2 = x1 * d/dx2(silu(x2))
+
+        Args:
+            grad_output: Gradient from next layer (shape: batch * hidden_dim)
+            input_data: Input to SwiGLU (shape: batch * 2*hidden_dim)
+
+        Returns:
+            Gradient w.r.t. input (shape: batch * 2*hidden_dim)
+        """
+        original_shape = input_data.shape
+        grad_out_shape = grad_output.shape
+
+        # Reshape for processing
+        input_flat = input_data.astype(np.float32).reshape(-1, original_shape[-1])
+        grad_out_flat = grad_output.astype(np.float32).reshape(-1, grad_out_shape[-1])
+
+        batch_size = input_flat.shape[0]
+        input_dim = input_flat.shape[1]
+        hidden_dim = input_dim // 2
+        output_elements = batch_size * hidden_dim
+
+        if grad_out_flat.shape[0] != batch_size or grad_out_flat.shape[1] != hidden_dim:
+            raise ValueError(f"grad_output shape mismatch: expected ({batch_size}, {hidden_dim}), got {grad_out_flat.shape}")
+
+        # Check if shader is available
+        if 'activation-swiglu-backward' not in self.shaders:
+            # CPU fallback
+            x1 = input_flat[:, :hidden_dim]
+            x2 = input_flat[:, hidden_dim:]
+
+            # Compute sigmoid(x2) numerically stable
+            sigmoid_x2 = np.where(x2 >= 0,
+                                  1.0 / (1.0 + np.exp(-x2)),
+                                  np.exp(x2) / (1.0 + np.exp(x2)))
+            silu_x2 = x2 * sigmoid_x2
+
+            # Gradients
+            grad_x1 = grad_out_flat * silu_x2
+            silu_derivative = sigmoid_x2 * (1.0 + x2 * (1.0 - sigmoid_x2))
+            grad_x2 = grad_out_flat * x1 * silu_derivative
+
+            # Concatenate gradients
+            grad_in = np.concatenate([grad_x1, grad_x2], axis=-1)
+            return grad_in.reshape(original_shape)
+
+        # Flatten for GPU processing
+        input_data_flat = input_flat.flatten()
+        grad_out_1d = grad_out_flat.flatten()
+
+        # Acquire buffers from pool
+        buf_grad_out = self._acquire_buffer(grad_out_1d.nbytes)
+        buf_input = self._acquire_buffer(input_data_flat.nbytes)
+        buf_grad_in = self._acquire_buffer(input_data_flat.nbytes)
+
+        # Upload data
+        self._upload_buffer(buf_grad_out, grad_out_1d)
+        self._upload_buffer(buf_input, input_data_flat)
+
+        # Get or create pipeline
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'activation-swiglu-backward', 3, push_constant_size=8
+        )
+
+        # Get cached descriptor set
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'activation-swiglu-backward',
+            [
+                (self._get_buffer_handle(buf_grad_out), grad_out_1d.nbytes),
+                (self._get_buffer_handle(buf_input), input_data_flat.nbytes),
+                (self._get_buffer_handle(buf_grad_in), input_data_flat.nbytes)
+            ]
+        )
+
+        # Pack push constants
+        push_constants = struct.pack('II', output_elements, hidden_dim)
+
+        # Dispatch
+        workgroups = (output_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set,
+            workgroups, push_constants
+        )
+
+        # Download results
+        result = self._download_buffer(buf_grad_in, input_data_flat.nbytes, np.float32)
+        result = result[:len(input_data_flat)].reshape(original_shape)
 
         # Release buffers back to pool
         self._release_buffers([buf_grad_out, buf_input, buf_grad_in])
@@ -1734,3 +2170,162 @@ class VulkanFNN:
         else:
             return result.reshape(batch_seq, output_dim)
 
+
+
+    def fused_linear_gcu(
+        self,
+        x: np.ndarray,
+        weights: np.ndarray,
+        bias: Optional[np.ndarray] = None
+    ) -> np.ndarray:
+        """
+        Fused Linear + GCU: GCU(x @ W.T + b)
+        Uses: fused-linear-gcu.glsl
+        """
+        if 'fused-linear-gcu' not in self.shaders:
+            linear_out = self.linear(x, weights, bias)
+            return self.activation_gcu(linear_out)
+
+        original_shape = x.shape
+        x = x.astype(np.float32)
+        input_dim = x.shape[-1]
+        output_dim = weights.shape[0]
+
+        if x.ndim > 2:
+            batch_seq = int(np.prod(x.shape[:-1]))
+            x_flat = x.reshape(-1, input_dim).flatten()
+        else:
+            batch_seq = x.shape[0] if x.ndim == 2 else 1
+            x_flat = x.flatten()
+
+        w_flat = weights.astype(np.float32).flatten()
+        output_size = batch_seq * output_dim * 4
+
+        if bias is not None:
+            b_flat = bias.astype(np.float32).flatten()
+            has_bias = 1
+        else:
+            b_flat = np.zeros(output_dim, dtype=np.float32)
+            has_bias = 0
+
+        buf_input = self._acquire_buffer(x_flat.nbytes)
+        buf_weights = self._acquire_buffer(w_flat.nbytes)
+        buf_bias = self._acquire_buffer(b_flat.nbytes)
+        buf_output = self._acquire_buffer(output_size)
+
+        self._upload_buffer(buf_input, x_flat)
+        self._upload_buffer(buf_weights, w_flat)
+        self._upload_buffer(buf_bias, b_flat)
+
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'fused-linear-gcu', 4, push_constant_size=16
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'fused-linear-gcu',
+            [
+                (self._get_buffer_handle(buf_input), x_flat.nbytes),
+                (self._get_buffer_handle(buf_weights), w_flat.nbytes),
+                (self._get_buffer_handle(buf_bias), b_flat.nbytes),
+                (self._get_buffer_handle(buf_output), output_size)
+            ]
+        )
+
+        push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, has_bias)
+
+        workgroups_x = (output_dim + 15) // 16
+        workgroups_y = (batch_seq + 15) // 16
+
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set,
+            workgroups_x, push_constants, workgroups_y
+        )
+
+        result = self._download_buffer(buf_output, output_size, np.float32)
+        self._release_buffers([buf_input, buf_weights, buf_bias, buf_output])
+
+        if len(original_shape) > 2:
+            output_shape = original_shape[:-1] + (output_dim,)
+            return result.reshape(output_shape)
+        else:
+            return result.reshape(batch_seq, output_dim)
+
+    def fused_linear_roswish(
+        self,
+        x: np.ndarray,
+        weights: np.ndarray,
+        bias: Optional[np.ndarray] = None,
+        alpha: float = 1.0,
+        beta: float = 1.0
+    ) -> np.ndarray:
+        """
+        Fused Linear + RoSwish: RoSwish(x @ W.T + b)
+        Uses: fused-linear-roswish.glsl
+        """
+        if 'fused-linear-roswish' not in self.shaders:
+            linear_out = self.linear(x, weights, bias)
+            return self.activation_roswish(linear_out, alpha=alpha, beta=beta)
+
+        original_shape = x.shape
+        x = x.astype(np.float32)
+        input_dim = x.shape[-1]
+        output_dim = weights.shape[0]
+
+        if x.ndim > 2:
+            batch_seq = int(np.prod(x.shape[:-1]))
+            x_flat = x.reshape(-1, input_dim).flatten()
+        else:
+            batch_seq = x.shape[0] if x.ndim == 2 else 1
+            x_flat = x.flatten()
+
+        w_flat = weights.astype(np.float32).flatten()
+        output_size = batch_seq * output_dim * 4
+
+        if bias is not None:
+            b_flat = bias.astype(np.float32).flatten()
+            has_bias = 1
+        else:
+            b_flat = np.zeros(output_dim, dtype=np.float32)
+            has_bias = 0
+
+        buf_input = self._acquire_buffer(x_flat.nbytes)
+        buf_weights = self._acquire_buffer(w_flat.nbytes)
+        buf_bias = self._acquire_buffer(b_flat.nbytes)
+        buf_output = self._acquire_buffer(output_size)
+
+        self._upload_buffer(buf_input, x_flat)
+        self._upload_buffer(buf_weights, w_flat)
+        self._upload_buffer(buf_bias, b_flat)
+
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            'fused-linear-roswish', 4, push_constant_size=24
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            'fused-linear-roswish',
+            [
+                (self._get_buffer_handle(buf_input), x_flat.nbytes),
+                (self._get_buffer_handle(buf_weights), w_flat.nbytes),
+                (self._get_buffer_handle(buf_bias), b_flat.nbytes),
+                (self._get_buffer_handle(buf_output), output_size)
+            ]
+        )
+
+        push_constants = struct.pack('IIIIff', batch_seq, input_dim, output_dim, has_bias, alpha, beta)
+
+        workgroups_x = (output_dim + 15) // 16
+        workgroups_y = (batch_seq + 15) // 16
+
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set,
+            workgroups_x, push_constants, workgroups_y
+        )
+
+        result = self._download_buffer(buf_output, output_size, np.float32)
+        self._release_buffers([buf_input, buf_weights, buf_bias, buf_output])
+
+        if len(original_shape) > 2:
+            output_shape = original_shape[:-1] + (output_dim,)
+            return result.reshape(output_shape)
+        else:
+            return result.reshape(batch_seq, output_dim)

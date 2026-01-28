@@ -13,6 +13,9 @@ from .modules import (
     ReLU,
     GELU,
     SiLU,
+    GCU,
+    RoSwish,
+    SwiGLU,
     Softmax,
     Softplus,
     MultiheadAttention,
@@ -95,6 +98,26 @@ from .loss import (
     MSELoss,
     CrossEntropyLoss,
     BCELoss,
+)
+
+# Convolutional layers
+from .conv import (
+    Conv1d,
+    Conv2d,
+)
+
+# Normalization layers
+from .normalization import (
+    BatchNorm1d,
+    BatchNorm2d,
+)
+
+# Pooling layers
+from .pooling import (
+    MaxPool2d,
+    AvgPool2d,
+    AdaptiveMaxPool2d,
+    AdaptiveAvgPool2d,
 )
 
 # Autograd utilities
@@ -230,6 +253,9 @@ __all__ = [
     'ReLU',
     'GELU',
     'SiLU',
+    'GCU',
+    'RoSwish',
+    'SwiGLU',
     'Softmax',
     'Softplus',
     'MultiheadAttention',
@@ -298,6 +324,20 @@ __all__ = [
     'MSELoss',
     'CrossEntropyLoss',
     'BCELoss',
+
+    # Convolutional layers
+    'Conv1d',
+    'Conv2d',
+
+    # Normalization layers
+    'BatchNorm1d',
+    'BatchNorm2d',
+
+    # Pooling layers
+    'MaxPool2d',
+    'AvgPool2d',
+    'AdaptiveMaxPool2d',
+    'AdaptiveAvgPool2d',
 
     # Autograd - Core
     'Variable',

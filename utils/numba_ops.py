@@ -408,6 +408,168 @@ def relu(x: np.ndarray) -> np.ndarray:
 
 
 # ============================================================================
+# GCU (Growing Cosine Unit) Activation
+# ============================================================================
+
+if NUMBA_AVAILABLE:
+    @jit(nopython=True, parallel=True, fastmath=True, cache=True)
+    def _gcu_numba(x: np.ndarray) -> np.ndarray:
+        """
+        Numba-accelerated GCU activation.
+
+        GCU(x) = x * cos(x)
+        Oscillatory activation for neuromorphic systems.
+        """
+        output = np.empty_like(x)
+        flat_x = x.ravel()
+        flat_out = output.ravel()
+
+        for i in prange(len(flat_x)):
+            flat_out[i] = flat_x[i] * np.cos(flat_x[i])
+
+        return output
+else:
+    def _gcu_numba(x: np.ndarray) -> np.ndarray:
+        """Fallback GCU (pure numpy)"""
+        return x * np.cos(x)
+
+
+def gcu(x: np.ndarray) -> np.ndarray:
+    """
+    GCU (Growing Cosine Unit) activation with numba acceleration.
+
+    Args:
+        x: Input array
+
+    Returns:
+        x * cos(x)
+    """
+    x = np.ascontiguousarray(x, dtype=np.float32)
+    return _gcu_numba(x)
+
+
+# ============================================================================
+# RoSwish (Rotating Swish) Activation
+# ============================================================================
+
+if NUMBA_AVAILABLE:
+    @jit(nopython=True, parallel=True, fastmath=True, cache=True)
+    def _roswish_numba(x: np.ndarray, alpha: float, beta: float) -> np.ndarray:
+        """
+        Numba-accelerated RoSwish activation.
+
+        RoSwish(x) = (x + α) * sigmoid(β * x) - 0.5 * α
+        Learnable parameters for adaptive gating.
+        """
+        output = np.empty_like(x)
+        flat_x = x.ravel()
+        flat_out = output.ravel()
+
+        for i in prange(len(flat_x)):
+            x_val = flat_x[i]
+            # Numerically stable sigmoid
+            beta_x = beta * x_val
+            if beta_x >= 0.0:
+                sigmoid_bx = 1.0 / (1.0 + np.exp(-beta_x))
+            else:
+                exp_bx = np.exp(beta_x)
+                sigmoid_bx = exp_bx / (1.0 + exp_bx)
+
+            flat_out[i] = (x_val + alpha) * sigmoid_bx - 0.5 * alpha
+
+        return output
+else:
+    def _roswish_numba(x: np.ndarray, alpha: float, beta: float) -> np.ndarray:
+        """Fallback RoSwish (pure numpy)"""
+        sigmoid_bx = 1.0 / (1.0 + np.exp(-beta * x))
+        return (x + alpha) * sigmoid_bx - 0.5 * alpha
+
+
+def roswish(x: np.ndarray, alpha: float = 1.0, beta: float = 1.0) -> np.ndarray:
+    """
+    RoSwish (Rotating Swish) activation with numba acceleration.
+
+    Args:
+        x: Input array
+        alpha: Rotation parameter (default: 1.0)
+        beta: Gating parameter (default: 1.0)
+
+    Returns:
+        (x + α) * sigmoid(β * x) - 0.5 * α
+    """
+    x = np.ascontiguousarray(x, dtype=np.float32)
+    return _roswish_numba(x, float(alpha), float(beta))
+
+
+# ============================================================================
+# SwiGLU (Swish-Gated Linear Unit) Activation
+# ============================================================================
+
+if NUMBA_AVAILABLE:
+    @jit(nopython=True, parallel=True, fastmath=True, cache=True)
+    def _swiglu_numba(x: np.ndarray) -> np.ndarray:
+        """
+        Numba-accelerated SwiGLU activation.
+
+        SwiGLU: Split input into [x1, x2], output = x1 * silu(x2)
+        Input shape: (..., 2*hidden_dim)
+        Output shape: (..., hidden_dim)
+        """
+        original_shape = x.shape
+        # Reshape to (..., 2*hidden_dim)
+        flat_x = x.reshape(-1, original_shape[-1])
+        batch_size = flat_x.shape[0]
+        full_dim = flat_x.shape[1]
+        hidden_dim = full_dim // 2
+
+        output = np.empty((batch_size, hidden_dim), dtype=np.float32)
+
+        for i in prange(batch_size):
+            for j in range(hidden_dim):
+                x1 = flat_x[i, j]
+                x2 = flat_x[i, j + hidden_dim]
+
+                # SiLU(x2) = x2 * sigmoid(x2)
+                if x2 >= 0.0:
+                    sigmoid_x2 = 1.0 / (1.0 + np.exp(-x2))
+                else:
+                    exp_x2 = np.exp(x2)
+                    sigmoid_x2 = exp_x2 / (1.0 + exp_x2)
+
+                silu_x2 = x2 * sigmoid_x2
+                output[i, j] = x1 * silu_x2
+
+        # Reshape output to match input shape (replacing last dim)
+        output_shape = original_shape[:-1] + (hidden_dim,)
+        return output.reshape(output_shape)
+else:
+    def _swiglu_numba(x: np.ndarray) -> np.ndarray:
+        """Fallback SwiGLU (pure numpy)"""
+        hidden_dim = x.shape[-1] // 2
+        x1 = x[..., :hidden_dim]
+        x2 = x[..., hidden_dim:]
+        sigmoid_x2 = 1.0 / (1.0 + np.exp(-x2))
+        silu_x2 = x2 * sigmoid_x2
+        return x1 * silu_x2
+
+
+def swiglu(x: np.ndarray) -> np.ndarray:
+    """
+    SwiGLU (Swish-Gated Linear Unit) activation with numba acceleration.
+
+    Used in LLaMA, PaLM, Mistral transformer FFN layers.
+
+    Args:
+        x: Input array of shape (..., 2*hidden_dim)
+
+    Returns:
+        Output array of shape (..., hidden_dim)
+    """
+    x = np.ascontiguousarray(x, dtype=np.float32)
+    return _swiglu_numba(x)
+
+
+# ============================================================================
 # Attention Score Computation
 # ============================================================================
 

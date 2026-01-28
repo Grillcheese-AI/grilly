@@ -16,6 +16,8 @@ from .learning import VulkanLearning
 from .fft import VulkanFFT
 from .contrastive import VulkanContrastive
 from .pooling import VulkanPooling
+from .conv import VulkanConv
+from .normalization import VulkanNormalization
 
 
 class VulkanCompute:
@@ -43,6 +45,8 @@ class VulkanCompute:
         self.fft = VulkanFFT(self.core, self.pipelines, self.core.shaders)
         self.contrastive = VulkanContrastive(self.core, self.pipelines, self.core.shaders)
         self.pooling = VulkanPooling(self.core, self.pipelines, self.core.shaders)
+        self.conv = VulkanConv(self.core, self.pipelines, self.core.shaders)
+        self.normalization = VulkanNormalization(self.core, self.pipelines, self.core.shaders)
 
         # Expose core device/queue for convenience
         self.device = self.core.device
@@ -103,6 +107,9 @@ class VulkanCompute:
         
         # Expose backward passes for training
         self.activation_gelu_backward = self.fnn.activation_gelu_backward
+        self.activation_gcu_backward = self.fnn.activation_gcu_backward
+        self.activation_roswish_backward = self.fnn.activation_roswish_backward
+        self.activation_swiglu_backward = self.fnn.activation_swiglu_backward
         self.layernorm_backward = self.fnn.layernorm_backward
         self.softmax_backward = self.fnn.softmax_backward
 
@@ -110,6 +117,9 @@ class VulkanCompute:
         self.activation_relu = self.fnn.activation_relu
         self.activation_gelu = self.fnn.activation_gelu
         self.activation_silu = self.fnn.activation_silu
+        self.activation_gcu = self.fnn.activation_gcu
+        self.activation_roswish = self.fnn.activation_roswish
+        self.activation_swiglu = self.fnn.activation_swiglu
         self.activation_softmax = self.fnn.activation_softmax
         self.layernorm = self.fnn.layernorm
         self.linear = self.fnn.linear
@@ -143,11 +153,23 @@ class VulkanCompute:
     def activation_relu(self, *args, **kwargs):
         """Apply ReLU activation: max(0, x)"""
         return self.fnn.activation_relu(*args, **kwargs)
-    
+
     def activation_gelu(self, *args, **kwargs):
         """Apply GELU activation"""
         return self.fnn.activation_gelu(*args, **kwargs)
-    
+
+    def activation_gcu(self, *args, **kwargs):
+        """Apply GCU (Growing Cosine Unit) activation: x * cos(x)"""
+        return self.fnn.activation_gcu(*args, **kwargs)
+
+    def activation_roswish(self, *args, **kwargs):
+        """Apply RoSwish activation: (x + α) * sigmoid(β * x) - 0.5 * α"""
+        return self.fnn.activation_roswish(*args, **kwargs)
+
+    def activation_swiglu(self, *args, **kwargs):
+        """Apply SwiGLU activation: x1 * silu(x2) where input = [x1, x2]"""
+        return self.fnn.activation_swiglu(*args, **kwargs)
+
     def activation_silu(self, *args, **kwargs):
         """Apply SiLU (Swish) activation: x * sigmoid(x)"""
         return self.fnn.activation_silu(*args, **kwargs)

@@ -541,6 +541,172 @@ class SiLU(Module):
         return "SiLU()"
 
 
+class GCU(Module):
+    """
+    GCU (Growing Cosine Unit) activation: x * cos(x)
+    Uses: activation-gcu.glsl
+
+    Oscillatory activation function for neuromorphic systems.
+    Enables single neurons to learn complex patterns like XOR.
+    """
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        """Forward pass using activation-gcu.glsl"""
+        backend = self._get_backend()
+        return backend.activation_gcu(x)
+
+    def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
+        """
+        Backward pass for GCU.
+
+        Args:
+            grad_output: Gradient w.r.t. output
+            x: Input from forward pass
+
+        Returns:
+            grad_input: Gradient w.r.t. input
+        """
+        # GCU backward: d/dx (x * cos(x)) = cos(x) - x * sin(x)
+        backend = self._get_backend()
+        return backend.activation_gcu_backward(grad_output, x)
+
+    def __repr__(self):
+        return "GCU()"
+
+
+class RoSwish(Module):
+    """
+    RoSwish (Rotating Swish) activation: (x + α) * sigmoid(β * x) - 0.5 * α
+    Uses: activation-roswish.glsl
+
+    Learnable activation with adaptive gating.
+    Shows 6-30% improvement over ReLU/Swish on diverse tasks.
+
+    Args:
+        alpha_init: Initial rotation parameter (default: 1.0)
+        beta_init: Initial gating parameter (default: 1.0)
+        learnable: Whether α and β are learnable (default: True)
+    """
+
+    def __init__(self, alpha_init: float = 1.0, beta_init: float = 1.0, learnable: bool = True):
+        super().__init__()
+        self.learnable = learnable
+
+        if learnable and _PARAMETER_AVAILABLE and ParameterClass is not None:
+            # Create learnable parameters
+            self.alpha = ParameterClass(np.array([alpha_init], dtype=np.float32), requires_grad=True)
+            self.beta = ParameterClass(np.array([beta_init], dtype=np.float32), requires_grad=True)
+        else:
+            # Fixed parameters
+            self.alpha = np.array([alpha_init], dtype=np.float32)
+            self.beta = np.array([beta_init], dtype=np.float32)
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        """Forward pass using activation-roswish.glsl"""
+        backend = self._get_backend()
+
+        # Extract scalar values from parameters
+        alpha_val = float(self.alpha[0] if hasattr(self.alpha, '__getitem__') else self.alpha)
+        beta_val = float(self.beta[0] if hasattr(self.beta, '__getitem__') else self.beta)
+
+        return backend.activation_roswish(x, alpha=alpha_val, beta=beta_val)
+
+    def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
+        """
+        Backward pass for RoSwish.
+
+        Args:
+            grad_output: Gradient w.r.t. output
+            x: Input from forward pass
+
+        Returns:
+            grad_input: Gradient w.r.t. input
+        """
+        backend = self._get_backend()
+
+        # Extract scalar values
+        alpha_val = float(self.alpha[0] if hasattr(self.alpha, '__getitem__') else self.alpha)
+        beta_val = float(self.beta[0] if hasattr(self.beta, '__getitem__') else self.beta)
+
+        grad_input = backend.activation_roswish_backward(grad_output, x, alpha=alpha_val, beta=beta_val)
+
+        # Compute gradients w.r.t. parameters if learnable
+        if self.learnable and hasattr(self.alpha, 'grad'):
+            # d/dα RoSwish = sigmoid(β*x) - 0.5
+            # d/dβ RoSwish = (x + α) * x * sigmoid(β*x) * (1 - sigmoid(β*x))
+            beta_x = beta_val * x
+            sigmoid_bx = 1.0 / (1.0 + np.exp(-beta_x))
+
+            # Gradient w.r.t. α
+            grad_alpha = grad_output * (sigmoid_bx - 0.5)
+            if self.alpha.grad is None:
+                self.alpha.grad = np.sum(grad_alpha).reshape(1).astype(np.float32)
+            else:
+                self.alpha.grad += np.sum(grad_alpha).reshape(1).astype(np.float32)
+
+            # Gradient w.r.t. β
+            grad_beta = grad_output * (alpha_val + x) * x * sigmoid_bx * (1.0 - sigmoid_bx)
+            if self.beta.grad is None:
+                self.beta.grad = np.sum(grad_beta).reshape(1).astype(np.float32)
+            else:
+                self.beta.grad += np.sum(grad_beta).reshape(1).astype(np.float32)
+
+        return grad_input
+
+    def __repr__(self):
+        alpha_val = float(self.alpha[0] if hasattr(self.alpha, '__getitem__') else self.alpha)
+        beta_val = float(self.beta[0] if hasattr(self.beta, '__getitem__') else self.beta)
+        return f"RoSwish(alpha={alpha_val:.3f}, beta={beta_val:.3f}, learnable={self.learnable})"
+
+
+class SwiGLU(Module):
+    """
+    SwiGLU (Swish-Gated Linear Unit) activation
+    Uses: activation-swiglu.glsl
+
+    Used in LLaMA, PaLM, Mistral transformer FFN layers.
+    Provides 5-15% perplexity improvement over GELU/ReLU.
+
+    Input shape: (..., 2*hidden_dim)
+    Output shape: (..., hidden_dim)
+
+    The input is split into two parts [x1, x2], then output = x1 * silu(x2)
+    """
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        """
+        Forward pass using activation-swiglu.glsl
+
+        Args:
+            x: Input array of shape (..., 2*hidden_dim)
+
+        Returns:
+            Output array of shape (..., hidden_dim)
+        """
+        if x.shape[-1] % 2 != 0:
+            raise ValueError(f"SwiGLU input last dimension must be even, got {x.shape[-1]}")
+
+        backend = self._get_backend()
+        return backend.activation_swiglu(x)
+
+    def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
+        """
+        Backward pass for SwiGLU.
+
+        Args:
+            grad_output: Gradient w.r.t. output (shape: (..., hidden_dim))
+            x: Input from forward pass (shape: (..., 2*hidden_dim))
+
+        Returns:
+            grad_input: Gradient w.r.t. input (shape: (..., 2*hidden_dim))
+        """
+        backend = self._get_backend()
+        return backend.activation_swiglu_backward(grad_output, x)
+
+    def __repr__(self):
+        return "SwiGLU()"
+
+
 class Softmax(Module):
     """
     Softmax activation

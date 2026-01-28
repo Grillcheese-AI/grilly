@@ -109,14 +109,91 @@ class TestFNNOperations:
     def test_activation_gelu(self, gpu):
         """Test GELU activation"""
         input_data = np.array([0.0, 1.0, -1.0], dtype=np.float32)
-        
+
         output = gpu.activation_gelu(input_data)
-        
+
         # GELU(0) should be 0
         assert abs(output[0]) < 1e-5
         # GELU should be positive for positive inputs
         assert output[1] > 0
-    
+
+    def test_activation_gcu(self, gpu):
+        """Test GCU (Growing Cosine Unit) activation: x * cos(x)"""
+        input_data = np.array([0.0, 1.0, -1.0, np.pi/2, -np.pi/2], dtype=np.float32)
+
+        output = gpu.activation_gcu(input_data)
+
+        # GCU(0) = 0 * cos(0) = 0 * 1 = 0
+        assert abs(output[0]) < 1e-5
+
+        # GCU(1) = 1 * cos(1) ≈ 0.5403
+        expected_1 = 1.0 * np.cos(1.0)
+        np.testing.assert_allclose(output[1], expected_1, rtol=1e-5)
+
+        # GCU(-1) = -1 * cos(-1) ≈ -0.5403
+        expected_neg1 = -1.0 * np.cos(-1.0)
+        np.testing.assert_allclose(output[2], expected_neg1, rtol=1e-5)
+
+        # GCU(π/2) = π/2 * cos(π/2) ≈ π/2 * 0 = 0
+        expected_pi2 = (np.pi/2) * np.cos(np.pi/2)
+        np.testing.assert_allclose(output[3], expected_pi2, rtol=1e-4, atol=1e-5)
+
+        # GCU(-π/2) = -π/2 * cos(-π/2) ≈ -π/2 * 0 = 0
+        expected_neg_pi2 = (-np.pi/2) * np.cos(-np.pi/2)
+        np.testing.assert_allclose(output[4], expected_neg_pi2, rtol=1e-4, atol=1e-5)
+
+    def test_activation_roswish(self, gpu):
+        """Test RoSwish activation: (x + α) * sigmoid(β * x) - 0.5 * α"""
+        input_data = np.array([0.0, 1.0, -1.0, 2.0], dtype=np.float32)
+        alpha = 1.0
+        beta = 1.0
+
+        output = gpu.activation_roswish(input_data, alpha=alpha, beta=beta)
+
+        # Manual computation for verification
+        sigmoid_bx = 1.0 / (1.0 + np.exp(-beta * input_data))
+        expected = (input_data + alpha) * sigmoid_bx - 0.5 * alpha
+
+        np.testing.assert_allclose(output, expected, rtol=1e-5)
+
+        # Test with different parameters
+        alpha2 = 0.5
+        beta2 = 2.0
+        output2 = gpu.activation_roswish(input_data, alpha=alpha2, beta=beta2)
+
+        sigmoid_bx2 = 1.0 / (1.0 + np.exp(-beta2 * input_data))
+        expected2 = (input_data + alpha2) * sigmoid_bx2 - 0.5 * alpha2
+
+        np.testing.assert_allclose(output2, expected2, rtol=1e-5)
+
+    def test_activation_swiglu(self, gpu):
+        """Test SwiGLU activation: x1 * silu(x2) where input is [x1, x2]"""
+        # SwiGLU expects input of shape (..., 2*hidden_dim)
+        # It splits into x1 and x2, then computes x1 * silu(x2)
+        hidden_dim = 4
+        input_data = np.random.randn(8, 2 * hidden_dim).astype(np.float32)
+
+        output = gpu.activation_swiglu(input_data)
+
+        # Manual computation
+        x1 = input_data[:, :hidden_dim]
+        x2 = input_data[:, hidden_dim:]
+        silu_x2 = x2 / (1.0 + np.exp(-x2))  # SiLU
+        expected = x1 * silu_x2
+
+        np.testing.assert_allclose(output, expected, rtol=1e-5)
+
+        # Test 1D case
+        input_1d = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)  # 2*hidden_dim=4
+        output_1d = gpu.activation_swiglu(input_1d)
+
+        x1_1d = input_1d[:2]
+        x2_1d = input_1d[2:]
+        silu_x2_1d = x2_1d / (1.0 + np.exp(-x2_1d))
+        expected_1d = x1_1d * silu_x2_1d
+
+        np.testing.assert_allclose(output_1d, expected_1d, rtol=1e-5)
+
     def test_layernorm(self, gpu):
         """Test layer normalization"""
         input_data = np.random.randn(100).astype(np.float32)
