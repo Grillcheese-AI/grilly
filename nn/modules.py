@@ -122,11 +122,63 @@ class Linear(Module):
             self.register_parameter('bias', self.bias)
     
     def forward(self, x: np.ndarray) -> np.ndarray:
-        """Forward pass using fnn-linear.glsl"""
+        """Forward pass with GEMM fast path if available."""
         backend = self._get_backend()
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias) if self.bias is not None else None
-        return backend.fnn.linear(x, weight, bias)
+
+        x = np.asarray(x, dtype=np.float32)
+        weight = np.asarray(weight, dtype=np.float32)
+
+        # x: (batch, in_features) or (batch, seq, in_features)
+        if x.ndim == 2:
+            batch_seq, in_features = x.shape
+            x_2d = x
+        elif x.ndim == 3:
+            b, s, in_features = x.shape
+            batch_seq = b * s
+            x_2d = x.reshape(batch_seq, in_features)
+        else:
+            raise ValueError(f"Linear expects 2D or 3D input, got shape {x.shape}")
+
+        out_features = self.out_features
+
+        use_gemm = (
+            hasattr(backend, 'fnn') and
+            hasattr(backend.fnn, 'gemm') and
+            'gemm_mnk' in getattr(backend.core, 'shaders', {}) and
+            batch_seq * out_features >= 4096  # simple heuristic
+        )
+
+        if use_gemm:
+            # GEMM path: (batch_seq, in_features) @ (in_features, out_features)
+            # We have weight stored as (out_features, in_features); transpose it
+            W_t = weight.T  # shape (in_features, out_features)
+            out_2d = backend.fnn.gemm(x_2d, W_t)  # (batch_seq, out_features)
+
+            if bias is not None:
+                out_2d += bias.reshape(1, out_features)
+
+        else:
+            # Existing Vulkan linear path if available
+            if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'linear'):
+                try:
+                    out = backend.fnn.linear(x, weight, bias)
+                    return out
+                except Exception:
+                    pass  # Fall back to CPU
+
+            # CPU fallback
+            out_2d = x_2d @ weight.T
+            if bias is not None:
+                out_2d += bias.reshape(1, out_features)
+
+        # Reshape back to original batch shape
+        if x.ndim == 2:
+            return out_2d
+        else:
+            return out_2d.reshape(b, s, out_features)
+
     
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
@@ -172,9 +224,28 @@ class Linear(Module):
                 pass  # Fall back to CPU
         
         # CPU fallback
-        grad_input = grad_output @ weight  # (batch, in_features)
-        grad_weight = grad_output.T @ x  # (out_features, in_features)
-        grad_bias = np.sum(grad_output, axis=0) if bias is not None else None
+        # Handle both 2D and 3D inputs
+        grad_output_shape = grad_output.shape
+        x_shape = x.shape
+
+        # Flatten to 2D for gradient computation
+        if grad_output.ndim == 3:
+            batch, seq, out_features = grad_output.shape
+            grad_output_2d = grad_output.reshape(batch * seq, out_features)
+            x_2d = x.reshape(batch * seq, x.shape[-1])
+        else:
+            grad_output_2d = grad_output
+            x_2d = x
+
+        grad_input_2d = grad_output_2d @ weight  # (batch*seq, in_features) or (batch, in_features)
+        grad_weight = grad_output_2d.T @ x_2d  # (out_features, in_features)
+        grad_bias = np.sum(grad_output_2d, axis=0) if bias is not None else None
+
+        # Reshape grad_input back to original shape
+        if grad_output.ndim == 3:
+            grad_input = grad_input_2d.reshape(grad_output_shape[0], grad_output_shape[1], -1)
+        else:
+            grad_input = grad_input_2d
         
         # Store gradients in parameters (from backward pass)
         if self.weight is not None:

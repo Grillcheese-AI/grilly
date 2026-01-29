@@ -45,7 +45,8 @@ class VulkanCore:
                 shaders[name] = f.read()
         
         # Check for missing shaders and warn
-        required_shaders = ['fnn-xavier-init']
+        required_shaders = ['fnn-xavier-init', 'convd_im2col', 'conv2d-backward-weight', 
+                            'conv2d-backward-input', 'conv2d-forward', 'gemm_mnk']
         for shader_name in required_shaders:
             if shader_name not in shaders:
                 print(f"[WARNING] Shader {shader_name}.spv not found - GPU Xavier init will use CPU fallback")
@@ -65,6 +66,8 @@ class VulkanCore:
             apiVersion=VK_API_VERSION_1_0
         )
         
+        
+
         create_info = VkInstanceCreateInfo(
             sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,
             pApplicationInfo=app_info
@@ -120,7 +123,7 @@ class VulkanCore:
                 device_features.sparseResidencyBuffer = self.device_features.sparseResidencyBuffer
         except:
             pass
-        
+
         device_create_info = VkDeviceCreateInfo(
             sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
             queueCreateInfoCount=1,

@@ -182,12 +182,12 @@ class VulkanPooling:
         # Upload input
         self.core._upload_buffer(buf_in, mem_in, x.flatten())
 
-        # Push constants
-        push_data = struct.pack('IIIIIIIIIIII', batch_size, channels, in_h, in_w, out_h, out_w,
+        # Push constants (14 uints)
+        push_data = struct.pack('IIIIIIIIIIIIII', batch_size, channels, in_h, in_w, out_h, out_w,
                                 kh, kw, sh, sw, ph, pw, dh, dw)
 
-        # Pipeline
-        pipeline, layout, _ = self.pipelines.get_or_create_pipeline('maxpool2d-forward', 3, push_constant_size=48)
+        # Pipeline (14 uints = 56 bytes)
+        pipeline, layout, _ = self.pipelines.get_or_create_pipeline('maxpool2d-forward', 3, push_constant_size=56)
         desc = self.pipelines.get_cached_descriptor_set('maxpool2d-forward',
                                                         [(buf_in, input_size), (buf_out, output_size), (buf_idx, indices_size)])
 
@@ -225,6 +225,7 @@ class VulkanPooling:
         indices = np.asarray(indices, dtype=np.uint32)
 
         batch_size, channels, in_h, in_w = input_shape
+        _, _, out_h, out_w = grad_output.shape
         output_size = grad_output.size
         input_size = batch_size * channels * in_h * in_w
 
@@ -237,21 +238,19 @@ class VulkanPooling:
         self.core._upload_buffer(buf_grad_out, mem_grad_out, grad_output.flatten())
         self.core._upload_buffer(buf_idx, mem_idx, indices.flatten())
 
-        # Zero grad_input
-        zeros = np.zeros(input_size, dtype=np.float32)
-        self.core._upload_buffer(buf_grad_in, mem_grad_in, zeros)
-
-        # Push constants
-        push_data = struct.pack('II', output_size, input_size)
+        # Push constants (6 uints: batch, channels, in_h, in_w, out_h, out_w)
+        push_data = struct.pack('IIIIII', batch_size, channels, in_h, in_w, out_h, out_w)
 
         # Pipeline
-        pipeline, layout, _ = self.pipelines.get_or_create_pipeline('maxpool2d-backward', 3, push_constant_size=8)
+        pipeline, layout, _ = self.pipelines.get_or_create_pipeline('maxpool2d-backward', 3, push_constant_size=24)
         desc = self.pipelines.get_cached_descriptor_set('maxpool2d-backward',
                                                         [(buf_grad_out, output_size * 4), (buf_idx, output_size * 4), (buf_grad_in, input_size * 4)])
 
-        # Dispatch
-        workgroups = (output_size + 255) // 256
-        self.core._dispatch_compute(pipeline, layout, desc, workgroups, push_data)
+        # Dispatch over INPUT dimensions
+        gx = (in_w + 7) // 8
+        gy = (in_h + 7) // 8
+        gz = batch_size * channels
+        self.core._dispatch_compute(pipeline, layout, desc, gx, push_data, gy, gz)
 
         # Download
         grad_input = self.core._download_buffer(mem_grad_in, input_size * 4, np.float32).reshape(input_shape)
@@ -370,14 +369,23 @@ class VulkanPooling:
         push_data = struct.pack('IIIIIIIIIIIII', batch_size, channels, in_h, in_w, out_h, out_w,
                                 kh, kw, sh, sw, ph, pw, 1 if count_include_pad else 0)
 
+        # Debug
+        import sys
+        if hasattr(sys, '_called_from_test'):
+            print(f"[AvgPool Backward] batch={batch_size}, ch={channels}, in={in_h}x{in_w}, out={out_h}x{out_w}, kernel={kh}x{kw}, stride={sh}x{sw}, pad={ph}x{pw}")
+            gx_calc = (out_w + 7) // 8
+            gy_calc = (out_h + 7) // 8
+            gz_calc = batch_size * channels
+            print(f"[AvgPool Backward] Dispatch: gx={gx_calc}, gy={gy_calc}, gz={gz_calc}")
+
         # Pipeline
         pipeline, layout, _ = self.pipelines.get_or_create_pipeline('avgpool2d-backward', 2, push_constant_size=52)
         desc = self.pipelines.get_cached_descriptor_set('avgpool2d-backward',
                                                         [(buf_grad_out, output_size), (buf_grad_in, input_size)])
 
-        # Dispatch
-        gx = (out_w + 7) // 8
-        gy = (out_h + 7) // 8
+        # Dispatch over INPUT dimensions (not output) to avoid race conditions
+        gx = (in_w + 7) // 8
+        gy = (in_h + 7) // 8
         gz = batch_size * channels
         self.core._dispatch_compute(pipeline, layout, desc, gx, push_data, gy, gz)
 

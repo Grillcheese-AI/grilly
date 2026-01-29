@@ -260,7 +260,7 @@ def main():
     print(f"Test samples: {len(test_data)}")
 
     # Create data loaders
-    batch_size = 128
+    batch_size = 1024
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
@@ -272,8 +272,8 @@ def main():
     loss_fn = GPUCrossEntropyLoss(compute.fnn)
 
     # Training parameters
-    learning_rate = 0.1
-    epochs = 5
+    learning_rate = 0.05
+    epochs = 30
 
     print(f"\nTraining parameters:")
     print(f"  Learning rate: {learning_rate}")
@@ -353,8 +353,8 @@ def main():
     print("=" * 70)
 
     # Benchmark forward pass
-    X_bench = np.random.randn(1000, 784).astype(np.float32)
-    y_bench = np.random.randint(0, 10, 1000).astype(np.int64)
+    X_bench = np.random.randn(4096, 784).astype(np.float32)
+    y_bench = np.random.randint(0, 10, 4096).astype(np.int64)
 
     # Warmup
     for _ in range(10):

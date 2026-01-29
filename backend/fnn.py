@@ -100,6 +100,70 @@ class VulkanFNN:
                 logging.getLogger(__name__).debug(f"Buffer pool init failed: {e}")
                 pass  # Pool initialization failed, will use direct allocation
         return self._pool
+    
+    def gemm(self, A: np.ndarray, B: np.ndarray) -> np.ndarray:
+        """
+        GEMM: C = A @ B
+        A: (M, K), B: (K, N) -> C: (M, N)
+        Uses gemm-mnk.glsl
+        """
+        if 'gemm-mnk' not in self.shaders:
+            # CPU fallback
+            return A @ B
+
+        A = np.asarray(A, dtype=np.float32)
+        B = np.asarray(B, dtype=np.float32)
+        M, K = A.shape
+        K2, N = B.shape
+        assert K == K2
+
+        # Bytes
+        A_bytes = M * K * 4
+        B_bytes = K * N * 4
+        C_bytes = M * N * 4
+
+        # Allocate buffers
+        buf_A = self.core._acquire_buffer(A_bytes)
+        buf_B = self.core._acquire_buffer(B_bytes)
+        buf_C = self.core._acquire_buffer(C_bytes)
+
+        try:
+            self.core._upload_buffer(buf_A, A.flatten())
+            self.core._upload_buffer(buf_B, B.flatten())
+
+            pipeline, layout, _ = self.pipelines.get_or_create_pipeline(
+                'gemm_mnk', 3, push_constant_size=12
+            )
+
+            A_handle = self.core._get_buffer_handle(buf_A)
+            B_handle = self.core._get_buffer_handle(buf_B)
+            C_handle = self.core._get_buffer_handle(buf_C)
+
+            desc = self.pipelines.get_cached_descriptor_set(
+                'gemm-mnk',
+                [
+                    (A_handle, A_bytes),
+                    (B_handle, B_bytes),
+                    (C_handle, C_bytes),
+                ]
+            )
+
+            push = struct.pack('3I', M, K, N)
+
+            group_x = (N + 15) // 16
+            group_y = (M + 15) // 16
+            group_z = 1
+
+            self.core._dispatch_compute(
+                pipeline, layout, desc,
+                group_x, push, group_y, group_z
+            )
+
+            C_flat = self.core._download_buffer(buf_C, C_bytes, np.float32)
+            return C_flat.reshape(M, N)
+
+        finally:
+            self.core._release_buffers([buf_A, buf_B, buf_C])
 
     def _acquire_buffer(self, size: int, usage: int = None) -> 'PooledBuffer':
         """
@@ -1442,7 +1506,12 @@ class VulkanFNN:
         bias: Optional[np.ndarray] = None
     ) -> tuple:
         """
-        Backward pass for linear layer using fnn-linear-backward.glsl
+        Backward pass for linear layer using GEMM.
+
+        Computes:
+        - grad_input = grad_output @ weights        # (batch, in_features)
+        - grad_weight = grad_output.T @ x           # (out_features, in_features)
+        - grad_bias = sum(grad_output, axis=0)      # (out_features,)
 
         Args:
             grad_output: Gradient w.r.t. output (batch, out_features)
@@ -1453,21 +1522,78 @@ class VulkanFNN:
         Returns:
             (grad_input, grad_weight, grad_bias)
         """
-        # Check if shader is available
+        # Ensure arrays are float32
+        grad_output = np.asarray(grad_output, dtype=np.float32)
+        x = np.asarray(x, dtype=np.float32)
+        weights = np.asarray(weights, dtype=np.float32)
+
+        # Handle both 2D and 3D inputs
+        grad_output_shape = grad_output.shape
+        x_shape = x.shape
+
+        # Flatten to 2D for GEMM
+        if grad_output.ndim == 3:
+            batch, seq, out_features = grad_output.shape
+            grad_output_2d = grad_output.reshape(batch * seq, out_features)
+            x_2d = x.reshape(batch * seq, x.shape[-1])
+            in_features = x.shape[-1]
+        else:
+            grad_output_2d = grad_output
+            x_2d = x
+            batch, out_features = grad_output.shape
+            _, in_features = x.shape
+
+        # Decide whether to use GEMM or fallback shader/CPU
+        # Use GEMM for larger problems (same heuristic as forward)
+        use_gemm = (
+            'gemm_mnk' in self.shaders and
+            batch * in_features >= 4096
+        )
+
+        if use_gemm:
+            # ============ GEMM-based backward ============
+
+            # 1) grad_input = grad_output @ weights
+            #    (batch*seq, out_features) @ (out_features, in_features) = (batch*seq, in_features)
+            grad_input_2d = self.gemm(grad_output_2d, weights)
+
+            # 2) grad_weight = grad_output.T @ x
+            #    (out_features, batch*seq) @ (batch*seq, in_features) = (out_features, in_features)
+            grad_weight = self.gemm(grad_output_2d.T.copy(), x_2d)
+
+            # 3) grad_bias = sum over batch dimension
+            grad_bias = np.sum(grad_output_2d, axis=0, dtype=np.float32) if bias is not None else None
+
+            # Reshape grad_input back to original shape
+            if grad_output.ndim == 3:
+                grad_input = grad_input_2d.reshape(grad_output_shape[0], grad_output_shape[1], -1)
+            else:
+                grad_input = grad_input_2d
+
+            return grad_input, grad_weight, grad_bias
+
+        # ============ Fallback: use fnn-linear-backward shader or CPU ============
         if 'fnn-linear-backward' not in self.shaders:
-            # CPU fallback
-            grad_input = grad_output @ weights  # (batch, in_features)
-            grad_weight = grad_output.T @ x  # (out_features, in_features)
-            grad_bias = np.sum(grad_output, axis=0) if bias is not None else None
+            # CPU fallback (using 2D arrays)
+            grad_input_2d = grad_output_2d @ weights  # (batch*seq, in_features)
+            grad_weight = grad_output_2d.T @ x_2d  # (out_features, in_features)
+            grad_bias = np.sum(grad_output_2d, axis=0) if bias is not None else None
+
+            # Reshape grad_input back to original shape
+            if grad_output.ndim == 3:
+                grad_input = grad_input_2d.reshape(grad_output_shape[0], grad_output_shape[1], -1)
+            else:
+                grad_input = grad_input_2d
+
             return grad_input.astype(np.float32), grad_weight.astype(np.float32), grad_bias
 
-        # GPU implementation
-        batch_seq, output_dim = grad_output.shape
-        _, input_dim = x.shape
+        # GPU shader implementation (using 2D arrays)
+        batch_seq, output_dim = grad_output_2d.shape
+        _, input_dim = x_2d.shape
 
-        # Flatten arrays
-        grad_out_flat = grad_output.astype(np.float32).flatten()
-        x_flat = x.astype(np.float32).flatten()
+        # Flatten 2D arrays for shader
+        grad_out_flat = grad_output_2d.astype(np.float32).flatten()
+        x_flat = x_2d.astype(np.float32).flatten()
         w_flat = weights.astype(np.float32).flatten()
 
         # Output buffers sizes
@@ -1553,9 +1679,15 @@ class VulkanFNN:
             grad_bias_flat = None
 
         # Reshape
-        grad_input = grad_input_flat[:batch_seq * input_dim].reshape(batch_seq, input_dim)
+        grad_input_2d = grad_input_flat[:batch_seq * input_dim].reshape(batch_seq, input_dim)
         grad_weight = grad_weight_flat[:output_dim * input_dim].reshape(output_dim, input_dim)
         grad_bias = grad_bias_flat[:output_dim] if grad_bias_flat is not None else None
+
+        # Reshape grad_input back to original shape
+        if grad_output.ndim == 3:
+            grad_input = grad_input_2d.reshape(grad_output_shape[0], grad_output_shape[1], -1)
+        else:
+            grad_input = grad_input_2d
 
         # Free descriptor set and release buffers
         vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])

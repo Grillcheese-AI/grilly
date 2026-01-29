@@ -52,7 +52,8 @@ void main() {
     uint in_x = gl_GlobalInvocationID.x;
 
     // Bounds check
-    if (batch >= params.batch_size || in_y >= params.in_height || in_x >= params.in_width) {
+    if (batch >= params.batch_size || ic >= params.in_channels ||
+        in_y >= params.in_height   || in_x >= params.in_width) {
         return;
     }
 

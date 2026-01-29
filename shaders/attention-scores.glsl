@@ -31,51 +31,35 @@ layout(push_constant) uniform PushConsts {
 };
 
 void main() {
-    uint row = gl_GlobalInvocationID.y;
-    uint col = gl_GlobalInvocationID.x;
-    
-    if (pass_type == 0) {
-        // Compute attention scores: scores = Q @ K^T / sqrt(d_k)
-        // Each thread computes score[batch][head][q_pos][k_pos]
-        
-        uint total_positions = batch_size * num_heads * seq_len;
-        uint flat_row = row;
-        
-        if (flat_row >= total_positions || col >= seq_len) {
-            return;
-        }
-        
-        uint batch_idx = flat_row / (num_heads * seq_len);
-        uint remainder = flat_row % (num_heads * seq_len);
-        uint head_idx = remainder / seq_len;
-        uint q_pos = remainder % seq_len;
-        uint k_pos = col;
-        
-        // Compute dot product: Q[q_pos] · K[k_pos]
-        float score = 0.0;
-        
-        for (uint d = 0; d < head_dim; d++) {
-            // Q index: [batch, seq, head, head_dim]
-            uint q_idx = batch_idx * seq_len * num_heads * head_dim +
-                        q_pos * num_heads * head_dim +
-                        head_idx * head_dim + d;
-            
-            // K index: [batch, seq, head, head_dim]
-            uint k_idx = batch_idx * seq_len * num_heads * head_dim +
-                        k_pos * num_heads * head_dim +
-                        head_idx * head_dim + d;
-            
-            score += Q[q_idx] * K[k_idx];
-        }
-        
-        // Scale by sqrt(d_k)
-        score *= scale;
-        
-        // Store score
-        uint score_idx = batch_idx * num_heads * seq_len * seq_len +
-                        head_idx * seq_len * seq_len +
-                        q_pos * seq_len + k_pos;
-        
-        scores[score_idx] = score;
+    uint q_pos = gl_GlobalInvocationID.y;
+    uint k_pos = gl_GlobalInvocationID.x;
+    uint flat_bh = gl_GlobalInvocationID.z;
+
+    if (q_pos >= seq_len || k_pos >= seq_len || flat_bh >= batch_size * num_heads) {
+        return;
     }
+
+    uint batch_idx = flat_bh / num_heads;
+    uint head_idx  = flat_bh % num_heads;
+
+    float score = 0.0;
+
+    for (uint d = 0; d < head_dim; d++) {
+        uint base = batch_idx * seq_len * num_heads * head_dim
+                  + head_idx * head_dim;
+        uint q_idx = base + q_pos * num_heads * head_dim + d;
+        uint k_idx = base + k_pos * num_heads * head_dim + d;
+
+        score += Q[q_idx] * K[k_idx];
+    }
+
+    score *= scale;
+
+    uint score_idx =
+        batch_idx * num_heads * seq_len * seq_len +
+        head_idx  * seq_len * seq_len +
+        q_pos     * seq_len +
+        k_pos;
+
+    scores[score_idx] = score;
 }

@@ -120,6 +120,14 @@ from .pooling import (
     AdaptiveAvgPool2d,
 )
 
+# Recurrent layers
+from .rnn import (
+    LSTM,
+    LSTMCell,
+    GRU,
+    GRUCell,
+)
+
 # Autograd utilities
 from .autograd import (
     Variable,
@@ -338,6 +346,12 @@ __all__ = [
     'AvgPool2d',
     'AdaptiveMaxPool2d',
     'AdaptiveAvgPool2d',
+
+    # Recurrent layers
+    'LSTM',
+    'LSTMCell',
+    'GRU',
+    'GRUCell',
 
     # Autograd - Core
     'Variable',

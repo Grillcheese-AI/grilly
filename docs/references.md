@@ -43,3 +43,4 @@ There is no single canonical “activation function” paper here; this is a sys
   This work describes a fused-tiled execution strategy that fuses multiple operators in forward and backward passes to reduce activation memory and improve performance, which is a more general form of fused linear+activation segments. [pmc.ncbi.nlm.nih](https://pmc.ncbi.nlm.nih.gov/articles/PMC9302555/)
 
 For a neuromorphic / custom-kernel context, these two give you a solid combination of conceptual definition (DirectML) and a more formal fused-operator execution model (Xu et al.). [learn.microsoft](https://learn.microsoft.com/en-us/windows/ai/directml/dml-fused-activations)
+

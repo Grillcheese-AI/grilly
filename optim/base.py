@@ -38,6 +38,12 @@ class Optimizer:
         else:
             # Single parameter group
             self.param_groups = [{'params': param_groups}]
+
+        # Copy defaults to each param_group (PyTorch behavior)
+        for group in self.param_groups:
+            for key, value in self.defaults.items():
+                if key not in group:
+                    group[key] = value
         
         # Initialize state for each parameter
         for group in self.param_groups:
