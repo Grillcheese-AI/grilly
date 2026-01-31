@@ -53,7 +53,7 @@ GPU-accelerated neural network framework using Vulkan compute shaders. Supports 
 
 ## Installation
 
-### From PyPI (when published)
+### From PyPI
 
 ```bash
 pip install grilly
@@ -269,8 +269,6 @@ Run `make help` to see all available commands:
 - `make test` - Run tests
 - `make compile-shaders` - Compile shaders
 - `make build` - Build distribution
-- `make publish-test` - Publish to Test PyPI
-- `make publish` - Publish to PyPI
 - `make format` - Format code
 - `make lint` - Run linters
 - `make clean` - Clean build artifacts
@@ -287,10 +285,3 @@ Run `make help` to see all available commands:
 
 MIT License - see LICENSE file for details.
 
-## References
-
-- Vulkan Compute Shaders: https://www.khronos.org/vulkan/
-- Flash Attention 2: https://arxiv.org/abs/2307.08691
-- STDP Learning: Bi & Poo (1998)
-- EWC: Kirkpatrick et al. (2017)
-- LoRA: Hu et al. (2021)
