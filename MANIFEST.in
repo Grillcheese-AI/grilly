@@ -1,0 +1,28 @@
+# Include documentation
+include README.md
+include LICENSE
+include CHANGELOG.md
+include CLAUDE.md
+
+# Include all shader files
+recursive-include grilly/shaders *.glsl
+recursive-include grilly/shaders *.comp
+recursive-include grilly/shaders *.spv
+
+# Include configuration files
+include pyproject.toml
+
+# Exclude development files
+exclude .gitignore
+exclude .git*
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * .pytest_cache
+recursive-exclude * .venv
+recursive-exclude * .mypy_cache
+recursive-exclude * .ruff_cache
+
+# Exclude tests and examples from package (keep in source)
+prune grilly/tests
+prune examples
+prune datasets
