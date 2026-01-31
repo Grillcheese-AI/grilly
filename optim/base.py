@@ -48,8 +48,12 @@ class Optimizer:
         # Initialize state for each parameter
         for group in self.param_groups:
             for p in group['params']:
-                if not isinstance(p, np.ndarray):
-                    raise TypeError("Optimizer can only optimize numpy arrays")
+                # Accept both numpy arrays and Variable objects
+                if hasattr(p, 'data') and hasattr(p, 'grad'):
+                    # Variable from autograd - this is fine
+                    pass
+                elif not isinstance(p, np.ndarray):
+                    raise TypeError("Optimizer can only optimize numpy arrays or Variable objects")
                 # Create state entry for this parameter
                 param_id = id(p)
                 if param_id not in self.state:

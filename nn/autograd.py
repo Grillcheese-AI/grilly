@@ -59,13 +59,17 @@ class GradFn:
     Represents a node in the computation graph.
     Stores the backward function and references to input variables.
 
+    Now supports GPU-accelerated backward pass via optional gpu_backward_fn.
+
     Note: We use strong references to inputs to prevent garbage collection
     of intermediate variables before backward() is called.
     """
 
-    def __init__(self, name: str, backward_fn: Callable, inputs: List['Variable']):
+    def __init__(self, name: str, backward_fn: Callable, inputs: List['Variable'],
+                 gpu_backward_fn: Optional[Callable] = None):
         self.name = name
-        self.backward_fn = backward_fn
+        self.backward_fn = backward_fn  # CPU fallback
+        self.gpu_backward_fn = gpu_backward_fn  # GPU version (optional)
         # Use strong references to prevent GC of intermediate variables
         self._inputs = list(inputs)
         self._next_functions: List[Optional['GradFn']] = []
@@ -82,8 +86,14 @@ class GradFn:
         """Get input variables."""
         return self._inputs
 
+    @property
+    def has_gpu_backward(self) -> bool:
+        """Check if GPU backward is available for this operation."""
+        return self.gpu_backward_fn is not None
+
     def __repr__(self):
-        return f"<{self.name}Backward>"
+        gpu_str = " (GPU)" if self.has_gpu_backward else ""
+        return f"<{self.name}Backward{gpu_str}>"
 
 
 class Variable:
@@ -156,7 +166,8 @@ class Variable:
         """Clear the gradient."""
         self.grad = None
 
-    def backward(self, grad_output: Optional[np.ndarray] = None, retain_graph: bool = False):
+    def backward(self, grad_output: Optional[np.ndarray] = None, retain_graph: bool = False,
+                 use_gpu: bool = True):
         """
         Compute gradients via reverse-mode automatic differentiation.
 
@@ -166,6 +177,7 @@ class Variable:
         Args:
             grad_output: Gradient w.r.t. this variable. Default is ones_like for all outputs.
             retain_graph: If True, keep the computation graph for future backward passes.
+            use_gpu: If True, use GPU-accelerated backward when available (default: True).
         """
         if not self.requires_grad:
             return
@@ -173,6 +185,20 @@ class Variable:
         if grad_output is None:
             # Default gradient is ones (identity gradient)
             grad_output = np.ones_like(self.data, dtype=np.float32)
+
+        # Initialize GPU backend if requested
+        gpu_ops = None
+        if use_gpu:
+            try:
+                from grilly.nn.gpu_backward import get_gpu_backward_ops
+                gpu_ops = get_gpu_backward_ops(use_gpu=True)
+                if not gpu_ops.is_available():
+                    gpu_ops = None
+                    use_gpu = False
+            except Exception:
+                # Fall back to CPU if GPU not available
+                gpu_ops = None
+                use_gpu = False
 
         # Build topological order of the computation graph
         topo_order = []
@@ -210,8 +236,20 @@ class Variable:
 
             # Propagate gradients through the computation graph
             if var.grad_fn is not None:
-                # Call the backward function to get gradients for inputs
-                input_grads = var.grad_fn.backward_fn(grad)
+                # Try GPU backward first if available
+                if use_gpu and gpu_ops and var.grad_fn.has_gpu_backward:
+                    try:
+                        input_grads = var.grad_fn.gpu_backward_fn(gpu_ops, grad)
+                    except Exception as e:
+                        # Fall back to CPU on error
+                        import logging
+                        logging.getLogger(__name__).debug(
+                            f"GPU backward failed for {var.grad_fn.name}: {e}. Using CPU fallback."
+                        )
+                        input_grads = var.grad_fn.backward_fn(grad)
+                else:
+                    # CPU backward
+                    input_grads = var.grad_fn.backward_fn(grad)
 
                 if not isinstance(input_grads, tuple):
                     input_grads = (input_grads,)
@@ -607,13 +645,25 @@ def _ensure_variable(x, copy=False) -> Variable:
     return Variable(x, requires_grad=False)
 
 
-def _make_backward(name: str, inputs: List[Variable], backward_fn: Callable) -> Optional[GradFn]:
-    """Create a GradFn if any input requires gradient."""
+def _make_backward(name: str, inputs: List[Variable], backward_fn: Callable,
+                   gpu_backward_fn: Optional[Callable] = None) -> Optional[GradFn]:
+    """
+    Create a GradFn if any input requires gradient.
+
+    Args:
+        name: Operation name
+        inputs: Input variables
+        backward_fn: CPU backward function
+        gpu_backward_fn: Optional GPU backward function
+
+    Returns:
+        GradFn or None if gradients disabled
+    """
     if not _grad_enabled:
         return None
     if not any(v.requires_grad for v in inputs if isinstance(v, Variable)):
         return None
-    return GradFn(name, backward_fn, inputs)
+    return GradFn(name, backward_fn, inputs, gpu_backward_fn=gpu_backward_fn)
 
 
 # ============================================================================
@@ -729,7 +779,7 @@ def pow(a, exponent) -> Variable:
 
 
 def matmul(a, b) -> Variable:
-    """Matrix multiplication: a @ b"""
+    """Matrix multiplication: a @ b (with GPU backward support)"""
     a = _ensure_variable(a)
     b = _ensure_variable(b)
 
@@ -737,6 +787,7 @@ def matmul(a, b) -> Variable:
 
     a_data, b_data = a.data, b.data
 
+    # CPU backward (fallback)
     def backward(grad):
         if a_data.ndim == 1 and b_data.ndim == 1:
             # Vector dot product
@@ -756,7 +807,28 @@ def matmul(a, b) -> Variable:
             grad_b = np.matmul(np.swapaxes(a_data, -2, -1), grad)
         return grad_a, grad_b
 
-    grad_fn = _make_backward("MatMul", [a, b], backward)
+    # GPU backward (NEW)
+    def gpu_backward(gpu_ops, grad):
+        # For matrix multiplication, use linear backward shader
+        # This assumes b is the weight matrix (typical in neural networks)
+        if a_data.ndim == 2 and b_data.ndim == 2:
+            # Treat as: output = a @ b.T (linear layer convention)
+            # grad_a = grad @ b, grad_b = grad.T @ a
+            grad_a, grad_b, _ = gpu_ops.linear_backward(
+                grad, a_data, b_data.T,
+                compute_input_grad=True,
+                compute_weight_grad=True,
+                compute_bias_grad=False
+            )
+            # Transpose grad_b back
+            if grad_b is not None:
+                grad_b = grad_b.T
+            return grad_a, grad_b
+        else:
+            # Fall back to CPU for non-2D cases
+            return backward(grad)
+
+    grad_fn = _make_backward("MatMul", [a, b], backward, gpu_backward_fn=gpu_backward)
     requires_grad = a.requires_grad or b.requires_grad
 
     return Variable(result_data, requires_grad=requires_grad, grad_fn=grad_fn)
@@ -881,17 +953,23 @@ def min(a, dim=None, keepdims=False) -> Variable:
 # ============================================================================
 
 def relu(a) -> Variable:
-    """ReLU activation: max(0, a)"""
+    """ReLU activation: max(0, a) (with GPU backward support)"""
     a = _ensure_variable(a)
 
     result_data = np.maximum(a.data, 0)
 
     a_data = a.data
 
+    # CPU backward (fallback)
     def backward(grad):
         return (grad * (a_data > 0).astype(np.float32),)
 
-    grad_fn = _make_backward("ReLU", [a], backward)
+    # GPU backward (NEW)
+    def gpu_backward(gpu_ops, grad):
+        grad_input = gpu_ops.relu_backward(grad, a_data)
+        return (grad_input,)
+
+    grad_fn = _make_backward("ReLU", [a], backward, gpu_backward_fn=gpu_backward)
 
     return Variable(result_data, requires_grad=a.requires_grad, grad_fn=grad_fn)
 
@@ -1349,7 +1427,7 @@ def gelu(a) -> Variable:
 
 
 def silu(a) -> Variable:
-    """SiLU/Swish activation: x * sigmoid(x)"""
+    """SiLU/Swish activation: x * sigmoid(x) (with GPU backward support)"""
     a = _ensure_variable(a)
 
     sig = 1.0 / (1.0 + np.exp(-a.data))
@@ -1358,13 +1436,19 @@ def silu(a) -> Variable:
     x = a.data
     sigmoid_x = sig
 
+    # CPU backward (fallback)
     def backward(grad):
         # d/dx (x * sigmoid(x)) = sigmoid(x) + x * sigmoid(x) * (1 - sigmoid(x))
         #                       = sigmoid(x) * (1 + x * (1 - sigmoid(x)))
         grad_x = grad * sigmoid_x * (1 + x * (1 - sigmoid_x))
         return (grad_x,)
 
-    grad_fn = _make_backward("SiLU", [a], backward)
+    # GPU backward (NEW)
+    def gpu_backward(gpu_ops, grad):
+        grad_input = gpu_ops.silu_backward(grad, x)
+        return (grad_input,)
+
+    grad_fn = _make_backward("SiLU", [a], backward, gpu_backward_fn=gpu_backward)
     return Variable(result_data, requires_grad=a.requires_grad, grad_fn=grad_fn)
 
 
