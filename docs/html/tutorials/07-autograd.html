@@ -1,0 +1,76 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>07 - Autograd Basics</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>07 - Autograd Basics</h1>
+     <p>Automatic differentiation with grilly.nn.autograd.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Objective</h2>
+       <p>
+         Fit <code>exp(x)</code> with a polynomial using Grilly's autograd system. This mirrors
+         <code>tutorials/07_autograd.py</code>.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Setup</h2>
+       <pre><code>import numpy as np
+ from grilly.nn.autograd import linspace, randn, no_grad
+ 
+ # x in [-1, 1], y = exp(x)
+ x = linspace(-1, 1, 2000)
+ y = x.exp()
+ 
+ a = randn(requires_grad=True)
+ b = randn(requires_grad=True)
+ c = randn(requires_grad=True)
+ d = randn(requires_grad=True)</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Training Loop</h2>
+       <pre><code>learning_rate = 1e-5
+ 
+ for t in range(5000):
+     y_pred = a + b * x + c * x ** 2 + d * x ** 3
+     loss = ((y_pred - y) ** 2).sum()
+ 
+     a.zero_grad()
+     b.zero_grad()
+     c.zero_grad()
+     d.zero_grad()
+     loss.backward()
+ 
+     with no_grad():
+         a.data -= learning_rate * a.grad
+         b.data -= learning_rate * b.grad
+         c.data -= learning_rate * c.grad
+         d.data -= learning_rate * d.grad</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Notes</h2>
+       <ul>
+         <li>Variables track gradients automatically through operator overloading.</li>
+         <li>Use <code>no_grad()</code> for parameter updates to avoid tracking.</li>
+         <li>Use <code>zero_grad()</code> before each backward pass.</li>
+       </ul>
+     </section>
+   </main>
+   <footer>Grilly Docs - Autograd Basics</footer>
+ </body>
+ </html>

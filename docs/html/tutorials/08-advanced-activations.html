@@ -1,0 +1,83 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>08 - Advanced Activations</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>08 - Advanced Activations</h1>
+     <p>GCU, RoSwish, SwiGLU, and fused activation benchmarks.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Activation Overview</h2>
+       <ul>
+         <li><strong>GCU</strong> - Growing Cosine Unit: f(x) = x * cos(x)</li>
+         <li><strong>RoSwish</strong> - Learnable gated activation with alpha and beta.</li>
+         <li><strong>SwiGLU</strong> - Gated activation for transformer FFN blocks.</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Basic Usage</h2>
+       <pre><code>import numpy as np
+ import grilly
+ 
+ compute = grilly.Compute()
+ x = np.array([-2, -1, 0, 1, 2], dtype=np.float32)
+ 
+ print(compute.activation_gcu(x))
+ print(compute.activation_roswish(x, alpha=1.0, beta=1.0))
+ 
+ x_ffn = np.random.randn(2, 4, 2 * 256).astype(np.float32)
+ y = compute.activation_swiglu(x_ffn)</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Learnable RoSwish Module</h2>
+       <pre><code>import grilly.nn as nn
+ 
+ roswish = nn.RoSwish(alpha_init=1.0, beta_init=1.0, learnable=True)
+ out = roswish(x)</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Fused Linear + Activation</h2>
+       <pre><code>x = np.random.randn(32, 256).astype(np.float32)
+ w = np.random.randn(512, 256).astype(np.float32)
+ b = np.random.randn(512).astype(np.float32)
+ 
+ y = compute.fnn.fused_linear_gcu(x, w, b)
+ z = compute.fnn.fused_linear_roswish(x, w, b)</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Selection Guide</h2>
+       <table>
+         <thead>
+           <tr>
+             <th>Use Case</th>
+             <th>Recommended</th>
+           </tr>
+         </thead>
+         <tbody>
+           <tr><td>Transformer FFN</td><td>SwiGLU or GELU</td></tr>
+           <tr><td>General MLP</td><td>RoSwish or GELU</td></tr>
+           <tr><td>Neuromorphic patterns</td><td>GCU</td></tr>
+           <tr><td>Edge inference</td><td>ReLU</td></tr>
+         </tbody>
+       </table>
+     </section>
+   </main>
+   <footer>Grilly Docs - Advanced Activations</footer>
+ </body>
+ </html>

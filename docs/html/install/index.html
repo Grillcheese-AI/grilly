@@ -1,0 +1,206 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>Installation - Grilly</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>Installation</h1>
+     <p>Vulkan drivers, Vulkan SDK, and PyVMA setup for Linux, Windows, and macOS.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Requirements</h2>
+       <ul>
+         <li>Python 3.10+</li>
+         <li>Vulkan-capable GPU (AMD, NVIDIA, Intel)</li>
+         <li>Up-to-date GPU drivers</li>
+         <li>Vulkan SDK or runtime tools for your OS</li>
+       </ul>
+       <p class="note">
+         Grilly uses Vulkan compute shaders. If Vulkan is not available, some operations may fall
+         back to CPU. Always verify Vulkan is working before running GPU workloads.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Install Grilly</h2>
+       <pre><code>pip install grilly</code></pre>
+       <p class="note">
+         For editable installs from source, run <code>pip install -e .</code> inside the repo.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Vulkan Installation</h2>
+       <div class="grid two">
+         <div>
+           <h3>Linux (Ubuntu/Debian)</h3>
+           <pre><code>sudo apt-get update
+ sudo apt-get install -y \
+   vulkan-tools vulkan-validationlayers \
+   mesa-vulkan-drivers libvulkan1</code></pre>
+           <p class="note">
+             For NVIDIA, install the latest recommended NVIDIA driver. For AMD/Intel, Mesa packages
+             provide Vulkan drivers on most distros.
+           </p>
+         </div>
+         <div>
+           <h3>Linux (Fedora)</h3>
+           <pre><code>sudo dnf install -y \
+   vulkan-tools vulkan-validation-layers \
+   mesa-vulkan-drivers vulkan-loader</code></pre>
+           <p class="note">
+             On Arch, install <code>vulkan-tools</code> and the appropriate driver package
+             (nvidia, amdvlk, or vulkan-intel).
+           </p>
+         </div>
+         <div>
+           <h3>Windows</h3>
+           <ol>
+             <li>Install the latest GPU driver from AMD, NVIDIA, or Intel.</li>
+             <li>Install the Vulkan SDK from LunarG (includes vulkaninfo and validation layers).</li>
+           </ol>
+           <pre><code>https://vulkan.lunarg.com/sdk/home</code></pre>
+         </div>
+         <div>
+           <h3>macOS</h3>
+           <ol>
+             <li>Install the Vulkan SDK from LunarG (includes MoltenVK).</li>
+             <li>Ensure the SDK environment variables are set in your shell.</li>
+           </ol>
+           <pre><code>https://vulkan.lunarg.com/sdk/home</code></pre>
+           <p class="note">
+             macOS uses Metal through MoltenVK. Some Vulkan features may not be available; run the
+             Grilly test suite to confirm shader compatibility.
+           </p>
+         </div>
+       </div>
+     </section>
+ 
+     <section>
+       <h2>Verify Vulkan</h2>
+       <pre><code>vulkaninfo</code></pre>
+       <p class="note">
+         On Windows, launch a "Developer Command Prompt" if the tool is not on PATH.
+         On macOS, use the SDK-provided vulkaninfo binary if the system one is not available.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Install PyVMA (Recommended)</h2>
+       <p>
+         PyVMA is a Python binding for Vulkan Memory Allocator (VMA). It improves buffer reuse,
+         reduces fragmentation, and prevents memory access issues on some AMD systems.
+       </p>
+       <h3>Automatic Installer (All OS)</h3>
+       <pre><code>python -m grilly.scripts.install_pyvma</code></pre>
+       <p class="note">
+         The installer checks for a compiler, builds the VMA library, installs PyVMA, and validates
+         that the bindings are available.
+       </p>
+ 
+       <h3>Manual Build - Windows</h3>
+       <ol>
+         <li>Install "Visual Studio Build Tools" with C++ workload.</li>
+         <li>Open "Developer Command Prompt for VS".</li>
+       </ol>
+       <pre><code>cd grilly
+ git clone https://github.com/realitix/pyvma.git
+ cd pyvma\pyvma\pyvma_build
+ 
+ cl.exe /c /I"include" /DVMA_IMPLEMENTATION /DVMA_STATIC_VULKAN_FUNCTIONS=0 ^
+   /nologo /W3 /Ox /Oi /GF /EHsc /MD /GS /Gy /Zc:inline /Zc:wchar_t /Gd /TP ^
+   /Fo"vk_mem_alloc.obj" "vk_mem_alloc.h"
+ 
+ lib.exe /OUT:"vk_mem_alloc.lib" "vk_mem_alloc.obj"
+ 
+ cd ..\..
+ pip install .</code></pre>
+ 
+       <h3>Manual Build - Linux</h3>
+       <pre><code>sudo apt-get install -y build-essential
+ cd grilly
+ git clone https://github.com/realitix/pyvma.git
+ cd pyvma/pyvma/pyvma_build
+ 
+ g++ -std=c++11 -fPIC -x c++ -I"include" \
+   -DVMA_IMPLEMENTATION -DVMA_STATIC_VULKAN_FUNCTIONS=0 \
+   -c vk_mem_alloc.h -o vk_mem_alloc.o
+ 
+ ar rvs libvk_mem_alloc.a vk_mem_alloc.o
+ 
+ cd ../..
+ pip install .</code></pre>
+ 
+       <h3>Manual Build - macOS</h3>
+       <pre><code>xcode-select --install
+ cd grilly
+ git clone https://github.com/realitix/pyvma.git
+ cd pyvma/pyvma/pyvma_build
+ 
+ clang++ -std=c++11 -fPIC -x c++ -I"include" \
+   -DVMA_IMPLEMENTATION -DVMA_STATIC_VULKAN_FUNCTIONS=0 \
+   -c vk_mem_alloc.h -o vk_mem_alloc.o
+ 
+ libtool -static -o libvk_mem_alloc.a vk_mem_alloc.o
+ 
+ cd ../..
+ pip install .</code></pre>
+ 
+       <h3>Verify PyVMA</h3>
+       <pre><code>python - <<'PY'
+ import pyvma
+ print("PyVMA:", pyvma.__version__)
+ print("vmaCreateAllocator:", pyvma.vmaCreateAllocator)
+ PY</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Environment Variables</h2>
+       <table>
+         <thead>
+           <tr>
+             <th>Variable</th>
+             <th>Purpose</th>
+           </tr>
+         </thead>
+         <tbody>
+           <tr>
+             <td>VK_GPU_INDEX</td>
+             <td>Select GPU index when multiple GPUs are present.</td>
+           </tr>
+           <tr>
+             <td>GRILLY_DEBUG</td>
+             <td>Enable debug logging.</td>
+           </tr>
+           <tr>
+             <td>ALLOW_CPU_VULKAN</td>
+             <td>Allow CPU fallback when GPU is not available.</td>
+           </tr>
+         </tbody>
+       </table>
+     </section>
+ 
+     <section>
+       <h2>Troubleshooting</h2>
+       <ul>
+         <li><strong>vulkaninfo not found</strong>: install Vulkan SDK or vulkan-tools.</li>
+         <li><strong>Vulkan init fails</strong>: update GPU drivers and verify Vulkan works.</li>
+         <li><strong>PyVMA build errors</strong>: ensure a C++ compiler is installed and on PATH.</li>
+         <li><strong>macOS limitations</strong>: MoltenVK does not expose all Vulkan features.</li>
+       </ul>
+     </section>
+   </main>
+   <footer>Grilly Docs - Installation</footer>
+ </body>
+ </html>

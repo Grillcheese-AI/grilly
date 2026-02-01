@@ -1,0 +1,71 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>API Reference - Grilly</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>API Reference</h1>
+     <p>Public interfaces and internal modules for Grilly.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>API Sections</h2>
+       <div class="grid two">
+         <div>
+           <h3><a href="core.html">Core API</a></h3>
+           <p>Compute backends, architecture selection, core exports.</p>
+         </div>
+         <div>
+           <h3><a href="nn.html">grilly.nn</a></h3>
+           <p>PyTorch-like modules, layers, and autograd utilities.</p>
+         </div>
+         <div>
+           <h3><a href="functional.html">grilly.functional</a></h3>
+           <p>Functional operations for activations, attention, memory, and more.</p>
+         </div>
+         <div>
+           <h3><a href="optim.html">grilly.optim</a></h3>
+           <p>Optimizers and learning rate schedulers.</p>
+         </div>
+         <div>
+           <h3><a href="utils.html">grilly.utils</a></h3>
+           <p>Data utilities, device management, tensor conversion, HF bridge.</p>
+         </div>
+         <div>
+           <h3><a href="backend.html">backend (internal)</a></h3>
+           <p>Vulkan compute pipelines, shader-backed kernels, buffer pools.</p>
+         </div>
+         <div>
+           <h3><a href="module-map.html">Module Map</a></h3>
+           <p>Complete list of Python files in the repository.</p>
+         </div>
+       </div>
+     </section>
+ 
+     <section>
+       <h2>Usage Notes</h2>
+       <ul>
+         <li>
+           Public API: <code>grilly</code>, <code>grilly.nn</code>,
+           <code>grilly.functional</code>, <code>grilly.optim</code>, <code>grilly.utils</code>.
+         </li>
+         <li>
+           Backend modules are internal. Their APIs can change and are primarily intended for
+           contributors and advanced users.
+         </li>
+       </ul>
+     </section>
+   </main>
+   <footer>Grilly Docs - API Reference</footer>
+ </body>
+ </html>

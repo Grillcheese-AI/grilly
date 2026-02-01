@@ -1,0 +1,102 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>06 - Transformer Components</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>06 - Transformer Components</h1>
+     <p>LayerNorm, projections, attention scores, and fused FFN.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Overview</h2>
+       <p>
+         This tutorial demonstrates core transformer building blocks with Vulkan-accelerated
+         kernels: layer norm, linear projections, attention scoring, softmax, and fused FFN.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Setup</h2>
+       <pre><code>import numpy as np
+ import time
+ from grilly import Compute
+ 
+ compute = Compute()
+ 
+ batch_size = 8
+ seq_len = 128
+ d_model = 256
+ n_heads = 4
+ d_k = d_model // n_heads
+ 
+ x = np.random.randn(batch_size, seq_len, d_model).astype(np.float32)
+ gamma = np.ones(d_model, dtype=np.float32)
+ beta = np.zeros(d_model, dtype=np.float32)</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Layer Normalization</h2>
+       <pre><code>x_flat = x.reshape(-1, d_model)
+ normed = compute.fnn.layernorm(x_flat, gamma, beta)</code></pre>
+       <p class="note">LayerNorm output should have mean near 0 and std near 1.</p>
+     </section>
+ 
+     <section>
+       <h2>QKV Projections</h2>
+       <pre><code>w_q = np.random.randn(d_model, d_model).astype(np.float32) * 0.02
+ w_k = np.random.randn(d_model, d_model).astype(np.float32) * 0.02
+ w_v = np.random.randn(d_model, d_model).astype(np.float32) * 0.02
+ b_q = np.zeros(d_model, dtype=np.float32)
+ b_k = np.zeros(d_model, dtype=np.float32)
+ b_v = np.zeros(d_model, dtype=np.float32)
+ 
+ Q = compute.fnn.linear(normed, w_q, b_q)
+ K = compute.fnn.linear(normed, w_k, b_k)
+ V = compute.fnn.linear(normed, w_v, b_v)</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Attention Scores and Softmax</h2>
+       <pre><code>Qh = Q.reshape(batch_size, seq_len, n_heads, d_k).transpose(0, 2, 1, 3)
+ Kh = K.reshape(batch_size, seq_len, n_heads, d_k).transpose(0, 2, 1, 3)
+ 
+ scores = np.matmul(Qh, Kh.transpose(0, 1, 3, 2)) * (1.0 / np.sqrt(d_k))
+ scores_flat = scores.reshape(-1, seq_len)
+ 
+ attn_weights = compute.fnn.activation_softmax(scores_flat)</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Fused FFN</h2>
+       <pre><code>d_ff = d_model * 4
+ w_ff = np.random.randn(d_ff, d_model).astype(np.float32) * 0.02
+ b_ff = np.zeros(d_ff, dtype=np.float32)
+ 
+ ffn_out = compute.fnn.fused_linear_gelu(normed, w_ff, b_ff)</code></pre>
+       <p class="note">
+         Fused kernels reduce dispatch count and improve throughput in transformer FFN blocks.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Next Steps</h2>
+       <ul>
+         <li>Use grilly.nn.MultiheadAttention for a module-level abstraction.</li>
+         <li>Use compute.flash_attention2 for optimized attention kernels.</li>
+       </ul>
+     </section>
+   </main>
+   <footer>Grilly Docs - Transformer Components</footer>
+ </body>
+ </html>

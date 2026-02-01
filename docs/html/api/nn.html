@@ -1,0 +1,202 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>grilly.nn - API Reference</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>grilly.nn</h1>
+     <p>PyTorch-like neural network modules and autograd utilities.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Overview</h2>
+       <p>
+         The <code>grilly.nn</code> package mirrors the structure of <code>torch.nn</code>,
+         with modules backed by Vulkan compute shaders where available. Inputs are typically
+         numpy arrays (float32) or VulkanTensor objects, and some modules integrate with
+         Grilly autograd.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Base Classes</h2>
+       <ul>
+         <li><strong>Module</strong> - Base class for all layers.</li>
+         <li><strong>Parameter</strong> - Trainable parameter wrapper.</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Core Layers</h2>
+       <table>
+         <thead>
+           <tr>
+             <th>Layer</th>
+             <th>Notes</th>
+           </tr>
+         </thead>
+         <tbody>
+           <tr><td>Linear</td><td>Dense projection, Vulkan-accelerated.</td></tr>
+           <tr><td>LayerNorm</td><td>Layer normalization.</td></tr>
+           <tr><td>Dropout</td><td>Dropout regularization.</td></tr>
+           <tr><td>Embedding</td><td>Embedding lookup (indices to vectors).</td></tr>
+           <tr><td>Sequential</td><td>Chain layers in sequence.</td></tr>
+           <tr><td>Residual</td><td>Residual wrapper for skip connections.</td></tr>
+           <tr><td>MultiheadAttention</td><td>Standard attention module.</td></tr>
+           <tr><td>FlashAttention2</td><td>Optimized attention kernel.</td></tr>
+         </tbody>
+       </table>
+     </section>
+ 
+     <section>
+       <h2>Activation Modules</h2>
+       <ul>
+         <li>ReLU</li>
+         <li>GELU</li>
+         <li>SiLU</li>
+         <li>GCU (Growing Cosine Unit)</li>
+         <li>RoSwish (learnable)</li>
+         <li>SwiGLU (gated activation)</li>
+         <li>Softmax</li>
+         <li>Softplus</li>
+       </ul>
+       <p class="note">
+         Fused Linear+Activation kernels are exposed on the low-level compute backend for
+         high-performance transformer workloads.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Convolution and Pooling</h2>
+       <ul>
+         <li>Conv1d, Conv2d</li>
+         <li>MaxPool2d, AvgPool2d</li>
+         <li>AdaptiveMaxPool2d, AdaptiveAvgPool2d</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Normalization</h2>
+       <ul>
+         <li>BatchNorm1d</li>
+         <li>BatchNorm2d</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Recurrent Layers</h2>
+       <ul>
+         <li>LSTM, LSTMCell</li>
+         <li>GRU, GRUCell</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Loss Functions</h2>
+       <ul>
+         <li>MSELoss</li>
+         <li>CrossEntropyLoss</li>
+         <li>BCELoss</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Spiking Neural Networks (SNN)</h2>
+       <ul>
+         <li>LIFNeuron, GIFNeuron</li>
+         <li>SNNLayer, HebbianLayer, STDPLayer</li>
+         <li>SNNMatMul, SNNSoftmax, SNNRMSNorm, SNNReadout</li>
+         <li>Synapse</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Memory and Capsule Modules</h2>
+       <ul>
+         <li>MemoryRead, MemoryWrite, MemoryContextAggregate</li>
+         <li>MemoryQueryPooling, MemoryInject, MemoryInjectConcat, MemoryInjectGate, MemoryInjectResidual</li>
+         <li>CapsuleProject, SemanticEncoder, DentateGyrus</li>
+         <li>CapsuleEmbedding, ContrastiveLoss</li>
+         <li>HippocampalTransformerLayer</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Transformer and Routing</h2>
+       <ul>
+         <li>TransformerEncoderLayer, TransformerDecoderLayer</li>
+         <li>RoPE, ProsodyModulatedAttention</li>
+         <li>DomainRouter, DomainPredictor, DomainClassifier, ExpertCombiner</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Multimodal Modules</h2>
+       <ul>
+         <li>BottleneckFusion</li>
+         <li>PerceiverIO, PerceiverResampler</li>
+         <li>CrossModalAttentionFusion</li>
+         <li>ImageBindFusion</li>
+         <li>FlamingoFusion</li>
+         <li>VisionLanguageModel, VLMLayer</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>LoRA</h2>
+       <ul>
+         <li>LoRAConfig</li>
+         <li>LoRALinear, LoRAEmbedding, LoRAAttention</li>
+         <li>LoRAModel</li>
+         <li>apply_lora_to_linear, calculate_lora_params</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Autograd</h2>
+       <p>
+         Autograd utilities live under <code>grilly.nn.autograd</code> and provide a PyTorch-like
+         operator overloading system.
+       </p>
+       <ul>
+         <li>Variable, Function, FunctionCtx, GradFn</li>
+         <li>Tensor factory functions: tensor, zeros, ones, randn, rand, linspace, arange, eye, full</li>
+         <li>Operators: add, sub, mul, div, matmul, pow, exp, log, sqrt, relu, gelu, silu, softmax</li>
+         <li>Reductions: sum, mean, max, min, var, std, norm</li>
+         <li>Context: enable_grad, no_grad, is_grad_enabled</li>
+         <li>Loss ops: cross_entropy, mse_loss, bce_loss, nll_loss, kl_div_loss</li>
+       </ul>
+       <p class="note">
+         See Tutorials 07 and 08 for detailed autograd usage and custom Function examples.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Example</h2>
+       <pre><code>import numpy as np
+ import grilly.nn as nn
+ 
+ model = nn.Sequential(
+     nn.Linear(128, 64),
+     nn.GELU(),
+     nn.Linear(64, 10)
+ )
+ 
+ x = np.random.randn(32, 128).astype(np.float32)
+ y = model(x)
+ print(y.shape)</code></pre>
+     </section>
+   </main>
+   <footer>Grilly Docs - grilly.nn</footer>
+ </body>
+ </html>
