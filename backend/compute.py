@@ -18,6 +18,7 @@ from .contrastive import VulkanContrastive
 from .pooling import VulkanPooling
 from .conv import VulkanConv
 from .normalization import VulkanNormalization
+from .lora import VulkanLoRA
 
 
 class VulkanCompute:
@@ -47,6 +48,7 @@ class VulkanCompute:
         self.pooling = VulkanPooling(self.core, self.pipelines, self.core.shaders)
         self.conv = VulkanConv(self.core, self.pipelines, self.core.shaders)
         self.normalization = VulkanNormalization(self.core, self.pipelines, self.core.shaders)
+        self.lora = VulkanLoRA(self.core, self.pipelines, self.core.shaders)
 
         # Expose core device/queue for convenience
         self.device = self.core.device
