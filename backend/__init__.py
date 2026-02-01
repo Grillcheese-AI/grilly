@@ -16,6 +16,7 @@ from .base import VULKAN_AVAILABLE
 from .compute import VulkanCompute
 from .snn_compute import SNNCompute
 from .learning import VulkanLearning
+from .lora import VulkanLoRA
 from .capsule_transformer import (
     CapsuleMemory,
     CapsuleTransformerConfig,
