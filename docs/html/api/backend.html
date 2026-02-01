@@ -1,0 +1,105 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>backend - API Reference</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>backend (internal)</h1>
+     <p>Vulkan compute modules and shader-backed kernels.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Overview</h2>
+       <p>
+         The backend package implements Vulkan compute execution. Most users should interact with
+         <code>grilly.Compute</code> and the public APIs. The modules below are intended for
+         contributors and advanced integrations.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Core Infrastructure</h2>
+       <ul>
+         <li><strong>base.py</strong> - Vulkan availability and constants.</li>
+         <li><strong>core.py</strong> - Vulkan device, queue, memory, and buffer management.</li>
+         <li><strong>pipelines.py</strong> - Pipeline creation, caching, descriptor sets.</li>
+         <li><strong>shader_registry.py</strong> - Shader loading and metadata.</li>
+         <li><strong>buffer_pool.py</strong> - GPU buffer pooling for reuse.</li>
+         <li><strong>vma_wrapper.py</strong> - PyVMA integration for memory allocation.</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Main Entry Points</h2>
+       <ul>
+         <li><strong>compute.py</strong> - VulkanCompute class (composition of modules).</li>
+         <li><strong>snn_compute.py</strong> - High-level spiking neural network interface.</li>
+         <li><strong>autograd_core.py</strong> - Backend autograd and tracing utilities.</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Operation Modules</h2>
+       <div class="grid two">
+         <div>
+           <h3>Neural Ops</h3>
+           <ul>
+             <li>fnn.py - Feedforward ops (linear, activations, layernorm)</li>
+             <li>conv.py - Convolution kernels</li>
+             <li>pooling.py - Pooling kernels</li>
+             <li>normalization.py - Batch and layer normalization ops</li>
+             <li>attention.py - Attention kernels, Flash Attention 2</li>
+             <li>lora.py - LoRA helpers and kernels</li>
+           </ul>
+         </div>
+         <div>
+           <h3>Specialized Ops</h3>
+           <ul>
+             <li>snn.py - Spiking neural network kernels</li>
+             <li>memory.py - Memory read/write and context ops</li>
+             <li>faiss.py - Distance, topk, IVF filters</li>
+             <li>learning.py - EWC, NLMS, natural gradient, whitening</li>
+             <li>fft.py - FFT and spectral ops</li>
+             <li>contrastive.py - Contrastive loss and gradients</li>
+           </ul>
+         </div>
+         <div>
+           <h3>Domain-Specific</h3>
+           <ul>
+             <li>capsule_transformer.py - Capsule memory and transformer blocks</li>
+             <li>cells.py - Place cells and time cells</li>
+             <li>affect.py - Affective processing ops</li>
+             <li>hilbert.py - Hilbert curve utilities</li>
+             <li>snn_visualizer.py - Optional SNN visualization helpers</li>
+           </ul>
+         </div>
+         <div>
+           <h3>GLU Helpers</h3>
+           <ul>
+             <li>_glu_append.py - Fused GLU variants (SwiGLU, ReGLU, GeGLU)</li>
+           </ul>
+         </div>
+       </div>
+     </section>
+ 
+     <section>
+       <h2>Usage Guidance</h2>
+       <p>
+         Use backend modules if you need custom Vulkan workflows or want to extend kernel coverage.
+         For normal usage, prefer the high-level APIs in <code>grilly</code> and <code>grilly.nn</code>.
+       </p>
+     </section>
+   </main>
+   <footer>Grilly Docs - backend</footer>
+ </body>
+ </html>

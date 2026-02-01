@@ -1,0 +1,226 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>Module Map - Grilly</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>Module Map</h1>
+     <p>Complete list of Python files in the repository.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Top-Level</h2>
+       <ul>
+         <li>__init__.py - Package exports and convenience imports.</li>
+         <li>main.py - Minimal entry point for local execution.</li>
+         <li>test_quick.py - Quick sanity checks.</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>backend</h2>
+       <ul>
+         <li>backend/__init__.py</li>
+         <li>backend/_glu_append.py</li>
+         <li>backend/affect.py</li>
+         <li>backend/attention.py</li>
+         <li>backend/autograd_core.py</li>
+         <li>backend/base.py</li>
+         <li>backend/buffer_pool.py</li>
+         <li>backend/capsule_transformer.py</li>
+         <li>backend/cells.py</li>
+         <li>backend/compute.py</li>
+         <li>backend/contrastive.py</li>
+         <li>backend/conv.py</li>
+         <li>backend/core.py</li>
+         <li>backend/faiss.py</li>
+         <li>backend/fft.py</li>
+         <li>backend/fnn.py</li>
+         <li>backend/hilbert.py</li>
+         <li>backend/learning.py</li>
+         <li>backend/lora.py</li>
+         <li>backend/memory.py</li>
+         <li>backend/normalization.py</li>
+         <li>backend/pipelines.py</li>
+         <li>backend/pooling.py</li>
+         <li>backend/shader_registry.py</li>
+         <li>backend/snn.py</li>
+         <li>backend/snn_compute.py</li>
+         <li>backend/snn_visualizer.py</li>
+         <li>backend/vma_wrapper.py</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>nn</h2>
+       <ul>
+         <li>nn/__init__.py</li>
+         <li>nn/affect.py</li>
+         <li>nn/autograd.py</li>
+         <li>nn/capsule.py</li>
+         <li>nn/capsule_embedding.py</li>
+         <li>nn/cells.py</li>
+         <li>nn/conv.py</li>
+         <li>nn/decoding.py</li>
+         <li>nn/gpu_backward.py</li>
+         <li>nn/hippocampal.py</li>
+         <li>nn/lora.py</li>
+         <li>nn/loss.py</li>
+         <li>nn/memory.py</li>
+         <li>nn/module.py</li>
+         <li>nn/modules.py</li>
+         <li>nn/multimodal.py</li>
+         <li>nn/normalization.py</li>
+         <li>nn/parameter.py</li>
+         <li>nn/pooling.py</li>
+         <li>nn/rnn.py</li>
+         <li>nn/routing.py</li>
+         <li>nn/snn.py</li>
+         <li>nn/transformer.py</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>functional</h2>
+       <ul>
+         <li>functional/__init__.py</li>
+         <li>functional/activations.py</li>
+         <li>functional/attention.py</li>
+         <li>functional/bridge.py</li>
+         <li>functional/cells.py</li>
+         <li>functional/dropout.py</li>
+         <li>functional/embedding.py</li>
+         <li>functional/faiss.py</li>
+         <li>functional/fft.py</li>
+         <li>functional/learning.py</li>
+         <li>functional/linear.py</li>
+         <li>functional/loss.py</li>
+         <li>functional/memory.py</li>
+         <li>functional/normalization.py</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>optim</h2>
+       <ul>
+         <li>optim/__init__.py</li>
+         <li>optim/adam.py</li>
+         <li>optim/adamw.py</li>
+         <li>optim/base.py</li>
+         <li>optim/lr_scheduler.py</li>
+         <li>optim/natural_gradient.py</li>
+         <li>optim/nlms.py</li>
+         <li>optim/sgd.py</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>utils</h2>
+       <ul>
+         <li>utils/__init__.py</li>
+         <li>utils/checkpoint.py</li>
+         <li>utils/data.py</li>
+         <li>utils/device.py</li>
+         <li>utils/device_manager.py</li>
+         <li>utils/huggingface_bridge.py</li>
+         <li>utils/initialization.py</li>
+         <li>utils/numba_ops.py</li>
+         <li>utils/pytorch_compat.py</li>
+         <li>utils/pytorch_ops.py</li>
+         <li>utils/tensor_conversion.py</li>
+         <li>utils/visualization.py</li>
+         <li>utils/vulkan_sentence_transformer.py</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>scripts</h2>
+       <ul>
+         <li>scripts/__init__.py</li>
+         <li>scripts/install_pyvma.py</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>tutorials</h2>
+       <ul>
+         <li>tutorials/_path_setup.py</li>
+         <li>tutorials/01_quickstart.py</li>
+         <li>tutorials/02_fused_operations.py</li>
+         <li>tutorials/03_buffer_pool.py</li>
+         <li>tutorials/04_polynomial_regression.py</li>
+         <li>tutorials/05_neural_network.py</li>
+         <li>tutorials/06_transformer_components.py</li>
+         <li>tutorials/07_autograd.py</li>
+         <li>tutorials/08_advanced_activations.py</li>
+         <li>tutorials/08_custom_autograd.py</li>
+         <li>tutorials/09_data_loading.py</li>
+         <li>tutorials/10_gpu_training.py</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>examples (legacy)</h2>
+       <p class="note">
+         Example scripts exist in the repository but may be outdated. Use the Tutorials for
+         current, maintained guidance.
+       </p>
+       <ul>
+         <li>examples/build_simple_model.py</li>
+         <li>examples/huggingface_integration.py</li>
+         <li>examples/pytorch_to_vulkan.py</li>
+         <li>examples/sentence_transformers_gpu.py</li>
+         <li>examples/train_capsule_embeddings.py</li>
+         <li>examples/train_capsule_from_dataset.py</li>
+         <li>examples/vulkan_sentence_transformer_example.py</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>tests</h2>
+       <ul>
+         <li>tests/__init__.py</li>
+         <li>tests/conftest.py</li>
+         <li>tests/test_adamw.py</li>
+         <li>tests/test_attention.py</li>
+         <li>tests/test_backward.py</li>
+         <li>tests/test_batchnorm2d.py</li>
+         <li>tests/test_conv2d.py</li>
+         <li>tests/test_core.py</li>
+         <li>tests/test_device_manager.py</li>
+         <li>tests/test_gemm_backward.py</li>
+         <li>tests/test_gpu_operations.py</li>
+         <li>tests/test_gru.py</li>
+         <li>tests/test_huggingface_bridge.py</li>
+         <li>tests/test_huggingface_t5.py</li>
+         <li>tests/test_integration.py</li>
+         <li>tests/test_integration_vulkan.py</li>
+         <li>tests/test_learning.py</li>
+         <li>tests/test_lora.py</li>
+         <li>tests/test_lr_scheduler.py</li>
+         <li>tests/test_lstm.py</li>
+         <li>tests/test_memory_operations.py</li>
+         <li>tests/test_multimodal.py</li>
+         <li>tests/test_pooling.py</li>
+         <li>tests/test_pytorch_compat.py</li>
+         <li>tests/test_pytorch_ops.py</li>
+         <li>tests/test_sentence_transformers_gpu.py</li>
+         <li>tests/test_snn.py</li>
+         <li>tests/test_tensor_conversion.py</li>
+         <li>tests/test_vulkan_tensor.py</li>
+       </ul>
+     </section>
+   </main>
+   <footer>Grilly Docs - Module Map</footer>
+ </body>
+ </html>

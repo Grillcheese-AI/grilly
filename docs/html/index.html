@@ -1,0 +1,87 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>Grilly Documentation</title>
+   <link rel="stylesheet" href="assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>Grilly Documentation</h1>
+     <p>GPU-accelerated neural network framework using Vulkan compute shaders.</p>
+   </header>
+   <nav>
+     <a href="index.html">Home</a>
+     <a href="install/index.html">Installation</a>
+     <a href="api/index.html">API Reference</a>
+     <a href="tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <span class="pill">Overview</span>
+       <h2>What is Grilly?</h2>
+       <p>
+         Grilly is a Vulkan-first neural network framework that runs on AMD, NVIDIA, and Intel GPUs
+         using compute shaders. It provides a PyTorch-like API (<code>grilly.nn</code> and
+         <code>grilly.functional</code>) while exposing a low-level Vulkan backend for high-performance
+         kernels such as attention, convolution, FAISS-style similarity search, and spiking neural
+         networks.
+       </p>
+       <p class="note">
+         The HTML docs focus on public APIs and usage. Internal backend modules are documented for
+         contributors and advanced users.
+       </p>
+     </section>
+ 
+     <section class="grid two">
+       <div>
+         <h3>Installation</h3>
+         <p>Platform-specific Vulkan and PyVMA setup for Linux, Windows, and macOS.</p>
+         <p><a href="install/index.html">Go to Installation -></a></p>
+       </div>
+       <div>
+         <h3>API Reference</h3>
+         <p>Compute backend, neural network modules, functional API, optimizers, utilities.</p>
+         <p><a href="api/index.html">Go to API Reference -></a></p>
+       </div>
+       <div>
+         <h3>Tutorials</h3>
+         <p>Step-by-step guides from quickstart to full GPU training.</p>
+         <p><a href="tutorials/index.html">Go to Tutorials -></a></p>
+       </div>
+     </section>
+ 
+     <section>
+       <h2>Quick Start</h2>
+       <pre><code>import numpy as np
+ import grilly
+ 
+ backend = grilly.Compute()
+ 
+ x = np.random.randn(2, 64).astype(np.float32)
+ w = np.random.randn(128, 64).astype(np.float32)
+ b = np.zeros(128, dtype=np.float32)
+ 
+ y = backend.fnn.linear(x, w, b)
+ y = backend.fnn.activation_gelu(y)
+ print(y.shape)</code></pre>
+       <p class="note">
+         This example uses the low-level <code>Compute</code> backend. For a PyTorch-like API,
+         see <code>grilly.nn</code> and the tutorials.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Documentation Map</h2>
+       <ul>
+        <li><strong>Installation</strong> -> Vulkan SDK, drivers, PyVMA compilation, verification</li>
+        <li><strong>API Reference</strong> -> Core APIs, layers, functional ops, optimizers</li>
+        <li><strong>Tutorials</strong> -> 10 guided tutorials with code and explanations</li>
+        <li><strong>Backend</strong> -> Shader-backed kernels and advanced integrations</li>
+       </ul>
+     </section>
+   </main>
+   <footer>Grilly Docs - Generated for docs/html</footer>
+ </body>
+ </html>

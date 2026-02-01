@@ -1,0 +1,82 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>08 - Custom Autograd Functions</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>08 - Custom Autograd Functions</h1>
+     <p>Create custom differentiable operations with grilly.nn.autograd.Function.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Custom ReLU</h2>
+       <pre><code>import numpy as np
+ from grilly.nn.autograd import Function, FunctionCtx, Variable
+ 
+ class MyReLU(Function):
+     @staticmethod
+     def forward(ctx: FunctionCtx, x: Variable) -> np.ndarray:
+         ctx.save_for_backward(x)
+         return np.maximum(x.data, 0)
+ 
+     @staticmethod
+     def backward(ctx: FunctionCtx, grad_output: np.ndarray):
+         x, = ctx.saved_tensors
+         return grad_output * (x.data > 0).astype(np.float32)</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Custom Linear</h2>
+       <pre><code>class MyLinear(Function):
+     @staticmethod
+     def forward(ctx, x, weight, bias):
+         ctx.save_for_backward(x, weight, bias)
+         return x.data @ weight.data.T + bias.data
+ 
+     @staticmethod
+     def backward(ctx, grad_output):
+         x, weight, bias = ctx.saved_tensors
+         grad_x = grad_output @ weight.data
+         grad_w = grad_output.T @ x.data
+         grad_b = grad_output.sum(axis=0)
+         return grad_x, grad_w, grad_b</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Training with Custom Functions</h2>
+       <pre><code>from grilly.nn.autograd import tensor, randn, no_grad
+ 
+ x = tensor([[-1, 0, 1]], requires_grad=False)
+ w = randn(2, 3, requires_grad=True)
+ b = randn(2, requires_grad=True)
+ 
+ y = MyLinear.apply(x, w, b)
+ loss = y.sum()
+ loss.backward()
+ 
+ with no_grad():
+     w.data -= 0.01 * w.grad
+     b.data -= 0.01 * b.grad</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Custom Loss Example</h2>
+       <p>
+         The tutorial also implements a squared hinge loss for binary classification. Use custom
+         functions when you need full control over forward and backward passes.
+       </p>
+     </section>
+   </main>
+   <footer>Grilly Docs - Custom Autograd</footer>
+ </body>
+ </html>

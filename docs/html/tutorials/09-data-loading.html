@@ -1,0 +1,80 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>09 - Data Loading</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>09 - Data Loading</h1>
+     <p>Datasets, DataLoader, and preprocessing transforms.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Dataset and DataLoader</h2>
+       <p>
+         Grilly provides dataset abstractions and DataLoader utilities in
+         <code>grilly.utils.data</code>.
+       </p>
+       <pre><code>import numpy as np
+ from grilly.utils.data import TensorDataset, DataLoader
+ 
+ X = np.random.randn(1000, 784).astype(np.float32)
+ y = np.random.randint(0, 10, 1000)
+ 
+ dataset = TensorDataset(X, y)
+ loader = DataLoader(dataset, batch_size=64, shuffle=True)
+ 
+ for X_batch, y_batch in loader:
+     print(X_batch.shape, y_batch.shape)
+     break</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Transforms</h2>
+       <pre><code>from grilly.utils.data import Compose, Normalize, Flatten, OneHot
+ 
+ transform = Compose([
+     Flatten(),
+     Normalize(mean=0.0, std=1.0),
+ ])
+ 
+ target_transform = OneHot(num_classes=10)</code></pre>
+       <p class="note">
+         Use transforms to standardize inputs and reshape data for neural networks.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Training with DataLoader</h2>
+       <pre><code>from grilly.nn.autograd import Variable, cross_entropy, no_grad
+ 
+ # Example forward and loss
+ for X_batch, y_batch in loader:
+     X_flat = X_batch.reshape(X_batch.shape[0], -1).astype(np.float32)
+     x_var = Variable(X_flat, requires_grad=False)
+ 
+     # model.forward(...) -> logits
+     # loss = cross_entropy(logits, Variable(y_batch, requires_grad=False))</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Notes on Built-in Datasets</h2>
+       <p class="note">
+         Some environments provide dataset helpers (for example MNIST and CIFAR10). If those
+         modules are not present, you can load data manually and wrap it with TensorDataset or
+         ArrayDataset.
+       </p>
+     </section>
+   </main>
+   <footer>Grilly Docs - Data Loading</footer>
+ </body>
+ </html>

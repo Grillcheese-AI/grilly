@@ -1,0 +1,132 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>Core API - Grilly</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>Core API</h1>
+     <p>Main entry points and core Vulkan compute backend.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Top-Level Exports</h2>
+       <table>
+         <thead>
+           <tr>
+             <th>Export</th>
+             <th>Description</th>
+           </tr>
+         </thead>
+         <tbody>
+           <tr>
+             <td>grilly.Compute</td>
+             <td>Main Vulkan compute backend (alias of VulkanCompute).</td>
+           </tr>
+           <tr>
+             <td>grilly.SNNCompute</td>
+             <td>High-level spiking neural network interface.</td>
+           </tr>
+           <tr>
+             <td>grilly.Learning</td>
+             <td>Learning algorithms (EWC, NLMS, natural gradients).</td>
+           </tr>
+           <tr>
+             <td>grilly.VULKAN_AVAILABLE</td>
+             <td>Boolean indicating Vulkan availability.</td>
+           </tr>
+           <tr>
+             <td>CapsuleMemory / CapsuleTransformerConfig</td>
+             <td>Capsule memory configuration and helpers.</td>
+           </tr>
+           <tr>
+             <td>CognitiveFeatures / MemoryType</td>
+             <td>Enums and configuration for memory modules.</td>
+           </tr>
+         </tbody>
+       </table>
+     </section>
+ 
+     <section>
+       <h2>VulkanCompute</h2>
+       <p>
+         The central backend. It composes all Vulkan-accelerated modules and exposes them under
+         namespaces like <code>compute.fnn</code>, <code>compute.attention</code>,
+         <code>compute.memory</code>, and <code>compute.faiss</code>.
+       </p>
+       <h3>Constructor</h3>
+       <pre><code>compute = grilly.Compute(shader_dir=None)</code></pre>
+       <p class="note">
+         If <code>shader_dir</code> is provided, it overrides the default shader lookup path.
+       </p>
+ 
+       <h3>Core Attributes</h3>
+       <ul>
+         <li><code>compute.core</code> - VulkanCore instance (device, queues, memory).</li>
+         <li><code>compute.pipelines</code> - Pipeline registry and descriptor cache.</li>
+         <li><code>compute.shaders</code> - Loaded shader registry.</li>
+       </ul>
+ 
+       <h3>Operation Modules</h3>
+       <ul>
+         <li><code>compute.fnn</code> - Feedforward ops (linear, activations, layernorm).</li>
+         <li><code>compute.attention</code> - Attention kernels and Flash Attention 2.</li>
+         <li><code>compute.memory</code> - Memory read/write and context ops.</li>
+         <li><code>compute.faiss</code> - Vector similarity search (distance, topk).</li>
+         <li><code>compute.snn</code> - Spiking neural network kernels.</li>
+         <li><code>compute.learning</code> - EWC, NLMS, natural gradient, whitening.</li>
+         <li><code>compute.fft</code> - FFT kernels and spectral ops.</li>
+         <li><code>compute.conv</code> - Convolution kernels.</li>
+         <li><code>compute.pooling</code> - Pooling kernels.</li>
+         <li><code>compute.normalization</code> - Norm kernels beyond layernorm.</li>
+         <li><code>compute.lora</code> - LoRA-related kernels.</li>
+         <li><code>compute.affect</code> - Affective processing ops.</li>
+         <li><code>compute.cells</code> - Place and time cells.</li>
+       </ul>
+ 
+       <h3>Architecture Selection</h3>
+       <pre><code>compute.set_architecture("bert")</code></pre>
+       <p>
+         Selecting an architecture enables architecture-specific shader variants (BERT, GPT, T5,
+         DistilBERT, etc). It also exposes convenience wrappers on the compute instance such as
+         <code>compute.flash_attention2</code>.
+       </p>
+ 
+       <h3>Resource Management</h3>
+       <pre><code>compute.cleanup()</code></pre>
+       <p class="note">
+         Call this when you are done to release Vulkan resources and buffer pools.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Example</h2>
+       <pre><code>import numpy as np
+ import grilly
+ 
+ compute = grilly.Compute()
+ compute.set_architecture("bert")
+ 
+ x = np.random.randn(2, 64).astype(np.float32)
+ w = np.random.randn(128, 64).astype(np.float32)
+ b = np.zeros(128, dtype=np.float32)
+ 
+ y = compute.fnn.linear(x, w, b)
+ y = compute.fnn.activation_gelu(y)
+ print(y.shape)
+ 
+ compute.cleanup()</code></pre>
+     </section>
+   </main>
+   <footer>Grilly Docs - Core API</footer>
+ </body>
+ </html>

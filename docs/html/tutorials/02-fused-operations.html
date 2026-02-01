@@ -1,0 +1,91 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>02 - Fused Operations</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>02 - Fused Operations</h1>
+     <p>Combine multiple kernels into a single GPU dispatch for higher throughput.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Why Fused Ops?</h2>
+       <p>
+         Fused shaders reduce intermediate memory writes. For example, a linear projection followed
+         by GELU can be executed as a single kernel. This improves latency and throughput for
+         transformer workloads.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Benchmark: Linear + GELU</h2>
+       <pre><code>import numpy as np
+ import time
+ from grilly import Compute
+ 
+ compute = Compute()
+ 
+ x = np.random.randn(32, 256).astype(np.float32)
+ w = np.random.randn(512, 256).astype(np.float32)
+ b = np.random.randn(512).astype(np.float32)
+ 
+ # Warmup
+ for _ in range(5):
+     compute.fnn.linear(x, w, b)
+ 
+ iterations = 100
+ 
+ # Separate ops
+ start = time.perf_counter()
+ for _ in range(iterations):
+     out = compute.fnn.linear(x, w, b)
+     out = compute.fnn.activation_gelu(out)
+ separate_ms = (time.perf_counter() - start) / iterations * 1000
+ 
+ # Fused op
+ start = time.perf_counter()
+ for _ in range(iterations):
+     out = compute.fnn.fused_linear_gelu(x, w, b)
+ fused_ms = (time.perf_counter() - start) / iterations * 1000
+ 
+ print("Separate:", separate_ms, "ms")
+ print("Fused:", fused_ms, "ms")</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Available Fused Ops</h2>
+       <ul>
+         <li>fused_linear_gelu</li>
+         <li>fused_linear_relu</li>
+         <li>fused_linear_silu</li>
+         <li>fused_linear_gcu</li>
+         <li>fused_linear_roswish</li>
+       </ul>
+       <p class="note">
+         Fused GLU variants (SwiGLU, ReGLU, GeGLU) are implemented in the backend for transformer
+         FFN layers. Use them where appropriate for LLM-style architectures.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Performance Tips</h2>
+       <ul>
+         <li>Use fused ops inside transformer blocks (QKV and FFN).</li>
+         <li>Warm up kernels before benchmarking.</li>
+         <li>Keep batch sizes consistent for stable timings.</li>
+       </ul>
+     </section>
+   </main>
+   <footer>Grilly Docs - Fused Operations</footer>
+ </body>
+ </html>

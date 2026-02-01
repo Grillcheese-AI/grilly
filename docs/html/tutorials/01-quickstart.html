@@ -1,0 +1,85 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>01 - Quick Start</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>01 - Quick Start</h1>
+     <p>Basic GPU-accelerated operations using VulkanCompute.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Goal</h2>
+       <p>
+         Initialize the Vulkan backend, run a few core operations (activations, linear, layernorm),
+         and validate outputs. This mirrors <code>tutorials/01_quickstart.py</code>.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Step 1 - Initialize the Backend</h2>
+       <pre><code>import numpy as np
+ from grilly import Compute
+ 
+ compute = Compute()
+ print(f"GPU: {compute.core.device_properties.deviceName}")</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Step 2 - Activations</h2>
+       <pre><code>x = np.random.randn(4, 8).astype(np.float32)
+ 
+ relu_out = compute.fnn.activation_relu(x)
+ gelu_out = compute.fnn.activation_gelu(x)
+ softmax_out = compute.fnn.activation_softmax(x)
+ 
+ print(relu_out.shape)
+ print(gelu_out.shape)
+ print(softmax_out.sum(axis=-1))</code></pre>
+       <p class="note">
+         The softmax rows should sum to roughly 1.0.
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Step 3 - Linear Layer</h2>
+       <pre><code>x = np.random.randn(2, 64).astype(np.float32)
+ weights = np.random.randn(128, 64).astype(np.float32)
+ bias = np.random.randn(128).astype(np.float32)
+ 
+ y = compute.fnn.linear(x, weights, bias)
+ print(y.shape)  # (2, 128)</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Step 4 - Layer Normalization</h2>
+       <pre><code>x = np.random.randn(2, 64).astype(np.float32)
+ gamma = np.ones(64, dtype=np.float32)
+ beta = np.zeros(64, dtype=np.float32)
+ 
+ y = compute.fnn.layernorm(x, gamma, beta)
+ print(y.mean(), y.std())</code></pre>
+       <p class="note">
+         LayerNorm outputs should have mean near 0 and std near 1 (per row).
+       </p>
+     </section>
+ 
+     <section>
+       <h2>Cleanup</h2>
+       <pre><code>compute.cleanup()</code></pre>
+       <p class="note">Release Vulkan resources when done.</p>
+     </section>
+   </main>
+   <footer>Grilly Docs - Quick Start</footer>
+ </body>
+ </html>

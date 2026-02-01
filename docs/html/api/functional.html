@@ -1,0 +1,153 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>grilly.functional - API Reference</title>
+   <link rel="stylesheet" href="../assets/style.css" />
+ </head>
+ <body>
+   <header>
+     <h1>grilly.functional</h1>
+     <p>Stateless functional operators for Vulkan-accelerated workloads.</p>
+   </header>
+   <nav>
+     <a href="../index.html">Home</a>
+     <a href="../install/index.html">Installation</a>
+     <a href="../api/index.html">API Reference</a>
+     <a href="../tutorials/index.html">Tutorials</a>
+   </nav>
+   <main>
+     <section>
+       <h2>Usage</h2>
+       <p>
+         Functional APIs accept numpy arrays (float32) or VulkanTensor objects. They mirror
+         <code>torch.nn.functional</code> patterns and map to Vulkan kernels via the compute backend.
+       </p>
+       <pre><code>import numpy as np
+ from grilly import functional as F
+ 
+ x = np.random.randn(4, 128).astype(np.float32)
+ w = np.random.randn(256, 128).astype(np.float32)
+ b = np.zeros(256, dtype=np.float32)
+ 
+ y = F.linear(x, w, b)
+ y = F.gelu(y)
+ y = F.dropout(y, p=0.1)</code></pre>
+     </section>
+ 
+     <section>
+       <h2>Activations</h2>
+       <ul>
+         <li>relu</li>
+         <li>gelu</li>
+         <li>silu</li>
+         <li>softmax</li>
+         <li>softplus</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Linear and Normalization</h2>
+       <ul>
+         <li>linear</li>
+         <li>layer_norm</li>
+         <li>dropout</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Attention</h2>
+       <ul>
+         <li>attention</li>
+         <li>flash_attention2</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Loss Functions</h2>
+       <ul>
+         <li>cross_entropy</li>
+         <li>binary_cross_entropy</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>FFT</h2>
+       <ul>
+         <li>fft</li>
+         <li>ifft</li>
+         <li>fft_magnitude</li>
+         <li>fft_power_spectrum</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Memory Operations</h2>
+       <ul>
+         <li>memory_read</li>
+         <li>memory_write</li>
+         <li>memory_context_aggregate</li>
+         <li>memory_query_pooling</li>
+         <li>memory_inject_concat</li>
+         <li>memory_inject_gate</li>
+         <li>memory_inject_residual</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Cells</h2>
+       <ul>
+         <li>place_cell</li>
+         <li>time_cell</li>
+         <li>theta_gamma_encoding</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Learning</h2>
+       <ul>
+         <li>fisher_info</li>
+         <li>ewc_penalty</li>
+         <li>natural_gradient</li>
+         <li>fisher_normalize</li>
+         <li>nlms_predict, nlms_update, nlms_ensemble, nlms_metrics</li>
+         <li>whitening_transform, whitening_apply, whitening_batch_stats</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Bridge Operations</h2>
+       <ul>
+         <li>continuous_to_spikes</li>
+         <li>spikes_to_continuous</li>
+         <li>bridge_temporal_weights</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>Embedding</h2>
+       <ul>
+         <li>embedding_lookup</li>
+         <li>embedding_normalize</li>
+         <li>embedding_position</li>
+         <li>embedding_pool</li>
+         <li>embedding_ffn</li>
+         <li>embedding_attention</li>
+       </ul>
+     </section>
+ 
+     <section>
+       <h2>FAISS-Style Similarity</h2>
+       <ul>
+         <li>faiss_distance</li>
+         <li>faiss_topk</li>
+         <li>faiss_ivf_filter</li>
+         <li>faiss_kmeans_update</li>
+         <li>faiss_quantize</li>
+       </ul>
+     </section>
+   </main>
+   <footer>Grilly Docs - grilly.functional</footer>
+ </body>
+ </html>
