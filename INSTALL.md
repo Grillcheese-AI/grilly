@@ -11,4 +11,5 @@ Vulkan Supported GPU (Nvidia, Intel, AMD)
 32GB DDR4 RAM (faster is better)
 Intel i5 9th generation or i3 12th gen (i3 below 12th gen could work but slow)
 
+
 ## WITH PIP ##

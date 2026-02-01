@@ -60,9 +60,30 @@ Homepage = "https://grillcheeseai.com"
 Repository = "https://github.com/grillcheese-ai/grilly"
 Documentation = "https://grillcheeseai.com"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["grilly*"]
+# Explicit package mapping since pyproject.toml is inside the package directory
+[tool.setuptools]
+packages = [
+    "grilly",
+    "grilly.backend",
+    "grilly.nn",
+    "grilly.optim",
+    "grilly.utils",
+    "grilly.functional",
+    "grilly.scripts",
+    "grilly.tutorials",
+    "grilly.tests",
+]
+
+[tool.setuptools.package-dir]
+"grilly" = "."
+"grilly.backend" = "backend"
+"grilly.nn" = "nn"
+"grilly.optim" = "optim"
+"grilly.utils" = "utils"
+"grilly.functional" = "functional"
+"grilly.scripts" = "scripts"
+"grilly.tutorials" = "tutorials"
+"grilly.tests" = "tests"
 
 [tool.setuptools.package-data]
 grilly = [
