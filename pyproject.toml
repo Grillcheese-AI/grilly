@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grilly"
-version = "0.1.2"
+version = "0.2.0"
 description = "GPU-accelerated neural network operations using Vulkan compute shaders"
 readme = "README.md"
 license = {text = "MIT"}
@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
-keywords = ["vulkan", "gpu", "neural-network", "snn", "compute-shaders", "gpu-acceleration"]
+keywords = ["vulkan", "gpu", "neural-network", "snn", "compute-shaders", "gpu-acceleration", "lora-bridge", "huggingface-bridge", "machine-learning", "torch-alternative","synapse", "neuron network", "hebbian-learning"]
 
 dependencies = [
     "numba>=0.63.1",
