@@ -468,3 +468,24 @@ __all__.extend([
     'VisionLanguageModel',
     'VLMLayer',
 ])
+
+# LoRA (Low-Rank Adaptation) for efficient fine-tuning
+from .lora import (
+    LoRAConfig,
+    LoRALinear,
+    LoRAEmbedding,
+    LoRAAttention,
+    LoRAModel,
+    apply_lora_to_linear,
+    calculate_lora_params,
+)
+
+__all__.extend([
+    'LoRAConfig',
+    'LoRALinear',
+    'LoRAEmbedding',
+    'LoRAAttention',
+    'LoRAModel',
+    'apply_lora_to_linear',
+    'calculate_lora_params',
+])

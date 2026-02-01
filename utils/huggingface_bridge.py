@@ -4,9 +4,16 @@ HuggingFace Bridge for GPU Compatibility
 Provides a wrapper to run HuggingFace models (tokenizers, transformers) on CUDA
 while using Vulkan for custom operations. Handles seamless tensor conversion
 between PyTorch CUDA tensors and numpy arrays for Vulkan.
+
+Also provides LoRA (Low-Rank Adaptation) support for efficient fine-tuning:
+- Load pre-trained models with LoRA adapters
+- Save/load LoRA adapters independently
+- Apply LoRA to specific model layers
 """
 from typing import Optional, Union, Dict, Any, List, Tuple
+from pathlib import Path
 import numpy as np
+import json
 
 try:
     import torch
@@ -586,6 +593,355 @@ class HuggingFaceBridge:
     def to_cuda(self, array: np.ndarray, dtype: Optional[torch.dtype] = None) -> torch.Tensor:
         """Convert numpy array to PyTorch CUDA tensor"""
         return self.device_manager.to_cuda(array, dtype)
+    
+    # ============== LoRA Support ==============
+    
+    def load_model_with_lora(
+        self,
+        model_name: str,
+        lora_config: Optional[Dict[str, Any]] = None,
+        lora_path: Optional[Union[str, Path]] = None,
+        model_type: str = 'causal_lm',
+        target_modules: Optional[List[str]] = None,
+        rank: int = 8,
+        alpha: float = 16.0,
+        **kwargs
+    ) -> Tuple[Any, 'LoRAModel']:
+        """
+        Load a HuggingFace model with LoRA adapters for fine-tuning.
+        
+        This method:
+        1. Loads the base HuggingFace model
+        2. Extracts weights from target layers
+        3. Creates Grilly LoRA adapters for those layers
+        4. Optionally loads pre-trained LoRA weights
+        
+        Args:
+            model_name: HuggingFace model name or path
+            lora_config: Optional LoRAConfig dict (rank, alpha, target_modules, etc.)
+            lora_path: Optional path to pre-trained LoRA weights
+            model_type: Model type ('causal_lm', 'auto', 'sequence_classification')
+            target_modules: List of module names to apply LoRA to
+                Default for LLMs: ['q_proj', 'v_proj']
+            rank: LoRA rank (default: 8)
+            alpha: LoRA scaling factor (default: 16.0)
+            **kwargs: Additional arguments for model loading
+        
+        Returns:
+            Tuple of (base_model, lora_model):
+            - base_model: HuggingFace model (frozen)
+            - lora_model: Grilly LoRAModel with adapters
+        
+        Example:
+            >>> bridge = HuggingFaceBridge()
+            >>> model, lora = bridge.load_model_with_lora(
+            ...     "meta-llama/Llama-3.2-3B-Instruct",
+            ...     rank=8, alpha=16,
+            ...     target_modules=['q_proj', 'v_proj']
+            ... )
+            >>> # Train with lora.parameters()
+            >>> # Save with bridge.save_lora_adapters(lora, "path/to/lora")
+        """
+        from grilly.nn.lora import LoRAConfig, LoRAModel, LoRALinear
+        
+        # Load base model
+        base_model = self.load_model(model_name, model_type=model_type, **kwargs)
+        
+        # Freeze base model
+        for param in base_model.parameters():
+            param.requires_grad = False
+        
+        # Create LoRA config
+        if lora_config is not None:
+            config = LoRAConfig.from_dict(lora_config)
+        else:
+            if target_modules is None:
+                # Default target modules for common architectures
+                target_modules = self._get_default_target_modules(base_model)
+            config = LoRAConfig(
+                rank=rank,
+                alpha=alpha,
+                target_modules=target_modules,
+            )
+        
+        # Create LoRA model
+        lora_model = LoRAModel(config)
+        
+        # Find and wrap target modules
+        self._apply_lora_to_model(base_model, lora_model, config)
+        
+        # Load pre-trained LoRA weights if provided
+        if lora_path is not None:
+            lora_path = Path(lora_path)
+            if lora_path.exists():
+                logger.info(f"Loading LoRA weights from {lora_path}")
+                lora_model = LoRAModel.load_checkpoint(lora_path)
+        
+        # Print parameter summary
+        lora_model.print_trainable_parameters()
+        
+        return base_model, lora_model
+    
+    def _get_default_target_modules(self, model: Any) -> List[str]:
+        """Get default target modules for LoRA based on model architecture."""
+        model_name = model.__class__.__name__.lower()
+        
+        # Common attention projection names
+        if 'llama' in model_name or 'mistral' in model_name:
+            return ['q_proj', 'v_proj']
+        elif 'gpt' in model_name or 'gpt2' in model_name:
+            return ['c_attn']  # GPT-2 uses combined QKV
+        elif 'bert' in model_name:
+            return ['query', 'value']
+        elif 't5' in model_name:
+            return ['q', 'v']
+        else:
+            # Default: try common projection names
+            return ['q_proj', 'v_proj', 'query', 'value']
+    
+    def _apply_lora_to_model(
+        self,
+        model: Any,
+        lora_model: 'LoRAModel',
+        config: 'LoRAConfig'
+    ) -> None:
+        """
+        Apply LoRA adapters to target modules in the model.
+        
+        Extracts weights from PyTorch layers and creates corresponding
+        Grilly LoRA layers.
+        """
+        from grilly.nn.lora import LoRALinear
+        
+        for name, module in model.named_modules():
+            # Check if this module should have LoRA
+            module_name = name.split('.')[-1]
+            if module_name in config.target_modules:
+                # Check if it's a Linear layer
+                if hasattr(module, 'weight') and hasattr(module, 'in_features'):
+                    # Extract weight
+                    weight = module.weight.data.cpu().numpy()
+                    in_features = module.in_features
+                    out_features = module.out_features
+                    
+                    # Create LoRA layer
+                    lora_layer = lora_model.add_lora_layer(
+                        name=name,
+                        in_features=in_features,
+                        out_features=out_features,
+                        base_weights=weight,
+                    )
+                    
+                    logger.debug(f"Added LoRA to {name}: {in_features} -> {out_features}")
+    
+    def save_lora_adapters(
+        self,
+        lora_model: 'LoRAModel',
+        save_path: Union[str, Path],
+        model_name: Optional[str] = None,
+    ) -> None:
+        """
+        Save LoRA adapters to disk.
+        
+        Saves:
+        - config.json: LoRA configuration
+        - adapters.npz: LoRA A and B matrices
+        - metadata.json: Layer information and model name
+        
+        Args:
+            lora_model: LoRAModel instance
+            save_path: Directory to save adapters
+            model_name: Optional base model name for reference
+        
+        Example:
+            >>> bridge.save_lora_adapters(lora, "my_lora_adapters")
+            >>> # Later: bridge.load_lora_adapters("my_lora_adapters")
+        """
+        save_path = Path(save_path)
+        save_path.mkdir(parents=True, exist_ok=True)
+        
+        # Save using LoRAModel's method
+        lora_model.save_checkpoint(save_path)
+        
+        # Add model reference if provided
+        if model_name is not None:
+            meta_path = save_path / 'metadata.json'
+            if meta_path.exists():
+                with open(meta_path, 'r') as f:
+                    metadata = json.load(f)
+            else:
+                metadata = {}
+            
+            metadata['base_model'] = model_name
+            
+            with open(meta_path, 'w') as f:
+                json.dump(metadata, f, indent=2)
+        
+        logger.info(f"LoRA adapters saved to {save_path}")
+    
+    def load_lora_adapters(
+        self,
+        load_path: Union[str, Path],
+    ) -> 'LoRAModel':
+        """
+        Load LoRA adapters from disk.
+        
+        Args:
+            load_path: Directory containing saved adapters
+        
+        Returns:
+            LoRAModel instance with loaded weights
+        
+        Example:
+            >>> lora = bridge.load_lora_adapters("my_lora_adapters")
+            >>> # Use lora layers for inference
+        """
+        from grilly.nn.lora import LoRAModel
+        
+        load_path = Path(load_path)
+        
+        if not load_path.exists():
+            raise FileNotFoundError(f"LoRA checkpoint not found: {load_path}")
+        
+        lora_model = LoRAModel.load_checkpoint(load_path)
+        logger.info(f"LoRA adapters loaded from {load_path}")
+        
+        return lora_model
+    
+    def extract_model_weights(
+        self,
+        model_name: str,
+        layer_names: Optional[List[str]] = None,
+        model_type: str = 'causal_lm',
+    ) -> Dict[str, np.ndarray]:
+        """
+        Extract weights from a HuggingFace model for Vulkan inference.
+        
+        Args:
+            model_name: Model name or path
+            layer_names: Optional list of layer names to extract
+                        (None = extract all linear layers)
+            model_type: Model type
+        
+        Returns:
+            Dictionary mapping layer names to numpy weight arrays
+        
+        Example:
+            >>> weights = bridge.extract_model_weights("meta-llama/Llama-3.2-3B-Instruct")
+            >>> # Use weights with Vulkan compute backend
+        """
+        model = self.load_model(model_name, model_type=model_type)
+        
+        weights = {}
+        
+        for name, module in model.named_modules():
+            # Filter by layer names if specified
+            if layer_names is not None:
+                if not any(ln in name for ln in layer_names):
+                    continue
+            
+            # Extract linear layer weights
+            if hasattr(module, 'weight'):
+                weight = module.weight.data.cpu().numpy().astype(np.float32)
+                weights[name] = weight
+                
+                # Also extract bias if present
+                if hasattr(module, 'bias') and module.bias is not None:
+                    bias = module.bias.data.cpu().numpy().astype(np.float32)
+                    weights[f"{name}.bias"] = bias
+        
+        return weights
+    
+    def create_lora_from_weights(
+        self,
+        weights: Dict[str, np.ndarray],
+        target_modules: List[str],
+        rank: int = 8,
+        alpha: float = 16.0,
+    ) -> 'LoRAModel':
+        """
+        Create LoRA model from extracted weights.
+        
+        This is useful when you want to create LoRA adapters without
+        loading the full HuggingFace model (e.g., for Vulkan-only inference).
+        
+        Args:
+            weights: Dictionary of layer weights (from extract_model_weights)
+            target_modules: Layer name patterns to apply LoRA to
+            rank: LoRA rank
+            alpha: LoRA scaling factor
+        
+        Returns:
+            LoRAModel with adapters for target layers
+        
+        Example:
+            >>> weights = bridge.extract_model_weights("model_name")
+            >>> lora = bridge.create_lora_from_weights(
+            ...     weights,
+            ...     target_modules=['q_proj', 'v_proj'],
+            ...     rank=8
+            ... )
+        """
+        from grilly.nn.lora import LoRAConfig, LoRAModel
+        
+        config = LoRAConfig(
+            rank=rank,
+            alpha=alpha,
+            target_modules=target_modules,
+        )
+        
+        lora_model = LoRAModel(config)
+        
+        for name, weight in weights.items():
+            # Skip bias weights
+            if name.endswith('.bias'):
+                continue
+            
+            # Check if this layer should have LoRA
+            layer_name = name.split('.')[-1]
+            if any(tm in layer_name for tm in target_modules):
+                if len(weight.shape) == 2:
+                    out_features, in_features = weight.shape
+                    lora_model.add_lora_layer(
+                        name=name,
+                        in_features=in_features,
+                        out_features=out_features,
+                        base_weights=weight,
+                    )
+        
+        return lora_model
+    
+    def merge_lora_to_model(
+        self,
+        model: Any,
+        lora_model: 'LoRAModel',
+    ) -> Any:
+        """
+        Merge LoRA weights into the base model.
+        
+        After merging, the model can be used without LoRA overhead.
+        Note: This modifies the model in-place.
+        
+        Args:
+            model: HuggingFace model
+            lora_model: LoRAModel with trained adapters
+        
+        Returns:
+            Model with merged weights
+        """
+        for name, module in model.named_modules():
+            if name in lora_model.lora_layers:
+                lora_layer = lora_model.lora_layers[name]
+                
+                # Merge LoRA into base weights
+                lora_layer.merge_weights()
+                
+                # Update PyTorch module weight
+                if hasattr(module, 'weight'):
+                    merged_weight = self.torch.from_numpy(lora_layer.W.data)
+                    module.weight.data = merged_weight.to(module.weight.device)
+        
+        return model
 
 
 def get_huggingface_bridge(cuda_device: Optional[Union[str, int]] = None) -> HuggingFaceBridge:

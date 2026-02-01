@@ -140,3 +140,132 @@ class TestHuggingFaceBridgeVulkanOnly:
             if "Vulkan" in str(e) or "not available" in str(e).lower():
                 pytest.skip(f"Vulkan not available: {e}")
             raise
+
+
+class TestHuggingFaceBridgeLoRA:
+    """Test LoRA support in HuggingFace bridge (no external dependencies required)"""
+    
+    def test_lora_methods_exist(self):
+        """Test that LoRA methods are available on the class"""
+        assert hasattr(HuggingFaceBridge, 'load_model_with_lora')
+        assert hasattr(HuggingFaceBridge, 'save_lora_adapters')
+        assert hasattr(HuggingFaceBridge, 'load_lora_adapters')
+        assert hasattr(HuggingFaceBridge, 'extract_model_weights')
+        assert hasattr(HuggingFaceBridge, 'create_lora_from_weights')
+        assert hasattr(HuggingFaceBridge, 'merge_lora_to_model')
+    
+    def test_create_lora_from_weights(self):
+        """Test creating LoRA from weights dict (no HF model needed)"""
+        from grilly.nn.lora import LoRAModel, LoRAConfig
+        
+        # Simulate extracted weights
+        weights = {
+            'layer.0.attention.q_proj': np.random.randn(768, 768).astype(np.float32) * 0.01,
+            'layer.0.attention.v_proj': np.random.randn(768, 768).astype(np.float32) * 0.01,
+            'layer.0.attention.k_proj': np.random.randn(768, 768).astype(np.float32) * 0.01,
+            'layer.1.attention.q_proj': np.random.randn(768, 768).astype(np.float32) * 0.01,
+            'layer.1.attention.v_proj': np.random.randn(768, 768).astype(np.float32) * 0.01,
+        }
+        
+        # Create LoRA config
+        config = LoRAConfig(
+            rank=8,
+            alpha=16,
+            target_modules=['q_proj', 'v_proj']
+        )
+        
+        # Create LoRA model manually (same logic as bridge method)
+        lora_model = LoRAModel(config)
+        
+        for name, weight in weights.items():
+            layer_name = name.split('.')[-1]
+            if any(tm in layer_name for tm in config.target_modules):
+                if len(weight.shape) == 2:
+                    out_features, in_features = weight.shape
+                    lora_model.add_lora_layer(
+                        name=name,
+                        in_features=in_features,
+                        out_features=out_features,
+                        base_weights=weight,
+                    )
+        
+        # Verify LoRA layers were created for q_proj and v_proj only
+        assert len(lora_model.lora_layers) == 4  # 2 layers x 2 modules (q_proj, v_proj)
+        
+        # Verify k_proj was not included
+        for name in lora_model.lora_layers:
+            assert 'k_proj' not in name
+    
+    def test_lora_save_load_cycle(self):
+        """Test saving and loading LoRA adapters"""
+        import tempfile
+        from pathlib import Path
+        from grilly.nn.lora import LoRAModel, LoRAConfig
+        
+        # Create LoRA model
+        config = LoRAConfig(rank=4, alpha=8, target_modules=['q_proj'])
+        lora_model = LoRAModel(config)
+        
+        # Add some layers
+        lora_model.add_lora_layer('layer.0.q_proj', 256, 256)
+        lora_model.add_lora_layer('layer.1.q_proj', 256, 256)
+        
+        # Set some non-zero weights
+        for name, layer in lora_model.lora_layers.items():
+            layer.lora_A.data = np.random.randn(*layer.lora_A.data.shape).astype(np.float32)
+            layer.lora_B.data = np.random.randn(*layer.lora_B.data.shape).astype(np.float32)
+        
+        # Save to temp directory
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = Path(tmpdir) / 'lora_test'
+            lora_model.save_checkpoint(save_path)
+            
+            # Verify files exist
+            assert (save_path / 'config.json').exists()
+            assert (save_path / 'adapters.npz').exists()
+            assert (save_path / 'metadata.json').exists()
+            
+            # Load back
+            loaded_model = LoRAModel.load_checkpoint(save_path)
+            
+            # Verify structure matches
+            assert len(loaded_model.lora_layers) == len(lora_model.lora_layers)
+            assert loaded_model.config.rank == config.rank
+            assert loaded_model.config.alpha == config.alpha
+            
+            # Verify weights match
+            for name in lora_model.lora_layers:
+                orig = lora_model.lora_layers[name]
+                loaded = loaded_model.lora_layers[name]
+                np.testing.assert_array_almost_equal(
+                    orig.lora_A.data, loaded.lora_A.data, decimal=5
+                )
+                np.testing.assert_array_almost_equal(
+                    orig.lora_B.data, loaded.lora_B.data, decimal=5
+                )
+    
+    def test_lora_parameter_counting(self):
+        """Test LoRA reduces trainable parameter count"""
+        from grilly.nn.lora import calculate_lora_params
+        
+        # Simulate a 3B parameter model with 32 attention layers
+        # Each q_proj and v_proj: 4096 x 4096
+        model_params = 3_000_000_000
+        num_layers = 32
+        num_lora_layers = num_layers * 2  # q_proj + v_proj per layer
+        in_features = 4096
+        out_features = 4096
+        rank = 8
+        
+        stats = calculate_lora_params(
+            model_params=model_params,
+            num_lora_layers=num_lora_layers,
+            in_features=in_features,
+            out_features=out_features,
+            rank=rank,
+        )
+        
+        # Verify parameter reduction
+        assert stats['trainable_ratio'] < 0.01  # Less than 1% trainable
+        assert stats['lora_params'] < 10_000_000  # Less than 10M LoRA params
+        assert stats['total_training_memory_gb'] < 1.0  # Less than 1GB for training
