@@ -167,3 +167,4 @@ datasets/cifar-10-python.tar.gz
 /datasets
 /brain
 /experimental_todo
+/examples.excluded
