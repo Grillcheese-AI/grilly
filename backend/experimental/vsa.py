@@ -32,50 +32,10 @@ class VulkanVSA:
         self.core = core
         self.pipelines = VulkanPipelines(core)
         
-        # Load shaders
-        self.shaders = self._load_shaders()
-        
-        # Register shaders with core so pipelines can find them
-        for shader_name, shader_code in self.shaders.items():
-            if shader_name not in self.core.shaders:
-                self.core.shaders[shader_name] = shader_code
-        
+        # Experimental shaders are now automatically loaded by VulkanCore
+        # from shaders/experimental/spv directory. No need to load separately.
         # Create pipelines
         self._init_pipelines()
-    
-    def _load_shaders(self) -> dict:
-        """Load VSA shaders from experimental directory."""
-        shaders = {}
-        experimental_dir = self.core.shader_dir / "experimental"
-        experimental_spv_dir = experimental_dir / "spv"
-        
-        shader_names = [
-            "vsa-bind",
-            "vsa-bundle",
-            "vsa-similarity-batch",
-            "vsa-fft-convolve",
-        ]
-        
-        # Try to load from SPV directory first (compiled shaders)
-        if experimental_spv_dir.exists():
-            for shader_name in shader_names:
-                spv_path = experimental_spv_dir / f"{shader_name}.spv"
-                if spv_path.exists():
-                    with open(spv_path, 'rb') as f:
-                        shaders[shader_name] = f.read()
-        
-        # Also check main SPV directory (fallback)
-        main_spv_dir = self.core.shader_dir / "spv"
-        if main_spv_dir.exists():
-            for shader_name in shader_names:
-                if shader_name not in shaders:
-                    spv_path = main_spv_dir / f"{shader_name}.spv"
-                    if spv_path.exists():
-                        with open(spv_path, 'rb') as f:
-                            shaders[shader_name] = f.read()
-        
-        # Note: If shaders are not found, operations will fallback to CPU
-        return shaders
     
     def _init_pipelines(self):
         """Initialize compute pipelines."""
@@ -99,7 +59,7 @@ class VulkanVSA:
         assert len(b) == dim, "Vectors must have same dimension"
         
         # Check if shader available, otherwise fallback to CPU
-        if 'vsa-bind' not in self.shaders:
+        if 'vsa-bind' not in self.core.shaders:
             from grilly.experimental.vsa.ops import BinaryOps
             return BinaryOps.bind(a, b)
         
@@ -166,7 +126,7 @@ class VulkanVSA:
         num_vectors = len(vectors)
         
         # Check if shader available, otherwise fallback to CPU
-        if 'vsa-bundle' not in self.shaders:
+        if 'vsa-bundle' not in self.core.shaders:
             from grilly.experimental.vsa.ops import BinaryOps
             return BinaryOps.bundle(vectors)
         
@@ -235,7 +195,7 @@ class VulkanVSA:
         assert codebook.shape == (codebook_size, dim), "Invalid codebook shape"
         
         # Check if shader available, otherwise fallback to CPU
-        if 'vsa-similarity-batch' not in self.shaders:
+        if 'vsa-similarity-batch' not in self.core.shaders:
             from grilly.experimental.vsa.ops import BinaryOps
             return np.array([BinaryOps.similarity(query, vec) for vec in codebook])
         

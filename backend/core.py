@@ -33,8 +33,10 @@ class VulkanCore:
         self._init_vulkan()
     
     def _load_shaders(self):
-        """Load all .spv files"""
+        """Load all .spv files from main and experimental directories"""
         shaders = {}
+        
+        # Load from main spv directory
         spv_dir = Path(self.shader_dir) / "spv"
         if not spv_dir.exists():
             spv_dir = Path(self.shader_dir)
@@ -43,6 +45,16 @@ class VulkanCore:
             name = spv_file.stem
             with open(spv_file, 'rb') as f:
                 shaders[name] = f.read()
+        
+        # Also load from experimental/spv directory
+        experimental_spv_dir = Path(self.shader_dir) / "experimental" / "spv"
+        if experimental_spv_dir.exists():
+            for spv_file in experimental_spv_dir.glob("*.spv"):
+                name = spv_file.stem
+                # Only add if not already loaded (main directory takes precedence)
+                if name not in shaders:
+                    with open(spv_file, 'rb') as f:
+                        shaders[name] = f.read()
         
         # Check for missing shaders and warn
         required_shaders = ['fnn-xavier-init', 'convd_im2col', 'conv2d-backward-weight', 
