@@ -489,7 +489,7 @@ wheels = [
 
 [[package]]
 name = "grilly"
-version = "0.3.0.dev0"
+version = "0.3.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "numba" },
