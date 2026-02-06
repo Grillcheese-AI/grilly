@@ -264,11 +264,12 @@ class TestGEMMPerformance:
             linear.backward(grad_output, x)
         gpu_time = (time.perf_counter() - start) / num_iterations
 
-        # Benchmark CPU reference
+        # Benchmark CPU reference (ensure weight is a numpy ndarray for .T)
         start = time.perf_counter()
         for _ in range(num_iterations):
             x = np.random.randn(batch, in_features).astype(np.float32)
-            weight = linear.weight.data if hasattr(linear.weight, 'data') else np.asarray(linear.weight)
+            w = linear.weight.data if hasattr(linear.weight, 'data') else linear.weight
+            weight = np.asarray(w, dtype=np.float32).copy()
             output = x @ weight.T
             grad_output = np.random.randn(batch, out_features).astype(np.float32)
             grad_input = grad_output @ weight

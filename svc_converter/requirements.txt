@@ -1,0 +1,18 @@
+# SVC Converter Requirements
+# For GPU-accelerated processing on TensorDock/RunPod
+
+# Core NLP
+spacy>=3.7.0
+spacy-transformers>=1.3.0
+
+# GPU support (CUDA 11.x or 12.x)
+cupy-cuda12x>=12.0.0  # Change to cupy-cuda11x if using CUDA 11
+
+# Progress and utilities
+tqdm>=4.65.0
+
+# Data handling
+orjson>=3.9.0  # Faster JSON parsing (optional)
+
+# Download the transformer model after installing:
+# python -m spacy download en_core_web_trf

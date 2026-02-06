@@ -5,7 +5,7 @@ Answers "what if" questions by creating alternative timelines.
 """
 
 import numpy as np
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from grilly.experimental.temporal.state import TemporalWorldModel, TemporalState
 
