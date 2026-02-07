@@ -8,7 +8,6 @@ and functions across Grilly. Each submodule is rendered as its own HTML page.
    :maxdepth: 2
    :caption: API Packages
 
-   generated/grilly
    generated/grilly.backend
    generated/grilly.datasets
    generated/grilly.experimental
@@ -25,7 +24,6 @@ all submodules as independent pages.
    :toctree: generated
    :recursive:
 
-   grilly
    grilly.backend
    grilly.datasets
    grilly.experimental
