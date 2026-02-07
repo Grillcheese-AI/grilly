@@ -2,30 +2,24 @@ API Reference
 =============
 
 This section is generated from the codebase and documents modules, classes,
-and functions across Grilly.
+and functions across Grilly. Each submodule is rendered as its own HTML page.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Grilly API Reference
+   :caption: API Packages
 
-   grilly
-   grilly.backend
-   grilly.backend.experimental
-   grilly.datasets
-   grilly.experimental
-   grilly.experimental.cognitive
-   grilly.experimental.language
-   grilly.experimental.moe
-   grilly.experimental.temporal
-   grilly.experimental.vsa
-   grilly.functional
-   grilly.nn
-   grilly.optim
-   grilly.scripts
-   grilly.utils
+   generated/grilly
+   generated/grilly.backend
+   generated/grilly.datasets
+   generated/grilly.experimental
+   generated/grilly.functional
+   generated/grilly.nn
+   generated/grilly.optim
+   generated/grilly.scripts
+   generated/grilly.utils
 
-The pages below are generated recursively from importable modules and provide
-deep per-module entries for members, variables, and usage details.
+The pages below are generated recursively from importable modules and include
+all submodules as independent pages.
 
 .. autosummary::
    :toctree: generated

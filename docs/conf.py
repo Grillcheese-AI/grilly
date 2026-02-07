@@ -69,7 +69,13 @@ extensions = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "api/modules.rst",
+    "api/grilly*.rst",
+]
 
 source_suffix = ".rst"
 master_doc = "index"
@@ -80,7 +86,7 @@ html_title = f"{project} {version}"
 html_static_path = []
 html_theme_options = {
     "navigation_depth": 4,
-    "collapse_navigation": False,
+    "collapse_navigation": True,
     "sticky_navigation": True,
     "titles_only": False,
 }
