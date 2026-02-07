@@ -26,6 +26,7 @@ version = release
 
 extensions = [
     "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.githubpages",
@@ -46,7 +47,6 @@ html_static_path = []
 
 # Prevent RTD docs builds from failing when optional runtime deps are absent.
 autodoc_mock_imports = [
-    "vulkan",
     "torch",
     "transformers",
     "spacy",
@@ -59,6 +59,9 @@ autodoc_default_options = {
     "undoc-members": False,
     "show-inheritance": True,
 }
+autodoc_member_order = "bysource"
+autodoc_typehints = "description"
+autosummary_generate = True
 
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
@@ -66,3 +69,7 @@ napoleon_numpy_docstring = True
 
 # Required by sphinx-notfound-page for RTD links.
 notfound_urls_prefix = "/en/latest/"
+
+# Legacy modules contain mixed docstring styles; suppress autodoc parsing noise
+# so API pages still render comprehensively on RTD.
+suppress_warnings = ["autodoc"]

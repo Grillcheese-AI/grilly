@@ -20,6 +20,18 @@ is crossed. Typical state variables:
 - refractory timer
 - optional adaptation state (for GIF variants)
 
+Design choices
+--------------
+
+Grilly SNN design intentionally separates concerns:
+
+1. Backend kernels implement numerical updates (`lif_step`, STDP, Hebbian).
+2. `nn` modules provide PyTorch-like ergonomics for composition.
+3. `SNNCompute` provides a high-level convenience pipeline for rapid testing.
+
+This lets you start simple and progressively move closer to kernel-level
+control as your project matures.
+
 High-level SNN pipeline
 -----------------------
 

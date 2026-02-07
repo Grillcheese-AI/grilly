@@ -45,6 +45,15 @@ Embedding and lookup operations
 Embedding workflows include lookup, positional handling, normalization, and
 attention-friendly transforms, with Vulkan acceleration where available.
 
+Design choices
+--------------
+
+Specialized operations are kept as modular kernels instead of hidden internals:
+
+1. Researchers can compose niche operators without forking core modules.
+2. Domain-specific kernels can evolve independently from standard ANN layers.
+3. Experimental operators can keep CPU fallbacks while GPU kernels mature.
+
 Practical recommendation
 ------------------------
 

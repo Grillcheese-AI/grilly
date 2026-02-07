@@ -31,6 +31,17 @@ When to use which approach
 2. Use `PerceiverIO` for variable-length multimodal input handling.
 3. Use `VisionLanguageModel` stack when building end-to-end VLM-style systems.
 
+Design choices
+--------------
+
+The multimodal subsystem is intentionally pluralistic:
+
+1. Multiple fusion architectures are provided because no single strategy wins
+   across all modality/sequence regimes.
+2. Bottleneck and resampler options target memory/compute efficiency.
+3. VLM-oriented layers are exposed alongside lower-level fusion blocks so teams
+   can choose between rapid assembly and custom architecture work.
+
 Example: simple multimodal fusion
 ---------------------------------
 

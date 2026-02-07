@@ -3,17 +3,6 @@ Vulkan Autograd Core - Automatic Differentiation with GPU Acceleration
 
 This module provides tape-based automatic differentiation that integrates with
 the grilly nn.Module system and dispatches backward passes to GPU shaders.
-
-Architecture:
-    User Code (Python)
-        ↓
-    Grilly API (nn, functional, optim, utils)
-        ↓
-    Backend (VulkanCompute, Autograd)
-        ↓
-    Vulkan Shaders (SPIR-V)
-        ↓
-    GPU Hardware (AMD/NVIDIA/Intel)
 """
 
 import numpy as np
@@ -41,17 +30,14 @@ class GradientTape:
     """
     Records operations for automatic differentiation.
 
-    Usage:
+    Example::
+
         with GradientTape() as tape:
             y = model(x)
             loss = loss_fn(y, target)
         grads = tape.gradient(loss, model.parameters())
 
-    Or with the simpler API:
-        with GradientTape(watch=model.parameters()):
-            y = model(x)
-            loss = loss_fn(y, target)
-            loss.backward()  # Computes gradients automatically
+    You can also construct it with `watch=...` for convenience.
     """
 
     def __init__(self, persistent: bool = False, watch: List = None):

@@ -11,6 +11,16 @@ Grilly performance depends on:
 3. tensor shapes and batch sizing
 4. operation fusion opportunities
 
+Design choices
+--------------
+
+Performance and correctness tooling in Grilly favors explicitness:
+
+1. Keep kernel boundaries visible so bottlenecks are measurable.
+2. Preserve CPU fallback paths for differential testing and debugging.
+3. Use strict docs/test builds (`-W` and targeted suites) to catch regressions
+   early in CI and local workflows.
+
 Profiling strategy
 ------------------
 

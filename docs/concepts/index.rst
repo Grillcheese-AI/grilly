@@ -8,6 +8,7 @@ for a complete mental model of Grilly.
    :maxdepth: 2
 
    architecture_and_runtime
+   design_choices
    tensor_model_and_shapes
    module_system_and_functional_api
    training_and_optimization

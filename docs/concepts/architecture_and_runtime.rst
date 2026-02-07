@@ -47,6 +47,17 @@ Many operators include a CPU fallback when:
 This allows development and tests to run across more environments while still
 using GPU acceleration when available.
 
+Design choices
+--------------
+
+Key architecture decisions:
+
+1. Keep `VulkanCore` focused on Vulkan primitives, not ML semantics.
+2. Build operation-specific modules (`fnn`, `snn`, `attention`, etc.) above the
+   core for clear separation of concerns.
+3. Cache pipelines and descriptor layouts to reduce per-call setup overhead.
+4. Expose a composed `VulkanCompute` object so users get one backend entrypoint.
+
 Resource lifecycle
 ------------------
 

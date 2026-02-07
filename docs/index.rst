@@ -22,3 +22,9 @@ from first install to end-to-end workflows quickly.
    :caption: Tutorials
 
    tutorials/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API Reference
+
+   api/index

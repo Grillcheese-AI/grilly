@@ -21,6 +21,17 @@ From `grilly.utils.stable_hash`:
 These functions prefer BLAKE3 and fall back deterministically when BLAKE3 is
 unavailable.
 
+Design choices
+--------------
+
+Stable hashing and checkpointing were added to solve reproducibility and scale:
+
+1. Avoid process-randomized `hash()` for seed derivation in vector pipelines.
+2. Prefer BLAKE3 for speed and deterministic byte output.
+3. Store ingestion checkpoints in compact array formats (`npz`) with an explicit
+   manifest for forward compatibility.
+4. Support compressed sentence memory modes to control disk and RAM usage.
+
 Ingestion checkpoint system
 ---------------------------
 
