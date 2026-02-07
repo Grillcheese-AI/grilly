@@ -41,7 +41,7 @@ def main() -> None:
     ap.add_argument("--sources", "-s", nargs="*", default=None, help="Only these sources")
     ap.add_argument("--dim", "-d", type=int, default=2048)
     ap.add_argument("--chunk", type=int, default=4096, help="Entries per ingestion chunk")
-    ap.add_argument("--progress", type=int, default=50000, help="Print progress every N entries")
+    ap.add_argument("--progress", type=int, default=500, help="Print progress every N entries")
     ap.add_argument("--no-templates", action="store_true", help="Skip template learning")
     ap.add_argument("--no-realm-vectors", action="store_true", help="Skip realm vector building")
     ap.add_argument(

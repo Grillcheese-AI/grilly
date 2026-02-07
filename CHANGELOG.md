@@ -8,7 +8,32 @@ This changelog follows the spirit of **Keep a Changelog** and uses the terms **A
 
 ## [0.3.0] - 2026-02-07
 
+# Changelog
 
+All notable changes to this repository are documented here.
+
+## Unreleased
+
+### Added
+- `scripts/ingest_svc.py`: streaming SVC ingestion to avoid double-encoding (ingest once through `CognitiveController`) and support chunked processing for large JSONL files.
+- `tests/experimental/test_svc_ingest_speed.py`: regression test to ensure `InstantLanguage.ingest_svc(..., verbose=False)` stays quiet (no per-entry print spam).
+
+### Changed
+- Ingestion defaults are now friendlier for large corpora: optional `--no-ngrams` switch to bypass expensive n-gram HRR word construction during bulk ingestion.
+
+### Fixed
+- Test helper construction of `SVCEntry` now matches the current dataclass signature (`svc_s/svc_v/svc_c` instead of a nested `svc={...}` dict).
+
+## 2026-02 RDNA2 performance series
+
+### Added
+- RDNA2-friendly block-wise GEMM kernels and shader variants for matrix-heavy paths.
+- Top-k selection upgrade on GPU paths.
+
+### Fixed
+- Shader + test packaging to ship only modified kernels and their validation tests.
+
+### Performance
 
 ### Added
 - **RDNA2-friendly GEMM similarity path** for VSA dot-products (codebook projection / similarity) via the `gemm_mnk` shader (block-tiled matmul).

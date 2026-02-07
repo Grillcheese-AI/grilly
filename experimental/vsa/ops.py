@@ -16,6 +16,17 @@ Date: February 2026
 """
 
 import numpy as np
+
+# Stable hashing (BLAKE3) for deterministic string->vector
+try:
+    from utils.stable_hash import stable_u32, bipolar_from_key
+except ModuleNotFoundError:
+    try:
+        from grilly.utils.stable_hash import stable_u32, bipolar_from_key  # type: ignore
+    except Exception:
+        stable_u32 = None  # type: ignore
+        bipolar_from_key = None  # type: ignore
+
 from typing import List, Optional
 
 
@@ -179,37 +190,34 @@ class BinaryOps:
     @staticmethod
     def random_bipolar(dim: int, seed: Optional[int] = None) -> np.ndarray:
         """
-        Generate a random bipolar vector.
-        
-        Args:
-            dim: Dimension of the vector
-            seed: Optional random seed for reproducibility
-            
-        Returns:
-            Random bipolar vector with values +1 or -1
+        Generate a random bipolar vector (+1/-1).
+
+        NOTE: Uses a local RNG when seed is provided to avoid mutating global numpy state.
         """
-        if seed is not None:
-            np.random.seed(seed)
-        return np.sign(np.random.randn(dim)).astype(np.float32)
+        if seed is None:
+            return np.sign(np.random.randn(dim)).astype(np.float32)
+        rng = np.random.RandomState(seed)
+        return np.sign(rng.randn(dim)).astype(np.float32)
     
     @staticmethod
     def hash_to_bipolar(s: str, dim: int) -> np.ndarray:
         """
-        Deterministically hash a string to a bipolar vector.
-        
-        Same string always produces same vector.
-        
-        Args:
-            s: String to hash
-            dim: Dimension of output vector
-            
-        Returns:
-            Deterministic bipolar vector for the string
+        Deterministically map a string to a bipolar (+1/-1) vector.
+
+        IMPORTANT:
+        - Does NOT use Python's built-in `hash()` (which is randomized per-process).
+        - Uses BLAKE3 (preferred) via utils.stable_hash.bipolar_from_key.
+
+        Falls back to a stable-u32 seed (still deterministic) if the helper is unavailable.
         """
-        seed = hash(s) % (2**31)
+        if bipolar_from_key is not None:
+            return bipolar_from_key(s, dim, domain="grilly.vsa.binaryops")
+        # fallback: stable u32 -> RNG (still deterministic, but depends on numpy RNG)
+        if stable_u32 is None:
+            seed = 0
+        else:
+            seed = stable_u32(s, domain="grilly.vsa.binaryops.seed")
         return BinaryOps.random_bipolar(dim, seed)
-
-
 class HolographicOps:
     """
     Operations for continuous vectors using Holographic Reduced Representations (HRR).
@@ -383,15 +391,13 @@ class HolographicOps:
     def random_vector(dim: int, seed: Optional[int] = None) -> np.ndarray:
         """
         Generate a random unit vector.
-        
-        Args:
-            dim: Dimension of the vector
-            seed: Optional random seed for reproducibility
-            
-        Returns:
-            Random unit vector
+
+        NOTE: Uses a local RNG when seed is provided to avoid mutating global numpy state.
         """
-        if seed is not None:
-            np.random.seed(seed)
-        v = np.random.randn(dim).astype(np.float32)
+        if seed is None:
+            v = np.random.randn(dim).astype(np.float32)
+            return v / np.linalg.norm(v)
+
+        rng = np.random.RandomState(seed)
+        v = rng.randn(dim).astype(np.float32)
         return v / np.linalg.norm(v)

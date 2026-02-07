@@ -26,6 +26,7 @@ classifiers = [
 keywords = ["vulkan", "gpu", "neural-network", "snn", "compute-shaders", "gpu-acceleration", "lora-bridge", "huggingface-bridge", "machine-learning", "torch-alternative","synapse", "neuron network", "hebbian-learning"]
 
 dependencies = [
+    "blake3>=1.0.8",
     "numba>=0.63.1",
     "numpy",
     "pytest>=9.0.2",

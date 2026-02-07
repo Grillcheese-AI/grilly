@@ -5,6 +5,16 @@ Encodes words using n-grams and sentences using role-bound composition.
 """
 
 import numpy as np
+
+# Stable hashing (BLAKE3) for deterministic word seeding
+try:
+    from utils.stable_hash import stable_u32
+except ModuleNotFoundError:
+    try:
+        from grilly.utils.stable_hash import stable_u32  # type: ignore
+    except Exception:
+        stable_u32 = None  # type: ignore
+
 import re
 from typing import Dict, List, Optional, Tuple, Union
 from grilly.experimental.vsa.ops import HolographicOps
@@ -93,7 +103,7 @@ class WordEncoder:
             vec = self._encode_ngrams(word)
         else:
             # Deterministic random from hash
-            vec = HolographicOps.random_vector(self.dim, seed=hash(word) % (2**31))
+            vec = HolographicOps.random_vector(self.dim, seed=(stable_u32(word, domain='grilly.word') % (2**31) if stable_u32 else 0))
         
         self.word_vectors[word] = vec
         return vec

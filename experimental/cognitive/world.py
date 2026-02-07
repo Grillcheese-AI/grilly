@@ -5,6 +5,16 @@ Stores facts, constraints, and expectations for verifying statement coherence.
 """
 
 import numpy as np
+
+# Stable hashing (BLAKE3) for deterministic fact seeding
+try:
+    from utils.stable_hash import stable_u32
+except ModuleNotFoundError:
+    try:
+        from grilly.utils.stable_hash import stable_u32  # type: ignore
+    except Exception:
+        stable_u32 = None  # type: ignore
+
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from collections import defaultdict
@@ -83,9 +93,9 @@ class WorldModel:
     
     def encode_fact(self, subject: str, relation: str, object_: str) -> np.ndarray:
         """Encode a fact as a holographic vector."""
-        subj_vec = HolographicOps.random_vector(self.dim, seed=hash(subject) % (2**31))
-        rel_vec = self.relations.get(relation, HolographicOps.random_vector(self.dim, seed=hash(relation) % (2**31)))
-        obj_vec = HolographicOps.random_vector(self.dim, seed=hash(object_) % (2**31))
+        subj_vec = HolographicOps.random_vector(self.dim, seed=(stable_u32('subj', subject, domain='grilly.fact') % (2**31) if stable_u32 else 0))
+        rel_vec = self.relations.get(relation, HolographicOps.random_vector(self.dim, seed=(stable_u32('rel', relation, domain='grilly.fact') % (2**31) if stable_u32 else 0)))
+        obj_vec = HolographicOps.random_vector(self.dim, seed=(stable_u32('obj', object_, domain='grilly.fact') % (2**31) if stable_u32 else 0))
         
         # Fact = subject ⊗ relation ⊗ object
         return HolographicOps.convolve(

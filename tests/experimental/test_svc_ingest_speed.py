@@ -11,7 +11,9 @@ def _two_entries():
     e1 = SVCEntry(
         id="t1",
         text="Below, I've modified your code.",
-        svc={"s": "I", "v": "modify", "c": "your code"},
+        svc_s="I",
+        svc_v="modify",
+        svc_c="your code",
         pos=["ADV", "PRON", "AUX", "VERB", "PRON", "NOUN"],
         lemmas=["below", "i", "have", "modify", "your", "code"],
         deps=["advmod", "nsubj", "aux", "ROOT", "poss", "dobj"],
@@ -23,7 +25,9 @@ def _two_entries():
     e2 = SVCEntry(
         id="t2",
         text="The model predicts future events.",
-        svc={"s": "model", "v": "predict", "c": "future events"},
+        svc_s="model",
+        svc_v="predict",
+        svc_c="future events",
         pos=["DET", "NOUN", "VERB", "ADJ", "NOUN"],
         lemmas=["the", "model", "predict", "future", "event"],
         deps=["det", "nsubj", "ROOT", "amod", "dobj"],

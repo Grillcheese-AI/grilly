@@ -5,6 +5,16 @@ Provides causal rules and forward/backward propagation.
 """
 
 import numpy as np
+
+# Stable hashing (BLAKE3) for deterministic temporal seeding
+try:
+    from utils.stable_hash import stable_u32
+except ModuleNotFoundError:
+    try:
+        from grilly.utils.stable_hash import stable_u32  # type: ignore
+    except Exception:
+        stable_u32 = None  # type: ignore
+
 from typing import Dict, List, Tuple, Any, Optional
 from dataclasses import dataclass
 from collections import defaultdict
@@ -50,7 +60,7 @@ class CausalChain:
         """Get/create encoding for a variable name."""
         if name not in self.variable_vectors:
             self.variable_vectors[name] = HolographicOps.random_vector(
-                self.dim, seed=hash(name) % (2**31)
+                self.dim, seed=(stable_u32('name', name, domain='grilly.temporal') % (2**31) if stable_u32 else 0)
             )
         return self.variable_vectors[name]
     
@@ -58,7 +68,7 @@ class CausalChain:
         """Get/create encoding for a variable's value."""
         if value not in self.value_vectors[variable]:
             self.value_vectors[variable][value] = HolographicOps.random_vector(
-                self.dim, seed=hash((variable, str(value))) % (2**31)
+                self.dim, seed=(stable_u32('var', variable, 'val', str(value), domain='grilly.temporal') % (2**31) if stable_u32 else 0)
             )
         return self.value_vectors[variable][value]
     
