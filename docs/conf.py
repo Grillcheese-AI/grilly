@@ -9,9 +9,11 @@ import sys
 
 DOCS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = DOCS_DIR.parent
+EXT_DIR = DOCS_DIR / "_ext"
 
 # Ensure local package modules are importable by Sphinx/autodoc.
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(EXT_DIR))
 
 
 project = "grilly"
@@ -31,6 +33,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.githubpages",
     "notfound.extension",
+    "api_doc_enhancer",
 ]
 
 templates_path = ["_templates"]
@@ -56,7 +59,7 @@ autodoc_mock_imports = [
 
 autodoc_default_options = {
     "members": True,
-    "undoc-members": False,
+    "undoc-members": True,
     "show-inheritance": True,
 }
 autodoc_member_order = "bysource"
