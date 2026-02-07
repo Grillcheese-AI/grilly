@@ -22,22 +22,11 @@ from .ops import BinaryOps
 
 
 class ResonatorNetwork:
-    """
-    Resonator network for factorizing composite vectors.
-    
-    Given a composite vector formed by binding multiple factors:
-        composite = bind(factor_a, bind(factor_b, factor_c, ...))
-    
-    The resonator recovers each factor by:
-    1. Initialize estimates for each factor (randomly from codebook)
-    2. For each factor:
-       - Unbind all OTHER factors from composite
-       - Project result onto that factor's codebook
-       - Update estimate to best match
-    3. Repeat until convergence or max iterations
-    
-    This is a parallel, iterative algorithm that leverages the
-    mathematical properties of VSA binding.
+    """Resonator network for factorizing composite vectors.
+
+    The network iteratively estimates each factor by unbinding the other
+    current estimates from the composite vector and projecting the result
+    onto the target factor codebook.
     """
     
     def __init__(
