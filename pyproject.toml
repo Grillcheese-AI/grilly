@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grilly"
-version = "0.2.0"
+version = "0.3.0.20260207103851"
 description = "GPU-accelerated neural network operations using Vulkan compute shaders"
 readme = "README.md"
 license = {text = "MIT"}
@@ -26,12 +26,14 @@ classifiers = [
 keywords = ["vulkan", "gpu", "neural-network", "snn", "compute-shaders", "gpu-acceleration", "lora-bridge", "huggingface-bridge", "machine-learning", "torch-alternative","synapse", "neuron network", "hebbian-learning"]
 
 dependencies = [
+    "blake3>=1.0.8",
     "numba>=0.63.1",
-    "numpy>=1.24.0",
+    "numpy",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "pytest-benchmark>=5.2.3",
     "sentence-transformers>=5.2.0",
+    "spacy>=3.8.11",
     "torch>=2.10.0",
     "transformers>=4.57.6",
     "twine>=6.2.0",
@@ -72,6 +74,7 @@ packages = [
     "grilly.scripts",
     "grilly.tutorials",
     "grilly.tests",
+    "grilly.experimental"
 ]
 
 [tool.setuptools.package-dir]
@@ -84,6 +87,10 @@ packages = [
 "grilly.scripts" = "scripts"
 "grilly.tutorials" = "tutorials"
 "grilly.tests" = "tests"
+"grilly.experimental" = "experimental"
+"grilly.experimental_datasets" = "experimental_datasets"
+"grilly.datasets" = "datasets"
+"grilly.examples" = "examples"
 
 [tool.setuptools.package-data]
 grilly = [
@@ -94,7 +101,7 @@ grilly = [
 
 [tool.black]
 line-length = 100
-target-version = ["py310", "py311", "py312"]
+target-version = ["py312"]
 exclude = '''
 /(
     \.git
@@ -125,7 +132,7 @@ filterwarnings = [
 ]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true

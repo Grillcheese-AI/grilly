@@ -224,3 +224,6 @@ if PYTORCH_OPS_AVAILABLE:
 
 if VULKAN_SENTENCE_TRANSFORMER_AVAILABLE:
     __all__.append('VulkanSentenceTransformer')
+
+# Stable hashing
+from .stable_hash import stable_u32, stable_u64, stable_bytes, bipolar_from_key
