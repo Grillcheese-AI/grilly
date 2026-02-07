@@ -55,6 +55,17 @@ class TestWorldModelFacts:
         
         assert fact_vec.shape == (dim,)
 
+    def test_add_fact_sets_capsule_vector(self, dim):
+        """add_fact should set capsule vector for facts."""
+        from grilly.experimental.cognitive.world import WorldModel
+
+        world = WorldModel(dim=dim)
+
+        world.add_fact("dog", "is", "animal")
+
+        assert world.facts[0].capsule_vector is not None
+        assert world.facts[0].capsule_vector.shape == (world.capsule_dim,)
+
     def test_query_fact_finds_existing(self, dim):
         """query_fact should find existing facts."""
         from grilly.experimental.cognitive.world import WorldModel

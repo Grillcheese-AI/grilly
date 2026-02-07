@@ -11,6 +11,7 @@ from grilly.experimental.language.system import InstantLanguage
 from grilly.experimental.cognitive.memory import WorkingMemory
 from grilly.experimental.cognitive.world import WorldModel
 from grilly.experimental.vsa.ops import HolographicOps
+from grilly.experimental.cognitive.capsule import cosine_similarity
 
 
 @dataclass
@@ -160,8 +161,22 @@ class InternalSimulator:
             context_sim = HolographicOps.similarity(utterance_vec, context)
         else:
             context_sim = HolographicOps.similarity(utterance_vec, wm_context)
-        
-        # Confidence based on context alignment
-        confidence = (context_sim + 1) / 2  # Normalize to [0, 1]
-        
-        return confidence
+
+        vsa_conf = (context_sim + 1) / 2
+
+        capsule_conf = None
+        if self.wm.capsule_encoder is not None:
+            has_capsule_context = any(
+                item.capsule_vector is not None for item in self.wm.items
+            )
+            if has_capsule_context:
+                utterance_capsule = self.wm.capsule_encoder.encode_vector(utterance_vec)
+                context_capsule = self.wm.get_context_capsule()
+                if context_capsule is not None:
+                    capsule_sim = cosine_similarity(utterance_capsule, context_capsule)
+                    capsule_conf = (capsule_sim + 1) / 2
+
+        if capsule_conf is None:
+            return vsa_conf
+
+        return (vsa_conf + capsule_conf) / 2

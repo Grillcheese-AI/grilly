@@ -41,8 +41,10 @@ sentence_vec = sentence_encoder.encode_sentence(words)
 print(f"Sentence: {' '.join(words)}")
 print(f"Encoded sentence: shape={sentence_vec.shape}")
 
-roles = sentence_encoder.query_role(sentence_vec, "SUBJECT")
-print(f"Subject role query: {roles[:5]}")
+role_vec = sentence_encoder.query_role(sentence_vec, "SUBJ")
+print(f"Subject role query vector: {role_vec[:5]}")
+role_words = word_encoder.find_closest(role_vec, top_k=3)
+print(f"Closest words for SUBJ role: {role_words}")
 
 # Sentence Generator
 print("\n3. Sentence Generation")
@@ -51,11 +53,11 @@ print("-" * 60)
 generator = SentenceGenerator(sentence_encoder)
 
 template = generator.generate_from_roles({
-    "SUBJECT": "dog",
+    "SUBJ": "dog",
     "VERB": "barked",
-    "OBJECT": "loudly"
+    "OBJ": "loudly"
 })
-print(f"Generated sentence: {template}")
+print(f"Generated sentence: {' '.join(template)}")
 
 relation_sentence = generator.generate_from_relation("cat", "chases", "mouse")
 print(f"Relation sentence: {relation_sentence}")
@@ -68,8 +70,8 @@ parser = ResonatorParser(sentence_encoder, max_iterations=30)
 
 parsed = parser.parse(sentence_vec)
 print(f"Parsed sentence:")
-for word, role in parsed:
-    print(f"  {word}: {role}")
+for word, role, conf in parsed:
+    print(f"  {word}: {role} (conf={conf:.2f})")
 
 # Instant Language System
 print("\n5. Instant Language System")
@@ -82,9 +84,9 @@ lang.learn_sentence("the dog barked loudly")
 lang.learn_sentence("the bird flew high")
 
 print("Learned sentences:")
-for sentence in lang.language.sentence_encoder.word_encoder.vocabulary.keys():
-    if len(sentence.split()) > 1:
-        print(f"  {sentence}")
+for _, words in lang.sentence_memory:
+    sentence = " ".join(words)
+    print(f"  {sentence}")
 
 # Query relations
 result = lang.query_relation("cat", "chased")

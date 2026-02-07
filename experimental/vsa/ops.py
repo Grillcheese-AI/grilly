@@ -48,6 +48,28 @@ class BinaryOps:
             Bound bipolar vector
         """
         return (a * b).astype(np.float32)
+
+    @staticmethod
+    def bind_batch(a_batch: np.ndarray, b_batch: np.ndarray) -> np.ndarray:
+        """
+        Batch bind two sets of bipolar vectors via element-wise multiplication.
+
+        Args:
+            a_batch: Batch of vectors (batch, dim)
+            b_batch: Batch of vectors (batch, dim)
+
+        Returns:
+            Bound vectors (batch, dim)
+        """
+        a_batch = np.asarray(a_batch)
+        b_batch = np.asarray(b_batch)
+
+        if a_batch.shape != b_batch.shape:
+            raise ValueError("Batch inputs must have the same shape")
+        if a_batch.ndim != 2:
+            raise ValueError("Batch inputs must be 2D (batch, dim)")
+
+        return (a_batch * b_batch).astype(np.float32)
     
     @staticmethod
     def unbind(composite: np.ndarray, known: np.ndarray) -> np.ndarray:
@@ -91,6 +113,30 @@ class BinaryOps:
             result = np.sign(result + 1e-8).astype(np.float32)
         
         return result
+
+    @staticmethod
+    def bundle_batch(vectors: np.ndarray, normalize: bool = True) -> np.ndarray:
+        """
+        Bundle multiple batches of vectors via majority voting.
+
+        Args:
+            vectors: Array of shape (batch, num_vectors, dim)
+            normalize: If True, apply sign function for bipolar output
+
+        Returns:
+            Bundled vectors of shape (batch, dim)
+        """
+        vecs = np.asarray(vectors, dtype=np.float32)
+
+        if vecs.ndim != 3:
+            raise ValueError("vectors must have shape (batch, num_vectors, dim)")
+
+        result = np.sum(vecs, axis=1)
+
+        if normalize:
+            result = np.sign(result + 1e-8).astype(np.float32)
+
+        return result
     
     @staticmethod
     def similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -107,6 +153,28 @@ class BinaryOps:
             Similarity in range [-1, 1]
         """
         return float(np.dot(a, b) / len(a))
+
+    @staticmethod
+    def similarity_batch(query: np.ndarray, codebook: np.ndarray) -> np.ndarray:
+        """
+        Compute cosine similarity between a query and a codebook.
+
+        Args:
+            query: Query vector of shape (dim,)
+            codebook: Codebook vectors of shape (num_vectors, dim)
+
+        Returns:
+            Similarities of shape (num_vectors,)
+        """
+        query = np.asarray(query, dtype=np.float32)
+        codebook = np.asarray(codebook, dtype=np.float32)
+
+        if query.ndim != 1:
+            raise ValueError("query must be 1D (dim,)")
+        if codebook.ndim != 2 or codebook.shape[1] != query.shape[0]:
+            raise ValueError("codebook must have shape (num_vectors, dim)")
+
+        return (codebook @ query) / float(query.shape[0])
     
     @staticmethod
     def random_bipolar(dim: int, seed: Optional[int] = None) -> np.ndarray:
@@ -171,6 +239,30 @@ class HolographicOps:
             Convolved vector
         """
         return np.real(np.fft.ifft(np.fft.fft(a) * np.fft.fft(b))).astype(np.float32)
+
+    @staticmethod
+    def convolve_batch(a_batch: np.ndarray, b_batch: np.ndarray) -> np.ndarray:
+        """
+        Batch circular convolution via frequency domain multiplication.
+
+        Args:
+            a_batch: Batch of vectors (batch, dim)
+            b_batch: Batch of vectors (batch, dim)
+
+        Returns:
+            Convolved vectors (batch, dim)
+        """
+        a_batch = np.asarray(a_batch, dtype=np.float32)
+        b_batch = np.asarray(b_batch, dtype=np.float32)
+
+        if a_batch.shape != b_batch.shape:
+            raise ValueError("Batch inputs must have the same shape")
+        if a_batch.ndim != 2:
+            raise ValueError("Batch inputs must be 2D (batch, dim)")
+
+        fft_a = np.fft.fft(a_batch, axis=1)
+        fft_b = np.fft.fft(b_batch, axis=1)
+        return np.real(np.fft.ifft(fft_a * fft_b, axis=1)).astype(np.float32)
     
     @staticmethod
     def correlate(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -211,6 +303,32 @@ class HolographicOps:
                 result = result / norm
         
         return result
+
+    @staticmethod
+    def bundle_batch(vectors: np.ndarray, normalize: bool = True) -> np.ndarray:
+        """
+        Bundle multiple batches of vectors via element-wise sum.
+
+        Args:
+            vectors: Array of shape (batch, num_vectors, dim)
+            normalize: If True, normalize each result to unit length
+
+        Returns:
+            Bundled vectors of shape (batch, dim)
+        """
+        vecs = np.asarray(vectors, dtype=np.float32)
+
+        if vecs.ndim != 3:
+            raise ValueError("vectors must have shape (batch, num_vectors, dim)")
+
+        result = np.sum(vecs, axis=1).astype(np.float32)
+
+        if normalize:
+            norms = np.linalg.norm(result, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1.0, norms)
+            result = result / norms
+
+        return result
     
     @staticmethod
     def similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -231,6 +349,35 @@ class HolographicOps:
             return 0.0
         
         return float(np.dot(a, b) / (norm_a * norm_b))
+
+    @staticmethod
+    def similarity_batch(query: np.ndarray, codebook: np.ndarray) -> np.ndarray:
+        """
+        Compute cosine similarity between a query and a codebook.
+
+        Args:
+            query: Query vector of shape (dim,)
+            codebook: Codebook vectors of shape (num_vectors, dim)
+
+        Returns:
+            Similarities of shape (num_vectors,)
+        """
+        query = np.asarray(query, dtype=np.float32)
+        codebook = np.asarray(codebook, dtype=np.float32)
+
+        if query.ndim != 1:
+            raise ValueError("query must be 1D (dim,)")
+        if codebook.ndim != 2 or codebook.shape[1] != query.shape[0]:
+            raise ValueError("codebook must have shape (num_vectors, dim)")
+
+        norm_query = np.linalg.norm(query)
+        if norm_query == 0:
+            return np.zeros(codebook.shape[0], dtype=np.float32)
+
+        norms = np.linalg.norm(codebook, axis=1)
+        norms = np.where(norms == 0, 1.0, norms)
+        sims = (codebook @ query) / (norms * norm_query)
+        return sims.astype(np.float32)
     
     @staticmethod
     def random_vector(dim: int, seed: Optional[int] = None) -> np.ndarray:

@@ -5,14 +5,17 @@ Orchestrates understanding, simulation, and response generation with confidence 
 """
 
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Callable, TYPE_CHECKING
 from dataclasses import dataclass, field
-from grilly.experimental.language.system import InstantLanguage
+from grilly.experimental.language.system import InstantLanguage, SVCIngestionResult
 from grilly.experimental.cognitive.memory import WorkingMemory
 from grilly.experimental.cognitive.world import WorldModel
 from grilly.experimental.cognitive.simulator import InternalSimulator
 from grilly.experimental.cognitive.understander import Understander
 from grilly.experimental.cognitive.understander import UnderstandingResult
+
+if TYPE_CHECKING:
+    from grilly.experimental.language.svc_loader import SVCEntry
 
 
 @dataclass
@@ -60,19 +63,120 @@ class CognitiveController:
         # State tracking
         self.current_state: Optional[CognitiveState] = None
         self.thinking_trace: List[str] = []
+
+        # Optional temporal validation
+        self.temporal_world = None
+        self.temporal_validator = None
+        self.decision_extractor: Optional[Callable[[str], Dict[str, object]]] = None
+        self.temporal_check_horizon = 5
     
     def add_knowledge(self, subject: str, relation: str, object_: str):
         """Add knowledge to world model."""
         self.world.add_fact(subject, relation, object_)
+
+    def ingest_svc(
+        self,
+        entries: List['SVCEntry'],
+        learn_templates: bool = True,
+        build_realm_vectors: bool = True,
+        verbose: bool = False,
+        engine: Optional[object] = None,
+    ) -> SVCIngestionResult:
+        """
+        Ingest SVC data into the full cognitive system.
+
+        When a GPU is available the heavy VSA operations are dispatched
+        to Vulkan compute shaders via an ``SVCIngestionEngine``.
+        Pass *engine* to control backend selection.
+
+        This does three things:
+        1. Feeds entries into InstantLanguage (via the engine) for sentence
+           encoding, vocabulary building, template learning, and realm
+           vectors.
+        2. Adds each SVC triple (s, root_verb, c) as a world model fact
+           so the controller can use them for coherence checking.
+        3. Adds causal expectations when the root verb implies causality.
+
+        Args:
+            entries: List of SVCEntry instances.
+            learn_templates: If True, learn sentence templates.
+            build_realm_vectors: If True, build realm expert vectors.
+            verbose: If True, print progress.
+            engine: Optional SVCIngestionEngine (auto-created if None).
+
+        Returns:
+            SVCIngestionResult with statistics.
+        """
+        # 1. Language-level ingestion (GPU-accelerated via engine)
+        result = self.language.ingest_svc(
+            entries,
+            learn_templates=learn_templates,
+            build_realm_vectors=build_realm_vectors,
+            verbose=verbose,
+            engine=engine,
+        )
+
+        # 2. World model facts
+        causal_verbs = {
+            "cause", "causes", "prevent", "prevents", "improve", "improves",
+            "reduce", "reduces", "increase", "increases", "enable", "enables",
+            "lead", "leads", "result", "results", "produce", "produces",
+        }
+
+        for entry in entries:
+            subject = entry.svc_s.lower()
+            verb = entry.root_verb.lower()
+            complement = entry.svc_c.lower()
+
+            # Add as world fact
+            self.world.add_fact(
+                subject=subject,
+                relation=verb,
+                object_=complement,
+                confidence=min(1.0, 0.5 + entry.complexity),
+                source=entry.source,
+            )
+
+            # 3. Causal link if the verb implies causation
+            if verb in causal_verbs:
+                self.world.add_causal_link(
+                    cause=subject,
+                    effect=complement,
+                    strength=0.5 + entry.complexity * 0.5,
+                )
+
+        return result
     
     def understand(self, text: str) -> UnderstandingResult:
         """Just understand without responding."""
         return self.understander.understand(text)
+
+    def set_temporal_validation(
+        self,
+        world_model,
+        validator,
+        decision_extractor: Optional[Callable[[str], Dict[str, object]]] = None,
+        check_horizon: int = 5
+    ) -> None:
+        """
+        Attach temporal validation for candidate filtering.
+
+        Args:
+            world_model: TemporalWorldModel instance
+            validator: TemporalDecisionValidator instance
+            decision_extractor: Optional function mapping text -> decision dict
+            check_horizon: How far into the future to validate
+        """
+        self.temporal_world = world_model
+        self.temporal_validator = validator
+        self.decision_extractor = decision_extractor
+        self.temporal_check_horizon = check_horizon
     
     def process(
         self,
         input_text: str,
-        verbose: bool = False
+        verbose: bool = False,
+        decision_time: Optional[int] = None
     ) -> Optional[str]:
         """
         Process input and generate response.
@@ -117,6 +221,14 @@ class CognitiveController:
         # Sort by overall score
         evaluated.sort(key=lambda x: x[1].overall_score, reverse=True)
         state.candidates = evaluated
+
+        # 3.5 TEMPORAL VALIDATION
+        evaluated = self._apply_temporal_validation(
+            evaluated,
+            decision_time=decision_time,
+            verbose=verbose
+        )
+        state.candidates = evaluated
         
         # 4. SELECT best candidate
         if evaluated:
@@ -139,6 +251,59 @@ class CognitiveController:
         
         self.current_state = state
         return None
+
+    def _extract_decision(self, text: str) -> Dict[str, object]:
+        """
+        Extract decision variables from text.
+
+        If a custom extractor is set, it is used. Otherwise, a simple
+        heuristic handles patterns like "x is y".
+        """
+        if self.decision_extractor is not None:
+            return self.decision_extractor(text)
+
+        parts = text.lower().split()
+        if len(parts) >= 3:
+            if parts[1] in {"is", "are", "was", "were"}:
+                subject = parts[0]
+                value = " ".join(parts[2:])
+                return {subject: value}
+
+        return {}
+
+    def _apply_temporal_validation(
+        self,
+        evaluated: List[Tuple[str, 'SimulationResult']],
+        decision_time: Optional[int],
+        verbose: bool
+    ) -> List[Tuple[str, 'SimulationResult']]:
+        if self.temporal_validator is None or self.temporal_world is None:
+            return evaluated
+
+        if decision_time is None:
+            decision_time = getattr(self.temporal_world, "current_time", 0)
+
+        filtered: List[Tuple[str, 'SimulationResult']] = []
+        for candidate, result in evaluated:
+            decision = self._extract_decision(candidate)
+            if not decision:
+                filtered.append((candidate, result))
+                continue
+
+            validation = self.temporal_validator.validate_decision(
+                decision_time=decision_time,
+                decision=decision,
+                check_horizon=self.temporal_check_horizon
+            )
+
+            if validation.is_valid:
+                filtered.append((candidate, result))
+            elif verbose:
+                self.thinking_trace.append(
+                    f"Temporal reject '{candidate}': {validation.violations}"
+                )
+
+        return filtered
     
     def _generate_candidates(self, understanding: UnderstandingResult) -> List[str]:
         """Generate candidate responses."""

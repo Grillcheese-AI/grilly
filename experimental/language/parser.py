@@ -112,66 +112,30 @@ class ResonatorParser:
         Given known vocabulary, find which words are present
         and what roles they fill - ALL SIMULTANEOUSLY.
         """
-        # Build word codebook from known words
-        word_codebook = np.array([
-            self.word_encoder.encode_word(w) for w in known_words
-        ])
-        
-        # Initialize estimates
-        word_estimates = np.random.randn(len(known_words), self.dim).astype(np.float32)
-        role_estimates = np.random.randn(len(self.role_names), self.dim).astype(np.float32)
-        
-        # Resonator iterations
-        for _ in range(num_iterations):
-            # Update word estimates
-            for i in range(len(known_words)):
-                # Unbind all role estimates
-                unbound = sentence_vec.copy()
-                for j, role_est in enumerate(role_estimates):
-                    if HolographicOps.similarity(word_estimates[i], word_codebook[i]) > 0.5:
-                        unbound = HolographicOps.correlate(unbound, role_est)
-                
-                # Project onto word codebook
-                sims = []
-                for word_vec in word_codebook:
-                    sim = HolographicOps.similarity(unbound, word_vec)
-                    sims.append(sim)
-                word_estimates[i] = word_codebook[np.argmax(sims)]
-            
-            # Update role estimates
-            for j in range(len(self.role_names)):
-                # Unbind word estimates
-                unbound = sentence_vec.copy()
-                for i, word_est in enumerate(word_estimates):
-                    unbound = HolographicOps.correlate(unbound, word_est)
-                
-                # Project onto role codebook
-                sims = []
-                for role_vec in self.role_codebook:
-                    sim = HolographicOps.similarity(unbound, role_vec)
-                    sims.append(sim)
-                role_estimates[j] = self.role_codebook[np.argmax(sims)]
-        
-        # Extract results
-        results = {}
-        for i, word in enumerate(known_words):
-            # Find which role this word has
+        # Deterministic role recovery using role and position unbinding
+        max_positions = min(len(known_words), len(self.encoder.position_vectors))
+        role_pos_estimates: Dict[Tuple[str, int], np.ndarray] = {}
+
+        for role_name, role_vec in self.encoder.roles.items():
+            role_unbound = HolographicOps.correlate(sentence_vec, role_vec)
+            for pos in range(max_positions):
+                pos_vec = self.encoder.position_vectors[pos]
+                estimate = HolographicOps.correlate(role_unbound, pos_vec)
+                role_pos_estimates[(role_name, pos)] = estimate
+
+        results: Dict[str, Tuple[str, float]] = {}
+        for word in known_words:
             word_vec = self.word_encoder.encode_word(word)
-            
             best_role = None
-            best_conf = 0.0
-            
-            for j, role_name in enumerate(self.role_names):
-                role_vec = self.encoder.roles[role_name]
-                # Check if word ⊗ role is in sentence
-                bound = HolographicOps.convolve(word_vec, role_vec)
-                sim = HolographicOps.similarity(sentence_vec, bound)
-                
+            best_conf = -1.0
+
+            for (role_name, _), estimate in role_pos_estimates.items():
+                sim = HolographicOps.similarity(estimate, word_vec)
                 if sim > best_conf:
                     best_conf = sim
                     best_role = role_name
-            
-            if best_role and best_conf > 0.1:
+
+            if best_role is not None and best_conf > 0.1:
                 results[word] = (best_role, best_conf)
-        
+
         return results

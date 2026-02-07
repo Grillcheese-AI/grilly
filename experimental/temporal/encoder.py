@@ -28,10 +28,10 @@ class TemporalEncoder:
         self.max_time = max_time
         
         # Base time vector (T=0)
-        self.t0 = HolographicOps.random_vector(dim, seed=8000)
+        self.t0 = self._unitary(HolographicOps.random_vector(dim, seed=8000))
         
         # Time increment vector (add this to get next time)
-        self.dt = HolographicOps.random_vector(dim, seed=8001)
+        self.dt = self._unitary(HolographicOps.random_vector(dim, seed=8001))
         
         # Pre-compute time vectors for efficiency
         self.time_vectors: Dict[int, np.ndarray] = {}
@@ -57,7 +57,15 @@ class TemporalEncoder:
         for t in range(1, self.max_time):
             # T(n) = T(n-1) ⊗ dt
             current = HolographicOps.convolve(current, self.dt)
+            current = self._unitary(current)
             self.time_vectors[t] = current.copy()
+
+    def _unitary(self, vec: np.ndarray) -> np.ndarray:
+        """Project vector to unitary form in frequency domain."""
+        fft = np.fft.fft(vec)
+        mag = np.abs(fft)
+        fft = fft / (mag + 1e-8)
+        return np.real(np.fft.ifft(fft)).astype(np.float32)
     
     def encode_time(self, t: int) -> np.ndarray:
         """Get time vector for discrete time t."""
@@ -69,6 +77,7 @@ class TemporalEncoder:
             current = self.time_vectors[self.max_time - 1]
             for _ in range(t - self.max_time + 1):
                 current = HolographicOps.convolve(current, self.dt)
+                current = self._unitary(current)
             return current
         
         return self.time_vectors.get(t, self.t0)

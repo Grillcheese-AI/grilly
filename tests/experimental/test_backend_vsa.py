@@ -76,8 +76,7 @@ class TestVulkanVSABindBipolar:
             a_batch = np.array([BinaryOps.random_bipolar(dim) for _ in range(batch_size)])
             b_batch = np.array([BinaryOps.random_bipolar(dim) for _ in range(batch_size)])
             
-            # Use individual bind calls for batch (batch method not implemented yet)
-            result = np.array([vsa.bind_bipolar(a, b) for a, b in zip(a_batch, b_batch)])
+            result = vsa.bind_bipolar_batch(a_batch, b_batch)
             
             assert result.shape == (batch_size, dim)
         except RuntimeError:
@@ -104,6 +103,33 @@ class TestVulkanVSABundle:
             gpu_result = vsa.bundle(vectors)
             
             np.testing.assert_array_almost_equal(cpu_result, gpu_result, decimal=5)
+        except RuntimeError:
+            pytest.skip("Vulkan not available")
+
+    def test_bundle_batch_matches_cpu(self, dim):
+        """GPU bundle_batch should match CPU BinaryOps.bundle for each batch."""
+        from grilly.backend.experimental.vsa import VulkanVSA
+        from grilly.backend.core import VulkanCore
+        from grilly.experimental.vsa.ops import BinaryOps
+
+        try:
+            core = VulkanCore()
+            vsa = VulkanVSA(core)
+
+            batch_size = 4
+            num_vectors = 5
+            vectors = np.array(
+                [
+                    [BinaryOps.random_bipolar(dim) for _ in range(num_vectors)]
+                    for _ in range(batch_size)
+                ],
+                dtype=np.float32,
+            )
+
+            cpu_results = BinaryOps.bundle_batch(vectors)
+            gpu_results = vsa.bundle_batch(vectors)
+
+            np.testing.assert_array_almost_equal(cpu_results, gpu_results, decimal=5)
         except RuntimeError:
             pytest.skip("Vulkan not available")
 
@@ -167,28 +193,29 @@ class TestVulkanVSAResonator:
         """GPU resonator_step should match CPU resonator iteration."""
         from grilly.backend.experimental.vsa import VulkanVSA
         from grilly.backend.core import VulkanCore
-        from grilly.experimental.vsa.resonator import ResonatorNetwork
         from grilly.experimental.vsa.ops import BinaryOps
         
         try:
             core = VulkanCore()
             vsa = VulkanVSA(core)
-            
-            # Create simple resonator
-            codebook = np.sign(np.random.randn(5, dim)).astype(np.float32)
-            resonator = ResonatorNetwork(codebooks={"factor": codebook})
-            
-            composite = BinaryOps.bind(codebook[0], codebook[1])
-            
-            # Test full factorization (GPU resonator_step not implemented yet)
-            estimates, indices, iterations = resonator.factorize(composite)
-            
-            # Should recover at least one factor
-            assert "factor" in estimates
-            assert len(estimates["factor"]) == dim
-            
-            # GPU step implementation pending
-            pytest.skip("Resonator step GPU implementation pending")
+
+            if 'vsa-resonator-step' not in core.shaders:
+                pytest.skip("Resonator step shader not available")
+
+            # Simple two-factor composite
+            codebook = np.sign(np.random.randn(8, dim)).astype(np.float32)
+            composite = BinaryOps.bind(codebook[2], codebook[5])
+
+            # CPU reference: unbind one factor and project
+            unbound = BinaryOps.unbind(composite, codebook[5])
+            cpu_scores = (codebook @ unbound) / float(dim)
+            cpu_idx = int(np.argmax(cpu_scores))
+            cpu_vec = codebook[cpu_idx].copy()
+
+            gpu_vec, gpu_idx = vsa.resonator_step(composite, codebook, other_estimates=[codebook[5]])
+
+            assert gpu_idx == cpu_idx
+            np.testing.assert_array_almost_equal(cpu_vec, gpu_vec, decimal=5)
         except RuntimeError:
             pytest.skip("Vulkan not available")
 

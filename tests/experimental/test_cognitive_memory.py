@@ -166,6 +166,33 @@ class TestWorkingMemoryContext:
         assert context.shape == (dim,)
         np.testing.assert_array_equal(context, np.zeros(dim))
 
+    def test_get_context_capsule_returns_vector(self, dim):
+        """get_context_capsule should return capsule vector."""
+        from grilly.experimental.cognitive.memory import WorkingMemory, WorkingMemorySlot
+        from grilly.experimental.vsa.ops import HolographicOps
+
+        wm = WorkingMemory(dim=dim)
+
+        vec = HolographicOps.random_vector(dim)
+        wm.add(vec, "test", WorkingMemorySlot.CONTEXT)
+
+        capsule = wm.get_context_capsule()
+
+        assert capsule is not None
+        assert capsule.shape == (wm.capsule_dim,)
+
+    def test_get_context_capsule_empty_returns_zeros(self, dim):
+        """get_context_capsule should return zeros if empty."""
+        from grilly.experimental.cognitive.memory import WorkingMemory
+
+        wm = WorkingMemory(dim=dim)
+
+        capsule = wm.get_context_capsule()
+
+        assert capsule is not None
+        assert capsule.shape == (wm.capsule_dim,)
+        np.testing.assert_array_equal(capsule, np.zeros(wm.capsule_dim))
+
     def test_get_context_vector_weighted_by_activation(self, dim):
         """get_context_vector should weight by activation."""
         from grilly.experimental.cognitive.memory import WorkingMemory, WorkingMemorySlot

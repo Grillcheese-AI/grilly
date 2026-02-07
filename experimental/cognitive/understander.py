@@ -11,6 +11,7 @@ from grilly.experimental.language.system import InstantLanguage
 from grilly.experimental.cognitive.memory import WorkingMemory, WorkingMemorySlot
 from grilly.experimental.cognitive.world import WorldModel
 from grilly.experimental.vsa.ops import HolographicOps
+from grilly.experimental.cognitive.capsule import cosine_similarity
 
 
 @dataclass
@@ -151,9 +152,16 @@ class Understander:
     ) -> List[Tuple[str, np.ndarray]]:
         """Retrieve relevant facts from world model."""
         results = []
+
+        query_capsule = None
+        if self.world.capsule_encoder is not None:
+            query_capsule = self.world.capsule_encoder.encode_vector(query_vec)
         
-        for fact in self.world.facts:
+        for fact, fact_capsule in zip(self.world.facts, self.world.fact_capsules):
             sim = HolographicOps.similarity(query_vec, fact.vector)
+            if query_capsule is not None and fact_capsule is not None:
+                cap_sim = cosine_similarity(query_capsule, fact_capsule)
+                sim = 0.7 * sim + 0.3 * cap_sim
             if sim > 0.3:
                 fact_str = f"{fact.subject} {fact.relation} {fact.object}"
                 results.append((fact_str, fact.vector, sim))
@@ -248,5 +256,4 @@ class Understander:
         
         # Combine
         confidence = (retrieval_score + inference_score + coherence_score) / 3
-        
-        return confidence
+        return float(np.clip(confidence, 0.0, 1.0))

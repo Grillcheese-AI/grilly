@@ -9,6 +9,7 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from collections import defaultdict
 from grilly.experimental.vsa.ops import HolographicOps
+from grilly.experimental.cognitive.capsule import CapsuleEncoder, cosine_similarity
 
 
 @dataclass
@@ -18,6 +19,7 @@ class Fact:
     relation: str
     object: str
     vector: np.ndarray  # Holographic encoding
+    capsule_vector: Optional[np.ndarray] = None
     confidence: float = 1.0
     source: str = "observed"
 
@@ -36,12 +38,27 @@ class WorldModel:
     
     DEFAULT_DIM = 4096
     
-    def __init__(self, dim: int = DEFAULT_DIM):
+    def __init__(
+        self,
+        dim: int = DEFAULT_DIM,
+        capsule_dim: int = 32,
+        semantic_dims: int = 28
+    ):
         self.dim = dim
+        self.capsule_dim = capsule_dim
+        self.semantic_dims = semantic_dims
+        self.capsule_encoder: Optional[CapsuleEncoder] = None
+        if capsule_dim > 0:
+            self.capsule_encoder = CapsuleEncoder(
+                input_dim=dim,
+                capsule_dim=capsule_dim,
+                semantic_dims=semantic_dims
+            )
         
         # Fact storage
         self.facts: List[Fact] = []
         self.fact_vectors: List[np.ndarray] = []
+        self.fact_capsules: List[Optional[np.ndarray]] = []
         
         # Relation encodings
         self.relations: Dict[str, np.ndarray] = {}
@@ -82,22 +99,29 @@ class WorldModel:
         relation: str,
         object_: str,
         confidence: float = 1.0,
-        source: str = "observed"
+        source: str = "observed",
+        cognitive_features: Optional[np.ndarray] = None
     ):
         """Add a fact to the world model."""
         vector = self.encode_fact(subject, relation, object_)
         
+        capsule_vec = None
+        if self.capsule_encoder is not None:
+            capsule_vec = self.capsule_encoder.encode_vector(vector, cognitive_features)
+
         fact = Fact(
             subject=subject,
             relation=relation,
             object=object_,
             vector=vector,
+            capsule_vector=capsule_vec,
             confidence=confidence,
             source=source
         )
         
         self.facts.append(fact)
         self.fact_vectors.append(vector)
+        self.fact_capsules.append(capsule_vec)
         
         # Also add the negation as a constraint
         neg_vector = self.encode_fact(subject, "is_not", object_)
@@ -112,10 +136,18 @@ class WorldModel:
         query_vec = self.encode_fact(subject, relation, object_)
         
         best_sim = 0.0
-        for fact, fact_vec in zip(self.facts, self.fact_vectors):
+        query_capsule = None
+        if self.capsule_encoder is not None:
+            query_capsule = self.capsule_encoder.encode_vector(query_vec)
+
+        for fact, fact_vec, fact_capsule in zip(self.facts, self.fact_vectors, self.fact_capsules):
             sim = HolographicOps.similarity(query_vec, fact_vec)
             if sim > best_sim:
                 best_sim = sim
+            if query_capsule is not None and fact_capsule is not None:
+                cap_sim = cosine_similarity(query_capsule, fact_capsule)
+                if cap_sim > best_sim:
+                    best_sim = cap_sim
         
         return best_sim > 0.7, best_sim
     
@@ -144,6 +176,27 @@ class WorldModel:
             sim_to_neg = HolographicOps.similarity(statement_vec, neg_vec)
             if sim_to_neg > max_violation:
                 max_violation = sim_to_neg
+
+        if self.capsule_encoder is not None:
+            statement_capsule = self.capsule_encoder.encode_vector(statement_vec)
+            capsule_support = 0.0
+            capsule_violation = 0.0
+
+            for fact_capsule in self.fact_capsules:
+                if fact_capsule is None:
+                    continue
+                cap_sim = cosine_similarity(statement_capsule, fact_capsule)
+                if cap_sim > capsule_support:
+                    capsule_support = cap_sim
+
+            for _, neg_vec in self.constraints:
+                neg_capsule = self.capsule_encoder.encode_vector(neg_vec)
+                cap_neg_sim = cosine_similarity(statement_capsule, neg_capsule)
+                if cap_neg_sim > capsule_violation:
+                    capsule_violation = cap_neg_sim
+
+            max_support = max(max_support, capsule_support)
+            max_violation = max(max_violation, capsule_violation)
         
         # Compute coherence score
         coherence = max_support - max_violation

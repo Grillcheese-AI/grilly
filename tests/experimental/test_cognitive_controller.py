@@ -113,3 +113,52 @@ class TestUnderstand:
         assert hasattr(result, "deep_meaning")
         assert hasattr(result, "words")
         assert hasattr(result, "parsed_roles")
+
+
+class TestTemporalValidation:
+    """Tests for temporal validation in CognitiveController."""
+
+    def test_temporal_validation_filters_invalid_candidate(self, dim):
+        """Temporal validator should filter invalid candidates."""
+        from grilly.experimental.cognitive.controller import CognitiveController
+        from grilly.experimental.cognitive.simulator import SimulationResult
+        from grilly.experimental.temporal import (
+            TemporalWorldModel,
+            CounterfactualReasoner,
+            TemporalDecisionValidator
+        )
+
+        controller = CognitiveController(dim=dim, confidence_threshold=0.1)
+
+        world = TemporalWorldModel(dim=dim)
+        world.set_state(0, {"status": "alive"})
+        cf = CounterfactualReasoner(world)
+        validator = TemporalDecisionValidator(world, cf)
+
+        def extractor(text: str) -> dict:
+            if "dead" in text:
+                return {"status": "dead"}
+            if "alive" in text:
+                return {"status": "alive"}
+            return {}
+
+        controller.set_temporal_validation(world, validator, decision_extractor=extractor)
+
+        controller._generate_candidates = lambda _: ["status is dead", "status is alive"]
+
+        def fake_sim(candidate: str, context=None):
+            score = 0.9 if "dead" in candidate else 0.2
+            return SimulationResult(
+                candidate=candidate,
+                vector=np.zeros(dim, dtype=np.float32),
+                coherence_score=score,
+                coherence_reason="test",
+                predicted_response=None,
+                social_appropriateness=score,
+                confidence=score
+            )
+
+        controller.simulator.simulate_utterance = fake_sim
+
+        response = controller.process("test", decision_time=1, verbose=True)
+        assert response == "status is alive"

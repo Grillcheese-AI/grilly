@@ -245,6 +245,38 @@ class TestResonatorMoEWeights:
         assert total == pytest.approx(1.0, abs=1e-5)
 
 
+class TestResonatorMoECapsuleRouting:
+    """Tests for capsule-aware routing."""
+
+    def test_capsule_weight_can_drive_routing(self, dim):
+        """Capsule similarity should influence routing when weighted."""
+        from grilly.experimental.moe.routing import ResonatorMoE
+        from grilly.experimental.cognitive.capsule import CapsuleEncoder
+
+        def expert_a(x): return x
+        def expert_b(x): return x
+
+        encoder = CapsuleEncoder(input_dim=dim)
+        query = np.random.randn(dim).astype(np.float32)
+        query_capsule = encoder.encode_vector(query)
+
+        expert_capsules = {
+            "expert_a": query_capsule,
+            "expert_b": -query_capsule
+        }
+
+        moe = ResonatorMoE(
+            dim=dim,
+            experts={"expert_a": expert_a, "expert_b": expert_b},
+            expert_capsules=expert_capsules,
+            capsule_encoder=encoder,
+            capsule_weight=1.0
+        )
+
+        selected = moe.route(query, top_k=1)
+        assert selected[0] == "expert_a"
+
+
 class TestRelationalMoE:
     """Tests for RelationalMoE with structured expert codebook."""
 

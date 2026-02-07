@@ -157,6 +157,47 @@ class SentenceGenerator:
         # Average to get prototype pattern
         self.patterns[pattern_name] = HolographicOps.bundle(pattern_vecs)
     
+    def learn_svc_templates(
+        self,
+        word_lists: List[List[str]],
+        template_name: str,
+    ) -> None:
+        """
+        Learn a sentence template from SVC data.
+
+        Groups sentences that share the same dependency structure and
+        creates a prototype vector in VSA space, plus a role pattern
+        derived from the majority role assignment.
+
+        Args:
+            word_lists: List of tokenized sentences sharing the same
+                        dependency pattern.
+            template_name: Name for the template (e.g. the dep-label key).
+        """
+        if not word_lists:
+            return
+
+        # Build prototype via pattern learning
+        self.learn_pattern(word_lists, template_name)
+
+        # Also infer a role pattern from the first sentence
+        # (all sentences in a group share the same dep structure)
+        first_words = word_lists[0]
+        auto_roles = self.encoder._auto_assign_roles(first_words)
+
+        # Derive a compact role pattern (unique ordered roles)
+        seen: Dict[str, bool] = {}
+        role_pattern: List[str] = []
+        for role in auto_roles:
+            if role not in seen:
+                seen[role] = True
+                role_pattern.append(role)
+
+        self.templates[template_name] = {
+            "pattern": role_pattern,
+            "example": first_words,
+        }
+
     def complete_sentence(
         self,
         partial: List[str],

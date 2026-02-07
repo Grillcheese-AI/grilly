@@ -7,6 +7,7 @@ Uses VSA operations to route queries to relevant experts.
 import numpy as np
 from typing import Dict, List, Callable, Optional, Tuple
 from grilly.experimental.vsa.ops import BinaryOps
+from grilly.experimental.cognitive.capsule import CapsuleEncoder, cosine_similarity
 
 
 class ResonatorMoE:
@@ -22,7 +23,10 @@ class ResonatorMoE:
         self,
         dim: int,
         experts: Dict[str, Callable],
-        expert_vectors: Optional[Dict[str, np.ndarray]] = None
+        expert_vectors: Optional[Dict[str, np.ndarray]] = None,
+        expert_capsules: Optional[Dict[str, np.ndarray]] = None,
+        capsule_encoder: Optional[CapsuleEncoder] = None,
+        capsule_weight: float = 0.3
     ):
         """
         Initialize ResonatorMoE.
@@ -44,6 +48,33 @@ class ResonatorMoE:
             for name in experts.keys():
                 # Generate random bipolar vector for each expert
                 self.expert_vectors[name] = BinaryOps.random_bipolar(dim)
+
+        self.capsule_encoder = capsule_encoder
+        if self.capsule_encoder is None and (expert_capsules is not None):
+            self.capsule_encoder = CapsuleEncoder(input_dim=dim)
+
+        self.expert_capsules = expert_capsules or {}
+        if self.capsule_encoder is not None and not self.expert_capsules:
+            for name, vec in self.expert_vectors.items():
+                self.expert_capsules[name] = self.capsule_encoder.encode_vector(vec)
+
+        self.capsule_weight = float(np.clip(capsule_weight, 0.0, 1.0))
+
+    def _combined_similarity(self, query: np.ndarray, expert_name: str) -> float:
+        """Combine VSA and capsule similarity for routing."""
+        expert_vec = self.expert_vectors[expert_name]
+        vsa_sim = BinaryOps.similarity(query, expert_vec)
+
+        if self.capsule_encoder is None:
+            return vsa_sim
+
+        expert_capsule = self.expert_capsules.get(expert_name)
+        if expert_capsule is None:
+            return vsa_sim
+
+        query_capsule = self.capsule_encoder.encode_vector(query)
+        cap_sim = cosine_similarity(query_capsule, expert_capsule)
+        return (1.0 - self.capsule_weight) * vsa_sim + self.capsule_weight * cap_sim
     
     def route(
         self,
@@ -65,7 +96,7 @@ class ResonatorMoE:
         # Compute similarities
         similarities = []
         for name, expert_vec in self.expert_vectors.items():
-            sim = BinaryOps.similarity(query, expert_vec)
+            sim = self._combined_similarity(query, name)
             similarities.append((name, sim))
         
         # Filter by threshold if provided
@@ -96,7 +127,7 @@ class ResonatorMoE:
         # Compute raw similarities
         weights = {}
         for name, expert_vec in self.expert_vectors.items():
-            sim = BinaryOps.similarity(query, expert_vec)
+            sim = self._combined_similarity(query, name)
             # Convert similarity [-1, 1] to non-negative weight [0, 2]
             weights[name] = sim + 1.0
         
@@ -154,6 +185,38 @@ class ResonatorMoE:
             result = sum(outputs)
         
         return result.astype(np.float32)
+
+
+    @classmethod
+    def from_realm_vectors(
+        cls,
+        dim: int,
+        realm_expert_fns: Dict[str, Callable],
+        realm_vectors: Optional[Dict[str, np.ndarray]] = None,
+    ) -> 'ResonatorMoE':
+        """
+        Build a ResonatorMoE from SVC realm expert vectors.
+
+        If ``realm_vectors`` is provided (e.g. bundled sentence prototypes
+        from ``InstantLanguage.ingest_svc``), those are used as expert
+        vectors.  Otherwise, deterministic hash-based bipolar vectors
+        are generated for each realm name.
+
+        Args:
+            dim: Vector dimension.
+            realm_expert_fns: Mapping from realm name to expert callable.
+            realm_vectors: Optional pre-computed realm prototype vectors
+                           (e.g. from ``SVCIngestionResult.realm_vectors``).
+
+        Returns:
+            A configured ResonatorMoE instance.
+        """
+        if realm_vectors is None:
+            realm_vectors = {
+                realm: BinaryOps.hash_to_bipolar(realm, dim)
+                for realm in realm_expert_fns
+            }
+        return cls(dim=dim, experts=realm_expert_fns, expert_vectors=realm_vectors)
 
 
 class RelationalMoE(ResonatorMoE):

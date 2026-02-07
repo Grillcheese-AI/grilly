@@ -16,6 +16,7 @@ from .world import WorldModel, Fact
 from .simulator import InternalSimulator, SimulationResult
 from .understander import Understander, UnderstandingResult
 from .controller import CognitiveController
+from .capsule import CapsuleEncoder, cosine_similarity, batch_cosine_similarity
 
 __all__ = [
     "WorkingMemory",
@@ -28,4 +29,7 @@ __all__ = [
     "Understander",
     "UnderstandingResult",
     "CognitiveController",
+    "CapsuleEncoder",
+    "cosine_similarity",
+    "batch_cosine_similarity",
 ]

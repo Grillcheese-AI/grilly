@@ -1,15 +1,17 @@
 """
 Example: Temporal Reasoning
 
-Demonstrates temporal encoding, causal chains, counterfactual reasoning,
-and decision validation across time.
+Demonstrates temporal state tracking, causal propagation, counterfactual
+reasoning, and decision validation across time.
 """
 
-import numpy as np
 from grilly.experimental.temporal import (
-    TemporalEncoder, CausalChain, CounterfactualReasoner,
+    TemporalWorldModel,
+    CounterfactualReasoner,
+    CounterfactualQuery,
     TemporalDecisionValidator
 )
+from grilly.experimental.vsa import HolographicOps
 
 print("=" * 60)
 print("Temporal Reasoning Examples")
@@ -17,97 +19,66 @@ print("=" * 60)
 
 dim = 2048
 
-# Temporal Encoder
-print("\n1. Temporal Encoding")
+# Temporal World Model
+print("\n1. Temporal World Model")
 print("-" * 60)
 
-encoder = TemporalEncoder(dim=dim)
+world = TemporalWorldModel(dim=dim)
 
-time_vec_5 = encoder.encode_time(5)
-time_vec_6 = encoder.encode_time(6)
-print(f"Time vector t=5: shape={time_vec_5.shape}")
-print(f"Time vector t=6: shape={time_vec_6.shape}")
-
-from grilly.experimental.vsa import HolographicOps
-similarity = HolographicOps.similarity(time_vec_5, time_vec_6)
-print(f"Similarity between t=5 and t=6: {similarity:.4f}")
-
-state = HolographicOps.random_vector(dim)
-bound_state = encoder.bind_with_time(state, t=5)
-recovered = encoder.unbind_time(bound_state, t=5)
-recovery_sim = HolographicOps.similarity(state, recovered)
-print(f"\nState binding recovery: {recovery_sim:.4f}")
-
-# Causal Chain
-print("\n2. Causal Chain")
-print("-" * 60)
-
-chain = CausalChain(dim=dim)
-
-chain.add_rule(
+world.causal_chain.add_rule(
     name="rain_wet",
     conditions={"raining": True},
     effects={"wet": True},
-    probability=0.9
+    probability=1.0
 )
 
-chain.add_rule(
+world.causal_chain.add_rule(
     name="wet_sick",
     conditions={"wet": True, "cold": True},
     effects={"sick": True},
-    probability=0.7
+    probability=1.0
 )
 
-print(f"Added {len(chain.rules)} causal rules")
+world.set_state(0, {"raining": True, "wet": True, "cold": True})
+print("Initial state set at t=0")
 
-initial_state = chain.encode_state({"raining": True})
-print(f"Initial state: raining=True")
-print(f"State vector: shape={initial_state.shape}")
-
-propagated = chain.propagate_forward(initial_state, steps=2)
-print(f"Propagated state after 2 steps: shape={propagated.shape}")
+pred = world.predict_future(from_time=0, steps=2)
+print(f"Predicted future states: {list(pred.keys())}")
 
 # Counterfactual Reasoning
-print("\n3. Counterfactual Reasoning")
+print("\n2. Counterfactual Reasoning")
 print("-" * 60)
 
-reasoner = CounterfactualReasoner(chain, encoder)
-
-query = reasoner.intervene(
+reasoner = CounterfactualReasoner(world)
+query = CounterfactualQuery(
+    intervention_time=0,
     variable="raining",
+    actual_value=True,
     counterfactual_value=False,
-    at_time=1,
-    initial_state={"raining": True}
+    query_time=2,
+    query_variable="wet"
 )
 
-print(f"Counterfactual: What if it wasn't raining at t=1?")
-print(f"Query created: {query is not None}")
+cf_result = reasoner.query_counterfactual(query)
 
-result = reasoner.query_counterfactual(
-    query=query,
-    query_variable="sick",
-    query_time=3
-)
-
-print(f"\nActual outcome (raining=True): {result.actual_outcome}")
-print(f"Counterfactual outcome (raining=False): {result.counterfactual_outcome}")
-print(f"Difference: {result.difference}")
+print(f"Actual outcome at t=2: {cf_result.actual_outcome}")
+print(f"Counterfactual outcome at t=2: {cf_result.counterfactual_outcome}")
+print(f"Difference: {cf_result.difference}")
 
 # Decision Validation
-print("\n4. Decision Validation")
+print("\n3. Decision Validation")
 print("-" * 60)
 
-validator = TemporalDecisionValidator(chain, encoder)
+validator = TemporalDecisionValidator(world, reasoner)
 
-decision = {"has_umbrella": False, "is_outside": True}
+decision = {"wet": False}
 validation = validator.validate_decision(
+    decision_time=1,
     decision=decision,
-    current_state={"has_umbrella": True},
-    past_states=[{"has_umbrella": True}],
-    future_constraints=[{"is_sick": False}]
+    check_horizon=3
 )
 
-print(f"Decision: {decision}")
+print(f"Decision at t=1: {decision}")
 print(f"Valid: {validation.is_valid}")
 print(f"Past consistent: {validation.past_consistent}")
 print(f"Present consistent: {validation.present_consistent}")
@@ -116,3 +87,12 @@ print(f"Confidence: {validation.confidence:.4f}")
 
 if validation.violations:
     print(f"Violations: {validation.violations}")
+
+# Temporal Encoding sanity check
+print("\n4. Temporal Encoding")
+print("-" * 60)
+
+time_vec_5 = world.temporal_encoder.encode_time(5)
+time_vec_6 = world.temporal_encoder.encode_time(6)
+similarity = HolographicOps.similarity(time_vec_5, time_vec_6)
+print(f"Similarity between t=5 and t=6: {similarity:.4f}")

@@ -2,16 +2,44 @@
 InstantLanguage - Complete instant language learning system.
 
 Combines word encoding, sentence encoding, parsing, and generation.
+Uses VulkanVSA GPU shaders when available for batch VSA operations.
 """
 
 import numpy as np
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from collections import defaultdict
 from grilly.experimental.language.encoder import WordEncoder, SentenceEncoder
 from grilly.experimental.language.generator import SentenceGenerator
 from grilly.experimental.language.parser import ResonatorParser
-from grilly.experimental.vsa.ops import HolographicOps
+from grilly.experimental.vsa.ops import HolographicOps, BinaryOps
+
+if TYPE_CHECKING:
+    from grilly.experimental.language.svc_loader import SVCEntry, SVCIngestionEngine
+
+
+class SVCIngestionResult:
+    """Result of ingesting SVC data into the language system."""
+
+    def __init__(self) -> None:
+        self.sentences_learned: int = 0
+        self.words_encoded: int = 0
+        self.templates_learned: int = 0
+        self.realm_counts: Dict[str, int] = defaultdict(int)
+        self.verb_counts: Dict[str, int] = defaultdict(int)
+        self.realm_vectors: Dict[str, np.ndarray] = {}
+        self.backend: str = "cpu"
+
+    def summary(self) -> str:
+        lines = [
+            f"SVC Ingestion: {self.sentences_learned} sentences, "
+            f"{self.words_encoded} unique words",
+            f"  Templates learned: {self.templates_learned}",
+            f"  Realms: {dict(self.realm_counts)}",
+            f"  Top verbs: {dict(sorted(self.verb_counts.items(), key=lambda x: -x[1])[:10])}",
+            f"  Backend: {self.backend}",
+        ]
+        return "\n".join(lines)
 
 
 class InstantLanguage:
@@ -42,6 +70,11 @@ class InstantLanguage:
         # Memory
         self.sentence_memory: List[Tuple[np.ndarray, List[str]]] = []
         self.relation_memory: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+
+        # Realm vectors built from SVC data
+        self.realm_vectors: Dict[str, np.ndarray] = {}
+        # Realm sentence accumulators (bundled sentence vectors per realm)
+        self._realm_accumulators: Dict[str, List[np.ndarray]] = defaultdict(list)
     
     def learn_sentence(self, sentence: str) -> np.ndarray:
         """
@@ -163,6 +196,128 @@ class InstantLanguage:
         
         return self.word_encoder.find_closest(d_vec)
     
+    def _get_engine(
+        self,
+        engine: Optional['SVCIngestionEngine'] = None,
+    ) -> 'SVCIngestionEngine':
+        """Return the provided engine or create a default one."""
+        if engine is not None:
+            return engine
+        from grilly.experimental.language.svc_loader import SVCIngestionEngine
+        return SVCIngestionEngine(dim=self.dim)
+
+    def ingest_svc(
+        self,
+        entries: List['SVCEntry'],
+        learn_templates: bool = True,
+        build_realm_vectors: bool = True,
+        verbose: bool = False,
+        engine: Optional['SVCIngestionEngine'] = None,
+    ) -> SVCIngestionResult:
+        """
+        Ingest SVC data into the language system.
+
+        When a GPU is available the heavy VSA operations (convolve,
+        bundle, similarity_batch) are dispatched to Vulkan compute
+        shaders via :class:`SVCIngestionEngine`.  Pass ``engine`` to
+        control backend selection, or leave ``None`` for auto-detect.
+
+        Pipeline per entry:
+        1. Encode all words (builds vocabulary).
+        2. Bind word ⊗ role ⊗ position via ``engine.convolve`` (GPU).
+        3. Bundle components into sentence vector via ``engine.bundle`` (GPU).
+        4. Store in sentence memory.
+        5. Accumulate realm vectors.
+        6. Learn sentence templates from dependency patterns.
+        7. Bundle realm vectors via ``engine.batch_build_realm_vectors`` (GPU).
+
+        Args:
+            entries: List of SVCEntry instances.
+            learn_templates: If True, learn sentence templates from dep patterns.
+            build_realm_vectors: If True, build realm expert vectors.
+            verbose: If True, print progress.
+            engine: Optional SVCIngestionEngine (auto-created if None).
+
+        Returns:
+            SVCIngestionResult with statistics.
+        """
+        eng = self._get_engine(engine)
+        result = SVCIngestionResult()
+        result.backend = "VulkanVSA GPU" if eng.using_gpu else "CPU"
+        words_before = len(self.word_encoder.word_vectors)
+
+        if verbose:
+            print(f"  Backend: {eng.status()}")
+
+        # -- Step 1: Batch encode sentences via engine --------------------
+        print(f"  Encoding {len(entries)} sentences...")
+        sentence_vecs, word_lists = eng.batch_encode_sentences(
+            entries, self.word_encoder, self.sentence_encoder,
+        )
+        print(f"  Encoded {len(sentence_vecs)} sentences")
+
+        # -- Step 2: Store + accumulate stats ----------------------------
+        print(f"  Storing {len(entries)} sentences...")
+        template_groups: Dict[str, List[List[str]]] = defaultdict(list)
+
+        for i, entry in enumerate(entries):
+            sent_vec = sentence_vecs[i]
+            words = word_lists[i]
+            print(f"  Ingested sentence: {words}")
+
+            self.sentence_memory.append((sent_vec, words))
+            result.sentences_learned += 1
+            result.realm_counts[entry.realm] += 1
+            result.verb_counts[entry.root_verb] += 1
+
+            if build_realm_vectors and entry.realm:
+                self._realm_accumulators[entry.realm].append(sent_vec)
+
+            if learn_templates and entry.deps:
+                template_groups[entry.template_key()].append(words)
+
+            if verbose and (i + 1) % 10 == 0:
+                print(f"  Ingested {i + 1}/{len(entries)} entries...")
+
+        # -- Step 3: Learn templates ------------------------------------
+        if learn_templates:
+            print(f"  Learning {len(template_groups)} templates...")
+            for tkey, wlists in template_groups.items():
+                if len(wlists) >= 2:
+                    self.generator.learn_svc_templates(wlists, tkey)
+                    result.templates_learned += 1
+
+        # -- Step 4: Build realm vectors (GPU bundle) -------------------
+        if build_realm_vectors:
+            print(f"  Building {len(self._realm_accumulators)} realm vectors...")
+            self.realm_vectors.update(
+                eng.batch_build_realm_vectors(dict(self._realm_accumulators))
+            )
+            result.realm_vectors = dict(self.realm_vectors)
+            print(f"  Built {len(result.realm_vectors)} realm vectors")
+
+        result.words_encoded = len(self.word_encoder.word_vectors) - words_before
+
+        if verbose:
+            print(result.summary())
+
+        return result
+
+    def get_realm_vector(self, realm: str) -> Optional[np.ndarray]:
+        """Get the bundled prototype vector for a realm.
+
+        Returns None if no entries for that realm have been ingested.
+        """
+        return self.realm_vectors.get(realm)
+
+    def get_realm_indicator(self, realm: str) -> np.ndarray:
+        """Get a deterministic bipolar indicator vector for a realm name.
+
+        This uses hash-based generation so the same realm always
+        produces the same vector, even before any data is ingested.
+        """
+        return BinaryOps.hash_to_bipolar(realm, self.dim)
+
     def _tokenize(self, text: str) -> List[str]:
         """Simple tokenization."""
         # Remove punctuation, split on whitespace

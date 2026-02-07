@@ -10,6 +10,14 @@ from typing import Dict, List, Optional, Tuple, Union
 from grilly.experimental.vsa.ops import HolographicOps
 
 
+def _unitary(vec: np.ndarray) -> np.ndarray:
+    """Project vector to unitary form in frequency domain."""
+    fft = np.fft.fft(vec)
+    mag = np.abs(fft)
+    fft = fft / (mag + 1e-8)
+    return np.real(np.fft.ifft(fft)).astype(np.float32)
+
+
 class WordEncoder:
     """
     Encodes words as hypervectors with:
@@ -104,7 +112,8 @@ class WordEncoder:
             ngram = padded[i:i+n]
             
             # Encode n-gram as bound character sequence
-            ngram_vec = np.ones(self.dim, dtype=np.float32)
+            ngram_vec = np.zeros(self.dim, dtype=np.float32)
+            ngram_vec[0] = 1.0
             for j, char in enumerate(ngram):
                 char_vec = self.char_vectors.get(char, self.char_vectors['<UNK>'])
                 pos_vec = self.position_vectors[j % len(self.position_vectors)]
@@ -116,8 +125,8 @@ class WordEncoder:
             
             ngrams.append(ngram_vec)
         
-        # Bundle all n-grams
-        return HolographicOps.bundle(ngrams)
+        # Bundle all n-grams and project to unitary form
+        return _unitary(HolographicOps.bundle(ngrams))
     
     def extract_relation(self, word_a: str, word_b: str) -> np.ndarray:
         """
@@ -182,35 +191,35 @@ class SentenceEncoder:
         
         # Syntactic role vectors
         self.roles = {
-            "SUBJ": HolographicOps.random_vector(self.dim, seed=3000),
-            "VERB": HolographicOps.random_vector(self.dim, seed=3001),
-            "OBJ": HolographicOps.random_vector(self.dim, seed=3002),
-            "IOBJ": HolographicOps.random_vector(self.dim, seed=3003),
-            "ADJ": HolographicOps.random_vector(self.dim, seed=3010),
-            "ADV": HolographicOps.random_vector(self.dim, seed=3011),
-            "DET": HolographicOps.random_vector(self.dim, seed=3012),
-            "PREP": HolographicOps.random_vector(self.dim, seed=3013),
-            "POBJ": HolographicOps.random_vector(self.dim, seed=3014),
-            "AUX": HolographicOps.random_vector(self.dim, seed=3020),
-            "COMP": HolographicOps.random_vector(self.dim, seed=3021),
-            "REL": HolographicOps.random_vector(self.dim, seed=3022),
-            "ROOT": HolographicOps.random_vector(self.dim, seed=3030),
-            "PUNCT": HolographicOps.random_vector(self.dim, seed=3031),
+            "SUBJ": _unitary(HolographicOps.random_vector(self.dim, seed=3000)),
+            "VERB": _unitary(HolographicOps.random_vector(self.dim, seed=3001)),
+            "OBJ": _unitary(HolographicOps.random_vector(self.dim, seed=3002)),
+            "IOBJ": _unitary(HolographicOps.random_vector(self.dim, seed=3003)),
+            "ADJ": _unitary(HolographicOps.random_vector(self.dim, seed=3010)),
+            "ADV": _unitary(HolographicOps.random_vector(self.dim, seed=3011)),
+            "DET": _unitary(HolographicOps.random_vector(self.dim, seed=3012)),
+            "PREP": _unitary(HolographicOps.random_vector(self.dim, seed=3013)),
+            "POBJ": _unitary(HolographicOps.random_vector(self.dim, seed=3014)),
+            "AUX": _unitary(HolographicOps.random_vector(self.dim, seed=3020)),
+            "COMP": _unitary(HolographicOps.random_vector(self.dim, seed=3021)),
+            "REL": _unitary(HolographicOps.random_vector(self.dim, seed=3022)),
+            "ROOT": _unitary(HolographicOps.random_vector(self.dim, seed=3030)),
+            "PUNCT": _unitary(HolographicOps.random_vector(self.dim, seed=3031)),
         }
         
         # Position encoding vectors
         self.position_vectors = [
-            HolographicOps.random_vector(self.dim, seed=4000 + i)
+            _unitary(HolographicOps.random_vector(self.dim, seed=4000 + i))
             for i in range(100)
         ]
         
         # Phrase structure vectors
         self.phrase_types = {
-            "NP": HolographicOps.random_vector(self.dim, seed=5000),
-            "VP": HolographicOps.random_vector(self.dim, seed=5001),
-            "PP": HolographicOps.random_vector(self.dim, seed=5002),
-            "AP": HolographicOps.random_vector(self.dim, seed=5003),
-            "S": HolographicOps.random_vector(self.dim, seed=5004),
+            "NP": _unitary(HolographicOps.random_vector(self.dim, seed=5000)),
+            "VP": _unitary(HolographicOps.random_vector(self.dim, seed=5001)),
+            "PP": _unitary(HolographicOps.random_vector(self.dim, seed=5002)),
+            "AP": _unitary(HolographicOps.random_vector(self.dim, seed=5003)),
+            "S": _unitary(HolographicOps.random_vector(self.dim, seed=5004)),
         }
     
     def encode_sentence(

@@ -9,12 +9,21 @@ Submodules:
     - generator: SentenceGenerator
     - parser: ResonatorParser
     - system: InstantLanguage (unified API)
+    - svc_loader: SVC data loading utilities
 """
 
 from .encoder import WordEncoder, SentenceEncoder
 from .generator import SentenceGenerator
 from .parser import ResonatorParser
-from .system import InstantLanguage
+from .system import InstantLanguage, SVCIngestionResult
+from .svc_loader import (
+    SVCEntry,
+    SVCBatch,
+    SVCIngestionEngine,
+    load_svc_entries,
+    load_svc_batch,
+    load_svc_entries_from_dicts,
+)
 
 __all__ = [
     "WordEncoder",
@@ -22,4 +31,11 @@ __all__ = [
     "SentenceGenerator",
     "ResonatorParser",
     "InstantLanguage",
+    "SVCIngestionResult",
+    "SVCEntry",
+    "SVCBatch",
+    "SVCIngestionEngine",
+    "load_svc_entries",
+    "load_svc_batch",
+    "load_svc_entries_from_dicts",
 ]
