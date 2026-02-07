@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import importlib.metadata
-import importlib.util
 import sys
+import types
 
 
 DOCS_DIR = Path(__file__).resolve().parent
@@ -21,19 +21,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(EXT_DIR))
 
 # If the package cannot be imported by name yet (common on RTD with flat
-# layouts), load it explicitly from project root as `grilly`.
+# layouts), register a lightweight package stub without executing __init__.py.
 if "grilly" not in sys.modules:
-    init_py = PROJECT_ROOT / "__init__.py"
-    if init_py.exists():
-        spec = importlib.util.spec_from_file_location(
-            "grilly",
-            init_py,
-            submodule_search_locations=[str(PROJECT_ROOT)],
-        )
-        if spec and spec.loader:
-            module = importlib.util.module_from_spec(spec)
-            sys.modules["grilly"] = module
-            spec.loader.exec_module(module)
+    module = types.ModuleType("grilly")
+    module.__file__ = str(PROJECT_ROOT / "__init__.py")
+    module.__path__ = [str(PROJECT_ROOT)]
+    sys.modules["grilly"] = module
 
 
 project = "grilly"
@@ -70,6 +63,7 @@ html_static_path = []
 
 # Prevent RTD docs builds from failing when optional runtime deps are absent.
 autodoc_mock_imports = [
+    "numpy",
     "torch",
     "transformers",
     "spacy",
