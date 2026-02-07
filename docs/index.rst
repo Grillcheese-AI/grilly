@@ -13,6 +13,12 @@ from first install to end-to-end workflows quickly.
 
 .. toctree::
    :maxdepth: 2
+   :caption: Concepts
+
+   concepts/index
+
+.. toctree::
+   :maxdepth: 2
    :caption: Tutorials
 
    tutorials/index

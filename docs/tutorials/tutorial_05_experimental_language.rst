@@ -50,7 +50,7 @@ Step 4: Query similar sentences
 .. code-block:: python
 
    query = "Vaccines are effective."
-   similar = lang.find_similar(query, top_k=3)
+   similar = lang.find_similar_sentences(query, top_k=3)
    print(similar)
 
 Step 5: Integrate with controller
