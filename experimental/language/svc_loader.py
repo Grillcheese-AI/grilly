@@ -1,12 +1,8 @@
-"""SVC Data Loader & GPU-Accelerated Ingestion Engine.
+﻿"""SVC data loader and GPU-aware ingestion engine.
 
-Provides:
-- SVCEntry dataclass for parsed entries
-- Streaming JSONL loader with realm filtering
-- Batch loading with statistics
-- SVCIngestionEngine that uses VulkanVSA GPU shaders when available
-  (bundle, bundle_batch, similarity_batch, bind_bipolar_batch)
-  and falls back to CPU ops (HolographicOps, BinaryOps) otherwise
+This module provides JSONL loaders for SVC data, batch-level statistics,
+and an ingestion engine that dispatches VSA operations to Vulkan when
+available and falls back to CPU implementations otherwise.
 """
 
 import json
@@ -27,7 +23,7 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# Data layer – parsing and filtering
+# Data layer - parsing and filtering
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -266,24 +262,15 @@ def _try_get_vulkan_vsa() -> Optional['VulkanVSA']:
 
 
 class SVCIngestionEngine:
-    """GPU-accelerated SVC ingestion engine.
+    """GPU-aware SVC ingestion engine.
 
-    Wraps the full encode → store → bundle → route pipeline and
-    dispatches to VulkanVSA GPU shaders when available:
-
-    ┌──────────────────────────────────────────────────────────────┐
-    │  GPU Path (VulkanVSA)             CPU Fallback              │
-    │  ─────────────────────            ────────────              │
-    │  bind_bipolar_batch  ←──or──→  BinaryOps.bind_batch        │
-    │  bundle / bundle_batch ←or──→  HolographicOps.bundle       │
-    │  similarity_batch    ←──or──→  HolographicOps.similarity   │
-    │  resonator_step      ←──or──→  codebook @ query            │
-    │  circular_convolve   ←──or──→  HolographicOps.convolve     │
-    └──────────────────────────────────────────────────────────────┘
+    The engine wraps sentence encoding, bundling, similarity search, and
+    routing operations. It uses Vulkan-backed ``VulkanVSA`` kernels when
+    available, and CPU implementations as fallback.
 
     Usage::
 
-        engine = SVCIngestionEngine(dim=2048)   # auto-detects GPU
+        engine = SVCIngestionEngine(dim=2048)  # auto-detect GPU
         engine = SVCIngestionEngine(dim=2048, gpu=my_vulkan_vsa)
         engine = SVCIngestionEngine(dim=2048, gpu=False)  # force CPU
     """
@@ -297,9 +284,9 @@ class SVCIngestionEngine:
         Args:
             dim: Hypervector dimension.
             gpu: One of:
-                 - ``None``  → auto-detect VulkanVSA
-                 - ``False`` → force CPU path
-                 - A ``VulkanVSA`` instance → use it directly
+                 - ``None``: auto-detect VulkanVSA.
+                 - ``False``: force CPU path.
+                 - A ``VulkanVSA`` instance: use it directly.
         """
         self.dim = dim
 
@@ -321,7 +308,7 @@ class SVCIngestionEngine:
     ) -> np.ndarray:
         """Bundle (superpose) a list of vectors.
 
-        GPU: ``VulkanVSA.bundle`` → ``vsa-bundle.spv``
+        GPU: ``VulkanVSA.bundle`` -> ``vsa-bundle.spv``
         CPU: ``HolographicOps.bundle``
         """
         if self._gpu is not None:
@@ -343,7 +330,7 @@ class SVCIngestionEngine:
     ) -> np.ndarray:
         """Batch cosine similarity: query vs every row in codebook.
 
-        GPU: ``VulkanVSA.similarity_batch`` → ``vsa-similarity-batch.spv``
+        GPU: ``VulkanVSA.similarity_batch`` -> ``vsa-similarity-batch.spv``
         CPU: ``HolographicOps.similarity_batch``
         """
         if self._gpu is not None:
@@ -360,7 +347,7 @@ class SVCIngestionEngine:
     ) -> np.ndarray:
         """Batch element-wise bipolar binding.
 
-        GPU: ``VulkanVSA.bind_bipolar_batch`` → ``vsa-bind-batch.spv``
+        GPU: ``VulkanVSA.bind_bipolar_batch`` -> ``vsa-bind-batch.spv``
         CPU: ``BinaryOps.bind_batch``
         """
         if self._gpu is not None:
@@ -373,7 +360,7 @@ class SVCIngestionEngine:
     def convolve(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """Circular convolution (HRR binding).
 
-        GPU: ``VulkanVSA.circular_convolve`` → ``vsa-fft-convolve.spv``
+        GPU: ``VulkanVSA.circular_convolve`` -> ``vsa-fft-convolve.spv``
         CPU: ``HolographicOps.convolve``
         """
         if self._gpu is not None:
@@ -391,7 +378,7 @@ class SVCIngestionEngine:
     ) -> Tuple[np.ndarray, int]:
         """One resonator projection step.
 
-        GPU: ``VulkanVSA.resonator_step`` → ``vsa-resonator-step.spv``
+        GPU: ``VulkanVSA.resonator_step`` -> ``vsa-resonator-step.spv``
         CPU: codebook dot-product + argmax
         """
         if self._gpu is not None:
@@ -421,16 +408,16 @@ class SVCIngestionEngine:
         For each entry this:
         1. Tokenizes and maps to SVC roles (SUBJ/VERB/OBJ).
         2. Encodes every word (populates word_encoder vocabulary).
-        3. Binds word ⊗ role ⊗ position per slot using ``self.convolve``.
+        3. Binds word, role, and position per slot using ``self.convolve``.
         4. Bundles slot vectors via ``self.bundle`` into a sentence vector.
 
         Returns:
-            (sentence_vectors, word_lists) – parallel lists.
+            ``(sentence_vectors, word_lists)`` as parallel lists.
         """
         sentence_vecs: List[np.ndarray] = []
         word_lists: List[List[str]] = []
 
-        # Cache of (role, pos_mod) → (role ⊗ position) to reduce convolves.
+        # Cache of (role, pos_mod) -> (role bound with position) to reduce convolves.
         # For long corpora this cuts per-token binding cost roughly in half.
         rolepos_cache: Dict[Tuple[str, int], np.ndarray] = {}
         pos_mod = len(sentence_encoder.position_vectors)
@@ -456,11 +443,11 @@ class SVCIngestionEngine:
             components: List[np.ndarray] = []
             for i, (word, role) in enumerate(zip(words, roles)):
                 word_vec = word_encoder.encode_word(word)
-                # word ⊗ (role ⊗ position)  (GPU convolve when available)
+                # Bind word with role-position slot (GPU convolve when available).
                 comp = self.convolve(word_vec, _rolepos(role, i))
                 components.append(comp)
 
-            # bundle components → sentence vector (GPU bundle when available)
+            # Bundle components into sentence vector (GPU bundle when available).
             sent_vec = self.bundle(components, normalize=True)
             sentence_vecs.append(sent_vec)
             word_lists.append(words)

@@ -219,11 +219,11 @@ grilly.backend.vma\_wrapper module
    :members:
    :undoc-members:
    :show-inheritance:
+   :exclude-members: handle
+   :noindex:
 
 Module contents
 ---------------
 
 .. automodule:: grilly.backend
-   :members:
-   :undoc-members:
-   :show-inheritance:
+   :noindex:

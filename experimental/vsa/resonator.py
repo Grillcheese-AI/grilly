@@ -1,4 +1,4 @@
-"""
+﻿"""
 Resonator Network for VSA Factorization.
 
 A resonator network iteratively factorizes a composite vector into its
@@ -26,7 +26,7 @@ class ResonatorNetwork:
     Resonator network for factorizing composite vectors.
     
     Given a composite vector formed by binding multiple factors:
-        composite = factor_a ⊗ factor_b ⊗ factor_c ⊗ ...
+        composite = bind(factor_a, bind(factor_b, factor_c, ...))
     
     The resonator recovers each factor by:
     1. Initialize estimates for each factor (randomly from codebook)
@@ -242,8 +242,8 @@ class ResonatorNetwork:
         """
         Extract unknown factor when some factors are known.
         
-        If composite = A ⊗ B ⊗ Z and we know A, B:
-        Z = composite ⊗ A⁻¹ ⊗ B⁻¹ = composite ⊗ A ⊗ B (for bipolar)
+        If composite = bind(A, bind(B, Z)) and we know A and B:
+        Z = unbind(unbind(composite, A), B) for bipolar vectors.
         
         This is O(d) - instant extraction!
         

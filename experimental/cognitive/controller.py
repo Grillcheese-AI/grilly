@@ -89,15 +89,10 @@ class CognitiveController:
 
         When a GPU is available the heavy VSA operations are dispatched
         to Vulkan compute shaders via an ``SVCIngestionEngine``.
-        Pass *engine* to control backend selection.
+        Pass ``engine`` to control backend selection.
 
-        This does three things:
-        1. Feeds entries into InstantLanguage (via the engine) for sentence
-           encoding, vocabulary building, template learning, and realm
-           vectors.
-        2. Adds each SVC triple (s, root_verb, c) as a world model fact
-           so the controller can use them for coherence checking.
-        3. Adds causal expectations when the root verb implies causality.
+        This call updates language representations, inserts world facts,
+        and adds causal expectations for causal verbs.
 
         Args:
             entries: List of SVCEntry instances.
