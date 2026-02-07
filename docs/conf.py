@@ -75,6 +75,10 @@ exclude_patterns = [
     ".DS_Store",
     "api/modules.rst",
     "api/grilly*.rst",
+    "api/generated/grilly.rst",
+    "api/generated/grilly.test_quick.rst",
+    "api/generated/grilly.tests*.rst",
+    "api/generated/grilly.tutorials*.rst",
 ]
 
 source_suffix = ".rst"
