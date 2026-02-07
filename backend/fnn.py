@@ -107,7 +107,7 @@ class VulkanFNN:
         A: (M, K), B: (K, N) -> C: (M, N)
         Uses gemm-mnk.glsl
         """
-        if 'gemm-mnk' not in self.shaders:
+        if 'gemm_mnk' not in self.shaders:
             # CPU fallback
             return A @ B
 
@@ -123,24 +123,24 @@ class VulkanFNN:
         C_bytes = M * N * 4
 
         # Allocate buffers
-        buf_A = self.core._acquire_buffer(A_bytes)
-        buf_B = self.core._acquire_buffer(B_bytes)
-        buf_C = self.core._acquire_buffer(C_bytes)
+        buf_A = self._acquire_buffer(A_bytes)
+        buf_B = self._acquire_buffer(B_bytes)
+        buf_C = self._acquire_buffer(C_bytes)
 
         try:
-            self.core._upload_buffer(buf_A, A.flatten())
-            self.core._upload_buffer(buf_B, B.flatten())
+            self._upload_buffer(buf_A, A.flatten())
+            self._upload_buffer(buf_B, B.flatten())
 
             pipeline, layout, _ = self.pipelines.get_or_create_pipeline(
                 'gemm_mnk', 3, push_constant_size=12
             )
 
-            A_handle = self.core._get_buffer_handle(buf_A)
-            B_handle = self.core._get_buffer_handle(buf_B)
-            C_handle = self.core._get_buffer_handle(buf_C)
+            A_handle = self._get_buffer_handle(buf_A)
+            B_handle = self._get_buffer_handle(buf_B)
+            C_handle = self._get_buffer_handle(buf_C)
 
             desc = self.pipelines.get_cached_descriptor_set(
-                'gemm-mnk',
+                'gemm_mnk',
                 [
                     (A_handle, A_bytes),
                     (B_handle, B_bytes),
@@ -159,11 +159,11 @@ class VulkanFNN:
                 group_x, push, group_y, group_z
             )
 
-            C_flat = self.core._download_buffer(buf_C, C_bytes, np.float32)
+            C_flat = self._download_buffer(buf_C, C_bytes, np.float32)
             return C_flat.reshape(M, N)
 
         finally:
-            self.core._release_buffers([buf_A, buf_B, buf_C])
+            self._release_buffer(buf_A); self._release_buffer(buf_B); self._release_buffer(buf_C)
 
     def _acquire_buffer(self, size: int, usage: int = None) -> 'PooledBuffer':
         """
@@ -197,6 +197,10 @@ class VulkanFNN:
                 handle, memory = buf
                 vkDestroyBuffer(self.core.device, handle, None)
                 vkFreeMemory(self.core.device, memory, None)
+
+    def _release_buffer(self, buf):
+        """Backward-compatible single-buffer release helper."""
+        self._release_buffers([buf])
 
     def _is_vma_buffer(self, buf) -> bool:
         """Check if buffer is a VMA-allocated buffer"""

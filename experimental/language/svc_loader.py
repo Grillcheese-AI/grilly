@@ -410,48 +410,118 @@ class SVCIngestionEngine:
 
     # -- high-level batch operations ----------------------------------
 
+    def bundle_batch(self, vectors: np.ndarray, normalize: bool = True) -> np.ndarray:
+        """Bundle batch [B, L, D] vectors along axis 1."""
+        if self._gpu is not None:
+            try:
+                return self._gpu.bundle_batch(vectors, normalize=normalize)
+            except Exception:
+                pass
+        return HolographicOps.bundle_batch(vectors, normalize=normalize)
+
     def batch_encode_sentences(
         self,
         entries: List[SVCEntry],
         word_encoder: 'WordEncoder',
         sentence_encoder: 'SentenceEncoder',
     ) -> Tuple[List[np.ndarray], List[List[str]]]:
-        """Encode a batch of SVC entries into sentence vectors.
-
-        For each entry this:
-        1. Tokenizes and maps to SVC roles (SUBJ/VERB/OBJ).
-        2. Encodes every word (populates word_encoder vocabulary).
-        3. Binds word ⊗ role ⊗ position per slot using ``self.convolve``.
-        4. Bundles slot vectors via ``self.bundle`` into a sentence vector.
-
-        Returns:
-            (sentence_vectors, word_lists) – parallel lists.
-        """
+        """Encode a batch of SVC entries into sentence vectors (GPU-friendly)."""
         sentence_vecs: List[np.ndarray] = []
         word_lists: List[List[str]] = []
 
+        if not entries:
+            return sentence_vecs, word_lists
+
+        # RDNA2-friendly GPU path: bipolar bind + bundle_batch
+        if self._gpu is not None:
+            try:
+                dim = self.dim
+                B = len(entries)
+
+                words_per: List[List[str]] = []
+                roles_per: List[List[str]] = []
+                lengths: List[int] = []
+
+                max_len = 0
+                for entry in entries:
+                    words, roles = entry.to_roles()
+                    # ensure vocabulary is populated / stable vectors
+                    for w in words:
+                        word_encoder.encode_word(w)
+                    words_per.append(words)
+                    roles_per.append(roles)
+                    lengths.append(len(words))
+                    max_len = max(max_len, len(words))
+
+                if max_len == 0:
+                    return [np.zeros(dim, dtype=np.float32) for _ in entries], words_per
+
+                # Build padded tensors [B, L, D]
+                W = np.zeros((B, max_len, dim), dtype=np.float32)
+                R = np.zeros((B, max_len, dim), dtype=np.float32)
+                P = np.zeros((B, max_len, dim), dtype=np.float32)
+
+                pos_vecs = sentence_encoder.position_vectors
+                pos_mod = len(pos_vecs)
+
+                for b in range(B):
+                    words = words_per[b]
+                    roles = roles_per[b]
+                    for i, (word, role) in enumerate(zip(words, roles)):
+                        wv = word_encoder.encode_word(word)
+                        W[b, i] = np.where(wv >= 0.0, 1.0, -1.0)
+                        rv = sentence_encoder.roles.get(role, sentence_encoder.roles["ROOT"])
+                        R[b, i] = np.where(rv >= 0.0, 1.0, -1.0)
+                        pv = pos_vecs[i % pos_mod]
+                        P[b, i] = np.where(pv >= 0.0, 1.0, -1.0)
+
+                # Flatten to [B*L, D] for bind_batch
+                flatW = W.reshape(B * max_len, dim)
+                flatR = R.reshape(B * max_len, dim)
+                flatP = P.reshape(B * max_len, dim)
+
+                comp = self.bind_bipolar_batch(flatW, flatR)
+                comp = self.bind_bipolar_batch(comp, flatP)
+
+                comp3 = comp.reshape(B, max_len, dim)
+
+                summed = self.bundle_batch(comp3, normalize=False)  # [B, D]
+
+                # Per-sentence normalization using true lengths (avoid padding bias)
+                for b in range(B):
+                    L = lengths[b]
+                    if L > 0:
+                        sent = summed[b] / float(np.sqrt(L))
+                    else:
+                        sent = np.zeros(dim, dtype=np.float32)
+                    norm = np.linalg.norm(sent)
+                    if norm > 0:
+                        sent = sent / norm
+                    sentence_vecs.append(sent.astype(np.float32, copy=False))
+                    word_lists.append(words_per[b])
+
+                return sentence_vecs, word_lists
+
+            except Exception:
+                # fall through to CPU loop
+                pass
+
+        # CPU / legacy path (HRR-style convolve)
         for entry in entries:
             words, roles = entry.to_roles()
 
-            # ensure vocabulary is populated
             for w in words:
                 word_encoder.encode_word(w)
 
             components: List[np.ndarray] = []
             for i, (word, role) in enumerate(zip(words, roles)):
                 word_vec = word_encoder.encode_word(word)
-                role_vec = sentence_encoder.roles.get(
-                    role, sentence_encoder.roles["ROOT"]
-                )
-                pos_vec = sentence_encoder.position_vectors[
-                    i % len(sentence_encoder.position_vectors)
-                ]
-                # word ⊗ role ⊗ position  (GPU convolve when available)
+                role_vec = sentence_encoder.roles.get(role, sentence_encoder.roles["ROOT"])
+                pos_vec = sentence_encoder.position_vectors[i % len(sentence_encoder.position_vectors)]
                 comp = self.convolve(word_vec, role_vec)
                 comp = self.convolve(comp, pos_vec)
                 components.append(comp)
 
-            # bundle components → sentence vector (GPU bundle when available)
             sent_vec = self.bundle(components, normalize=True)
             sentence_vecs.append(sent_vec)
             word_lists.append(words)
@@ -462,10 +532,7 @@ class SVCIngestionEngine:
         self,
         realm_sentence_vecs: Dict[str, List[np.ndarray]],
     ) -> Dict[str, np.ndarray]:
-        """Bundle sentence vectors per realm into prototype vectors.
-
-        Uses ``self.bundle`` (GPU ``vsa-bundle.spv`` when available).
-        """
+        """Bundle sentence vectors per realm into prototype vectors."""
         realm_vectors: Dict[str, np.ndarray] = {}
         for realm, vecs in realm_sentence_vecs.items():
             if vecs:
@@ -478,19 +545,7 @@ class SVCIngestionEngine:
         sentence_vecs: np.ndarray,
         top_k: int = 5,
     ) -> List[Tuple[int, float]]:
-        """Find top-k most similar sentences to *query_vec*.
-
-        Uses ``self.similarity_batch`` (GPU ``vsa-similarity-batch.spv``
-        when available).
-
-        Args:
-            query_vec: Query vector (dim,).
-            sentence_vecs: Matrix of sentence vectors (N, dim).
-            top_k: Number of results to return.
-
-        Returns:
-            List of (index, similarity) sorted descending.
-        """
+        """Find top-k most similar sentences to *query_vec*."""
         sims = self.similarity_batch(query_vec, sentence_vecs)
         indices = np.argsort(sims)[::-1][:top_k]
         return [(int(idx), float(sims[idx])) for idx in indices]
@@ -501,18 +556,7 @@ class SVCIngestionEngine:
         realm_codebook: np.ndarray,
         realm_names: List[str],
     ) -> List[str]:
-        """Route each query to its best-matching realm.
-
-        Uses ``self.similarity_batch`` per query (GPU accelerated).
-
-        Args:
-            queries: (N, dim) batch of query vectors.
-            realm_codebook: (R, dim) realm expert vectors.
-            realm_names: Ordered list of realm names matching codebook rows.
-
-        Returns:
-            List of realm names (length N).
-        """
+        """Route each query to its best-matching realm."""
         results: List[str] = []
         for i in range(queries.shape[0]):
             sims = self.similarity_batch(queries[i], realm_codebook)

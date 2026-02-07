@@ -376,6 +376,222 @@ class VulkanVSA:
         
         return result
 
+    # -------------------------------------------------------------------------
+    # GEMM-based similarity (RDNA2-friendly)
+    # -------------------------------------------------------------------------
+
+    def similarity_matrix_gemm(
+        self,
+        queries: np.ndarray,
+        codebook: np.ndarray,
+        divide_by_dim: bool = True,
+    ) -> np.ndarray:
+        """
+        Compute similarities using a tiled GEMM shader.
+
+        Computes: scores[B, N] = queries[B, D] @ codebook[N, D]^T
+
+        Args:
+            queries: (B, D) float32
+            codebook: (N, D) float32
+            divide_by_dim: if True, divide dot by D (recommended for bipolar)
+
+        Returns:
+            scores: (B, N) float32
+        """
+        from vulkan import VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+
+        queries = np.asarray(queries, dtype=np.float32)
+        codebook = np.asarray(codebook, dtype=np.float32)
+
+        assert queries.ndim == 2, "queries must be (B, D)"
+        assert codebook.ndim == 2, "codebook must be (N, D)"
+
+        B, D = queries.shape
+        N, D2 = codebook.shape
+        assert D == D2, "dimension mismatch"
+
+        # Fallback if shader not available
+        if 'vsa-similarity-gemm' not in self.core.shaders:
+            # CPU dot
+            scores = queries @ codebook.T
+            if divide_by_dim and D > 0:
+                scores = scores / float(D)
+            return scores.astype(np.float32)
+
+        # Create buffers
+        q_buf, q_mem = self.core._create_buffer(B * D * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        c_buf, c_mem = self.core._create_buffer(N * D * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        o_buf, o_mem = self.core._create_buffer(B * N * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+
+        # Upload
+        self.core._upload_buffer(q_buf, q_mem, queries.reshape(-1))
+        self.core._upload_buffer(c_buf, c_mem, codebook.reshape(-1))
+
+        # Pipeline
+        pipeline, layout, descriptor = self.pipelines.get_or_create_pipeline(
+            'vsa-similarity-gemm', num_buffers=3, push_constant_size=16
+        )
+
+        desc_set = self.pipelines._create_descriptor_set(
+            descriptor,
+            [(q_buf, B * D * 4), (c_buf, N * D * 4), (o_buf, B * N * 4)]
+        )
+
+        flags = 1 if divide_by_dim else 0
+        push_consts = struct.pack('IIII', B, N, D, flags)
+
+        # Dispatch tiles
+        wg_x = (N + 15) // 16
+        wg_y = (B + 15) // 16
+        self.core._dispatch_compute(pipeline, layout, desc_set, wg_x, push_consts, workgroup_y=wg_y)
+
+        # Download
+        out = self.core._download_buffer(o_mem, B * N * 4, dtype=np.float32).reshape(B, N)
+
+        # Cleanup
+        from vulkan import vkDestroyBuffer, vkFreeMemory, vkFreeDescriptorSets
+        vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [desc_set])
+        vkDestroyBuffer(self.core.device, q_buf, None)
+        vkDestroyBuffer(self.core.device, c_buf, None)
+        vkDestroyBuffer(self.core.device, o_buf, None)
+        vkFreeMemory(self.core.device, q_mem, None)
+        vkFreeMemory(self.core.device, c_mem, None)
+        vkFreeMemory(self.core.device, o_mem, None)
+
+        return out
+
+    def similarity_batch_gemm(self, query: np.ndarray, codebook: np.ndarray) -> np.ndarray:
+        """
+        GEMM-based drop-in replacement for similarity_batch (single query).
+
+        Args:
+            query: (D,)
+            codebook: (N, D)
+
+        Returns:
+            (N,) similarities
+        """
+        q = np.asarray(query, dtype=np.float32).reshape(1, -1)
+        scores = self.similarity_matrix_gemm(q, codebook, divide_by_dim=True)
+        return scores[0]
+
+    def similarity_topk_gemm(
+        self,
+        queries: np.ndarray,
+        codebook: np.ndarray,
+        top_k: int = 1,
+        mask_value: float = -1e20,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Top-k routing on GPU: GEMM -> row-wise argmax (k rounds with masking).
+
+        Args:
+            queries: (B, D)
+            codebook: (N, D)
+            top_k: number of winners per row
+            mask_value: value to write at selected positions between rounds
+
+        Returns:
+            idx: (B, top_k) uint32
+            val: (B, top_k) float32
+        """
+        from vulkan import VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+        import struct as _struct
+
+        queries = np.asarray(queries, dtype=np.float32)
+        codebook = np.asarray(codebook, dtype=np.float32)
+        assert queries.ndim == 2 and codebook.ndim == 2
+        B, D = queries.shape
+        N, D2 = codebook.shape
+        assert D == D2
+        top_k = int(top_k)
+        assert top_k >= 1
+
+        # Fallback (CPU)
+        if ('vsa-similarity-gemm' not in self.core.shaders or
+            'vsa-argmax-rows' not in self.core.shaders or
+            'vsa-mask-selected' not in self.core.shaders):
+            scores = (queries @ codebook.T) / float(D) if D > 0 else (queries @ codebook.T)
+            idx = np.argsort(-scores, axis=1)[:, :top_k].astype(np.uint32)
+            val = np.take_along_axis(scores, idx.astype(np.int64), axis=1).astype(np.float32)
+            return idx, val
+
+        # --- Allocate similarity buffers (keep on GPU) ---
+        q_buf, q_mem = self.core._create_buffer(B * D * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        c_buf, c_mem = self.core._create_buffer(N * D * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        s_buf, s_mem = self.core._create_buffer(B * N * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+
+        self.core._upload_buffer(q_buf, q_mem, queries.reshape(-1))
+        self.core._upload_buffer(c_buf, c_mem, codebook.reshape(-1))
+
+        # Similarity GEMM pipeline
+        sim_pipe, sim_layout, sim_desc = self.pipelines.get_or_create_pipeline(
+            'vsa-similarity-gemm', num_buffers=3, push_constant_size=16
+        )
+        sim_set = self.pipelines._create_descriptor_set(
+            sim_desc, [(q_buf, B*D*4), (c_buf, N*D*4), (s_buf, B*N*4)]
+        )
+        flags = 1  # divide by D
+        sim_pc = _struct.pack('IIII', B, N, D, flags)
+        wg_x = (N + 15) // 16
+        wg_y = (B + 15) // 16
+        self.core._dispatch_compute(sim_pipe, sim_layout, sim_set, wg_x, sim_pc, workgroup_y=wg_y)
+
+        # Argmax buffers
+        idx_buf, idx_mem = self.core._create_buffer(B * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        val_buf, val_mem = self.core._create_buffer(B * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+
+        arg_pipe, arg_layout, arg_desc = self.pipelines.get_or_create_pipeline(
+            'vsa-argmax-rows', num_buffers=3, push_constant_size=8
+        )
+        mask_pipe, mask_layout, mask_desc = self.pipelines.get_or_create_pipeline(
+            'vsa-mask-selected', num_buffers=2, push_constant_size=12
+        )
+
+        idx_out = np.zeros((B, top_k), dtype=np.uint32)
+        val_out = np.zeros((B, top_k), dtype=np.float32)
+
+        for r in range(top_k):
+            # Argmax
+            arg_set = self.pipelines._create_descriptor_set(
+                arg_desc, [(s_buf, B*N*4), (idx_buf, B*4), (val_buf, B*4)]
+            )
+            arg_pc = _struct.pack('II', N, B)
+            self.core._dispatch_compute(arg_pipe, arg_layout, arg_set, B, arg_pc)
+
+            # Read back indices + values
+            idx_round = self.core._download_buffer(idx_mem, B*4, dtype=np.uint32)
+            val_round = self.core._download_buffer(val_mem, B*4, dtype=np.float32)
+            idx_out[:, r] = idx_round
+            val_out[:, r] = val_round
+
+            # Mask selected for next round (except last)
+            if r != top_k - 1:
+                mask_set = self.pipelines._create_descriptor_set(
+                    mask_desc, [(s_buf, B*N*4), (idx_buf, B*4)]
+                )
+                mask_pc = _struct.pack('IIf', N, B, float(mask_value))
+                self.core._dispatch_compute(mask_pipe, mask_layout, mask_set, B, mask_pc)
+
+                from vulkan import vkFreeDescriptorSets
+                vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [mask_set])
+
+            from vulkan import vkFreeDescriptorSets
+            vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [arg_set])
+
+        # Cleanup
+        from vulkan import vkDestroyBuffer, vkFreeMemory, vkFreeDescriptorSets
+        vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [sim_set])
+
+        for buf in (q_buf, c_buf, s_buf, idx_buf, val_buf):
+            vkDestroyBuffer(self.core.device, buf, None)
+        for mem in (q_mem, c_mem, s_mem, idx_mem, val_mem):
+            vkFreeMemory(self.core.device, mem, None)
+
+        return idx_out, val_out
+
+
     def resonator_step(
         self,
         composite: np.ndarray,

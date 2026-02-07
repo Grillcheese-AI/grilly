@@ -5,7 +5,7 @@ Core Vulkan initialization, buffer management, and dispatch operations.
 import numpy as np
 import ctypes
 from pathlib import Path
-from .base import VULKAN_AVAILABLE
+from .base import VULKAN_AVAILABLE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
 
 if VULKAN_AVAILABLE:
     from vulkan import *
@@ -313,8 +313,13 @@ class VulkanCore:
         """
         return getattr(self, 'tiling_support', {'available': False})
     
-    def _create_buffer(self, size: int, usage: int):
-        """Create Vulkan buffer and allocate memory"""
+    def _create_buffer(self, size: int, usage: int = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT):
+        """Create Vulkan buffer and allocate memory.
+
+        usage defaults to VK_BUFFER_USAGE_STORAGE_BUFFER_BIT so callers that
+        only need a generic storage buffer can omit the flag (backward
+        compatibility with earlier call sites).
+        """
         buffer_info = VkBufferCreateInfo(
             sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             size=size,

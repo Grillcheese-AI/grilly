@@ -5,7 +5,7 @@ Uses VSA operations to route queries to relevant experts.
 """
 
 import numpy as np
-from typing import Dict, List, Callable, Optional, Tuple
+from typing import Dict, List, Callable, Optional, Tuple, Any
 from grilly.experimental.vsa.ops import BinaryOps
 from grilly.experimental.cognitive.capsule import CapsuleEncoder, cosine_similarity
 
@@ -26,7 +26,8 @@ class ResonatorMoE:
         expert_vectors: Optional[Dict[str, np.ndarray]] = None,
         expert_capsules: Optional[Dict[str, np.ndarray]] = None,
         capsule_encoder: Optional[CapsuleEncoder] = None,
-        capsule_weight: float = 0.3
+        capsule_weight: float = 0.3,
+        vsa_backend: Optional[Any] = None
     ):
         """
         Initialize ResonatorMoE.
@@ -59,6 +60,9 @@ class ResonatorMoE:
                 self.expert_capsules[name] = self.capsule_encoder.encode_vector(vec)
 
         self.capsule_weight = float(np.clip(capsule_weight, 0.0, 1.0))
+        self.vsa_backend = vsa_backend
+        self._expert_names = list(self.expert_vectors.keys())
+        self._expert_matrix = np.stack([self.expert_vectors[n] for n in self._expert_names], axis=0).astype(np.float32) if self._expert_names else None
 
     def _combined_similarity(self, query: np.ndarray, expert_name: str) -> float:
         """Combine VSA and capsule similarity for routing."""
@@ -93,12 +97,21 @@ class ResonatorMoE:
         Returns:
             List of expert names, ordered by similarity (descending)
         """
-        # Compute similarities
-        similarities = []
-        for name, expert_vec in self.expert_vectors.items():
-            sim = self._combined_similarity(query, name)
-            similarities.append((name, sim))
-        
+        # Fast path: VSA-only routing on GPU (capsule_weight == 0)
+        if (self.vsa_backend is not None and hasattr(self.vsa_backend, 'similarity_topk')
+                and self.capsule_weight <= 0.0 and self._expert_matrix is not None):
+            k = int(min(top_k, len(self._expert_names)))
+            idx, sims = self.vsa_backend.similarity_topk(query.astype(np.float32), self._expert_matrix, top_k=k)
+            idx = idx.reshape(-1).tolist()
+            sims = sims.reshape(-1).tolist()
+            similarities = [(self._expert_names[i], float(s)) for i, s in zip(idx, sims)]
+        else:
+            # Compute similarities (CPU / combined)
+            similarities = []
+            for name, expert_vec in self.expert_vectors.items():
+                sim = self._combined_similarity(query, name)
+                similarities.append((name, sim))
+
         # Filter by threshold if provided
         if threshold is not None:
             similarities = [(n, s) for n, s in similarities if s >= threshold]

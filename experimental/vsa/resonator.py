@@ -16,7 +16,7 @@ Date: February 2026
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 
 from .ops import BinaryOps
 
@@ -44,7 +44,8 @@ class ResonatorNetwork:
         self,
         codebooks: Dict[str, np.ndarray],
         max_iterations: int = 20,
-        convergence_threshold: float = 0.95
+        convergence_threshold: float = 0.95,
+        vsa_backend: Optional[Any] = None
     ):
         """
         Initialize resonator network.
@@ -71,6 +72,7 @@ class ResonatorNetwork:
         dims = [cb.shape[-1] for cb in codebooks.values()]
         assert len(set(dims)) == 1, "All codebooks must have same dimension"
         self.dim = dims[0]
+        self.vsa_backend = vsa_backend
     
     def factorize(
         self,
@@ -157,8 +159,19 @@ class ResonatorNetwork:
                 
                 # Project onto codebook (find best match)
                 codebook = self.codebooks[name]
-                similarities = codebook @ unbound  # (num_items,)
-                best_idx = int(np.argmax(similarities))
+
+                if self.vsa_backend is not None and hasattr(self.vsa_backend, 'similarity_topk'):
+
+                    idx, _val = self.vsa_backend.similarity_topk(unbound, codebook, top_k=1)
+
+                    best_idx = int(idx.reshape(-1)[0])
+
+                else:
+
+                    similarities = codebook @ unbound  # (num_items,)
+
+                    best_idx = int(np.argmax(similarities))
+
                 best_match = codebook[best_idx].copy()
                 
                 # Check convergence
@@ -177,8 +190,18 @@ class ResonatorNetwork:
         indices = {}
         for name in self.factor_names:
             codebook = self.codebooks[name]
-            similarities = codebook @ estimates[name]
-            indices[name] = int(np.argmax(similarities))
+
+            if self.vsa_backend is not None and hasattr(self.vsa_backend, 'similarity_topk'):
+
+                idx, _val = self.vsa_backend.similarity_topk(estimates[name], codebook, top_k=1)
+
+                indices[name] = int(idx.reshape(-1)[0])
+
+            else:
+
+                similarities = codebook @ estimates[name]
+
+                indices[name] = int(np.argmax(similarities))
         
         return estimates, indices, iteration + 1
     
@@ -193,8 +216,19 @@ class ResonatorNetwork:
         
         if composite is not None:
             # Find best matching item in codebook
-            similarities = codebook @ composite
-            best_idx = int(np.argmax(similarities))
+
+            if self.vsa_backend is not None and hasattr(self.vsa_backend, 'similarity_topk'):
+
+                idx, _val = self.vsa_backend.similarity_topk(composite, codebook, top_k=1)
+
+                best_idx = int(idx.reshape(-1)[0])
+
+            else:
+
+                similarities = codebook @ composite
+
+                best_idx = int(np.argmax(similarities))
+
             return codebook[best_idx].copy()
         else:
             idx = np.random.randint(len(codebook))
