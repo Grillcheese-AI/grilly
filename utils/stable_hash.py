@@ -33,6 +33,7 @@ except Exception:
     _warned = False
 
     def _warn_once():
+        """Emit a single warning about the hashing fallback."""
         global _warned
         if not _warned:
             warnings.warn(

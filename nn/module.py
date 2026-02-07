@@ -19,17 +19,22 @@ except ImportError:
     PARAMETER_AVAILABLE = False
     # Fallback: create a simple Parameter-like class
     class Parameter(np.ndarray):
+        """Fallback trainable array with gradient storage."""
+
         def __new__(cls, data, requires_grad=True):
+            """Create a parameter view from raw data."""
             obj = np.asarray(data, dtype=np.float32).view(cls)
             obj.requires_grad = requires_grad
             obj.grad = None
             return obj
         def __array_finalize__(self, obj):
+            """Propagate metadata when numpy creates array views."""
             if obj is None:
                 return
             self.requires_grad = getattr(obj, 'requires_grad', True)
             self.grad = getattr(obj, 'grad', None)
         def zero_grad(self):
+            """Reset gradients to zeros."""
             if self.grad is not None:
                 self.grad.fill(0.0)
             else:

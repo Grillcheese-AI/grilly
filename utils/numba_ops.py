@@ -28,7 +28,10 @@ except ImportError:
 
     # Create no-op decorator for when numba is unavailable
     def jit(*args, **kwargs):
+        """Provide a no-op replacement for numba.jit."""
+
         def decorator(func):
+            """Return the original function unchanged."""
             return func
         if len(args) == 1 and callable(args[0]):
             return args[0]

@@ -50,30 +50,42 @@ class Linear(Module):
         else:
             # Fallback: use wrapper class to add .grad attribute
             class ParamWrapper:
+                """Lightweight parameter wrapper with gradient storage."""
+
                 def __init__(self, data):
+                    """Initialize the wrapped parameter array."""
                     self.data = data.copy() if isinstance(data, np.ndarray) else np.array(data, dtype=np.float32)
                     self.grad = None
                 def __array__(self):
+                    """Expose the wrapped array to numpy operations."""
                     return self.data
                 def __getitem__(self, key):
+                    """Read parameter slices by index."""
                     return self.data[key]
                 def __setitem__(self, key, value):
+                    """Write parameter slices by index."""
                     self.data[key] = value
                 def __sub__(self, other):
+                    """Return elementwise subtraction as a wrapped parameter."""
                     result = self.data - (other.data if hasattr(other, 'data') else other)
                     return ParamWrapper(result)
                 def __isub__(self, other):
+                    """Apply in-place subtraction to the wrapped array."""
                     self.data -= (other.data if hasattr(other, 'data') else other)
                     return self
                 def copy(self):
+                    """Return a copy of the wrapped parameter."""
                     return ParamWrapper(self.data.copy())
                 @property
                 def shape(self):
+                    """Expose the wrapped array shape."""
                     return self.data.shape
                 @property
                 def dtype(self):
+                    """Expose the wrapped array dtype."""
                     return self.data.dtype
                 def zero_grad(self):
+                    """Reset gradients to zeros."""
                     if self.grad is not None:
                         self.grad.fill(0.0)
                     else:
@@ -86,30 +98,42 @@ class Linear(Module):
             else:
                 # Use same wrapper approach
                 class ParamWrapper:
+                    """Lightweight bias wrapper with gradient storage."""
+
                     def __init__(self, data):
+                        """Initialize the wrapped bias array."""
                         self.data = data.copy() if isinstance(data, np.ndarray) else np.array(data, dtype=np.float32)
                         self.grad = None
                     def __array__(self):
+                        """Expose the wrapped array to numpy operations."""
                         return self.data
                     def __getitem__(self, key):
+                        """Read bias entries by index."""
                         return self.data[key]
                     def __setitem__(self, key, value):
+                        """Write bias entries by index."""
                         self.data[key] = value
                     def __sub__(self, other):
+                        """Return elementwise subtraction as a wrapped bias."""
                         result = self.data - (other.data if hasattr(other, 'data') else other)
                         return ParamWrapper(result)
                     def __isub__(self, other):
+                        """Apply in-place subtraction to the wrapped bias."""
                         self.data -= (other.data if hasattr(other, 'data') else other)
                         return self
                     def copy(self):
+                        """Return a copy of the wrapped bias."""
                         return ParamWrapper(self.data.copy())
                     @property
                     def shape(self):
+                        """Expose the wrapped array shape."""
                         return self.data.shape
                     @property
                     def dtype(self):
+                        """Expose the wrapped array dtype."""
                         return self.data.dtype
                     def zero_grad(self):
+                        """Reset gradients to zeros."""
                         if self.grad is not None:
                             self.grad.fill(0.0)
                         else:
@@ -301,7 +325,10 @@ def _create_param_wrapper(data: np.ndarray):
         return ParameterClass(data, requires_grad=True)
     else:
         class ParamWrapper:
+            """Fallback parameter wrapper used when Parameter is unavailable."""
+
             def __init__(self, data):
+                """Initialize the wrapped array."""
                 # Ensure data is a numpy array
                 if isinstance(data, np.ndarray):
                     self.data = data.copy()
@@ -314,29 +341,39 @@ def _create_param_wrapper(data: np.ndarray):
                     self.data = np.ascontiguousarray(self.data)
                 self.grad = None
             def __array__(self):
+                """Expose the wrapped array to numpy operations."""
                 return self.data
             def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+                """Delegate numpy ufuncs to the wrapped array."""
                 # Delegate to numpy
                 return getattr(ufunc, method)(*inputs, **kwargs)
             def __getitem__(self, key):
+                """Read wrapped values by index."""
                 return self.data[key]
             def __setitem__(self, key, value):
+                """Write wrapped values by index."""
                 self.data[key] = value
             def __sub__(self, other):
+                """Return elementwise subtraction as a wrapped value."""
                 result = self.data - (other.data if hasattr(other, 'data') else other)
                 return ParamWrapper(result)
             def __isub__(self, other):
+                """Apply in-place subtraction to wrapped values."""
                 self.data -= (other.data if hasattr(other, 'data') else other)
                 return self
             def copy(self):
+                """Return a copy of the wrapped parameter."""
                 return ParamWrapper(self.data.copy())
             @property
             def shape(self):
+                """Expose the wrapped array shape."""
                 return self.data.shape
             @property
             def dtype(self):
+                """Expose the wrapped array dtype."""
                 return self.data.dtype
             def zero_grad(self):
+                """Reset gradients to zeros."""
                 if self.grad is not None:
                     self.grad.fill(0.0)
                 else:

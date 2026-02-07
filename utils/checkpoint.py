@@ -104,6 +104,7 @@ def save_checkpoint(
     if filepath.suffix == '.npz':
         # Flatten model state dict for npz (handle nested dicts)
         def flatten_state_dict(d, prefix=''):
+            """Flatten nested state dictionaries to dotted-key mappings."""
             flat = {}
             for k, v in d.items():
                 key = f"{prefix}.{k}" if prefix else k
@@ -186,6 +187,7 @@ def load_checkpoint(
             model_data = np.load(str(model_file), allow_pickle=True)
             # Unflatten nested dict structure
             def unflatten_state_dict(flat_dict):
+                """Rebuild nested dictionaries from dotted-key mappings."""
                 result = {}
                 for key, value in flat_dict.items():
                     parts = key.split('.')

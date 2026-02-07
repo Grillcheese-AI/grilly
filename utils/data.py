@@ -294,12 +294,18 @@ class BatchSampler:
                 from grilly.utils.data import RandomSampler as RS
 
                 class DummyDataset:
+                    """Minimal dataset shim for sampler compatibility."""
+
                     def __len__(self):
+                        """Return the synthetic dataset length."""
                         return sampler
                 self.sampler = RS(DummyDataset())
             else:
                 class DummyDataset:
+                    """Minimal dataset shim for sequential sampling."""
+
                     def __len__(self):
+                        """Return the synthetic dataset length."""
                         return sampler
                 self.sampler = SequentialSampler(DummyDataset())
         else:

@@ -26,9 +26,9 @@ class _DirectBuffer:
         """Initialize the instance."""
 
         self.handle, self.memory, self.size = handle, memory, size
-                       """Execute release."""
-
-    def release(self): pass
+    def release(self):
+        """Execute release."""
+        pass
     def destroy(self, device):
         """Execute destroy."""
 
