@@ -24,44 +24,6 @@ and functions across Grilly.
    grilly.scripts
    grilly.utils
 
-Submodule Pages
----------------
-
-Each submodule is built as an independent page for direct linking and cleaner
-navigation.
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Backend Submodules
-   :glob:
-
-   generated/grilly.backend.*
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Experimental Submodules
-   :glob:
-
-   generated/grilly.experimental.*
-
-.. toctree::
-   :maxdepth: 1
-   :caption: NN Submodules
-   :glob:
-
-   generated/grilly.nn.*
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Functional / Optim / Utils Submodules
-   :glob:
-
-   generated/grilly.functional.*
-   generated/grilly.optim.*
-   generated/grilly.utils.*
-   generated/grilly.datasets.*
-   generated/grilly.scripts.*
-
 The pages below are generated recursively from importable modules and provide
 deep per-module entries for members, variables, and usage details.
 
