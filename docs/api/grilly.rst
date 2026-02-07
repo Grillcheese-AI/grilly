@@ -39,6 +39,5 @@ Module contents
 ---------------
 
 .. automodule:: grilly
-   :members:
-   :undoc-members:
    :show-inheritance:
+   :noindex:

@@ -112,6 +112,5 @@ Module contents
 ---------------
 
 .. automodule:: grilly.functional
-   :members:
-   :undoc-members:
    :show-inheritance:
+   :noindex:

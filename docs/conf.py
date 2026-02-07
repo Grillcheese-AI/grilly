@@ -55,11 +55,18 @@ autodoc_mock_imports = [
     "spacy",
     "sentence_transformers",
     "numba",
+    "vulkan",
+    "pyvma",
+    "scipy",
+    "matplotlib",
+    "blake3",
 ]
 
 autodoc_default_options = {
     "members": True,
     "undoc-members": True,
+    "private-members": True,
+    "special-members": "__init__,__call__",
     "show-inheritance": True,
 }
 autodoc_member_order = "bysource"
@@ -72,7 +79,3 @@ napoleon_numpy_docstring = True
 
 # Required by sphinx-notfound-page for RTD links.
 notfound_urls_prefix = "/en/latest/"
-
-# Legacy modules contain mixed docstring styles; suppress autodoc parsing noise
-# so API pages still render comprehensively on RTD.
-suppress_warnings = ["autodoc"]

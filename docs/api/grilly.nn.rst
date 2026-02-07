@@ -184,6 +184,5 @@ Module contents
 ---------------
 
 .. automodule:: grilly.nn
-   :members:
-   :undoc-members:
    :show-inheritance:
+   :noindex:

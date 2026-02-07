@@ -24,6 +24,5 @@ Module contents
 ---------------
 
 .. automodule:: grilly.experimental.moe
-   :members:
-   :undoc-members:
    :show-inheritance:
+   :noindex:

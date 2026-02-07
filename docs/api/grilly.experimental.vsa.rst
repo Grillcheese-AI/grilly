@@ -24,6 +24,5 @@ Module contents
 ---------------
 
 .. automodule:: grilly.experimental.vsa
-   :members:
-   :undoc-members:
    :show-inheritance:
+   :noindex:

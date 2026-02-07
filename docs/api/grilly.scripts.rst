@@ -24,6 +24,5 @@ Module contents
 ---------------
 
 .. automodule:: grilly.scripts
-   :members:
-   :undoc-members:
    :show-inheritance:
+   :noindex:

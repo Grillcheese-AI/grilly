@@ -64,6 +64,5 @@ Module contents
 ---------------
 
 .. automodule:: grilly.optim
-   :members:
-   :undoc-members:
    :show-inheritance:
+   :noindex:

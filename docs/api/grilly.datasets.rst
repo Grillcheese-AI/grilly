@@ -40,6 +40,5 @@ Module contents
 ---------------
 
 .. automodule:: grilly.datasets
-   :members:
-   :undoc-members:
    :show-inheritance:
+   :noindex:

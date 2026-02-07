@@ -56,6 +56,5 @@ Module contents
 ---------------
 
 .. automodule:: grilly.experimental.cognitive
-   :members:
-   :undoc-members:
    :show-inheritance:
+   :noindex:

@@ -17,6 +17,5 @@ Module contents
 ---------------
 
 .. automodule:: grilly.experimental
-   :members:
-   :undoc-members:
    :show-inheritance:
+   :noindex:
