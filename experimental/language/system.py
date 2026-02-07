@@ -58,11 +58,14 @@ class InstantLanguage:
     
     DEFAULT_DIM = 4096
     
-    def __init__(self, dim: int = DEFAULT_DIM):
+    def __init__(self, dim: int = DEFAULT_DIM, *, word_use_ngrams: bool = True):
         self.dim = dim
         
         # Components
-        self.word_encoder = WordEncoder(dim=dim)
+        # N-gram HRR word vectors are *very* expensive to build at scale.
+        # For large ingestion runs you can disable them (word_use_ngrams=False)
+        # to switch to fast hashed vectors.
+        self.word_encoder = WordEncoder(dim=dim, use_ngrams=word_use_ngrams)
         self.sentence_encoder = SentenceEncoder(self.word_encoder)
         self.generator = SentenceGenerator(self.sentence_encoder)
         self.parser = ResonatorParser(self.sentence_encoder)
@@ -213,6 +216,9 @@ class InstantLanguage:
         build_realm_vectors: bool = True,
         verbose: bool = False,
         engine: Optional['SVCIngestionEngine'] = None,
+        progress_every: int = 10_000,
+        max_templates: int = 512,
+        template_examples_per_key: int = 32,
     ) -> SVCIngestionResult:
         """
         Ingest SVC data into the language system.
@@ -250,20 +256,27 @@ class InstantLanguage:
             print(f"  Backend: {eng.status()}")
 
         # -- Step 1: Batch encode sentences via engine --------------------
-        print(f"  Encoding {len(entries)} sentences...")
+        if verbose:
+            print(f"  Encoding {len(entries)} sentences...")
         sentence_vecs, word_lists = eng.batch_encode_sentences(
             entries, self.word_encoder, self.sentence_encoder,
         )
-        print(f"  Encoded {len(sentence_vecs)} sentences")
+        if verbose:
+            print(f"  Encoded {len(sentence_vecs)} sentences")
 
         # -- Step 2: Store + accumulate stats ----------------------------
-        print(f"  Storing {len(entries)} sentences...")
-        template_groups: Dict[str, List[List[str]]] = defaultdict(list)
+        if verbose:
+            print(f"  Storing {len(entries)} sentences...")
+
+        # Template learning can explode in memory on large corpora.
+        # We keep *counts* for all keys, but only store a bounded number
+        # of examples per key for template induction.
+        template_counts: Dict[str, int] = defaultdict(int)
+        template_examples: Dict[str, List[List[str]]] = defaultdict(list)
 
         for i, entry in enumerate(entries):
             sent_vec = sentence_vecs[i]
             words = word_lists[i]
-            print(f"  Ingested sentence: {words}")
 
             self.sentence_memory.append((sent_vec, words))
             result.sentences_learned += 1
@@ -274,27 +287,38 @@ class InstantLanguage:
                 self._realm_accumulators[entry.realm].append(sent_vec)
 
             if learn_templates and entry.deps:
-                template_groups[entry.template_key()].append(words)
+                tkey = entry.template_key()
+                template_counts[tkey] += 1
+                if len(template_examples[tkey]) < template_examples_per_key:
+                    template_examples[tkey].append(words)
 
-            if verbose and (i + 1) % 10 == 0:
+            if verbose and progress_every and (i + 1) % progress_every == 0:
                 print(f"  Ingested {i + 1}/{len(entries)} entries...")
 
         # -- Step 3: Learn templates ------------------------------------
         if learn_templates:
-            print(f"  Learning {len(template_groups)} templates...")
-            for tkey, wlists in template_groups.items():
+            # Choose the most frequent template keys, but learn from a
+            # bounded sample to keep runtime and memory predictable.
+            keys = sorted(template_counts.keys(), key=lambda k: -template_counts[k])
+            keys = keys[:max_templates] if max_templates else keys
+            if verbose:
+                print(f"  Learning {len(keys)} templates (of {len(template_counts)})...")
+            for tkey in keys:
+                wlists = template_examples.get(tkey, [])
                 if len(wlists) >= 2:
                     self.generator.learn_svc_templates(wlists, tkey)
                     result.templates_learned += 1
 
         # -- Step 4: Build realm vectors (GPU bundle) -------------------
         if build_realm_vectors:
-            print(f"  Building {len(self._realm_accumulators)} realm vectors...")
+            if verbose:
+                print(f"  Building {len(self._realm_accumulators)} realm vectors...")
             self.realm_vectors.update(
                 eng.batch_build_realm_vectors(dict(self._realm_accumulators))
             )
             result.realm_vectors = dict(self.realm_vectors)
-            print(f"  Built {len(result.realm_vectors)} realm vectors")
+            if verbose:
+                print(f"  Built {len(result.realm_vectors)} realm vectors")
 
         result.words_encoded = len(self.word_encoder.word_vectors) - words_before
 

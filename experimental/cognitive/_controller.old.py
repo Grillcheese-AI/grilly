@@ -48,15 +48,13 @@ class CognitiveController:
     def __init__(
         self,
         dim: int = DEFAULT_DIM,
-        confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
-        *,
-        word_use_ngrams: bool = True,
+        confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD
     ):
         self.dim = dim
         self.confidence_threshold = confidence_threshold
         
         # Core components
-        self.language = InstantLanguage(dim=dim, word_use_ngrams=word_use_ngrams)
+        self.language = InstantLanguage(dim=dim)
         self.world = WorldModel(dim=dim)
         self.wm = WorkingMemory(dim=dim)
         self.simulator = InternalSimulator(self.language, self.world, self.wm)

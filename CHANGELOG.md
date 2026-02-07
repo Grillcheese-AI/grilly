@@ -1,9 +1,55 @@
 # Changelog
 
-All notable changes to Grilly will be documented in this file.
+All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+This changelog follows the spirit of **Keep a Changelog** and uses the terms **Added**, **Changed**, **Fixed**, and **Performance**.
+
+---
+
+## [0.3.0] - 2026-02-07
+
+
+
+### Added
+- **RDNA2-friendly GEMM similarity path** for VSA dot-products (codebook projection / similarity) via the `gemm_mnk` shader (block-tiled matmul).
+- **GPU top-k routing primitives**:
+  - Row-wise argmax shader (`vsa-argmax-rows.glsl`)
+  - Winner masking shader for iterative top-k (`vsa-mask-selected.glsl`)
+- **Tiled GEMM VSA shader**: `vsa-similarity-gemm.glsl` (scores = Q · Cᵀ), used for large codebooks and batch queries.
+- **GPU backend tests**:
+  - `tests/experimental/test_backend_vsa_similarity_gemm.py`
+  - `tests/experimental/test_backend_vsa_topk.py`
+- **Fast streaming SVC ingestion script**: `scripts/ingest_svc.py` (chunked ingestion, progress reporting, optional n-gram disabling).
+
+### Changed
+- `backend/experimental/vsa.py`
+  - Prefers **GEMM-based similarity** when `gemm_mnk` is available.
+  - Adds/extends API for GEMM similarity and (iterative) top-k selection without full matrix readback.
+- `experimental/language/svc_loader.py`
+  - Adds a **batch sentence encoding fast path** (pad → bind_batch → bind_batch → bundle_batch).
+  - Bipolarizes word/role/pos vectors for consistent Hadamard binding in the fast path.
+- `experimental/cognitive/controller.py` and `experimental/language/system.py`
+  - Ingestion paths updated to support faster bulk ingestion and optional feature disabling (templates/realm vectors/ngrams).
+- **Ingestion workflow**
+  - Avoids doing two full passes (language ingestion + controller ingestion) in the default script; controller ingestion is now the single entry point for large datasets.
+
+### Fixed
+- `backend/fnn.py::VulkanFNN.gemm()`
+  - Corrected buffer upload/download usage and consistent shader key usage for `gemm_mnk`.
+
+### Performance
+- Bulk SVC ingestion no longer “hangs” due to duplicated work and excessive console output:
+  - Chunked ingestion + progress throttling in `scripts/ingest_svc.py`.
+  - Removes per-entry spam printing when `verbose=False` (guarded by a regression test).
+- Large-codebook similarity and resonator projections move from many small reductions to **block-wise GEMM**, improving RDNA2 occupancy and memory reuse.
+
+### Notes / Migration
+- If you rely on experimental shaders, ensure the new/updated GLSL files are compiled to SPIR-V and present under your `shaders/**/spv` folder with matching names.
+- GPU top-k selection is implemented as **k rounds** of (argmax → mask). This is ideal for small k (e.g., 1–8).
+
+---
+
+## 2026-02-06
 
 ## [0.1.0] - 2026-01-31
 
@@ -74,10 +120,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ANN→SNN conversion tool pending
 - Multi-GPU support not yet implemented
 
-### Upcoming (0.2.0)
+### New Features (0.2.0)
 - PLIF (Parametric LIF) neurons
 - LSNN (Long Short-Term Memory neurons)
 - Surrogate gradients for SNN training
 - ANN→SNN conversion tool
 - Multi-GPU distributed training
 - More architecture-specific optimizations
+
+
+### Upcoming (0.3.x)

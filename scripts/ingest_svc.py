@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""
-SVC Ingestion Script - Load SVC JSONL data into the Grilly experimental pipeline.
+"""SVC ingestion (fast, streaming).
+
+The original ingestion flow was doing two full passes:
+  1) InstantLanguage.ingest_svc(...)
+  2) CognitiveController.ingest_svc(...) (which calls language.ingest_svc again)
+
+That doubles the encoding work and makes large JSONL files feel like they
+"hang". This script ingests **once** through CognitiveController, streaming
+the JSONL in configurable chunks.
 
 Usage:
-    python -m grilly.scripts.ingest_svc --file datasets/_data/instruct_svc_semantic.jsonl
-    python -m grilly.scripts.ingest_svc --file datasets/_data/instruct_svc_semantic.jsonl --max 1000 --realms health science
-    python -m grilly.scripts.ingest_svc --file datasets/_data/conversations_svc_semantic.jsonl --verbose
-
-This script:
-1. Loads SVC entries from a JSONL file
-2. Ingests them into InstantLanguage (vocabulary, sentences, templates, realm vectors)
-3. Ingests them into CognitiveController (world model facts, causal links)
-4. Builds realm-routed ResonatorMoE expert vectors
-5. Prints summary statistics
+  python scripts/ingest_svc.py -f datasets/_data/svc_training_merged.jsonl
+  python scripts/ingest_svc.py -f ... --max 50000 --chunk 4096 --no-templates
+  python scripts/ingest_svc.py -f ... --no-ngrams   # much faster vocab build
 """
 
 import argparse
@@ -20,177 +20,158 @@ import sys
 import time
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Ingest SVC JSONL data into the Grilly experimental pipeline."
-    )
-    parser.add_argument(
-        "--file", "-f",
-        required=True,
-        help="Path to the SVC JSONL file.",
-    )
-    parser.add_argument(
-        "--max", "-n",
-        type=int,
-        default=None,
-        help="Maximum number of entries to load.",
-    )
-    parser.add_argument(
-        "--realms", "-r",
-        nargs="*",
-        default=None,
-        help="Only load entries from these realms.",
-    )
-    parser.add_argument(
-        "--min-complexity",
-        type=float,
-        default=None,
-        help="Minimum complexity threshold.",
-    )
-    parser.add_argument(
-        "--max-complexity",
-        type=float,
-        default=None,
-        help="Maximum complexity threshold.",
-    )
-    parser.add_argument(
-        "--sources", "-s",
-        nargs="*",
-        default=None,
-        help="Only load entries from these sources (instruct, conversation).",
-    )
-    parser.add_argument(
-        "--dim", "-d",
-        type=int,
-        default=2048,
-        help="VSA vector dimension (default: 2048).",
-    )
-    parser.add_argument(
-        "--no-templates",
-        action="store_true",
-        help="Skip template learning.",
-    )
-    parser.add_argument(
-        "--no-realm-vectors",
-        action="store_true",
-        help="Skip building realm vectors.",
-    )
-    parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Print detailed progress.",
-    )
-    args = parser.parse_args()
+def _fmt_rate(n: int, dt: float) -> str:
+    if dt <= 0:
+        return "∞/s"
+    rate = n / dt
+    if rate >= 1e6:
+        return f"{rate/1e6:.2f}M/s"
+    if rate >= 1e3:
+        return f"{rate/1e3:.2f}k/s"
+    return f"{rate:.2f}/s"
 
-    # Imports here so --help is fast
-    from grilly.experimental.language.svc_loader import load_svc_batch, SVCIngestionEngine
-    from grilly.experimental.language.system import InstantLanguage
-    from grilly.experimental.cognitive.controller import CognitiveController
-    from grilly.experimental.moe.routing import ResonatorMoE
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Stream-ingest SVC JSONL into Grilly.")
+    ap.add_argument("--file", "-f", required=True, help="Path to the SVC JSONL file")
+    ap.add_argument("--max", "-n", type=int, default=None, help="Max entries to ingest")
+    ap.add_argument("--realms", "-r", nargs="*", default=None, help="Only these realms")
+    ap.add_argument("--min-complexity", type=float, default=None)
+    ap.add_argument("--max-complexity", type=float, default=None)
+    ap.add_argument("--sources", "-s", nargs="*", default=None, help="Only these sources")
+    ap.add_argument("--dim", "-d", type=int, default=2048)
+    ap.add_argument("--chunk", type=int, default=4096, help="Entries per ingestion chunk")
+    ap.add_argument("--progress", type=int, default=50000, help="Print progress every N entries")
+    ap.add_argument("--no-templates", action="store_true", help="Skip template learning")
+    ap.add_argument("--no-realm-vectors", action="store_true", help="Skip realm vector building")
+    ap.add_argument(
+        "--no-ngrams",
+        action="store_true",
+        help="Disable n-gram HRR word encoding (much faster, less lexical similarity)",
+    )
+    ap.add_argument("--verbose", "-v", action="store_true")
+    args = ap.parse_args()
+
+    # Imports here so --help is instant
+    # Repo-layout compatibility: some setups package everything under "grilly",
+    # others run directly from the repo root.
+    try:
+        from grilly.experimental.language.svc_loader import load_svc_entries, SVCIngestionEngine
+        from grilly.experimental.cognitive.controller import CognitiveController
+        from grilly.experimental.moe.routing import ResonatorMoE
+        from grilly.experimental.vsa.ops import BinaryOps
+    except ModuleNotFoundError:
+        from experimental.language.svc_loader import load_svc_entries, SVCIngestionEngine
+        from experimental.cognitive.controller import CognitiveController
+        from experimental.moe.routing import ResonatorMoE
+        from experimental.vsa.ops import BinaryOps
 
     print("=" * 60)
-    print("Grilly SVC Ingestion Pipeline")
+    print("Grilly SVC Ingestion (streaming)")
     print("=" * 60)
 
-    # ---- Step 0: Create engine (auto-detect GPU) ----
     engine = SVCIngestionEngine(dim=args.dim)
     print(f"\nEngine: {engine.status()}")
 
-    # ---- Step 1: Load data ----
-    print(f"\n[1/4] Loading SVC data from: {args.file}")
+    controller = CognitiveController(
+        dim=args.dim,
+        word_use_ngrams=not args.no_ngrams,
+    )
+
+    # Stream entries and ingest in chunks
     t0 = time.time()
+    chunk = []
+    total = 0
+    last_print = t0
+    total_templates = 0
+    total_sentences = 0
+    total_new_words = 0
 
-    try:
-        batch = load_svc_batch(
-            path=args.file,
-            max_entries=args.max,
-            realms=args.realms,
-            min_complexity=args.min_complexity,
-            max_complexity=args.max_complexity,
-            sources=args.sources,
+    it = load_svc_entries(
+        path=args.file,
+        max_entries=args.max,
+        realms=args.realms,
+        min_complexity=args.min_complexity,
+        max_complexity=args.max_complexity,
+        sources=args.sources,
+    )
+
+    for entry in it:
+        chunk.append(entry)
+        if len(chunk) < args.chunk:
+            continue
+
+        res = controller.ingest_svc(
+            chunk,
+            learn_templates=not args.no_templates,
+            build_realm_vectors=not args.no_realm_vectors,
+            verbose=args.verbose,
+            engine=engine,
         )
-    except FileNotFoundError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        sys.exit(1)
+        total += len(chunk)
+        total_templates += res.templates_learned
+        total_sentences += res.sentences_learned
+        total_new_words += res.words_encoded
+        chunk.clear()
 
-    load_time = time.time() - t0
-    print(f"  Loaded {batch.total_loaded} entries in {load_time:.2f}s")
-    if args.verbose:
-        print(batch.summary())
+        if args.progress and total % args.progress == 0:
+            now = time.time()
+            print(
+                f"  ... {total} ingested ({_fmt_rate(args.progress, now - last_print)}), "
+                f"facts={len(controller.world.facts)}"
+            )
+            last_print = now
 
-    if not batch.entries:
-        print("No entries to ingest. Exiting.")
-        sys.exit(0)
+    # Final partial chunk
+    if chunk:
+        res = controller.ingest_svc(
+            chunk,
+            learn_templates=not args.no_templates,
+            build_realm_vectors=not args.no_realm_vectors,
+            verbose=args.verbose,
+            engine=engine,
+        )
+        total += len(chunk)
+        total_templates += res.templates_learned
+        total_sentences += res.sentences_learned
+        total_new_words += res.words_encoded
 
-    # ---- Step 2: Language ingestion (GPU-accelerated) ----
-    print(f"\n[2/4] Ingesting into InstantLanguage (dim={args.dim})...")
-    t1 = time.time()
+    dt = time.time() - t0
+    print("\n" + "=" * 60)
+    print(f"Done in {dt:.2f}s ({_fmt_rate(total, dt)})")
+    print(f"  Entries:    {total}")
+    print(f"  Sentences:  {total_sentences}")
+    print(f"  New words:  {total_new_words}")
+    print(f"  Facts:      {len(controller.world.facts)}")
 
-    lang = InstantLanguage(dim=args.dim)
-    lang_result = lang.ingest_svc(
-        batch.entries,
-        learn_templates=not args.no_templates,
-        build_realm_vectors=not args.no_realm_vectors,
-        verbose=args.verbose,
-        engine=engine,
-    )
+    realms = getattr(controller.language, "realm_vectors", {}) or {}
+    if realms and not args.no_realm_vectors:
+        realm_names = sorted(realms.keys())
+        print(f"  Realms:     {len(realm_names)} ({', '.join(realm_names[:12])}{'...' if len(realm_names) > 12 else ''})")
 
-    lang_time = time.time() - t1
-    print(f"  {lang_result.sentences_learned} sentences, "
-          f"{lang_result.words_encoded} new words in {lang_time:.2f}s")
-    print(f"  {lang_result.templates_learned} templates learned")
-    print(f"  {len(lang_result.realm_vectors)} realm vectors built")
-    print(f"  Backend: {lang_result.backend}")
-
-    # ---- Step 3: Cognitive ingestion (GPU-accelerated) ----
-    print(f"\n[3/4] Ingesting into CognitiveController...")
-    t2 = time.time()
-
-    controller = CognitiveController(dim=args.dim)
-    cog_result = controller.ingest_svc(
-        batch.entries,
-        learn_templates=not args.no_templates,
-        build_realm_vectors=not args.no_realm_vectors,
-        verbose=args.verbose,
-        engine=engine,
-    )
-
-    cog_time = time.time() - t2
-    print(f"  {len(controller.world.facts)} world facts added in {cog_time:.2f}s")
-    print(f"  {len(controller.world.expectations)} causal links")
-
-    # ---- Step 4: Realm MoE ----
-    print(f"\n[4/4] Building realm-routed MoE...")
-    realms = lang_result.realm_vectors
-    if realms:
-        realm_fns = {r: (lambda x, _r=r: x) for r in realms}
+        # Optional: build MoE router over realm indicators
+        realm_fns = {r: (lambda x, _r=r: x) for r in realm_names}
         moe = ResonatorMoE.from_realm_vectors(
             dim=args.dim,
             realm_expert_fns=realm_fns,
-            realm_vectors=None,  # Use hash-based for routing stability
+            realm_vectors=None,  # hash-based routing stability
         )
-        print(f"  ResonatorMoE with {len(realms)} realm experts: {sorted(realms.keys())}")
-
-        # Quick routing test
-        from grilly.experimental.vsa.ops import BinaryOps
-        for realm in sorted(realms.keys()):
-            indicator = BinaryOps.hash_to_bipolar(realm, args.dim)
+        # Quick sanity routing
+        ok = 0
+        for r in realm_names:
+            indicator = BinaryOps.hash_to_bipolar(r, args.dim)
             routed = moe.route(indicator, top_k=1)
-            status = "OK" if routed[0] == realm else f"MISMATCH ({routed[0]})"
-            print(f"    {realm} -> {status}")
+            ok += int(routed[0] == r)
+        print(f"  MoE route:  {ok}/{len(realm_names)} realm indicators matched")
     else:
-        print("  No realm vectors built (skipped or no data).")
+        print("  Realms:     none")
 
-    # ---- Summary ----
-    total_time = time.time() - t0
-    print(f"\n{'=' * 60}")
-    print(f"Done in {total_time:.2f}s total")
-    print(f"  Entries: {batch.total_loaded}")
-    print(f"  Words:   {lang_result.words_encoded}")
-    print(f"  Facts:   {len(controller.world.facts)}")
-    print(f"  Realms:  {sorted(realms.keys()) if realms else 'none'}")
-    print(f"{'=' * 60}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        sys.exit(130)
