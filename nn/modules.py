@@ -199,8 +199,9 @@ class Linear(Module):
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias) if self.bias is not None else None
 
-        # Try GPU shader if available
-        if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'linear_backward'):
+        # Try GPU shader if available (2D only; 3D uses CPU for numerical parity)
+        use_gpu = grad_output.ndim == 2 and hasattr(backend, 'fnn') and hasattr(backend.fnn, 'linear_backward')
+        if use_gpu:
             try:
                 grad_input, grad_weight, grad_bias = backend.fnn.linear_backward(
                     grad_output, x, weight, bias

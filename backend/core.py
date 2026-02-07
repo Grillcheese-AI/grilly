@@ -5,7 +5,7 @@ Core Vulkan initialization, buffer management, and dispatch operations.
 import numpy as np
 import ctypes
 from pathlib import Path
-from .base import VULKAN_AVAILABLE
+from .base import VULKAN_AVAILABLE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
 
 if VULKAN_AVAILABLE:
     from vulkan import *
@@ -33,8 +33,10 @@ class VulkanCore:
         self._init_vulkan()
     
     def _load_shaders(self):
-        """Load all .spv files"""
+        """Load all .spv files from main and experimental directories"""
         shaders = {}
+        
+        # Load from main spv directory
         spv_dir = Path(self.shader_dir) / "spv"
         if not spv_dir.exists():
             spv_dir = Path(self.shader_dir)
@@ -43,6 +45,16 @@ class VulkanCore:
             name = spv_file.stem
             with open(spv_file, 'rb') as f:
                 shaders[name] = f.read()
+        
+        # Also load from experimental/spv directory
+        experimental_spv_dir = Path(self.shader_dir) / "experimental" / "spv"
+        if experimental_spv_dir.exists():
+            for spv_file in experimental_spv_dir.glob("*.spv"):
+                name = spv_file.stem
+                # Only add if not already loaded (main directory takes precedence)
+                if name not in shaders:
+                    with open(spv_file, 'rb') as f:
+                        shaders[name] = f.read()
         
         # Check for missing shaders and warn
         required_shaders = ['fnn-xavier-init', 'convd_im2col', 'conv2d-backward-weight', 
@@ -301,8 +313,13 @@ class VulkanCore:
         """
         return getattr(self, 'tiling_support', {'available': False})
     
-    def _create_buffer(self, size: int, usage: int):
-        """Create Vulkan buffer and allocate memory"""
+    def _create_buffer(self, size: int, usage: int = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT):
+        """Create Vulkan buffer and allocate memory.
+
+        usage defaults to VK_BUFFER_USAGE_STORAGE_BUFFER_BIT so callers that
+        only need a generic storage buffer can omit the flag (backward
+        compatibility with earlier call sites).
+        """
         buffer_info = VkBufferCreateInfo(
             sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             size=size,
