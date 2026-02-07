@@ -5,9 +5,9 @@ include CHANGELOG.md
 include CLAUDE.md
 
 # Include all shader files
-recursive-include grilly/shaders *.glsl
-recursive-include grilly/shaders *.comp
-recursive-include grilly/shaders *.spv
+recursive-include shaders *.glsl
+recursive-include shaders *.comp
+recursive-include shaders *.spv
 
 # Include configuration files
 include pyproject.toml
@@ -22,7 +22,4 @@ recursive-exclude * .venv
 recursive-exclude * .mypy_cache
 recursive-exclude * .ruff_cache
 
-# Exclude tests and examples from package (keep in source)
-prune grilly/tests
-prune examples
-prune datasets
+# Keep package directories used by setuptools package mapping.

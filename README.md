@@ -2,6 +2,18 @@
 
 GPU-accelerated neural network framework using Vulkan compute shaders. Supports AMD, NVIDIA, and Intel GPUs.
 
+Documentation: https://grilly.readthedocs.io/
+
+## Release Status
+
+- Current release line: **v0.3.0**
+- Package name: `grilly`
+- Python support: `>=3.10`
+- Release channel: PyPI
+
+Versioning note:
+- The repository may publish timestamped patch builds within the `0.3.0` line (for example `0.3.0.<build>`), while keeping documentation and release notes aligned to `v0.3.0`.
+
 ## Features
 
 ### Neural Network Operations
@@ -272,6 +284,26 @@ Run `make help` to see all available commands:
 - `make format` - Format code
 - `make lint` - Run linters
 - `make clean` - Clean build artifacts
+
+## Publishing to PyPI
+
+Use the release script:
+
+```bash
+# from repository root
+powershell -ExecutionPolicy Bypass -File .\scripts\publish_pypi.ps1
+```
+
+TestPyPI dry run:
+
+```bash
+powershell -ExecutionPolicy Bypass -File .\scripts\publish_pypi.ps1 -TestPyPI
+```
+
+Required environment variable:
+
+- `PYPI_API_TOKEN` (for PyPI)
+- `TEST_PYPI_API_TOKEN` (optional, if using `-TestPyPI`)
 
 ### Contributing
 
