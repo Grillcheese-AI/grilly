@@ -451,22 +451,9 @@ def from_vulkan(array: np.ndarray, device: str = 'cuda') -> Any:
 
 
 def auto_convert_to_vulkan(func):
-    """
-    Decorator to automatically convert PyTorch tensor arguments to numpy arrays.
-    
-    Usage:
-        @auto_convert_to_vulkan
-        def my_function(x, y):
-            # x and y are automatically converted to numpy if they're PyTorch tensors
-            return x @ y
-    
-    Note: This decorator converts the first argument only. For multiple arguments,
-    use to_vulkan() manually.
-    """
+    """Decorate a function to auto-convert the first tensor argument."""
     def wrapper(*args, **kwargs):
-        # Convert first argument if it's a PyTorch tensor
-        """Run wrapper."""
-
+        # Convert first argument if it is a PyTorch tensor.
         if args and TORCH_AVAILABLE and isinstance(args[0], torch.Tensor):
             args = (to_vulkan(args[0]),) + args[1:]
         return func(*args, **kwargs)

@@ -1,8 +1,4 @@
-"""
-Attention functions (functional API)
-Uses: attention-scores.glsl, attention-output.glsl, attention-concat-heads.glsl,
-      attention-mask.glsl, flash-attention2.glsl, flash-attention2-rope.glsl
-"""
+"""Functional attention helpers backed by Grilly compute kernels."""
 import numpy as np
 from typing import Optional, Tuple
 

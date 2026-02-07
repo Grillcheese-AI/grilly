@@ -1,16 +1,4 @@
-"""
-Ingestion checkpoint helpers (v2): stable hashing + sentence compression + indexing.
-
-Key upgrades:
-- Stable hashing is handled in runtime code (vector seeds no longer depend on Python `hash()`).
-- Sentence memory can be stored compactly:
-  - tokens -> vocabulary ids (int32) + offsets (int64)
-  - vectors -> float16 OR bit-packed bipolar vectors (uint8) when applicable
-- Optional (lightweight) index material for readability/reuse in downstream tools.
-
-Format:
-- .npz containing arrays + a JSON manifest string (`manifest_json`).
-"""
+"""Checkpoint helpers for SVC ingestion snapshots and restore flows."""
 from __future__ import annotations
 
 from pathlib import Path

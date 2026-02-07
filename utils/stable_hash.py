@@ -1,19 +1,4 @@
-"""
-Stable hashing utilities (BLAKE3) for deterministic vector seeding.
-
-Why:
-- Python's built-in `hash()` is intentionally randomized per-process (PYTHONHASHSEED),
-  which breaks reproducibility when you derive seeds from `hash(str)`.
-
-What:
-- `stable_u32(...)` / `stable_u64(...)`: deterministic integers from strings/bytes
-- `stable_bytes(...)`: deterministic byte stream
-- `bipolar_from_key(...)`: deterministic +/-1 vectors without RNG
-
-Dependency:
-- Prefers `blake3` (pip install blake3). If unavailable, falls back to BLAKE2s
-  with a one-time warning (still deterministic, just different outputs).
-"""
+"""Deterministic hashing helpers used for reproducible vector seeding."""
 from __future__ import annotations
 
 from typing import Iterable, Union, Optional

@@ -67,6 +67,9 @@ Documentation = "https://grillcheeseai.com"
 packages = [
     "grilly",
     "grilly.backend",
+    "grilly.datasets",
+    "grilly.examples",
+    "grilly.experimental_datasets",
     "grilly.nn",
     "grilly.optim",
     "grilly.utils",

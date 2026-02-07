@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import importlib.metadata
+import importlib.machinery
 import sys
 import types
 
@@ -26,7 +27,25 @@ if "grilly" not in sys.modules:
     module = types.ModuleType("grilly")
     module.__file__ = str(PROJECT_ROOT / "__init__.py")
     module.__path__ = [str(PROJECT_ROOT)]
+    module.__package__ = "grilly"
+    module.__spec__ = importlib.machinery.ModuleSpec("grilly", loader=None, is_package=True)
     sys.modules["grilly"] = module
+
+
+def _register_pkg_stub(name: str, path: Path) -> None:
+    if name in sys.modules or not path.is_dir():
+        return
+    pkg = types.ModuleType(name)
+    pkg.__file__ = str(path / "__init__.py")
+    pkg.__path__ = [str(path)]
+    pkg.__package__ = name
+    pkg.__spec__ = importlib.machinery.ModuleSpec(name, loader=None, is_package=True)
+    sys.modules[name] = pkg
+
+
+# Ensure namespace/package discovery works even when an installed wheel is
+# incomplete or shadowed during docs builds.
+_register_pkg_stub("grilly.datasets", PROJECT_ROOT / "datasets")
 
 
 project = "grilly"
@@ -80,7 +99,7 @@ autodoc_default_options = {
     "members": True,
     "undoc-members": True,
     "private-members": True,
-    "special-members": "__init__,__call__",
+    "special-members": "__call__",
     "show-inheritance": True,
 }
 autodoc_member_order = "bysource"
@@ -93,3 +112,15 @@ napoleon_numpy_docstring = True
 
 # Required by sphinx-notfound-page for RTD links.
 notfound_urls_prefix = "/en/latest/"
+
+
+def _sanitize_known_docstrings(app, what, name, obj, options, lines):
+    """Normalize a few legacy docstrings that still trip docutils parsing."""
+    if name.endswith("LSTMCell.forward"):
+        lines[:] = ["Compute one LSTM step and return ``(h_new, c_new)``."]
+    elif name.endswith("nn.module.Module") or name.endswith("grilly.nn.Module"):
+        lines[:] = ["Base class for Grilly neural network modules."]
+
+
+def setup(app):
+    app.connect("autodoc-process-docstring", _sanitize_known_docstrings, priority=900)

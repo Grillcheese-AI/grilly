@@ -1,9 +1,4 @@
-"""
-Capsule Embedding System
-
-Complete capsule embedding pipeline with training support.
-Uses contrastive learning to train capsule projections.
-"""
+"""Capsule embedding modules for semantic and cognitive representations."""
 import numpy as np
 from typing import Optional, Tuple, List
 from .module import Module
@@ -12,22 +7,7 @@ from .capsule import CapsuleProject, DentateGyrus, SemanticEncoder
 
 
 class CapsuleEmbedding(Module):
-    """
-    Complete capsule embedding system.
-    
-    Pipeline:
-    1. Input embeddings (e.g., from sentence transformer)
-    2. CapsuleProject: 384D → 32D (semantic + cognitive)
-    3. Optional: DentateGyrus: 32D → 128D (sparse expansion)
-    
-    The 32D capsule encodes:
-    - 28 semantic dimensions: Core meaning, normalized to unit sphere
-    - 4 cognitive dimensions: Meta-information for memory management
-      * plasticity_gain: How much this memory should update on recall
-      * consolidation_priority: Importance for long-term storage
-      * stability: Resistance to interference
-      * stress_link: Emotional salience marker
-    """
+    """Capsule embedding pipeline from dense embeddings to compact capsules."""
     
     def __init__(
         self,

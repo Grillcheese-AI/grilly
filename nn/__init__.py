@@ -1,9 +1,4 @@
-"""
-Neural Network Modules (PyTorch-like API)
-
-This module provides a PyTorch-like interface for GPU-accelerated neural network operations
-using Vulkan compute shaders.
-"""
+"""Neural network module namespace for the Grilly framework."""
 from .module import Module
 from .parameter import Parameter, parameter
 from .modules import (

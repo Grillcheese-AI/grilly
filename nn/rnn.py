@@ -1,8 +1,4 @@
-"""
-Recurrent Neural Network Modules
-
-Implements LSTM and GRU layers matching PyTorch's API.
-"""
+"""Recurrent neural network modules for LSTM and GRU architectures."""
 import numpy as np
 from typing import Optional, Tuple, List
 from .module import Module
@@ -10,29 +6,10 @@ from .parameter import Parameter
 
 
 class LSTMCell(Module):
-    """
-    Long Short-Term Memory (LSTM) cell.
-
-    Matches torch.nn.LSTMCell
-
-    Applies LSTM transformation to input and hidden state:
-    i_t = sigmoid(W_ii @ x_t + b_ii + W_hi @ h_{t-1} + b_hi)
-    f_t = sigmoid(W_if @ x_t + b_if + W_hf @ h_{t-1} + b_hf)
-    g_t = tanh(W_ig @ x_t + b_ig + W_hg @ h_{t-1} + b_hg)
-    o_t = sigmoid(W_io @ x_t + b_io + W_ho @ h_{t-1} + b_ho)
-    c_t = f_t * c_{t-1} + i_t * g_t
-    h_t = o_t * tanh(c_t)
-    """
+    """Long short-term memory cell compatible with torch.nn.LSTMCell."""
 
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True):
-        """
-        Initialize LSTMCell.
-
-        Args:
-            input_size: Number of expected features in input
-            hidden_size: Number of features in hidden state
-            bias: If False, layer does not use bias weights (default: True)
-        """
+        """Initialize an LSTM cell with input and hidden dimensions."""
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -55,21 +32,7 @@ class LSTMCell(Module):
 
     def forward(self, input: np.ndarray,
                 hx: Optional[Tuple[np.ndarray, np.ndarray]] = None) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Forward pass through LSTM cell.
-
-        Args:
-            input: Input tensor of shape (batch, input_size)
-            hx: Tuple of (h_0, c_0) where:
-                h_0: Initial hidden state (batch, hidden_size)
-                c_0: Initial cell state (batch, hidden_size)
-                If None, initialized to zeros
-
-        Returns:
-            Tuple of (h_1, c_1) where:
-                h_1: Next hidden state (batch, hidden_size)
-                c_1: Next cell state (batch, hidden_size)
-        """
+        """Compute one LSTM step and return ``(h_new, c_new)``."""
         batch_size = input.shape[0]
 
         # Initialize hidden and cell states if not provided

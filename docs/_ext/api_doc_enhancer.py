@@ -96,39 +96,42 @@ def _append_dependencies(lines: list[str], obj: Any) -> None:
     if _has_heading(lines, "Dependencies"):
         return
     dependencies = _dependency_names(obj)
-    lines.extend(["", "Dependencies", "------------"])
+    lines.append("")
     if dependencies:
-        for dep in dependencies:
-            lines.append(f"- ``{dep}``")
+        dep_text = ", ".join(f"``{dep}``" for dep in dependencies)
+        lines.append(f"Dependencies: {dep_text}.")
     else:
-        lines.append("- ``None`` detected from callable globals.")
+        lines.append("Dependencies: ``None`` detected from callable globals.")
 
 
 def _append_variables(lines: list[str], obj: Any) -> None:
     if _has_heading(lines, "Variables"):
         return
 
-    lines.extend(["", "Variables", "---------"])
+    lines.append("")
     try:
         signature = inspect.signature(obj)
     except (TypeError, ValueError):
-        lines.append("- Signature introspection is unavailable.")
+        lines.append("Variables: Signature introspection is unavailable.")
         return
 
     params = list(_iter_input_params(signature))
     if not params:
-        lines.append("- This callable does not take explicit input variables.")
+        lines.append("Variables: This callable does not take explicit input variables.")
         return
 
+    variable_chunks: list[str] = []
     for param in params:
         annotation = _annotation_text(param.annotation)
         if param.default is inspect._empty:
-            lines.append(f"- ``{param.name}`` ({annotation}): Required input variable.")
+            variable_chunks.append(f"``{param.name}`` ({annotation}, required)")
         else:
             default_repr = _safe_repr(param.default)
-            lines.append(
-                f"- ``{param.name}`` ({annotation}): Optional; default ``{default_repr}``."
+            variable_chunks.append(
+                f"``{param.name}`` ({annotation}, optional, default ``{default_repr}``)"
             )
+
+    lines.append(f"Variables: {'; '.join(variable_chunks)}.")
 
 
 def _append_usage_example(lines: list[str], what: str, name: str, obj: Any) -> None:

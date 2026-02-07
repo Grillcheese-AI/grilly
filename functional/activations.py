@@ -1,8 +1,4 @@
-"""
-Activation functions (functional API)
-Uses: activation-relu.glsl, activation-gelu.glsl, activation-silu.glsl, 
-      activation-softmax.glsl, activation-softplus.glsl
-"""
+"""Functional activation helpers backed by Grilly compute kernels."""
 import numpy as np
 from typing import Optional
 

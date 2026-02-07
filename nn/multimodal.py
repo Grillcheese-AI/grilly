@@ -1,16 +1,5 @@
-"""
-Multimodal AI Techniques for Grilly
+"""Multimodal fusion modules for Grilly neural network workflows."""
 
-Implements cutting-edge multimodal fusion techniques:
-1. Multimodal Bottleneck Transformer (MBT) - Google
-2. Perceiver IO - DeepMind
-3. Cross-Attention Fusion with modality-specific encoders
-4. ImageBind-style joint embedding
-5. Perceiver Resampler (Flamingo architecture)
-6. Complete Vision-Language Model
-
-All modules are GPU-accelerated via Vulkan when available.
-"""
 
 import numpy as np
 from typing import Optional, List, Dict, Tuple, Union
@@ -23,29 +12,7 @@ from .modules import Linear, LayerNorm, GELU, Dropout, MultiheadAttention, Seque
 # =============================================================================
 
 class BottleneckFusion(Module):
-    """
-    Multimodal Bottleneck Transformer fusion layer.
-
-    Restricts cross-modal attention via small bottleneck tokens,
-    achieving 50% FLOP reduction compared to vanilla multimodal transformers.
-
-    Reference: Google Research - "Multimodal Bottleneck Transformer"
-
-    Architecture:
-        Input Modalities (e.g., Video + Audio)
-            ↓
-        Cross-Attention to Bottleneck Tokens
-            ↓
-        Self-Attention on Bottleneck
-            ↓
-        Fused Representation
-
-    Args:
-        d_model: Model dimension (default: 768)
-        num_bottlenecks: Number of bottleneck tokens (default: 64)
-        num_heads: Number of attention heads (default: 8)
-        dropout: Dropout rate (default: 0.1)
-    """
+    """Fuse modalities through a bottleneck-token attention mechanism."""
 
     def __init__(
         self,

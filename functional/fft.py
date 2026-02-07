@@ -1,8 +1,4 @@
-"""
-FFT functions (functional API)
-Uses: fft-bitrev.glsl, fft-butterfly.glsl, fft-magnitude.glsl,
-      fft-normalize.glsl, fft-power-spectrum.glsl
-"""
+"""Functional FFT helpers backed by Grilly compute kernels."""
 import numpy as np
 from typing import Optional
 

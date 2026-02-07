@@ -1225,7 +1225,7 @@ def sqrt(a) -> Variable:
 
 
 def abs(a) -> Variable:
-    """Absolute value: |a|"""
+    """Return the elementwise absolute value."""
     a = _ensure_variable(a)
 
     result_data = np.abs(a.data)

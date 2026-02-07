@@ -1,7 +1,4 @@
-"""
-Convolutional neural network layers (PyTorch-like).
-All modules use GPU-accelerated Vulkan shaders.
-"""
+"""Convolutional layers for the Grilly neural network API."""
 
 import numpy as np
 from typing import Union, Tuple, Optional
@@ -40,43 +37,7 @@ class Conv2d(Module):
         bias: bool = True,
         padding_mode: str = 'zeros'
     ):
-        """
-        Initialize 2D convolution layer.
-
-        Args:
-            in_channels: Number of input channels
-            out_channels: Number of output channels
-            kernel_size: Size of convolving kernel (int or tuple)
-            stride: Stride of convolution (default: 1)
-            padding: Zero-padding added to both sides (default: 0)
-            dilation: Spacing between kernel elements (default: 1)
-            groups: Number of blocked connections (default: 1)
-            bias: If True, adds learnable bias (default: True)
-            padding_mode: 'zeros' only (PyTorch also supports 'reflect', 'replicate', 'circular')
-
-        Shape:
-            Input: (N, C_in, H, W)
-            Output: (N, C_out, H_out, W_out) where
-                H_out = floor((H + 2*padding[0] - dilation[0]*(kernel_size[0]-1) - 1) / stride[0] + 1)
-                W_out = floor((W + 2*padding[1] - dilation[1]*(kernel_size[1]-1) - 1) / stride[1] + 1)
-
-        Examples:
-            >>> # Square kernel, stride, padding
-            >>> conv = Conv2d(16, 33, 3, stride=2, padding=1)
-            >>> input = np.random.randn(20, 16, 50, 100)
-            >>> output = conv(input)
-            >>> output.shape
-            (20, 33, 25, 50)
-
-            >>> # Non-square kernel
-            >>> conv = Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(1, 2))
-            >>> output = conv(input)
-            >>> output.shape
-            (20, 33, 25, 100)
-
-            >>> # Depthwise convolution (groups = in_channels)
-            >>> conv = Conv2d(16, 16, 3, groups=16)
-        """
+        """Initialize a 2D convolution layer compatible with torch.nn.Conv2d."""
         super().__init__()
 
         if padding_mode != 'zeros':
@@ -157,7 +118,7 @@ class Conv2d(Module):
 
     def backward(self, grad_output: np.ndarray) -> np.ndarray:
         """
-        Backward pass using conv2d-backward-*.glsl shaders
+        Backward pass using conv2d backward shaders.
 
         Computes gradients and stores them in self.weight.grad and self.bias.grad.
 
@@ -235,7 +196,7 @@ class Conv1d(Module):
     1D Convolution Layer (matches torch.nn.Conv1d API)
 
     Implemented as a wrapper around Conv2d with height=1.
-    For dedicated 1D kernels, create conv1d-*.glsl shaders.
+    For dedicated 1D kernels, create dedicated conv1d shader variants.
     """
 
     def __init__(
@@ -249,24 +210,7 @@ class Conv1d(Module):
         groups: int = 1,
         bias: bool = True
     ):
-        """
-        Initialize 1D convolution layer.
-
-        Args:
-            in_channels: Number of input channels
-            out_channels: Number of output channels
-            kernel_size: Size of convolving kernel
-            stride: Stride of convolution (default: 1)
-            padding: Zero-padding added to both sides (default: 0)
-            dilation: Spacing between kernel elements (default: 1)
-            groups: Number of blocked connections (default: 1)
-            bias: If True, adds learnable bias (default: True)
-
-        Shape:
-            Input: (N, C_in, L)
-            Output: (N, C_out, L_out) where
-                L_out = floor((L + 2*padding - dilation*(kernel_size-1) - 1) / stride + 1)
-        """
+        """Initialize a 1D convolution layer compatible with torch.nn.Conv1d."""
         super().__init__()
 
         # Use Conv2d with height=1

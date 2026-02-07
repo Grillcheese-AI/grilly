@@ -42,7 +42,7 @@ except ImportError:
 
 
 class Module:
-    """Represent module behavior."""
+    """Base class for Grilly neural network modules."""
 
     def __init__(self):
         """Initialize the instance."""
