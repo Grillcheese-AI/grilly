@@ -78,6 +78,12 @@ master_doc = "index"
 html_theme = "sphinx_rtd_theme"
 html_title = f"{project} {version}"
 html_static_path = []
+html_theme_options = {
+    "navigation_depth": 4,
+    "collapse_navigation": False,
+    "sticky_navigation": True,
+    "titles_only": False,
+}
 
 
 # Prevent RTD docs builds from failing when optional runtime deps are absent.
@@ -99,12 +105,16 @@ autodoc_default_options = {
     "members": True,
     "undoc-members": True,
     "private-members": True,
-    "special-members": "__call__",
+    "special-members": "__init__,__call__",
+    "inherited-members": True,
     "show-inheritance": True,
 }
 autodoc_member_order = "bysource"
+autoclass_content = "both"
 autodoc_typehints = "description"
 autosummary_generate = True
+autosummary_generate_overwrite = True
+autosummary_imported_members = True
 
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
