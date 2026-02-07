@@ -164,7 +164,7 @@ datasets/cifar-10-python.tar.gz
 VulkanMemoryAllocator
 datasets/cifar-10-python.tar.gz
 datasets/cifar-10-python.tar.gz
-/datasets
+./datasets/*.tar.gz
 /brain
 /docs.old
 /examples.excluded
