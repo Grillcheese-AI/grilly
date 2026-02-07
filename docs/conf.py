@@ -20,7 +20,7 @@ author = "Nicolas Cloutier"
 try:
     release = importlib.metadata.version("grilly")
 except importlib.metadata.PackageNotFoundError:
-    release = "0.0.0"
+    release = "0.3.0"
 version = release
 
 
