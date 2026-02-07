@@ -27,14 +27,6 @@ grilly.main module
    :undoc-members:
    :show-inheritance:
 
-grilly.test\_quick module
--------------------------
-
-.. automodule:: grilly.test_quick
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Module contents
 ---------------
 
