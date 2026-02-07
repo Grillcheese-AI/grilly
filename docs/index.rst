@@ -6,25 +6,25 @@ These docs are organized as a progressive learning path so you can move
 from first install to end-to-end workflows quickly.
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 4
    :caption: Getting Started
 
    getting_started/index
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 4
    :caption: Concepts
 
    concepts/index
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 4
    :caption: Tutorials
 
    tutorials/index
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 10
    :caption: API Reference
 
    api/index
