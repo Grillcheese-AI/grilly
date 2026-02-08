@@ -8,7 +8,10 @@ def test_checkpoint_sentence_token_compression(tmp_path):
         from experimental.cognitive.controller import CognitiveController
         from experimental.language.svc_loader import SVCEntry
 
-    from utils.ingest_checkpoint import save_ingest_checkpoint, load_ingest_checkpoint, CheckpointView
+    try:
+        from grilly.utils.ingest_checkpoint import save_ingest_checkpoint, load_ingest_checkpoint, CheckpointView
+    except ModuleNotFoundError:
+        from utils.ingest_checkpoint import save_ingest_checkpoint, load_ingest_checkpoint, CheckpointView
 
     c = CognitiveController(dim=128, word_use_ngrams=False)
 

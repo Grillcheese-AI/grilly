@@ -330,6 +330,17 @@ class VMABufferPool:
 
     def _return_buffer(self, buffer: VMABuffer):
         """Return a buffer to the pool for reuse."""
+        # Flush/invalidate VMA memory so the next acquire sees clean state.
+        # This prevents stale data from a previous dispatch leaking into a
+        # reused buffer (the root cause of the old "backward stability" bug).
+        try:
+            if self._allocator and buffer.allocation:
+                pyvma_lib.vmaInvalidateAllocation(
+                    self._allocator, buffer.allocation, 0, buffer.bucket_size
+                )
+        except Exception:
+            pass  # vmaInvalidateAllocation may not exist in older VMA builds
+
         with self._lock:
             self._stats['total_released'] += 1
             bucket = self._buckets[buffer.bucket_size]
@@ -457,15 +468,25 @@ class VMABufferPool:
             f"allocs={stats['allocations']}, vma={stats['vma_enabled']})"
         )
 
-    def __del__(self):
-        """Cleanup on destruction - clear buffers before destroying allocator"""
+    def shutdown(self):
+        """Explicit cleanup - call before destroying the Vulkan device."""
         try:
             self.clear()
             if self._allocator and pyvma_lib is not None:
                 pyvma_lib.vmaDestroyAllocator(self._allocator)
                 self._allocator = None
         except Exception:
-            pass  # Ignore errors during shutdown
+            pass
+
+    def __del__(self):
+        """Release resources during finalization.
+
+        VMA native calls on an already-destroyed Vulkan device cause
+        access violations that Python cannot catch, so we skip cleanup
+        here and rely on the OS to reclaim memory at process exit.
+        Use ``shutdown()`` for explicit cleanup before device destruction.
+        """
+        self._allocator = None
 
 
 # Legacy PooledBuffer for backward compatibility (direct Vulkan allocation)
@@ -679,10 +700,21 @@ class BufferPool:
             f"allocs={stats['allocations']})"
         )
 
-    def __del__(self):
-        """Release resources during finalization."""
+    def shutdown(self):
+        """Explicit cleanup - call before destroying the Vulkan device."""
+        try:
+            self.clear()
+        except Exception:
+            pass
 
-        self.clear()
+    def __del__(self):
+        """Release resources during finalization.
+
+        Native Vulkan calls on an already-destroyed device cause access
+        violations, so skip cleanup here. Use ``shutdown()`` for explicit
+        cleanup before device destruction.
+        """
+        pass
 
 
 # Global pool instance
@@ -705,19 +737,21 @@ import atexit
 atexit.register(_cleanup_global_pool)
 
 
-def get_buffer_pool(core: 'VulkanCore' = None, use_vma: bool = False):
+def get_buffer_pool(core: 'VulkanCore' = None, use_vma: bool = None):
     """
     Get or create the global buffer pool.
 
     Args:
         core: VulkanCore instance (required on first call)
-        use_vma: If True, use VMA pool when available.
-                 NOTE: VMA disabled by default due to stability issues with
-                 backward operations. Use legacy BufferPool for now.
+        use_vma: If True, use VMA pool when available. Defaults to True
+                 when PyVMA is installed (synchronization is handled by
+                 vkQueueWaitIdle in _dispatch_compute).
 
     Returns:
         VMABufferPool if VMA available and use_vma=True, else BufferPool
     """
+    if use_vma is None:
+        use_vma = PYVMA_AVAILABLE
     global _global_pool
 
     with _pool_lock:

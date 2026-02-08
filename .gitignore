@@ -171,3 +171,4 @@ datasets/cifar-10-python.tar.gz
 /experimental_todo
 *.zip
 scripts/publish_pypi.ps1
+.claude/settings.local.json

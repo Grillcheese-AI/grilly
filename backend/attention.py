@@ -6,7 +6,7 @@ GPU-accelerated attention mechanisms for transformers.
 import numpy as np
 import struct
 import logging
-from .base import VULKAN_AVAILABLE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+from .base import VULKAN_AVAILABLE, BufferMixin
 from .shader_registry import get_shader
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ if VULKAN_AVAILABLE:
     from vulkan import *
 
 
-class VulkanAttention:
+class VulkanAttention(BufferMixin):
     """Attention operations: scores, mask, output, concat heads"""
     
     def __init__(self, core, pipelines, shaders, architecture: str = None):
@@ -39,6 +39,7 @@ class VulkanAttention:
         self.pipelines = pipelines
         self.shaders = shaders
         self.architecture = architecture  # Model architecture (e.g., 'bert', 'gpt', 't5')
+        self._pool = None  # Lazy initialization
     
     def attention_scores(self, queries, keys, num_heads, head_dim, scale=None):
         """
@@ -70,62 +71,55 @@ class VulkanAttention:
         
         q_flat = q.flatten()
         k_flat = k.flatten()
-        
+        scores_size = batch_size * num_heads * seq_len * seq_len * 4
+
         # Create buffers
-        buf_q, mem_q = self.core._create_buffer(q_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_k, mem_k = self.core._create_buffer(k_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_scores, mem_scores = self.core._create_buffer(batch_size * num_heads * seq_len * seq_len * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        
-        # Upload data
-        self.core._upload_buffer(buf_q, mem_q, q_flat)
-        self.core._upload_buffer(buf_k, mem_k, k_flat)
-        
-        # Get or create pipeline
-        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'attention-scores', 4, push_constant_size=24
-        )
-        
+        buf_q = self._acquire_buffer(q_flat.nbytes)
+        buf_k = self._acquire_buffer(k_flat.nbytes)
+        buf_scores = self._acquire_buffer(scores_size)
         # Create dummy V buffer (required by shader)
-        buf_v_dummy, mem_v_dummy = self.core._create_buffer(q_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        self.core._upload_buffer(buf_v_dummy, mem_v_dummy, q_flat)
-        
-        # Get cached descriptor set
-        descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'attention-scores',
-            [
-                (buf_q, q_flat.nbytes),
-                (buf_k, k_flat.nbytes),
-                (buf_v_dummy, q_flat.nbytes),
-                (buf_scores, batch_size * num_heads * seq_len * seq_len * 4)
-            ]
-        )
-        
-        # Pack push constants
-        push_constants = struct.pack('IIIIfI', batch_size, seq_len, num_heads, head_dim, scale, 0)
-        
-        # Dispatch
-        workgroups_x = (seq_len + 15) // 16
-        workgroups_y = ((batch_size * num_heads * seq_len) + 15) // 16
-        self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups_x, push_constants, workgroups_y
-        )
-        
-        # Download results
-        result = self.core._download_buffer(mem_scores, batch_size * num_heads * seq_len * seq_len * 4, dtype=np.float32)
-        result = result[:batch_size * num_heads * seq_len * seq_len].reshape(batch_size, num_heads, seq_len, seq_len)
-        
-        # Cleanup
-        vkDestroyBuffer(self.core.device, buf_q, None)
-        vkDestroyBuffer(self.core.device, buf_k, None)
-        vkDestroyBuffer(self.core.device, buf_v_dummy, None)
-        vkDestroyBuffer(self.core.device, buf_scores, None)
-        vkFreeMemory(self.core.device, mem_q, None)
-        vkFreeMemory(self.core.device, mem_k, None)
-        vkFreeMemory(self.core.device, mem_v_dummy, None)
-        vkFreeMemory(self.core.device, mem_scores, None)
-        
-        return result
+        buf_v_dummy = self._acquire_buffer(q_flat.nbytes)
+
+        try:
+            # Upload data
+            self._upload_buffer(buf_q, q_flat)
+            self._upload_buffer(buf_k, k_flat)
+            self._upload_buffer(buf_v_dummy, q_flat)
+
+            # Get or create pipeline
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                'attention-scores', 4, push_constant_size=24
+            )
+
+            # Get cached descriptor set
+            descriptor_set = self.pipelines.get_cached_descriptor_set(
+                'attention-scores',
+                [
+                    (self._get_buffer_handle(buf_q), q_flat.nbytes),
+                    (self._get_buffer_handle(buf_k), k_flat.nbytes),
+                    (self._get_buffer_handle(buf_v_dummy), q_flat.nbytes),
+                    (self._get_buffer_handle(buf_scores), scores_size)
+                ]
+            )
+
+            # Pack push constants
+            push_constants = struct.pack('IIIIfI', batch_size, seq_len, num_heads, head_dim, scale, 0)
+
+            # Dispatch
+            workgroups_x = (seq_len + 15) // 16
+            workgroups_y = ((batch_size * num_heads * seq_len) + 15) // 16
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set,
+                workgroups_x, push_constants, workgroups_y
+            )
+
+            # Download results
+            result = self._download_buffer(buf_scores, scores_size, np.float32)
+            result = result[:batch_size * num_heads * seq_len * seq_len].reshape(batch_size, num_heads, seq_len, seq_len)
+
+            return result
+        finally:
+            self._release_buffers([buf_q, buf_k, buf_v_dummy, buf_scores])
     
     def attention_mask(self, attention_scores, use_causal=True, mask_value=-1e9, custom_mask=None):
         """
@@ -161,48 +155,45 @@ class VulkanAttention:
             mask_flat = custom_mask.astype(np.float32).flatten()
         
         # Create buffers
-        buf_scores, mem_scores = self.core._create_buffer(scores_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_mask, mem_mask = self.core._create_buffer(mask_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        
-        # Upload data
-        self.core._upload_buffer(buf_scores, mem_scores, scores_flat)
-        self.core._upload_buffer(buf_mask, mem_mask, mask_flat)
-        
-        # Get or create pipeline
-        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'attention-mask', 2, push_constant_size=20
-        )
-        
-        # Get cached descriptor set
-        descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'attention-mask',
-            [
-                (buf_scores, scores_flat.nbytes),
-                (buf_mask, mask_flat.nbytes)
-            ]
-        )
-        
-        # Pack push constants
-        push_constants = struct.pack('IIIIf', batch_size, num_heads, seq_len, 1 if use_causal else 0, mask_value)
-        
-        # Dispatch
-        workgroups = (len(scores_flat) + 255) // 256
-        self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
-        )
-        
-        # Download results
-        result = self.core._download_buffer(mem_scores, scores_flat.nbytes, dtype=np.float32)
-        result = result[:len(scores_flat)].reshape(batch_size, num_heads, seq_len, seq_len)
-        
-        # Cleanup
-        vkDestroyBuffer(self.core.device, buf_scores, None)
-        vkDestroyBuffer(self.core.device, buf_mask, None)
-        vkFreeMemory(self.core.device, mem_scores, None)
-        vkFreeMemory(self.core.device, mem_mask, None)
-        
-        return result
+        buf_scores = self._acquire_buffer(scores_flat.nbytes)
+        buf_mask = self._acquire_buffer(mask_flat.nbytes)
+
+        try:
+            # Upload data
+            self._upload_buffer(buf_scores, scores_flat)
+            self._upload_buffer(buf_mask, mask_flat)
+
+            # Get or create pipeline
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                'attention-mask', 2, push_constant_size=20
+            )
+
+            # Get cached descriptor set
+            descriptor_set = self.pipelines.get_cached_descriptor_set(
+                'attention-mask',
+                [
+                    (self._get_buffer_handle(buf_scores), scores_flat.nbytes),
+                    (self._get_buffer_handle(buf_mask), mask_flat.nbytes)
+                ]
+            )
+
+            # Pack push constants
+            push_constants = struct.pack('IIIIf', batch_size, num_heads, seq_len, 1 if use_causal else 0, mask_value)
+
+            # Dispatch
+            workgroups = (len(scores_flat) + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set,
+                workgroups, push_constants
+            )
+
+            # Download results
+            result = self._download_buffer(buf_scores, scores_flat.nbytes, np.float32)
+            result = result[:len(scores_flat)].reshape(batch_size, num_heads, seq_len, seq_len)
+
+            return result
+        finally:
+            self._release_buffers([buf_scores, buf_mask])
     
     def attention_output(self, attention_weights, values, num_heads, head_dim):
         """
@@ -250,56 +241,51 @@ class VulkanAttention:
         
         weights_flat = weights.flatten()
         v_flat = v.flatten()
-        
+
         output_size = batch_size * seq_len * num_heads * head_dim * 4
-        
+
         # Create buffers
-        buf_weights, mem_weights = self.core._create_buffer(weights_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_v, mem_v = self.core._create_buffer(v_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_out, mem_out = self.core._create_buffer(output_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        
-        # Upload data
-        self.core._upload_buffer(buf_weights, mem_weights, weights_flat)
-        self.core._upload_buffer(buf_v, mem_v, v_flat)
-        
-        # Get or create pipeline (use shader_name from registry)
-        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            shader_name, 3, push_constant_size=16
-        )
-        
-        # Get cached descriptor set (use shader_name from registry)
-        descriptor_set = self.pipelines.get_cached_descriptor_set(
-            shader_name,
-            [
-                (buf_weights, weights_flat.nbytes),
-                (buf_v, v_flat.nbytes),
-                (buf_out, output_size)
-            ]
-        )
-        
-        # Pack push constants
-        push_constants = struct.pack('IIII', batch_size, seq_len, num_heads, head_dim)
-        
-        # Dispatch
-        workgroups = ((batch_size * seq_len * num_heads * head_dim) + 255) // 256
-        self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
-        )
-        
-        # Download results
-        result = self.core._download_buffer(mem_out, output_size, dtype=np.float32)
-        result = result[:batch_size * seq_len * num_heads * head_dim].reshape(batch_size, seq_len, num_heads, head_dim)
-        
-        # Cleanup
-        vkDestroyBuffer(self.core.device, buf_weights, None)
-        vkDestroyBuffer(self.core.device, buf_v, None)
-        vkDestroyBuffer(self.core.device, buf_out, None)
-        vkFreeMemory(self.core.device, mem_weights, None)
-        vkFreeMemory(self.core.device, mem_v, None)
-        vkFreeMemory(self.core.device, mem_out, None)
-        
-        return result
+        buf_weights = self._acquire_buffer(weights_flat.nbytes)
+        buf_v = self._acquire_buffer(v_flat.nbytes)
+        buf_out = self._acquire_buffer(output_size)
+
+        try:
+            # Upload data
+            self._upload_buffer(buf_weights, weights_flat)
+            self._upload_buffer(buf_v, v_flat)
+
+            # Get or create pipeline (use shader_name from registry)
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                shader_name, 3, push_constant_size=16
+            )
+
+            # Get cached descriptor set (use shader_name from registry)
+            descriptor_set = self.pipelines.get_cached_descriptor_set(
+                shader_name,
+                [
+                    (self._get_buffer_handle(buf_weights), weights_flat.nbytes),
+                    (self._get_buffer_handle(buf_v), v_flat.nbytes),
+                    (self._get_buffer_handle(buf_out), output_size)
+                ]
+            )
+
+            # Pack push constants
+            push_constants = struct.pack('IIII', batch_size, seq_len, num_heads, head_dim)
+
+            # Dispatch
+            workgroups = ((batch_size * seq_len * num_heads * head_dim) + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set,
+                workgroups, push_constants
+            )
+
+            # Download results
+            result = self._download_buffer(buf_out, output_size, np.float32)
+            result = result[:batch_size * seq_len * num_heads * head_dim].reshape(batch_size, seq_len, num_heads, head_dim)
+
+            return result
+        finally:
+            self._release_buffers([buf_weights, buf_v, buf_out])
     
     def attention_concat_heads(self, attention_output):
         """
@@ -316,49 +302,46 @@ class VulkanAttention:
         
         output_flat = output.flatten()
         concat_size = batch_size * seq_len * num_heads * head_dim * 4
-        
+
         # Create buffers
-        buf_in, mem_in = self.core._create_buffer(output_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_out, mem_out = self.core._create_buffer(concat_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        
-        # Upload data
-        self.core._upload_buffer(buf_in, mem_in, output_flat)
-        
-        # Get or create pipeline
-        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'attention-concat-heads', 2, push_constant_size=16
-        )
-        
-        # Get cached descriptor set
-        descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'attention-concat-heads',
-            [
-                (buf_in, output_flat.nbytes),
-                (buf_out, concat_size)
-            ]
-        )
-        
-        # Pack push constants
-        push_constants = struct.pack('IIII', batch_size, seq_len, num_heads, head_dim)
-        
-        # Dispatch
-        workgroups = ((batch_size * seq_len * num_heads * head_dim) + 255) // 256
-        self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
-        )
-        
-        # Download results
-        result = self.core._download_buffer(mem_out, concat_size, dtype=np.float32)
-        result = result[:batch_size * seq_len * num_heads * head_dim].reshape(batch_size, seq_len, num_heads * head_dim)
-        
-        # Cleanup
-        vkDestroyBuffer(self.core.device, buf_in, None)
-        vkDestroyBuffer(self.core.device, buf_out, None)
-        vkFreeMemory(self.core.device, mem_in, None)
-        vkFreeMemory(self.core.device, mem_out, None)
-        
-        return result
+        buf_in = self._acquire_buffer(output_flat.nbytes)
+        buf_out = self._acquire_buffer(concat_size)
+
+        try:
+            # Upload data
+            self._upload_buffer(buf_in, output_flat)
+
+            # Get or create pipeline
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                'attention-concat-heads', 2, push_constant_size=16
+            )
+
+            # Get cached descriptor set
+            descriptor_set = self.pipelines.get_cached_descriptor_set(
+                'attention-concat-heads',
+                [
+                    (self._get_buffer_handle(buf_in), output_flat.nbytes),
+                    (self._get_buffer_handle(buf_out), concat_size)
+                ]
+            )
+
+            # Pack push constants
+            push_constants = struct.pack('IIII', batch_size, seq_len, num_heads, head_dim)
+
+            # Dispatch
+            workgroups = ((batch_size * seq_len * num_heads * head_dim) + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set,
+                workgroups, push_constants
+            )
+
+            # Download results
+            result = self._download_buffer(buf_out, concat_size, np.float32)
+            result = result[:batch_size * seq_len * num_heads * head_dim].reshape(batch_size, seq_len, num_heads * head_dim)
+
+            return result
+        finally:
+            self._release_buffers([buf_in, buf_out])
     
     def flash_attention2(
         self,
@@ -434,169 +417,160 @@ class VulkanAttention:
         output_accum_size = batch_size * seq_len * num_heads * head_dim * 4
         
         # Create buffers
-        buf_q, mem_q = self.core._create_buffer(q_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_k, mem_k = self.core._create_buffer(k_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_v, mem_v = self.core._create_buffer(v_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_running_max, mem_running_max = self.core._create_buffer(running_max_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_running_sum, mem_running_sum = self.core._create_buffer(running_sum_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_output_accum, mem_output_accum = self.core._create_buffer(output_accum_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_output, mem_output = self.core._create_buffer(output_accum_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        
-        # Upload Q, K, V
-        self.core._upload_buffer(buf_q, mem_q, q_flat)
-        self.core._upload_buffer(buf_k, mem_k, k_flat)
-        self.core._upload_buffer(buf_v, mem_v, v_flat)
-        
+        buf_q = self._acquire_buffer(q_flat.nbytes)
+        buf_k = self._acquire_buffer(k_flat.nbytes)
+        buf_v = self._acquire_buffer(v_flat.nbytes)
+        buf_running_max = self._acquire_buffer(running_max_size)
+        buf_running_sum = self._acquire_buffer(running_sum_size)
+        buf_output_accum = self._acquire_buffer(output_accum_size)
+        buf_output = self._acquire_buffer(output_accum_size)
+
         # Handle mask buffer
         buf_mask = None
-        mem_mask = None
         mask_flat = None
         if mask is not None:
             mask_flat = mask.astype(np.float32).flatten()
-            buf_mask, mem_mask = self.core._create_buffer(mask_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-            self.core._upload_buffer(buf_mask, mem_mask, mask_flat)
-        
-        # Check if shader is available
-        if 'flash-attention2' not in self.shaders:
-            raise RuntimeError(
-                "flash-attention2 shader not compiled. "
-                "Run: glslc -fshader-stage=compute shaders/flash-attention2.glsl -o shaders/spv/flash-attention2.spv"
+            buf_mask = self._acquire_buffer(mask_flat.nbytes)
+
+        try:
+            # Upload Q, K, V
+            self._upload_buffer(buf_q, q_flat)
+            self._upload_buffer(buf_k, k_flat)
+            self._upload_buffer(buf_v, v_flat)
+
+            if buf_mask is not None:
+                self._upload_buffer(buf_mask, mask_flat)
+
+            # Check if shader is available
+            if 'flash-attention2' not in self.shaders:
+                raise RuntimeError(
+                    "flash-attention2 shader not compiled. "
+                    "Run: glslc -fshader-stage=compute shaders/flash-attention2.glsl -o shaders/spv/flash-attention2.spv"
+                )
+
+            # Get or create pipeline
+            num_bindings = 8  # Q, K, V, mask, output, running_max, running_sum, output_accum
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                'flash-attention2', num_bindings, push_constant_size=44  # 11 uint/float values
             )
-        
-        # Get or create pipeline
-        num_bindings = 8  # Q, K, V, mask, output, running_max, running_sum, output_accum
-        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'flash-attention2', num_bindings, push_constant_size=44  # 11 uint/float values
-        )
-        
-        # Pass 0: Initialize running max, sum, and accumulator
-        descriptor_set_init = self.pipelines.get_cached_descriptor_set(
-            'flash-attention2',
-            [
-                (buf_q, q_flat.nbytes),
-                (buf_k, k_flat.nbytes),
-                (buf_v, v_flat.nbytes),
-                (buf_mask if mask is not None else buf_q, mask_flat.nbytes if mask is not None else q_flat.nbytes),
-                (buf_output, output_accum_size),
-                (buf_running_max, running_max_size),
-                (buf_running_sum, running_sum_size),
-                (buf_output_accum, output_accum_size)
-            ]
-        )
-        
-        push_constants_init = struct.pack(
-            'IIIIfIIIII',
-            batch_size, seq_len, num_heads, head_dim,
-            scale,
-            tile_size_q, tile_size_k,
-            0,  # pass_type = 0 (initialize)
-            1 if mask is not None else 0,  # has_mask
-            0, 0  # q_tile_idx, k_tile_idx (not used in init)
-        )
-        
-        # Dispatch initialization
-        workgroups_init_x = 16
-        workgroups_init_y = (num_q_positions + 15) // 16
-        self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set_init,
-            workgroups_init_x, push_constants_init, workgroups_init_y
-        )
-        
-        # Pass 1: Process all tiles
-        for q_tile in range(num_tiles_q):
-            for k_tile in range(num_tiles_k):
-                descriptor_set_tile = self.pipelines.get_cached_descriptor_set(
-                    'flash-attention2',
-                    [
-                        (buf_q, q_flat.nbytes),
-                        (buf_k, k_flat.nbytes),
-                        (buf_v, v_flat.nbytes),
-                        (buf_mask if mask is not None else buf_q, mask_flat.nbytes if mask is not None else q_flat.nbytes),
-                        (buf_output, output_accum_size),
-                        (buf_running_max, running_max_size),
-                        (buf_running_sum, running_sum_size),
-                        (buf_output_accum, output_accum_size)
-                    ]
-                )
-                
-                push_constants_tile = struct.pack(
-                    'IIIIfIIIII',
-                    batch_size, seq_len, num_heads, head_dim,
-                    scale,
-                    tile_size_q, tile_size_k,
-                    1,  # pass_type = 1 (process tile)
-                    1 if mask is not None else 0,  # has_mask
-                    q_tile, k_tile
-                )
-                
-                # Dispatch tile processing
-                workgroups_tile_x = (tile_size_k + 15) // 16
-                workgroups_tile_y = (batch_size * num_heads * tile_size_q + 15) // 16
-                self.core._dispatch_compute(
-                    pipeline, pipeline_layout, descriptor_set_tile,
-                    workgroups_tile_x, push_constants_tile, workgroups_tile_y
-                )
-        
-        # Pass 2: Finalize output
-        descriptor_set_final = self.pipelines.get_cached_descriptor_set(
-            'flash-attention2',
-            [
-                (buf_q, q_flat.nbytes),
-                (buf_k, k_flat.nbytes),
-                (buf_v, v_flat.nbytes),
-                (buf_mask if mask is not None else buf_q, mask_flat.nbytes if mask is not None else q_flat.nbytes),
-                (buf_output, output_accum_size),
-                (buf_running_max, running_max_size),
-                (buf_running_sum, running_sum_size),
-                (buf_output_accum, output_accum_size)
-            ]
-        )
-        
-        push_constants_final = struct.pack(
-            'IIIIfIIIII',
-            batch_size, seq_len, num_heads, head_dim,
-            scale,
-            tile_size_q, tile_size_k,
-            2,  # pass_type = 2 (finalize)
-            1 if mask is not None else 0,  # has_mask
-            0, 0  # q_tile_idx, k_tile_idx (not used in finalize)
-        )
-        
-        # Dispatch finalization
-        workgroups_final_x = (head_dim + 15) // 16
-        workgroups_final_y = (num_q_positions + 15) // 16
-        self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set_final,
-            workgroups_final_x, push_constants_final, workgroups_final_y
-        )
-        
-        # Download results
-        result = self.core._download_buffer(mem_output, output_accum_size, dtype=np.float32)
-        result = result[:batch_size * seq_len * num_heads * head_dim].reshape(
-            batch_size, seq_len, num_heads, head_dim
-        )
-        
-        # Cleanup
-        vkDestroyBuffer(self.core.device, buf_q, None)
-        vkDestroyBuffer(self.core.device, buf_k, None)
-        vkDestroyBuffer(self.core.device, buf_v, None)
-        vkDestroyBuffer(self.core.device, buf_running_max, None)
-        vkDestroyBuffer(self.core.device, buf_running_sum, None)
-        vkDestroyBuffer(self.core.device, buf_output_accum, None)
-        vkDestroyBuffer(self.core.device, buf_output, None)
-        vkFreeMemory(self.core.device, mem_q, None)
-        vkFreeMemory(self.core.device, mem_k, None)
-        vkFreeMemory(self.core.device, mem_v, None)
-        vkFreeMemory(self.core.device, mem_running_max, None)
-        vkFreeMemory(self.core.device, mem_running_sum, None)
-        vkFreeMemory(self.core.device, mem_output_accum, None)
-        vkFreeMemory(self.core.device, mem_output, None)
-        
-        if mask is not None:
-            vkDestroyBuffer(self.core.device, buf_mask, None)
-            vkFreeMemory(self.core.device, mem_mask, None)
-        
-        return result
+
+            # Helper for mask descriptor entry
+            mask_handle = self._get_buffer_handle(buf_mask) if buf_mask is not None else self._get_buffer_handle(buf_q)
+            mask_size = mask_flat.nbytes if mask_flat is not None else q_flat.nbytes
+
+            # Pass 0: Initialize running max, sum, and accumulator
+            descriptor_set_init = self.pipelines.get_cached_descriptor_set(
+                'flash-attention2',
+                [
+                    (self._get_buffer_handle(buf_q), q_flat.nbytes),
+                    (self._get_buffer_handle(buf_k), k_flat.nbytes),
+                    (self._get_buffer_handle(buf_v), v_flat.nbytes),
+                    (mask_handle, mask_size),
+                    (self._get_buffer_handle(buf_output), output_accum_size),
+                    (self._get_buffer_handle(buf_running_max), running_max_size),
+                    (self._get_buffer_handle(buf_running_sum), running_sum_size),
+                    (self._get_buffer_handle(buf_output_accum), output_accum_size)
+                ]
+            )
+
+            push_constants_init = struct.pack(
+                'IIIIfIIIII',
+                batch_size, seq_len, num_heads, head_dim,
+                scale,
+                tile_size_q, tile_size_k,
+                0,  # pass_type = 0 (initialize)
+                1 if mask is not None else 0,  # has_mask
+                0, 0  # q_tile_idx, k_tile_idx (not used in init)
+            )
+
+            # Dispatch initialization
+            workgroups_init_x = 16
+            workgroups_init_y = (num_q_positions + 15) // 16
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set_init,
+                workgroups_init_x, push_constants_init, workgroups_init_y
+            )
+
+            # Pass 1: Process all tiles
+            for q_tile in range(num_tiles_q):
+                for k_tile in range(num_tiles_k):
+                    descriptor_set_tile = self.pipelines.get_cached_descriptor_set(
+                        'flash-attention2',
+                        [
+                            (self._get_buffer_handle(buf_q), q_flat.nbytes),
+                            (self._get_buffer_handle(buf_k), k_flat.nbytes),
+                            (self._get_buffer_handle(buf_v), v_flat.nbytes),
+                            (mask_handle, mask_size),
+                            (self._get_buffer_handle(buf_output), output_accum_size),
+                            (self._get_buffer_handle(buf_running_max), running_max_size),
+                            (self._get_buffer_handle(buf_running_sum), running_sum_size),
+                            (self._get_buffer_handle(buf_output_accum), output_accum_size)
+                        ]
+                    )
+
+                    push_constants_tile = struct.pack(
+                        'IIIIfIIIII',
+                        batch_size, seq_len, num_heads, head_dim,
+                        scale,
+                        tile_size_q, tile_size_k,
+                        1,  # pass_type = 1 (process tile)
+                        1 if mask is not None else 0,  # has_mask
+                        q_tile, k_tile
+                    )
+
+                    # Dispatch tile processing
+                    workgroups_tile_x = (tile_size_k + 15) // 16
+                    workgroups_tile_y = (batch_size * num_heads * tile_size_q + 15) // 16
+                    self.core._dispatch_compute(
+                        pipeline, pipeline_layout, descriptor_set_tile,
+                        workgroups_tile_x, push_constants_tile, workgroups_tile_y
+                    )
+
+            # Pass 2: Finalize output
+            descriptor_set_final = self.pipelines.get_cached_descriptor_set(
+                'flash-attention2',
+                [
+                    (self._get_buffer_handle(buf_q), q_flat.nbytes),
+                    (self._get_buffer_handle(buf_k), k_flat.nbytes),
+                    (self._get_buffer_handle(buf_v), v_flat.nbytes),
+                    (mask_handle, mask_size),
+                    (self._get_buffer_handle(buf_output), output_accum_size),
+                    (self._get_buffer_handle(buf_running_max), running_max_size),
+                    (self._get_buffer_handle(buf_running_sum), running_sum_size),
+                    (self._get_buffer_handle(buf_output_accum), output_accum_size)
+                ]
+            )
+
+            push_constants_final = struct.pack(
+                'IIIIfIIIII',
+                batch_size, seq_len, num_heads, head_dim,
+                scale,
+                tile_size_q, tile_size_k,
+                2,  # pass_type = 2 (finalize)
+                1 if mask is not None else 0,  # has_mask
+                0, 0  # q_tile_idx, k_tile_idx (not used in finalize)
+            )
+
+            # Dispatch finalization
+            workgroups_final_x = (head_dim + 15) // 16
+            workgroups_final_y = (num_q_positions + 15) // 16
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set_final,
+                workgroups_final_x, push_constants_final, workgroups_final_y
+            )
+
+            # Download results
+            result = self._download_buffer(buf_output, output_accum_size, np.float32)
+            result = result[:batch_size * seq_len * num_heads * head_dim].reshape(
+                batch_size, seq_len, num_heads, head_dim
+            )
+
+            return result
+        finally:
+            buffers = [buf_q, buf_k, buf_v, buf_running_max, buf_running_sum, buf_output_accum, buf_output]
+            if buf_mask is not None:
+                buffers.append(buf_mask)
+            self._release_buffers(buffers)
     
     def apply_rope(self, q_or_k: np.ndarray, position_ids: np.ndarray = None, rope_base: float = 10000.0, rope_scaling: float = 1.0) -> np.ndarray:
         """
@@ -629,53 +603,50 @@ class VulkanAttention:
         total_elements = len(qk_flat)
         
         # Create buffers
-        buf_input, mem_input = self.core._create_buffer(qk_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_output, mem_output = self.core._create_buffer(qk_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        
-        # Upload data
-        self.core._upload_buffer(buf_input, mem_input, qk_flat)
-        
-        # Get or create pipeline
-        # Push constants: batch_size(uint), seq_len(uint), num_heads(uint), head_dim(uint), rope_base(float), use_precomputed(uint), rope_scaling(float)
-        # Total: 4*4 + 4 + 4 + 4 = 28 bytes
-        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'rope', 2, push_constant_size=28
-        )
-        
-        # Get cached descriptor set
-        descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'rope',
-            [
-                (buf_input, qk_flat.nbytes),
-                (buf_output, qk_flat.nbytes)
-            ]
-        )
-        
-        # Pack push constants: batch_size, seq_len, num_heads, head_dim, rope_base, use_precomputed, rope_scaling
-        push_constants = struct.pack('IIIIfIf', 
-            batch_size, seq_len, num_heads, head_dim,
-            rope_base, 0,  # use_precomputed = 0 (compute on-the-fly)
-            rope_scaling
-        )
-        
-        # Dispatch - shader now processes all elements (not just pairs)
-        workgroups = (total_elements + 255) // 256
-        self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
-        )
-        
-        # Download results
-        result = self.core._download_buffer(mem_output, qk_flat.nbytes, dtype=np.float32)
-        result = result[:total_elements].reshape(batch_size, seq_len, num_heads, head_dim)
-        
-        # Cleanup
-        vkDestroyBuffer(self.core.device, buf_input, None)
-        vkDestroyBuffer(self.core.device, buf_output, None)
-        vkFreeMemory(self.core.device, mem_input, None)
-        vkFreeMemory(self.core.device, mem_output, None)
-        
-        return result
+        buf_input = self._acquire_buffer(qk_flat.nbytes)
+        buf_output = self._acquire_buffer(qk_flat.nbytes)
+
+        try:
+            # Upload data
+            self._upload_buffer(buf_input, qk_flat)
+
+            # Get or create pipeline
+            # Push constants: batch_size(uint), seq_len(uint), num_heads(uint), head_dim(uint), rope_base(float), use_precomputed(uint), rope_scaling(float)
+            # Total: 4*4 + 4 + 4 + 4 = 28 bytes
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                'rope', 2, push_constant_size=28
+            )
+
+            # Get cached descriptor set
+            descriptor_set = self.pipelines.get_cached_descriptor_set(
+                'rope',
+                [
+                    (self._get_buffer_handle(buf_input), qk_flat.nbytes),
+                    (self._get_buffer_handle(buf_output), qk_flat.nbytes)
+                ]
+            )
+
+            # Pack push constants: batch_size, seq_len, num_heads, head_dim, rope_base, use_precomputed, rope_scaling
+            push_constants = struct.pack('IIIIfIf',
+                batch_size, seq_len, num_heads, head_dim,
+                rope_base, 0,  # use_precomputed = 0 (compute on-the-fly)
+                rope_scaling
+            )
+
+            # Dispatch - shader now processes all elements (not just pairs)
+            workgroups = (total_elements + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set,
+                workgroups, push_constants
+            )
+
+            # Download results
+            result = self._download_buffer(buf_output, qk_flat.nbytes, np.float32)
+            result = result[:total_elements].reshape(batch_size, seq_len, num_heads, head_dim)
+
+            return result
+        finally:
+            self._release_buffers([buf_input, buf_output])
     
     def apply_prosody_modulation(
         self,
@@ -713,56 +684,51 @@ class VulkanAttention:
         weights_flat = weights.flatten()
         
         # Create buffers
-        buf_scores, mem_scores = self.core._create_buffer(scores_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_prosody, mem_prosody = self.core._create_buffer(prosody_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_weights, mem_weights = self.core._create_buffer(weights_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        
-        # Upload data
-        self.core._upload_buffer(buf_scores, mem_scores, scores_flat)
-        self.core._upload_buffer(buf_prosody, mem_prosody, prosody_flat)
-        self.core._upload_buffer(buf_weights, mem_weights, weights_flat)
-        
-        # Get or create pipeline
-        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'attention-prosody-modulation', 3, push_constant_size=24
-        )
-        
-        # Get cached descriptor set
-        descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'attention-prosody-modulation',
-            [
-                (buf_scores, scores_flat.nbytes),
-                (buf_prosody, prosody_flat.nbytes),
-                (buf_weights, weights_flat.nbytes)
-            ]
-        )
-        
-        # Pack push constants: batch_size, num_heads, seq_len, prosody_dim, prosody_strength
-        push_constants = struct.pack('IIIIf', 
-            batch_size, num_heads, seq_len, prosody_dim, prosody_strength
-        )
-        
-        # Dispatch
-        total_scores = batch_size * num_heads * seq_len * seq_len
-        workgroups = (total_scores + 255) // 256
-        self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
-        )
-        
-        # Download results
-        result = self.core._download_buffer(mem_scores, scores_flat.nbytes, dtype=np.float32)
-        result = result[:total_scores].reshape(batch_size, num_heads, seq_len, seq_len)
-        
-        # Cleanup
-        vkDestroyBuffer(self.core.device, buf_scores, None)
-        vkDestroyBuffer(self.core.device, buf_prosody, None)
-        vkDestroyBuffer(self.core.device, buf_weights, None)
-        vkFreeMemory(self.core.device, mem_scores, None)
-        vkFreeMemory(self.core.device, mem_prosody, None)
-        vkFreeMemory(self.core.device, mem_weights, None)
-        
-        return result
+        buf_scores = self._acquire_buffer(scores_flat.nbytes)
+        buf_prosody = self._acquire_buffer(prosody_flat.nbytes)
+        buf_weights = self._acquire_buffer(weights_flat.nbytes)
+
+        try:
+            # Upload data
+            self._upload_buffer(buf_scores, scores_flat)
+            self._upload_buffer(buf_prosody, prosody_flat)
+            self._upload_buffer(buf_weights, weights_flat)
+
+            # Get or create pipeline
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                'attention-prosody-modulation', 3, push_constant_size=24
+            )
+
+            # Get cached descriptor set
+            descriptor_set = self.pipelines.get_cached_descriptor_set(
+                'attention-prosody-modulation',
+                [
+                    (self._get_buffer_handle(buf_scores), scores_flat.nbytes),
+                    (self._get_buffer_handle(buf_prosody), prosody_flat.nbytes),
+                    (self._get_buffer_handle(buf_weights), weights_flat.nbytes)
+                ]
+            )
+
+            # Pack push constants: batch_size, num_heads, seq_len, prosody_dim, prosody_strength
+            push_constants = struct.pack('IIIIf',
+                batch_size, num_heads, seq_len, prosody_dim, prosody_strength
+            )
+
+            # Dispatch
+            total_scores = batch_size * num_heads * seq_len * seq_len
+            workgroups = (total_scores + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set,
+                workgroups, push_constants
+            )
+
+            # Download results
+            result = self._download_buffer(buf_scores, scores_flat.nbytes, np.float32)
+            result = result[:total_scores].reshape(batch_size, num_heads, seq_len, seq_len)
+
+            return result
+        finally:
+            self._release_buffers([buf_scores, buf_prosody, buf_weights])
     
     def _prosody_modulation_cpu(
         self,

@@ -169,35 +169,19 @@ class Linear(Module):
 
         out_features = self.out_features
 
-        use_gemm = (
-            hasattr(backend, 'fnn') and
-            hasattr(backend.fnn, 'gemm') and
-            'gemm_mnk' in getattr(backend.core, 'shaders', {}) and
-            batch_seq * out_features >= 4096  # simple heuristic
-        )
+        # Use fnn.linear() which handles x @ W^T + bias in a single dispatch
+        # without needing a CPU weight transpose copy
+        if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'linear'):
+            try:
+                out = backend.fnn.linear(x, weight, bias)
+                return out
+            except Exception:
+                pass  # Fall back to CPU
 
-        if use_gemm:
-            # GEMM path: (batch_seq, in_features) @ (in_features, out_features)
-            # We have weight stored as (out_features, in_features); transpose it
-            W_t = weight.T  # shape (in_features, out_features)
-            out_2d = backend.fnn.gemm(x_2d, W_t)  # (batch_seq, out_features)
-
-            if bias is not None:
-                out_2d += bias.reshape(1, out_features)
-
-        else:
-            # Existing Vulkan linear path if available
-            if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'linear'):
-                try:
-                    out = backend.fnn.linear(x, weight, bias)
-                    return out
-                except Exception:
-                    pass  # Fall back to CPU
-
-            # CPU fallback
-            out_2d = x_2d @ weight.T
-            if bias is not None:
-                out_2d += bias.reshape(1, out_features)
+        # CPU fallback
+        out_2d = x_2d @ weight.T
+        if bias is not None:
+            out_2d += bias.reshape(1, out_features)
 
         # Reshape back to original batch shape
         if x.ndim == 2:

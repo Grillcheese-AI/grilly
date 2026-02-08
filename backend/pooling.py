@@ -5,92 +5,82 @@ Supports mean, max, and sum pooling with optional mask support.
 
 import numpy as np
 import struct
-from .base import VULKAN_AVAILABLE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:
     from vulkan import *
 
 
-class VulkanPooling:
+class VulkanPooling(BufferMixin):
     """GPU-accelerated pooling operations"""
-    
+
     def __init__(self, core, pipelines, shaders):
         """Initialize the instance."""
 
         self.core = core
         self.pipelines = pipelines
         self.shaders = shaders
-    
+
     def mean_pool(self, embeddings: np.ndarray, mask: np.ndarray = None) -> np.ndarray:
         """
         GPU-accelerated mean pooling with optional mask.
-        
+
         Args:
             embeddings: Input embeddings (batch, seq_len, dim)
             mask: Optional mask (batch, seq_len) - 1.0 = keep, 0.0 = mask out
-        
+
         Returns:
             Pooled embeddings (batch, dim)
         """
         data = embeddings.astype(np.float32)
         batch_size, seq_len, dim = data.shape
-        
+
         data_flat = data.flatten()
-        
+
         # Create buffers
-        buf_in, mem_in = self.core._create_buffer(data_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_out, mem_out = self.core._create_buffer(batch_size * dim * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        
+        buf_in = self._acquire_buffer(data_flat.nbytes)
+        buf_out = self._acquire_buffer(batch_size * dim * 4)
+
         # Upload data
-        self.core._upload_buffer(buf_in, mem_in, data_flat)
-        
+        self._upload_buffer(buf_in, data_flat)
+
         # Handle mask if provided
         if mask is not None:
             mask_flat = mask.astype(np.float32).flatten()
-            buf_mask, mem_mask = self.core._create_buffer(mask_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-            self.core._upload_buffer(buf_mask, mem_mask, mask_flat)
-            
+            buf_mask = self._acquire_buffer(mask_flat.nbytes)
+            self._upload_buffer(buf_mask, mask_flat)
+
             # Use embedding-pool shader with mask (it already supports masks)
             if 'embedding-pool' in self.shaders:
-                pipeline, layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                    'embedding-pool', 3, push_constant_size=16
-                )
-                descriptor_set = self.pipelines.get_cached_descriptor_set(
-                    'embedding-pool',
-                    [
-                        (buf_in, data_flat.nbytes),
-                        (buf_mask, mask_flat.nbytes),
-                        (buf_out, batch_size * dim * 4)
-                    ]
-                )
-                push_constants = struct.pack('IIII', batch_size, seq_len, dim, 0)  # 0 = mean
-                
-                # Dispatch
-                workgroups = (batch_size * dim + 255) // 256
-                self.core._dispatch_compute(pipeline, layout, descriptor_set, workgroups, push_constants)
-                
-                # Download results
-                result = self.core._download_buffer(mem_out, batch_size * dim * 4, dtype=np.float32)
-                result = result[:batch_size * dim].reshape(batch_size, dim)
-                
-                # Cleanup
-                vkDestroyBuffer(self.core.device, buf_in, None)
-                vkDestroyBuffer(self.core.device, buf_mask, None)
-                vkDestroyBuffer(self.core.device, buf_out, None)
-                vkFreeMemory(self.core.device, mem_in, None)
-                vkFreeMemory(self.core.device, mem_mask, None)
-                vkFreeMemory(self.core.device, mem_out, None)
-                
-                return result
+                try:
+                    pipeline, layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                        'embedding-pool', 3, push_constant_size=16
+                    )
+                    descriptor_set = self.pipelines.get_cached_descriptor_set(
+                        'embedding-pool',
+                        [
+                            (self._get_buffer_handle(buf_in), data_flat.nbytes),
+                            (self._get_buffer_handle(buf_mask), mask_flat.nbytes),
+                            (self._get_buffer_handle(buf_out), batch_size * dim * 4)
+                        ]
+                    )
+                    push_constants = struct.pack('IIII', batch_size, seq_len, dim, 0)  # 0 = mean
+
+                    # Dispatch
+                    workgroups = (batch_size * dim + 255) // 256
+                    self.core._dispatch_compute(pipeline, layout, descriptor_set, workgroups, push_constants)
+
+                    # Download results
+                    result = self._download_buffer(buf_out, batch_size * dim * 4, np.float32)
+                    result = result[:batch_size * dim].reshape(batch_size, dim)
+
+                    return result
+                finally:
+                    self._release_buffers([buf_in, buf_mask, buf_out])
             else:
                 # CPU fallback with mask (optimized)
-                vkDestroyBuffer(self.core.device, buf_in, None)
-                vkDestroyBuffer(self.core.device, buf_mask, None)
-                vkDestroyBuffer(self.core.device, buf_out, None)
-                vkFreeMemory(self.core.device, mem_in, None)
-                vkFreeMemory(self.core.device, mem_mask, None)
-                vkFreeMemory(self.core.device, mem_out, None)
-                
+                self._release_buffers([buf_in, buf_mask, buf_out])
+
                 # Optimized CPU pooling with mask
                 mask_expanded = mask[:, :, None]  # (batch, seq_len, 1)
                 x_masked = data * mask_expanded
@@ -102,45 +92,37 @@ class VulkanPooling:
                 # Create all-ones mask for no masking
                 ones_mask = np.ones((batch_size, seq_len), dtype=np.float32)
                 mask_flat = ones_mask.flatten()
-                buf_mask, mem_mask = self.core._create_buffer(mask_flat.nbytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-                self.core._upload_buffer(buf_mask, mem_mask, mask_flat)
-                
-                pipeline, layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                    'embedding-pool', 3, push_constant_size=16
-                )
-                descriptor_set = self.pipelines.get_cached_descriptor_set(
-                    'embedding-pool',
-                    [
-                        (buf_in, data_flat.nbytes),
-                        (buf_mask, mask_flat.nbytes),
-                        (buf_out, batch_size * dim * 4)
-                    ]
-                )
-                push_constants = struct.pack('IIII', batch_size, seq_len, dim, 0)  # 0 = mean
-                
-                # Dispatch
-                workgroups = (batch_size * dim + 255) // 256
-                self.core._dispatch_compute(pipeline, layout, descriptor_set, workgroups, push_constants)
-                
-                # Download results
-                result = self.core._download_buffer(mem_out, batch_size * dim * 4, dtype=np.float32)
-                result = result[:batch_size * dim].reshape(batch_size, dim)
-                
-                # Cleanup
-                vkDestroyBuffer(self.core.device, buf_in, None)
-                vkDestroyBuffer(self.core.device, buf_mask, None)
-                vkDestroyBuffer(self.core.device, buf_out, None)
-                vkFreeMemory(self.core.device, mem_in, None)
-                vkFreeMemory(self.core.device, mem_mask, None)
-                vkFreeMemory(self.core.device, mem_out, None)
-                
-                return result
+                buf_mask = self._acquire_buffer(mask_flat.nbytes)
+                self._upload_buffer(buf_mask, mask_flat)
+
+                try:
+                    pipeline, layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                        'embedding-pool', 3, push_constant_size=16
+                    )
+                    descriptor_set = self.pipelines.get_cached_descriptor_set(
+                        'embedding-pool',
+                        [
+                            (self._get_buffer_handle(buf_in), data_flat.nbytes),
+                            (self._get_buffer_handle(buf_mask), mask_flat.nbytes),
+                            (self._get_buffer_handle(buf_out), batch_size * dim * 4)
+                        ]
+                    )
+                    push_constants = struct.pack('IIII', batch_size, seq_len, dim, 0)  # 0 = mean
+
+                    # Dispatch
+                    workgroups = (batch_size * dim + 255) // 256
+                    self.core._dispatch_compute(pipeline, layout, descriptor_set, workgroups, push_constants)
+
+                    # Download results
+                    result = self._download_buffer(buf_out, batch_size * dim * 4, np.float32)
+                    result = result[:batch_size * dim].reshape(batch_size, dim)
+
+                    return result
+                finally:
+                    self._release_buffers([buf_in, buf_mask, buf_out])
             else:
                 # CPU fallback
-                vkDestroyBuffer(self.core.device, buf_in, None)
-                vkDestroyBuffer(self.core.device, buf_out, None)
-                vkFreeMemory(self.core.device, mem_in, None)
-                vkFreeMemory(self.core.device, mem_out, None)
+                self._release_buffers([buf_in, buf_out])
                 return data.mean(axis=1).astype(np.float32)
 
     def maxpool2d(self, x: np.ndarray, kernel_size, stride=None, padding=0, dilation=1):
@@ -177,39 +159,38 @@ class VulkanPooling:
         indices_size = batch_size * channels * out_h * out_w * 4  # uint
 
         # Create buffers
-        buf_in, mem_in = self.core._create_buffer(input_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_out, mem_out = self.core._create_buffer(output_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_idx, mem_idx = self.core._create_buffer(indices_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_in = self._acquire_buffer(input_size)
+        buf_out = self._acquire_buffer(output_size)
+        buf_idx = self._acquire_buffer(indices_size)
 
-        # Upload input
-        self.core._upload_buffer(buf_in, mem_in, x.flatten())
+        try:
+            # Upload input
+            self._upload_buffer(buf_in, x.flatten())
 
-        # Push constants (14 uints)
-        push_data = struct.pack('IIIIIIIIIIIIII', batch_size, channels, in_h, in_w, out_h, out_w,
-                                kh, kw, sh, sw, ph, pw, dh, dw)
+            # Push constants (14 uints)
+            push_data = struct.pack('IIIIIIIIIIIIII', batch_size, channels, in_h, in_w, out_h, out_w,
+                                    kh, kw, sh, sw, ph, pw, dh, dw)
 
-        # Pipeline (14 uints = 56 bytes)
-        pipeline, layout, _ = self.pipelines.get_or_create_pipeline('maxpool2d-forward', 3, push_constant_size=56)
-        desc = self.pipelines.get_cached_descriptor_set('maxpool2d-forward',
-                                                        [(buf_in, input_size), (buf_out, output_size), (buf_idx, indices_size)])
+            # Pipeline (14 uints = 56 bytes)
+            pipeline, layout, _ = self.pipelines.get_or_create_pipeline('maxpool2d-forward', 3, push_constant_size=56)
+            desc = self.pipelines.get_cached_descriptor_set('maxpool2d-forward',
+                                                            [(self._get_buffer_handle(buf_in), input_size),
+                                                             (self._get_buffer_handle(buf_out), output_size),
+                                                             (self._get_buffer_handle(buf_idx), indices_size)])
 
-        # Dispatch
-        gx = (out_w + 7) // 8
-        gy = (out_h + 7) // 8
-        gz = batch_size * channels
-        self.core._dispatch_compute(pipeline, layout, desc, gx, push_data, gy, gz)
+            # Dispatch
+            gx = (out_w + 7) // 8
+            gy = (out_h + 7) // 8
+            gz = batch_size * channels
+            self.core._dispatch_compute(pipeline, layout, desc, gx, push_data, gy, gz)
 
-        # Download results
-        output = self.core._download_buffer(mem_out, output_size, np.float32).reshape(batch_size, channels, out_h, out_w)
-        indices = self.core._download_buffer(mem_idx, indices_size, np.uint32).reshape(batch_size, channels, out_h, out_w)
+            # Download results
+            output = self._download_buffer(buf_out, output_size, np.float32).reshape(batch_size, channels, out_h, out_w)
+            indices = self._download_buffer(buf_idx, indices_size, np.uint32).reshape(batch_size, channels, out_h, out_w)
 
-        # Cleanup
-        for buf in [buf_in, buf_out, buf_idx]:
-            vkDestroyBuffer(self.core.device, buf, None)
-        for mem in [mem_in, mem_out, mem_idx]:
-            vkFreeMemory(self.core.device, mem, None)
-
-        return output, indices
+            return output, indices
+        finally:
+            self._release_buffers([buf_in, buf_out, buf_idx])
 
     def maxpool2d_backward(self, grad_output: np.ndarray, indices: np.ndarray, input_shape):
         """
@@ -232,38 +213,37 @@ class VulkanPooling:
         input_size = batch_size * channels * in_h * in_w
 
         # Create buffers
-        buf_grad_out, mem_grad_out = self.core._create_buffer(output_size * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_idx, mem_idx = self.core._create_buffer(output_size * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_grad_in, mem_grad_in = self.core._create_buffer(input_size * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_grad_out = self._acquire_buffer(output_size * 4)
+        buf_idx = self._acquire_buffer(output_size * 4)
+        buf_grad_in = self._acquire_buffer(input_size * 4)
 
-        # Upload
-        self.core._upload_buffer(buf_grad_out, mem_grad_out, grad_output.flatten())
-        self.core._upload_buffer(buf_idx, mem_idx, indices.flatten())
+        try:
+            # Upload
+            self._upload_buffer(buf_grad_out, grad_output.flatten())
+            self._upload_buffer(buf_idx, indices.flatten())
 
-        # Push constants (6 uints: batch, channels, in_h, in_w, out_h, out_w)
-        push_data = struct.pack('IIIIII', batch_size, channels, in_h, in_w, out_h, out_w)
+            # Push constants (6 uints: batch, channels, in_h, in_w, out_h, out_w)
+            push_data = struct.pack('IIIIII', batch_size, channels, in_h, in_w, out_h, out_w)
 
-        # Pipeline
-        pipeline, layout, _ = self.pipelines.get_or_create_pipeline('maxpool2d-backward', 3, push_constant_size=24)
-        desc = self.pipelines.get_cached_descriptor_set('maxpool2d-backward',
-                                                        [(buf_grad_out, output_size * 4), (buf_idx, output_size * 4), (buf_grad_in, input_size * 4)])
+            # Pipeline
+            pipeline, layout, _ = self.pipelines.get_or_create_pipeline('maxpool2d-backward', 3, push_constant_size=24)
+            desc = self.pipelines.get_cached_descriptor_set('maxpool2d-backward',
+                                                            [(self._get_buffer_handle(buf_grad_out), output_size * 4),
+                                                             (self._get_buffer_handle(buf_idx), output_size * 4),
+                                                             (self._get_buffer_handle(buf_grad_in), input_size * 4)])
 
-        # Dispatch over INPUT dimensions
-        gx = (in_w + 7) // 8
-        gy = (in_h + 7) // 8
-        gz = batch_size * channels
-        self.core._dispatch_compute(pipeline, layout, desc, gx, push_data, gy, gz)
+            # Dispatch over INPUT dimensions
+            gx = (in_w + 7) // 8
+            gy = (in_h + 7) // 8
+            gz = batch_size * channels
+            self.core._dispatch_compute(pipeline, layout, desc, gx, push_data, gy, gz)
 
-        # Download
-        grad_input = self.core._download_buffer(mem_grad_in, input_size * 4, np.float32).reshape(input_shape)
+            # Download
+            grad_input = self._download_buffer(buf_grad_in, input_size * 4, np.float32).reshape(input_shape)
 
-        # Cleanup
-        for buf in [buf_grad_out, buf_idx, buf_grad_in]:
-            vkDestroyBuffer(self.core.device, buf, None)
-        for mem in [mem_grad_out, mem_idx, mem_grad_in]:
-            vkFreeMemory(self.core.device, mem, None)
-
-        return grad_input
+            return grad_input
+        finally:
+            self._release_buffers([buf_grad_out, buf_idx, buf_grad_in])
 
     def avgpool2d(self, x: np.ndarray, kernel_size, stride=None, padding=0, count_include_pad=True):
         """
@@ -296,37 +276,35 @@ class VulkanPooling:
         output_size = batch_size * channels * out_h * out_w * 4
 
         # Create buffers
-        buf_in, mem_in = self.core._create_buffer(input_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_out, mem_out = self.core._create_buffer(output_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_in = self._acquire_buffer(input_size)
+        buf_out = self._acquire_buffer(output_size)
 
-        # Upload
-        self.core._upload_buffer(buf_in, mem_in, x.flatten())
+        try:
+            # Upload
+            self._upload_buffer(buf_in, x.flatten())
 
-        # Push constants
-        push_data = struct.pack('IIIIIIIIIIIII', batch_size, channels, in_h, in_w, out_h, out_w,
-                                kh, kw, sh, sw, ph, pw, 1 if count_include_pad else 0)
+            # Push constants
+            push_data = struct.pack('IIIIIIIIIIIII', batch_size, channels, in_h, in_w, out_h, out_w,
+                                    kh, kw, sh, sw, ph, pw, 1 if count_include_pad else 0)
 
-        # Pipeline
-        pipeline, layout, _ = self.pipelines.get_or_create_pipeline('avgpool2d-forward', 2, push_constant_size=52)
-        desc = self.pipelines.get_cached_descriptor_set('avgpool2d-forward',
-                                                        [(buf_in, input_size), (buf_out, output_size)])
+            # Pipeline
+            pipeline, layout, _ = self.pipelines.get_or_create_pipeline('avgpool2d-forward', 2, push_constant_size=52)
+            desc = self.pipelines.get_cached_descriptor_set('avgpool2d-forward',
+                                                            [(self._get_buffer_handle(buf_in), input_size),
+                                                             (self._get_buffer_handle(buf_out), output_size)])
 
-        # Dispatch
-        gx = (out_w + 7) // 8
-        gy = (out_h + 7) // 8
-        gz = batch_size * channels
-        self.core._dispatch_compute(pipeline, layout, desc, gx, push_data, gy, gz)
+            # Dispatch
+            gx = (out_w + 7) // 8
+            gy = (out_h + 7) // 8
+            gz = batch_size * channels
+            self.core._dispatch_compute(pipeline, layout, desc, gx, push_data, gy, gz)
 
-        # Download
-        output = self.core._download_buffer(mem_out, output_size, np.float32).reshape(batch_size, channels, out_h, out_w)
+            # Download
+            output = self._download_buffer(buf_out, output_size, np.float32).reshape(batch_size, channels, out_h, out_w)
 
-        # Cleanup
-        for buf in [buf_in, buf_out]:
-            vkDestroyBuffer(self.core.device, buf, None)
-        for mem in [mem_in, mem_out]:
-            vkFreeMemory(self.core.device, mem, None)
-
-        return output
+            return output
+        finally:
+            self._release_buffers([buf_in, buf_out])
 
     def avgpool2d_backward(self, grad_output: np.ndarray, input_shape, kernel_size, stride=None, padding=0, count_include_pad=True):
         """
@@ -357,47 +335,45 @@ class VulkanPooling:
         input_size = batch_size * channels * in_h * in_w * 4
 
         # Create buffers
-        buf_grad_out, mem_grad_out = self.core._create_buffer(output_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        buf_grad_in, mem_grad_in = self.core._create_buffer(input_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+        buf_grad_out = self._acquire_buffer(output_size)
+        buf_grad_in = self._acquire_buffer(input_size)
 
-        # Upload
-        self.core._upload_buffer(buf_grad_out, mem_grad_out, grad_output.flatten())
+        try:
+            # Upload
+            self._upload_buffer(buf_grad_out, grad_output.flatten())
 
-        # Zero grad_input
-        zeros = np.zeros(batch_size * channels * in_h * in_w, dtype=np.float32)
-        self.core._upload_buffer(buf_grad_in, mem_grad_in, zeros)
+            # Zero grad_input
+            zeros = np.zeros(batch_size * channels * in_h * in_w, dtype=np.float32)
+            self._upload_buffer(buf_grad_in, zeros)
 
-        # Push constants
-        push_data = struct.pack('IIIIIIIIIIIII', batch_size, channels, in_h, in_w, out_h, out_w,
-                                kh, kw, sh, sw, ph, pw, 1 if count_include_pad else 0)
+            # Push constants
+            push_data = struct.pack('IIIIIIIIIIIII', batch_size, channels, in_h, in_w, out_h, out_w,
+                                    kh, kw, sh, sw, ph, pw, 1 if count_include_pad else 0)
 
-        # Debug
-        import sys
-        if hasattr(sys, '_called_from_test'):
-            print(f"[AvgPool Backward] batch={batch_size}, ch={channels}, in={in_h}x{in_w}, out={out_h}x{out_w}, kernel={kh}x{kw}, stride={sh}x{sw}, pad={ph}x{pw}")
-            gx_calc = (out_w + 7) // 8
-            gy_calc = (out_h + 7) // 8
-            gz_calc = batch_size * channels
-            print(f"[AvgPool Backward] Dispatch: gx={gx_calc}, gy={gy_calc}, gz={gz_calc}")
+            # Debug
+            import sys
+            if hasattr(sys, '_called_from_test'):
+                print(f"[AvgPool Backward] batch={batch_size}, ch={channels}, in={in_h}x{in_w}, out={out_h}x{out_w}, kernel={kh}x{kw}, stride={sh}x{sw}, pad={ph}x{pw}")
+                gx_calc = (out_w + 7) // 8
+                gy_calc = (out_h + 7) // 8
+                gz_calc = batch_size * channels
+                print(f"[AvgPool Backward] Dispatch: gx={gx_calc}, gy={gy_calc}, gz={gz_calc}")
 
-        # Pipeline
-        pipeline, layout, _ = self.pipelines.get_or_create_pipeline('avgpool2d-backward', 2, push_constant_size=52)
-        desc = self.pipelines.get_cached_descriptor_set('avgpool2d-backward',
-                                                        [(buf_grad_out, output_size), (buf_grad_in, input_size)])
+            # Pipeline
+            pipeline, layout, _ = self.pipelines.get_or_create_pipeline('avgpool2d-backward', 2, push_constant_size=52)
+            desc = self.pipelines.get_cached_descriptor_set('avgpool2d-backward',
+                                                            [(self._get_buffer_handle(buf_grad_out), output_size),
+                                                             (self._get_buffer_handle(buf_grad_in), input_size)])
 
-        # Dispatch over INPUT dimensions (not output) to avoid race conditions
-        gx = (in_w + 7) // 8
-        gy = (in_h + 7) // 8
-        gz = batch_size * channels
-        self.core._dispatch_compute(pipeline, layout, desc, gx, push_data, gy, gz)
+            # Dispatch over INPUT dimensions (not output) to avoid race conditions
+            gx = (in_w + 7) // 8
+            gy = (in_h + 7) // 8
+            gz = batch_size * channels
+            self.core._dispatch_compute(pipeline, layout, desc, gx, push_data, gy, gz)
 
-        # Download
-        grad_input = self.core._download_buffer(mem_grad_in, input_size, np.float32).reshape(input_shape)
+            # Download
+            grad_input = self._download_buffer(buf_grad_in, input_size, np.float32).reshape(input_shape)
 
-        # Cleanup
-        for buf in [buf_grad_out, buf_grad_in]:
-            vkDestroyBuffer(self.core.device, buf, None)
-        for mem in [mem_grad_out, mem_grad_in]:
-            vkFreeMemory(self.core.device, mem, None)
-
-        return grad_input
+            return grad_input
+        finally:
+            self._release_buffers([buf_grad_out, buf_grad_in])

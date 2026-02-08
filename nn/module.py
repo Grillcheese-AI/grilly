@@ -54,6 +54,7 @@ class Module:
         self._backend = None
         self._device = 'vulkan'
         self._grad_enabled = True  # Enable gradients by default
+        self._return_gpu_tensor = False  # GPU-resident output mode
     
     def _get_backend(self):
         """Execute get backend."""
@@ -63,25 +64,28 @@ class Module:
             self._backend = Compute()
         return self._backend
     
-    def _convert_input(self, x: Union[np.ndarray, Any]) -> np.ndarray:
+    def _convert_input(self, x: Union[np.ndarray, Any]):
         """
-        Convert input to Vulkan-compatible numpy array.
+        Convert input to Vulkan-compatible format.
 
         Automatically handles PyTorch tensors, converting them to numpy.
-        For VulkanTensor, extracts numpy array (handles GPU download if needed).
+        When GPU-resident mode is enabled, VulkanTensor inputs are passed
+        through without downloading to CPU, avoiding unnecessary round-trips.
         Preserves integer dtypes for index arrays (e.g., token IDs).
 
         Args:
             x: Input (PyTorch tensor, numpy array, VulkanTensor, or other)
 
         Returns:
-            numpy array ready for Vulkan operations (preserves integer dtypes)
+            numpy array or VulkanTensor (when GPU-resident mode is active)
         """
         # Handle VulkanTensor (GPU-resident)
         if TENSOR_CONVERSION_AVAILABLE:
             from ..utils.tensor_conversion import VulkanTensor
             if isinstance(x, VulkanTensor):
-                # Extract numpy from GPU tensor
+                # In GPU mode, pass VulkanTensor through to avoid CPU round-trip
+                if self._return_gpu_tensor:
+                    return x
                 return x.numpy()
             return ensure_vulkan_compatible(x)
         else:
@@ -241,6 +245,25 @@ class Module:
             if name in state_dict:
                 module.load_state_dict(state_dict[name])
     
+    def gpu_mode(self, enable=True):
+        """Enable GPU-resident output (returns VulkanTensor instead of numpy).
+
+        When enabled, operations will accept VulkanTensor inputs without
+        downloading to CPU, and subclasses that support it will return
+        VulkanTensor outputs.  This eliminates CPU round-trips for chained
+        operations (e.g. linear -> relu -> linear).
+
+        Args:
+            enable: True to enable, False to disable
+
+        Returns:
+            self (for chaining)
+        """
+        self._return_gpu_tensor = enable
+        for module in self._modules.values():
+            module.gpu_mode(enable)
+        return self
+
     def to(self, device=None):
         """Execute to."""
 

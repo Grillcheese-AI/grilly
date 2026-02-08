@@ -6,41 +6,13 @@ GPU-accelerated batch normalization with forward/backward passes.
 import numpy as np
 import struct
 from typing import Optional, Tuple
-from .base import VULKAN_AVAILABLE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:
     from vulkan import *
 
-try:
-    from .buffer_pool import BufferPool, PooledBuffer, VMABuffer, VMABufferPool
-    BUFFER_POOL_AVAILABLE = True
-except ImportError:
-    BUFFER_POOL_AVAILABLE = False
 
-
-class _DirectBuffer:
-    """Represent direct buffer behavior."""
-
-    __slots__ = ('handle', 'memory', 'size')
-    def __init__(self, handle, memory, size):
-        """Initialize the instance."""
-
-        self.handle, self.memory, self.size = handle, memory, size
-    def release(self):
-        """Execute release."""
-        pass
-    def destroy(self, device):
-        """Execute destroy."""
-
-        if self.handle:
-            vkDestroyBuffer(device, self.handle, None)
-            self.handle = None
-        if self.memory:
-            vkFreeMemory(device, self.memory, None)
-            self.memory = None
-
-
-class VulkanNormalization:
+class VulkanNormalization(BufferMixin):
     """Normalization operations: BatchNorm2d forward/backward"""
 
     def __init__(self, core, pipelines, shaders):
@@ -49,56 +21,6 @@ class VulkanNormalization:
         self.core = core
         self.pipelines = pipelines
         self.shaders = shaders
-        self._pool = None
-
-    @property
-    def buffer_pool(self):
-        """Execute buffer pool."""
-
-        if self._pool is None and BUFFER_POOL_AVAILABLE:
-            try:
-                self._pool = BufferPool(self.core)
-            except Exception:
-                pass
-        return self._pool
-
-    def _acquire_buffer(self, size: int):
-        """Execute acquire buffer."""
-
-        pool = self.buffer_pool
-        if pool:
-            return pool.acquire(size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        handle, memory = self.core._create_buffer(size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-        return _DirectBuffer(handle, memory, size)
-
-    def _release_buffers(self, buffers):
-        """Execute release buffers."""
-
-        for buf in buffers:
-            if isinstance(buf, (PooledBuffer, VMABuffer)):
-                buf.release()
-            elif isinstance(buf, _DirectBuffer):
-                buf.destroy(self.core.device)
-
-    def _upload_buffer(self, buf, data):
-        """Execute upload buffer."""
-
-        if isinstance(buf, VMABuffer) and self.buffer_pool and isinstance(self.buffer_pool, VMABufferPool):
-            self.buffer_pool.upload_data(buf, data)
-        else:
-            self.core._upload_buffer(buf.handle, buf.memory, data)
-
-    def _download_buffer(self, buf, size, dtype=np.float32):
-        """Execute download buffer."""
-
-        if isinstance(buf, VMABuffer) and self.buffer_pool and isinstance(self.buffer_pool, VMABufferPool):
-            return self.buffer_pool.download_data(buf, size, dtype)
-        return self.core._download_buffer(buf.memory, size, dtype)
-
-    def _get_buffer_handle(self, buf):
-        """Execute get buffer handle."""
-
-        return buf.get_vulkan_handle() if isinstance(buf, VMABuffer) else buf.handle
 
     def batchnorm2d_forward(
         self,

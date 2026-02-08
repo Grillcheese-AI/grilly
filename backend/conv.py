@@ -10,51 +10,14 @@ Performance hierarchy:
 
 import numpy as np
 import struct
-from typing import Optional, Tuple, List
-from .base import VULKAN_AVAILABLE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+from typing import Optional, Tuple
+from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:
     from vulkan import *
 
-# Try to import buffer pool for GPU buffer reuse
-try:
-    from .buffer_pool import get_buffer_pool, PooledBuffer, VMABuffer, VMABufferPool, BufferPool
-    BUFFER_POOL_AVAILABLE = True
-except ImportError:
-    BUFFER_POOL_AVAILABLE = False
-    get_buffer_pool = None
-    PooledBuffer = None
-    VMABuffer = None
-    VMABufferPool = None
-    BufferPool = None
 
-
-class _DirectBuffer:
-    """Wrapper for direct buffer allocation when pool is unavailable"""
-    __slots__ = ('handle', 'memory', 'size')
-
-    def __init__(self, handle, memory, size):
-        """Initialize the instance."""
-
-        self.handle = handle
-        self.memory = memory
-        self.size = size
-
-    def release(self):
-        """No-op for compatibility - must call destroy explicitly"""
-        pass
-
-    def destroy(self, device):
-        """Destroy the buffer"""
-        if self.handle:
-            vkDestroyBuffer(device, self.handle, None)
-            self.handle = None
-        if self.memory:
-            vkFreeMemory(device, self.memory, None)
-            self.memory = None
-
-
-class VulkanConv:
+class VulkanConv(BufferMixin):
     """Convolutional operations: Conv2d forward and backward passes"""
 
     def __init__(self, core, pipelines, shaders):
@@ -63,72 +26,6 @@ class VulkanConv:
         self.core = core
         self.pipelines = pipelines
         self.shaders = shaders
-        self._pool = None  # Lazy initialization
-
-    @property
-    def buffer_pool(self):
-        """Get or initialize the buffer pool (per-instance pool)"""
-        if self._pool is None and BUFFER_POOL_AVAILABLE:
-            try:
-                self._pool = BufferPool(self.core)
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).debug(f"Buffer pool init failed: {e}")
-                pass
-        return self._pool
-
-    def _acquire_buffer(self, size: int, usage: int = None) -> 'PooledBuffer':
-        """Acquire a buffer from the pool or create directly if pool unavailable."""
-        if usage is None:
-            usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
-
-        pool = self.buffer_pool
-        if pool is not None:
-            return pool.acquire(size, usage)
-        else:
-            handle, memory = self.core._create_buffer(size, usage)
-            return _DirectBuffer(handle, memory, size)
-
-    def _release_buffers(self, buffers: List):
-        """Release multiple buffers back to pool or destroy directly"""
-        for buf in buffers:
-            if VMABuffer is not None and isinstance(buf, VMABuffer):
-                buf.release()
-            elif PooledBuffer is not None and isinstance(buf, PooledBuffer):
-                buf.release()
-            elif isinstance(buf, _DirectBuffer):
-                buf.destroy(self.core.device)
-            elif isinstance(buf, tuple) and len(buf) == 2:
-                handle, memory = buf
-                vkDestroyBuffer(self.core.device, handle, None)
-                vkFreeMemory(self.core.device, memory, None)
-
-    def _is_vma_buffer(self, buf) -> bool:
-        """Check if buffer is a VMA-allocated buffer"""
-        return VMABuffer is not None and isinstance(buf, VMABuffer)
-
-    def _upload_buffer(self, buf, data: np.ndarray):
-        """Upload data to buffer, handling VMA and direct buffers"""
-        if self._is_vma_buffer(buf):
-            pool = self.buffer_pool
-            if pool is not None and isinstance(pool, VMABufferPool):
-                pool.upload_data(buf, data)
-                return
-        self.core._upload_buffer(buf.handle, buf.memory, data.flatten())
-
-    def _download_buffer(self, buf, size: int, dtype=np.float32) -> np.ndarray:
-        """Download data from buffer, handling VMA and direct buffers"""
-        if self._is_vma_buffer(buf):
-            pool = self.buffer_pool
-            if pool is not None and isinstance(pool, VMABufferPool):
-                return pool.download_data(buf, size, dtype)
-        return self.core._download_buffer(buf.memory, size, dtype)
-
-    def _get_buffer_handle(self, buf):
-        """Get Vulkan-compatible buffer handle"""
-        if self._is_vma_buffer(buf):
-            return buf.get_vulkan_handle()
-        return buf.handle
 
     def _conv2d_gemm(
     self,

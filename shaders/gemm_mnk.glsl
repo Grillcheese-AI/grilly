@@ -39,12 +39,8 @@ void main() {
     uint global_m = gl_WorkGroupID.y * 16u + local_y;
     uint global_n = gl_WorkGroupID.x * 16u + local_x;
 
-    if (global_m >= params.M || global_n >= params.N) {
-        // We still need to participate in barriers if we use them later,
-        // but here we early return as we never read/write C.
-        return;
-    }
-
+    // All threads must participate in barriers - use bounds guard instead of early return
+    bool in_bounds = (global_m < params.M && global_n < params.N);
     float acc = 0.0;
 
     // Number of tiles along K
@@ -54,23 +50,15 @@ void main() {
         // Starting k index for this tile
         uint k_base = tile_idx * 16u;
 
-        // Load A tile: Asub[local_y][local_x] = A[global_m, k_base + local_x]
+        // Load A tile (all threads load, guarded for OOB)
         uint kA = k_base + local_x;
-        if (kA < params.K) {
-            uint A_idx = global_m * params.K + kA;
-            Asub[local_y][local_x] = A[A_idx];
-        } else {
-            Asub[local_y][local_x] = 0.0;
-        }
+        Asub[local_y][local_x] = (global_m < params.M && kA < params.K)
+            ? A[global_m * params.K + kA] : 0.0;
 
-        // Load B tile: Bsub[local_y][local_x] = B[k_base + local_y, global_n]
+        // Load B tile (all threads load, guarded for OOB)
         uint kB = k_base + local_y;
-        if (kB < params.K) {
-            uint B_idx = kB * params.N + global_n;
-            Bsub[local_y][local_x] = B[B_idx];
-        } else {
-            Bsub[local_y][local_x] = 0.0;
-        }
+        Bsub[local_y][local_x] = (global_n < params.N && kB < params.K)
+            ? B[kB * params.N + global_n] : 0.0;
 
         barrier();
 
@@ -82,7 +70,8 @@ void main() {
         barrier();
     }
 
-    // Write C
-    uint C_idx = global_m * params.N + global_n;
-    C[C_idx] = acc;
+    // Only in-bounds threads write C
+    if (in_bounds) {
+        C[global_m * params.N + global_n] = acc;
+    }
 }

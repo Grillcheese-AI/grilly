@@ -10,8 +10,8 @@ Performance hierarchy:
 
 import numpy as np
 import struct
-from typing import Optional, List
-from .base import VULKAN_AVAILABLE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+from typing import Optional
+from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:
     from vulkan import *
@@ -42,45 +42,7 @@ except ImportError:
     numba_roswish = None
     numba_swiglu = None
 
-# Import buffer pool for GPU buffer reuse
-try:
-    from .buffer_pool import get_buffer_pool, PooledBuffer, VMABuffer, VMABufferPool, BufferPool
-    BUFFER_POOL_AVAILABLE = True
-except ImportError:
-    BUFFER_POOL_AVAILABLE = False
-    get_buffer_pool = None
-    PooledBuffer = None
-    VMABuffer = None
-    VMABufferPool = None
-    BufferPool = None
-
-
-class _DirectBuffer:
-    """Wrapper for direct buffer allocation when pool is unavailable"""
-    __slots__ = ('handle', 'memory', 'size')
-
-    def __init__(self, handle, memory, size):
-        """Initialize the instance."""
-
-        self.handle = handle
-        self.memory = memory
-        self.size = size
-
-    def release(self):
-        """No-op for compatibility - must call destroy explicitly"""
-        pass
-
-    def destroy(self, device):
-        """Destroy the buffer"""
-        if self.handle:
-            vkDestroyBuffer(device, self.handle, None)
-            self.handle = None
-        if self.memory:
-            vkFreeMemory(device, self.memory, None)
-            self.memory = None
-
-
-class VulkanFNN:
+class VulkanFNN(BufferMixin):
     """FNN operations: activations, layer normalization, linear layers, dropout"""
 
     def __init__(self, core, pipelines, shaders):
@@ -91,29 +53,18 @@ class VulkanFNN:
         self.shaders = shaders
         self._pool = None  # Lazy initialization
 
-    @property
-    def buffer_pool(self):
-        """Get or initialize the buffer pool (per-instance pool)"""
-        if self._pool is None and BUFFER_POOL_AVAILABLE:
-            try:
-                # Use per-instance pool instead of global pool
-                # This avoids issues with stale device references across tests
-                self._pool = BufferPool(self.core)
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).debug(f"Buffer pool init failed: {e}")
-                pass  # Pool initialization failed, will use direct allocation
-        return self._pool
-    
     def gemm(self, A: np.ndarray, B: np.ndarray) -> np.ndarray:
         """
         GEMM: C = A @ B
         A: (M, K), B: (K, N) -> C: (M, N)
-        Uses gemm-mnk.glsl
+        Uses gemm_tiled (4x4 register blocking) with gemm_mnk fallback.
         """
-        if 'gemm_mnk' not in self.shaders:
-            # CPU fallback
-            return A @ B
+        # Select shader: prefer optimized tiled version
+        use_tiled = 'gemm_tiled' in self.shaders
+        use_basic = 'gemm_mnk' in self.shaders
+
+        if not use_tiled and not use_basic:
+            return A @ B  # CPU fallback
 
         A = np.asarray(A, dtype=np.float32)
         B = np.asarray(B, dtype=np.float32)
@@ -135,8 +86,19 @@ class VulkanFNN:
             self._upload_buffer(buf_A, A.flatten())
             self._upload_buffer(buf_B, B.flatten())
 
+            if use_tiled:
+                shader_name = 'gemm_tiled'
+                # 64x64 output tile per workgroup (16x16 threads, 4x4 per thread)
+                group_x = (N + 63) // 64
+                group_y = (M + 63) // 64
+            else:
+                shader_name = 'gemm_mnk'
+                # 16x16 output tile per workgroup
+                group_x = (N + 15) // 16
+                group_y = (M + 15) // 16
+
             pipeline, layout, _ = self.pipelines.get_or_create_pipeline(
-                'gemm_mnk', 3, push_constant_size=12
+                shader_name, 3, push_constant_size=12
             )
 
             A_handle = self._get_buffer_handle(buf_A)
@@ -144,7 +106,7 @@ class VulkanFNN:
             C_handle = self._get_buffer_handle(buf_C)
 
             desc = self.pipelines.get_cached_descriptor_set(
-                'gemm_mnk',
+                shader_name,
                 [
                     (A_handle, A_bytes),
                     (B_handle, B_bytes),
@@ -154,13 +116,9 @@ class VulkanFNN:
 
             push = struct.pack('3I', M, K, N)
 
-            group_x = (N + 15) // 16
-            group_y = (M + 15) // 16
-            group_z = 1
-
             self.core._dispatch_compute(
                 pipeline, layout, desc,
-                group_x, push, group_y, group_z
+                group_x, push, group_y, 1
             )
 
             C_flat = self._download_buffer(buf_C, C_bytes, np.float32)
@@ -168,74 +126,6 @@ class VulkanFNN:
 
         finally:
             self._release_buffer(buf_A); self._release_buffer(buf_B); self._release_buffer(buf_C)
-
-    def _acquire_buffer(self, size: int, usage: int = None) -> 'PooledBuffer':
-        """
-        Acquire a buffer from the pool or create directly if pool unavailable.
-
-        Returns:
-            PooledBuffer if pool available, or tuple (handle, memory) otherwise
-        """
-        if usage is None:
-            usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
-
-        pool = self.buffer_pool
-        if pool is not None:
-            return pool.acquire(size, usage)
-        else:
-            # Fallback to direct allocation (returns tuple)
-            handle, memory = self.core._create_buffer(size, usage)
-            return _DirectBuffer(handle, memory, size)
-
-    def _release_buffers(self, buffers: List):
-        """Release multiple buffers back to pool or destroy directly"""
-        for buf in buffers:
-            if VMABuffer is not None and isinstance(buf, VMABuffer):
-                buf.release()
-            elif PooledBuffer is not None and isinstance(buf, PooledBuffer):
-                buf.release()
-            elif isinstance(buf, _DirectBuffer):
-                buf.destroy(self.core.device)
-            elif isinstance(buf, tuple) and len(buf) == 2:
-                # Legacy tuple (handle, memory)
-                handle, memory = buf
-                vkDestroyBuffer(self.core.device, handle, None)
-                vkFreeMemory(self.core.device, memory, None)
-
-    def _release_buffer(self, buf):
-        """Backward-compatible single-buffer release helper."""
-        self._release_buffers([buf])
-
-    def _is_vma_buffer(self, buf) -> bool:
-        """Check if buffer is a VMA-allocated buffer"""
-        return VMABuffer is not None and isinstance(buf, VMABuffer)
-
-    def _upload_buffer(self, buf, data: np.ndarray):
-        """Upload data to buffer, handling VMA and direct buffers appropriately"""
-        if self._is_vma_buffer(buf):
-            # Use VMA's memory mapping for VMA buffers
-            pool = self.buffer_pool
-            if pool is not None and isinstance(pool, VMABufferPool):
-                pool.upload_data(buf, data)
-                return
-        # Direct buffer or PooledBuffer - use core's upload
-        self.core._upload_buffer(buf.handle, buf.memory, data)
-
-    def _download_buffer(self, buf, size: int, dtype=np.float32) -> np.ndarray:
-        """Download data from buffer, handling VMA and direct buffers appropriately"""
-        if self._is_vma_buffer(buf):
-            # Use VMA's memory mapping for VMA buffers
-            pool = self.buffer_pool
-            if pool is not None and isinstance(pool, VMABufferPool):
-                return pool.download_data(buf, size, dtype)
-        # Direct buffer or PooledBuffer - use core's download
-        return self.core._download_buffer(buf.memory, size, dtype)
-
-    def _get_buffer_handle(self, buf):
-        """Get Vulkan-compatible buffer handle"""
-        if self._is_vma_buffer(buf):
-            return buf.get_vulkan_handle()
-        return buf.handle
 
     def activation_relu(self, input_data):
         """Apply ReLU activation: max(0, x)"""
@@ -1625,12 +1515,14 @@ class VulkanFNN:
             (self._get_buffer_handle(buf_grad_w), grad_weight_size),
         ]
 
+        # Always 6 bindings - shader declares binding 5 for grad_bias
         if bias is not None:
             buf_grad_b = self._acquire_buffer(grad_bias_size)
-            buffers_list.append(buf_grad_b)
-            buffers.append((self._get_buffer_handle(buf_grad_b), grad_bias_size))
         else:
-            buf_grad_b = None
+            buf_grad_b = self._acquire_buffer(4)  # dummy buffer for binding 5
+        buffers_list.append(buf_grad_b)
+        buffers.append((self._get_buffer_handle(buf_grad_b),
+                        grad_bias_size if bias is not None else 4))
 
         # Upload data
         self._upload_buffer(buf_grad_out, grad_out_flat)
@@ -1642,66 +1534,65 @@ class VulkanFNN:
         if bias is not None:
             self._upload_buffer(buf_grad_b, np.zeros(output_dim, dtype=np.float32))
 
-        # Get or create pipeline
-        num_bindings = 6 if bias is not None else 5
+        # Get or create pipeline (always 6 bindings to match shader)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fnn-linear-backward', num_bindings, push_constant_size=16
+            'fnn-linear-backward', 6, push_constant_size=16
         )
 
         # Create descriptor set
         descriptor_set = self.pipelines._create_descriptor_set(desc_layout, buffers)
 
-        # Pass 0: Compute grad_input
-        push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, 0)
-        workgroups_x = (input_dim + 15) // 16
-        workgroups_y = (batch_seq + 15) // 16
-        self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups_x, push_constants, workgroups_y
-        )
-
-        # Pass 1: Compute grad_weight
-        push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, 1)
-        workgroups_x = (input_dim + 15) // 16
-        workgroups_y = (output_dim + 15) // 16
-        self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups_x, push_constants, workgroups_y
-        )
-
-        # Pass 2: Compute grad_bias (if bias exists)
-        if bias is not None:
-            push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, 2)
-            workgroups = (output_dim + 255) // 256
+        try:
+            # Pass 0: Compute grad_input
+            push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, 0)
+            workgroups_x = (input_dim + 15) // 16
+            workgroups_y = (batch_seq + 15) // 16
             self.core._dispatch_compute(
                 pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                workgroups_x, push_constants, workgroups_y
             )
 
-        # Download results
-        grad_input_flat = self._download_buffer(buf_grad_in, grad_input_size, np.float32)
-        grad_weight_flat = self._download_buffer(buf_grad_w, grad_weight_size, np.float32)
-        if bias is not None:
-            grad_bias_flat = self._download_buffer(buf_grad_b, grad_bias_size, np.float32)
-        else:
-            grad_bias_flat = None
+            # Pass 1: Compute grad_weight
+            push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, 1)
+            workgroups_x = (input_dim + 15) // 16
+            workgroups_y = (output_dim + 15) // 16
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set,
+                workgroups_x, push_constants, workgroups_y
+            )
 
-        # Reshape
-        grad_input_2d = grad_input_flat[:batch_seq * input_dim].reshape(batch_seq, input_dim)
-        grad_weight = grad_weight_flat[:output_dim * input_dim].reshape(output_dim, input_dim)
-        grad_bias = grad_bias_flat[:output_dim] if grad_bias_flat is not None else None
+            # Pass 2: Compute grad_bias (if bias exists)
+            if bias is not None:
+                push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, 2)
+                workgroups = (output_dim + 255) // 256
+                self.core._dispatch_compute(
+                    pipeline, pipeline_layout, descriptor_set,
+                    workgroups, push_constants
+                )
 
-        # Reshape grad_input back to original shape
-        if grad_output.ndim == 3:
-            grad_input = grad_input_2d.reshape(grad_output_shape[0], grad_output_shape[1], -1)
-        else:
-            grad_input = grad_input_2d
+            # Download results
+            grad_input_flat = self._download_buffer(buf_grad_in, grad_input_size, np.float32)
+            grad_weight_flat = self._download_buffer(buf_grad_w, grad_weight_size, np.float32)
+            if bias is not None:
+                grad_bias_flat = self._download_buffer(buf_grad_b, grad_bias_size, np.float32)
+            else:
+                grad_bias_flat = None
 
-        # Free descriptor set and release buffers
-        vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])
-        self._release_buffers(buffers_list)
+            # Reshape
+            grad_input_2d = grad_input_flat[:batch_seq * input_dim].reshape(batch_seq, input_dim)
+            grad_weight = grad_weight_flat[:output_dim * input_dim].reshape(output_dim, input_dim)
+            grad_bias = grad_bias_flat[:output_dim] if grad_bias_flat is not None else None
 
-        return grad_input, grad_weight, grad_bias
+            # Reshape grad_input back to original shape
+            if grad_output.ndim == 3:
+                grad_input = grad_input_2d.reshape(grad_output_shape[0], grad_output_shape[1], -1)
+            else:
+                grad_input = grad_input_2d
+
+            return grad_input, grad_weight, grad_bias
+        finally:
+            vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])
+            self._release_buffers(buffers_list)
 
     # ------------------------------------------------------------------
     # LayerNorm backward pass (GPU accelerated)

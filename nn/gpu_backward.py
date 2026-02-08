@@ -140,7 +140,7 @@ class GPUBackwardOps:
             return grad_input, grad_weight, grad_bias
 
         except Exception as e:
-            logger.warning(f"GPU linear backward failed: {e}. Falling back to CPU.")
+            logger.warning(f"GPU linear backward failed: {type(e).__name__}: {e}. Falling back to CPU.")
             return self._linear_backward_cpu(
                 grad_output, input_data, weights,
                 compute_input_grad, compute_weight_grad, compute_bias_grad
