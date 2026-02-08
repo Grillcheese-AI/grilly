@@ -4,7 +4,7 @@ to run our tests on specific GPUs, open an Issue and tell us about it.
 
 
 
-AMD (UNTESTED BUT SUPPORTS ALL FEATURES)
+AMD
 
 ### Desktop (Minimum RDNA2)
 RDNA3 and 4 are not listed as they should all be working.
