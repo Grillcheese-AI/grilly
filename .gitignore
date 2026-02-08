@@ -155,7 +155,6 @@ desktop.ini
 debug_*.py
 check_*.py
 PROJECT.md
-CLAUDE.md
 PLAN.md
 *.jsonl
 pyvma
