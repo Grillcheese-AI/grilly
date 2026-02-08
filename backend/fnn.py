@@ -53,21 +53,29 @@ class VulkanFNN(BufferMixin):
         self.shaders = shaders
         self._pool = None  # Lazy initialization
 
-    def gemm(self, A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    def gemm(self, A, B, return_gpu_tensor=False):
         """
         GEMM: C = A @ B
         A: (M, K), B: (K, N) -> C: (M, N)
         Uses gemm_tiled (4x4 register blocking) with gemm_mnk fallback.
+
+        Args:
+            A: Left matrix, numpy array or VulkanTensor
+            B: Right matrix, numpy array or VulkanTensor
+            return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
         """
+        from ..utils.tensor_conversion import VulkanTensor
+
         # Select shader: prefer optimized tiled version
         use_tiled = 'gemm_tiled' in self.shaders
         use_basic = 'gemm_mnk' in self.shaders
 
         if not use_tiled and not use_basic:
-            return A @ B  # CPU fallback
+            A_np = A.numpy() if isinstance(A, VulkanTensor) else np.asarray(A, dtype=np.float32)
+            B_np = B.numpy() if isinstance(B, VulkanTensor) else np.asarray(B, dtype=np.float32)
+            return A_np @ B_np  # CPU fallback
 
-        A = np.asarray(A, dtype=np.float32)
-        B = np.asarray(B, dtype=np.float32)
+        # Get shapes without forcing download
         M, K = A.shape
         K2, N = B.shape
         assert K == K2
@@ -77,15 +85,12 @@ class VulkanFNN(BufferMixin):
         B_bytes = K * N * 4
         C_bytes = M * N * 4
 
-        # Allocate buffers
-        buf_A = self._acquire_buffer(A_bytes)
-        buf_B = self._acquire_buffer(B_bytes)
+        # Use _prepare_input for zero-copy when VulkanTensor
+        buf_A, release_A = self._prepare_input(A, size=A_bytes)
+        buf_B, release_B = self._prepare_input(B, size=B_bytes)
         buf_C = self._acquire_buffer(C_bytes)
 
         try:
-            self._upload_buffer(buf_A, A.flatten())
-            self._upload_buffer(buf_B, B.flatten())
-
             if use_tiled:
                 shader_name = 'gemm_tiled'
                 # 64x64 output tile per workgroup (16x16 threads, 4x4 per thread)
@@ -121,30 +126,39 @@ class VulkanFNN(BufferMixin):
                 group_x, push, group_y, 1
             )
 
-            C_flat = self._download_buffer(buf_C, C_bytes, np.float32)
-            return C_flat.reshape(M, N)
+            if return_gpu_tensor:
+                return self._wrap_output_tensor(buf_C, (M, N))
+            else:
+                C_flat = self._download_buffer(buf_C, C_bytes, np.float32)
+                return C_flat.reshape(M, N)
 
         finally:
-            self._release_buffer(buf_A); self._release_buffer(buf_B); self._release_buffer(buf_C)
+            if release_A:
+                self._release_buffer(buf_A)
+            if release_B:
+                self._release_buffer(buf_B)
+            if not return_gpu_tensor:
+                self._release_buffer(buf_C)
 
-    def activation_relu(self, input_data):
+    def activation_relu(self, input_data, return_gpu_tensor=False):
         """Apply ReLU activation: max(0, x)"""
+        from ..utils.tensor_conversion import VulkanTensor
+        is_vt = isinstance(input_data, VulkanTensor)
+
         # Check if shader is available
         if 'activation-relu' not in self.shaders:
             # CPU fallback (numba if available)
+            data_np = input_data.numpy() if is_vt else np.asarray(input_data, dtype=np.float32)
             if NUMBA_AVAILABLE and numba_relu is not None:
-                return numba_relu(input_data.astype(np.float32))
-            return np.maximum(0, input_data).astype(np.float32)
+                return numba_relu(data_np.astype(np.float32))
+            return np.maximum(0, data_np).astype(np.float32)
 
-        data = input_data.astype(np.float32).flatten()
-        total_elements = len(data)
+        original_shape = input_data.shape
+        total_elements = int(np.prod(original_shape))
+        data_nbytes = total_elements * 4
 
-        # Acquire buffers from pool
-        buf_in = self._acquire_buffer(data.nbytes)
-        buf_out = self._acquire_buffer(data.nbytes)
-
-        # Upload data (uses VMA memory mapping for VMA buffers)
-        self._upload_buffer(buf_in, data)
+        buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
+        buf_out = self._acquire_buffer(data_nbytes)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -158,7 +172,7 @@ class VulkanFNN(BufferMixin):
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'activation-relu',
-            [(in_handle, data.nbytes), (out_handle, data.nbytes)]
+            [(in_handle, data_nbytes), (out_handle, data_nbytes)]
         )
 
         # Pack push constants
@@ -171,35 +185,43 @@ class VulkanFNN(BufferMixin):
             workgroups, push_constants
         )
 
-        # Download results (uses VMA memory mapping for VMA buffers)
-        result = self._download_buffer(buf_out, data.nbytes, np.float32)
-        result = result[:total_elements]
+        if return_gpu_tensor:
+            if release_in:
+                self._release_buffer(buf_in)
+            return self._wrap_output_tensor(buf_out, original_shape)
+        else:
+            # Download results (uses VMA memory mapping for VMA buffers)
+            result = self._download_buffer(buf_out, data_nbytes, np.float32)
+            result = result[:total_elements]
 
-        # Release buffers back to pool
-        self._release_buffers([buf_in, buf_out])
+            # Release buffers back to pool
+            if release_in:
+                self._release_buffer(buf_in)
+            self._release_buffer(buf_out)
 
-        return result.reshape(input_data.shape) if input_data.ndim > 1 else result
+            return result.reshape(original_shape) if len(original_shape) > 1 else result
     
-    def activation_gelu(self, input_data):
+    def activation_gelu(self, input_data, return_gpu_tensor=False):
         """Apply GELU activation"""
+        from ..utils.tensor_conversion import VulkanTensor
+        is_vt = isinstance(input_data, VulkanTensor)
+
         # Check if shader is available
         if 'activation-gelu' not in self.shaders:
             # CPU fallback (numba if available)
+            data_np = input_data.numpy() if is_vt else np.asarray(input_data, dtype=np.float32)
             if NUMBA_AVAILABLE and numba_gelu is not None:
-                return numba_gelu(input_data.astype(np.float32))
+                return numba_gelu(data_np.astype(np.float32))
             sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
             coeff = 0.044715
-            return 0.5 * input_data * (1 + np.tanh(sqrt_2_over_pi * (input_data + coeff * input_data ** 3)))
+            return 0.5 * data_np * (1 + np.tanh(sqrt_2_over_pi * (data_np + coeff * data_np ** 3)))
 
-        data = input_data.astype(np.float32).flatten()
-        total_elements = len(data)
+        original_shape = input_data.shape
+        total_elements = int(np.prod(original_shape))
+        data_nbytes = total_elements * 4
 
-        # Acquire buffers from pool
-        buf_in = self._acquire_buffer(data.nbytes)
-        buf_out = self._acquire_buffer(data.nbytes)
-
-        # Upload data
-        self._upload_buffer(buf_in, data)
+        buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
+        buf_out = self._acquire_buffer(data_nbytes)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -209,7 +231,7 @@ class VulkanFNN(BufferMixin):
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'activation-gelu',
-            [(self._get_buffer_handle(buf_in), data.nbytes), (self._get_buffer_handle(buf_out), data.nbytes)]
+            [(self._get_buffer_handle(buf_in), data_nbytes), (self._get_buffer_handle(buf_out), data_nbytes)]
         )
 
         # Pack push constants
@@ -222,41 +244,50 @@ class VulkanFNN(BufferMixin):
             workgroups, push_constants
         )
 
-        # Download results
-        result = self._download_buffer(buf_out, data.nbytes, np.float32)
-        result = result[:total_elements]
+        if return_gpu_tensor:
+            if release_in:
+                self._release_buffer(buf_in)
+            return self._wrap_output_tensor(buf_out, original_shape)
+        else:
+            # Download results
+            result = self._download_buffer(buf_out, data_nbytes, np.float32)
+            result = result[:total_elements]
 
-        # Check for NaN/Inf and fallback to CPU if needed
-        if np.isnan(result).any() or np.isinf(result).any():
-            # CPU fallback
-            sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
-            coeff = 0.044715
-            result = 0.5 * input_data * (1 + np.tanh(sqrt_2_over_pi * (input_data + coeff * input_data ** 3)))
-            result = result.astype(np.float32).flatten()
+            # Check for NaN/Inf and fallback to CPU if needed
+            if np.isnan(result).any() or np.isinf(result).any():
+                # CPU fallback
+                data_np = input_data.numpy() if is_vt else np.asarray(input_data, dtype=np.float32)
+                sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
+                coeff = 0.044715
+                result = 0.5 * data_np * (1 + np.tanh(sqrt_2_over_pi * (data_np + coeff * data_np ** 3)))
+                result = result.astype(np.float32).flatten()
 
-        # Release buffers back to pool
-        self._release_buffers([buf_in, buf_out])
+            # Release buffers back to pool
+            if release_in:
+                self._release_buffer(buf_in)
+            self._release_buffer(buf_out)
 
-        return result.reshape(input_data.shape) if input_data.ndim > 1 else result
+            return result.reshape(original_shape) if len(original_shape) > 1 else result
     
-    def activation_silu(self, input_data):
+    def activation_silu(self, input_data, return_gpu_tensor=False):
         """Apply SiLU (Swish) activation: x * sigmoid(x)"""
+        from ..utils.tensor_conversion import VulkanTensor
+        is_vt = isinstance(input_data, VulkanTensor)
+
         # Check if shader is available
         if 'activation-silu' not in self.shaders:
             # CPU fallback (numba if available)
+            data_np = input_data.numpy() if is_vt else np.asarray(input_data, dtype=np.float32)
             if NUMBA_AVAILABLE and numba_silu is not None:
-                return numba_silu(input_data.astype(np.float32))
-            return input_data / (1.0 + np.exp(-input_data))
+                return numba_silu(data_np.astype(np.float32))
+            return data_np / (1.0 + np.exp(-data_np))
 
-        data = input_data.astype(np.float32).flatten()
-        total_elements = len(data)
+        original_shape = input_data.shape
+        total_elements = int(np.prod(original_shape))
+        data_nbytes = total_elements * 4
 
-        # Acquire buffers from pool
-        buf_in = self._acquire_buffer(data.nbytes)
-        buf_out = self._acquire_buffer(data.nbytes)
-
-        # Upload data
-        self._upload_buffer(buf_in, data)
+        buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
+        buf_out = self._acquire_buffer(data_nbytes)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -266,7 +297,7 @@ class VulkanFNN(BufferMixin):
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'activation-silu',
-            [(self._get_buffer_handle(buf_in), data.nbytes), (self._get_buffer_handle(buf_out), data.nbytes)]
+            [(self._get_buffer_handle(buf_in), data_nbytes), (self._get_buffer_handle(buf_out), data_nbytes)]
         )
 
         # Pack push constants
@@ -279,14 +310,21 @@ class VulkanFNN(BufferMixin):
             workgroups, push_constants
         )
 
-        # Download results
-        result = self._download_buffer(buf_out, data.nbytes, np.float32)
-        result = result[:total_elements]
+        if return_gpu_tensor:
+            if release_in:
+                self._release_buffer(buf_in)
+            return self._wrap_output_tensor(buf_out, original_shape)
+        else:
+            # Download results
+            result = self._download_buffer(buf_out, data_nbytes, np.float32)
+            result = result[:total_elements]
 
-        # Release buffers back to pool
-        self._release_buffers([buf_in, buf_out])
+            # Release buffers back to pool
+            if release_in:
+                self._release_buffer(buf_in)
+            self._release_buffer(buf_out)
 
-        return result.reshape(input_data.shape) if input_data.ndim > 1 else result
+            return result.reshape(original_shape) if len(original_shape) > 1 else result
 
     def activation_gcu(self, input_data):
         """Apply GCU (Growing Cosine Unit) activation: x * cos(x)"""
@@ -1289,67 +1327,85 @@ class VulkanFNN(BufferMixin):
     # ------------------------------------------------------------------
     # Linear projection (GPU accelerated)
     # ------------------------------------------------------------------
-    def linear(self, x: np.ndarray, weights: np.ndarray, bias: Optional[np.ndarray] = None) -> np.ndarray:
+    def linear(self, x, weights, bias=None, return_gpu_tensor=False):
         """
         GPU-accelerated linear projection using fnn-linear.glsl shader.
         output = x @ W^T + b
 
         Args:
-            x: Input tensor (batch_seq, input_dim) or (batch, seq, input_dim)
+            x: Input tensor (batch_seq, input_dim) or (batch, seq, input_dim).
+                Can be numpy array or VulkanTensor.
             weights: Weight matrix (output_dim, input_dim)
             bias: Optional bias vector (output_dim,)
+            return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
 
         Returns:
             Output tensor with same batch dimensions, last dim = output_dim
         """
+        from ..utils.tensor_conversion import VulkanTensor
+        is_vt = isinstance(x, VulkanTensor)
+
         # Check if shader is available
         if 'fnn-linear' not in self.shaders:
             # CPU fallback (numba if available)
+            x_np = x.numpy() if is_vt else np.asarray(x, dtype=np.float32)
             if NUMBA_AVAILABLE and numba_linear is not None:
-                return numba_linear(x.astype(np.float32), weights.astype(np.float32),
+                return numba_linear(x_np.astype(np.float32), weights.astype(np.float32),
                                    bias.astype(np.float32) if bias is not None else None)
-            out = np.matmul(x, weights.T)
+            out = np.matmul(x_np, weights.T)
             if bias is not None:
                 out = out + bias
             return out
 
+        # Get shape info without forcing download for VulkanTensor
         original_shape = x.shape
         output_dim, input_dim = weights.shape
 
         # Reshape to 2D: (batch_seq, input_dim)
         if len(original_shape) > 2:
             batch_seq = int(np.prod(original_shape[:-1]))
-            x_2d = x.reshape(batch_seq, input_dim)
         else:
             batch_seq = original_shape[0]
-            x_2d = x
 
-        # Flatten arrays
-        x_flat = x_2d.astype(np.float32).flatten()
-        w_flat = weights.astype(np.float32).flatten()
+        # Prepare input data
+        if is_vt:
+            # Zero-copy: use existing GPU buffer
+            input_nbytes = batch_seq * input_dim * 4
+            buf_input, release_input = self._prepare_input(x, size=input_nbytes)
+        else:
+            x_np = np.asarray(x, dtype=np.float32)
+            if len(original_shape) > 2:
+                x_2d = x_np.reshape(batch_seq, input_dim)
+            else:
+                x_2d = x_np
+            x_flat = x_2d.astype(np.float32).flatten()
+            input_nbytes = x_flat.nbytes
+            buf_input = self._acquire_buffer(input_nbytes)
+            self._upload_buffer(buf_input, x_flat)
+            release_input = True
+
+        # Flatten weights
+        w_np = np.ascontiguousarray(weights, dtype=np.float32)
+        w_nbytes = int(np.prod(weights.shape)) * 4
 
         # Output size
         output_size = batch_seq * output_dim * 4  # float32
 
-        # Acquire buffers from pool
-        buf_input = self._acquire_buffer(x_flat.nbytes)
-        buf_weights = self._acquire_buffer(w_flat.nbytes)
+        # Use weight cache (avoids re-upload when weights haven't changed)
+        buf_weights, release_weights = self._get_or_upload_weight(w_np)
         buf_output = self._acquire_buffer(output_size)
 
         # Handle bias
         has_bias = 1 if bias is not None else 0
         if bias is not None:
-            bias_flat = bias.astype(np.float32).flatten()
-            buf_bias = self._acquire_buffer(bias_flat.nbytes)
-            self._upload_buffer(buf_bias, bias_flat)
+            bias_np = np.ascontiguousarray(bias, dtype=np.float32)
+            buf_bias, release_bias = self._get_or_upload_weight(bias_np)
+            bias_flat = bias_np.flatten()
         else:
             # Create dummy bias buffer (shader expects 4 buffers)
             buf_bias = self._acquire_buffer(4)
+            release_bias = True
             bias_flat = None
-
-        # Upload data
-        self._upload_buffer(buf_input, x_flat)
-        self._upload_buffer(buf_weights, w_flat)
 
         # Get or create pipeline (4 buffers, push constants: 4 uints = 16 bytes)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -1360,8 +1416,8 @@ class VulkanFNN(BufferMixin):
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'fnn-linear',
             [
-                (self._get_buffer_handle(buf_input), x_flat.nbytes),
-                (self._get_buffer_handle(buf_weights), w_flat.nbytes),
+                (self._get_buffer_handle(buf_input), input_nbytes),
+                (self._get_buffer_handle(buf_weights), w_nbytes),
                 (self._get_buffer_handle(buf_bias), bias_flat.nbytes if bias_flat is not None else 4),
                 (self._get_buffer_handle(buf_output), output_size),
             ]
@@ -1380,18 +1436,36 @@ class VulkanFNN(BufferMixin):
             workgroups_x, push_constants, workgroups_y
         )
 
-        # Download result
-        result = self._download_buffer(buf_output, output_size, np.float32)
-
-        # Release buffers back to pool
-        self._release_buffers([buf_input, buf_weights, buf_bias, buf_output])
-
-        # Reshape output to match input batch dimensions
+        # Compute output shape
         if len(original_shape) > 2:
             output_shape = original_shape[:-1] + (output_dim,)
-            return result.reshape(output_shape)
         else:
-            return result.reshape(batch_seq, output_dim)
+            output_shape = (batch_seq, output_dim)
+
+        if return_gpu_tensor:
+            result = self._wrap_output_tensor(buf_output, output_shape)
+            # Release only owned buffers (cache-owned buffers are not released)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            return result
+        else:
+            # Download result
+            result = self._download_buffer(buf_output, output_size, np.float32)
+
+            # Release only owned buffers (cache-owned buffers are not released)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            self._release_buffer(buf_output)
+
+            return result.reshape(output_shape)
     
     # ------------------------------------------------------------------
     # Linear backward pass
@@ -1920,9 +1994,10 @@ class VulkanFNN(BufferMixin):
 
     def fused_linear_gelu(
         self,
-        x: np.ndarray,
+        x,
         weights: np.ndarray,
-        bias: Optional[np.ndarray] = None
+        bias: Optional[np.ndarray] = None,
+        return_gpu_tensor=False,
     ) -> np.ndarray:
         """
         Fused Linear + GELU: GELU(x @ W.T + b)
@@ -1932,53 +2007,55 @@ class VulkanFNN(BufferMixin):
         Common in Transformer FFN (first layer).
 
         Args:
-            x: Input tensor (..., input_dim)
+            x: Input tensor (..., input_dim), numpy array or VulkanTensor
             weights: Weight matrix (output_dim, input_dim)
             bias: Optional bias (output_dim,)
+            return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
 
         Returns:
             GELU(Linear(x))
         """
         if 'fused-linear-gelu' not in self.shaders:
             # Fallback to separate operations
-            linear_out = self.linear(x, weights, bias)
-            return self.activation_gelu(linear_out)
+            linear_out = self.linear(x, weights, bias, return_gpu_tensor=return_gpu_tensor)
+            return self.activation_gelu(linear_out, return_gpu_tensor=return_gpu_tensor)
 
         # GPU implementation
         original_shape = x.shape
-        x = x.astype(np.float32)
         input_dim = x.shape[-1]
         output_dim = weights.shape[0]
 
         # Flatten batch dimensions
-        if x.ndim > 2:
-            batch_seq = int(np.prod(x.shape[:-1]))
-            x_flat = x.reshape(-1, input_dim).flatten()
+        if len(original_shape) > 2:
+            batch_seq = int(np.prod(original_shape[:-1]))
         else:
-            batch_seq = x.shape[0] if x.ndim == 2 else 1
-            x_flat = x.flatten()
+            batch_seq = original_shape[0] if len(original_shape) == 2 else 1
 
-        w_flat = weights.astype(np.float32).flatten()
+        input_nbytes = batch_seq * input_dim * 4
         output_size = batch_seq * output_dim * 4
 
-        # Handle bias
+        # Prepare input (zero-copy for VulkanTensor)
+        buf_input, release_input = self._prepare_input(x, size=input_nbytes)
+
+        # Use weight cache for weights and bias
+        w_np = np.ascontiguousarray(weights, dtype=np.float32)
+        w_nbytes = int(np.prod(weights.shape)) * 4
+        buf_weights, release_weights = self._get_or_upload_weight(w_np)
+
         if bias is not None:
-            b_flat = bias.astype(np.float32).flatten()
+            bias_np = np.ascontiguousarray(bias, dtype=np.float32)
+            buf_bias, release_bias = self._get_or_upload_weight(bias_np)
+            b_nbytes = bias_np.size * 4
             has_bias = 1
         else:
             b_flat = np.zeros(output_dim, dtype=np.float32)
+            buf_bias = self._acquire_buffer(b_flat.nbytes)
+            self._upload_buffer(buf_bias, b_flat)
+            b_nbytes = b_flat.nbytes
+            release_bias = True
             has_bias = 0
 
-        # Acquire buffers
-        buf_input = self._acquire_buffer(x_flat.nbytes)
-        buf_weights = self._acquire_buffer(w_flat.nbytes)
-        buf_bias = self._acquire_buffer(b_flat.nbytes)
         buf_output = self._acquire_buffer(output_size)
-
-        # Upload data
-        self._upload_buffer(buf_input, x_flat)
-        self._upload_buffer(buf_weights, w_flat)
-        self._upload_buffer(buf_bias, b_flat)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -1989,9 +2066,9 @@ class VulkanFNN(BufferMixin):
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'fused-linear-gelu',
             [
-                (self._get_buffer_handle(buf_input), x_flat.nbytes),
-                (self._get_buffer_handle(buf_weights), w_flat.nbytes),
-                (self._get_buffer_handle(buf_bias), b_flat.nbytes),
+                (self._get_buffer_handle(buf_input), input_nbytes),
+                (self._get_buffer_handle(buf_weights), w_nbytes),
+                (self._get_buffer_handle(buf_bias), b_nbytes),
                 (self._get_buffer_handle(buf_output), output_size)
             ]
         )
@@ -2008,24 +2085,38 @@ class VulkanFNN(BufferMixin):
             workgroups_x, push_constants, workgroups_y
         )
 
-        # Download result
-        result = self._download_buffer(buf_output, output_size, np.float32)
-
-        # Release buffers
-        self._release_buffers([buf_input, buf_weights, buf_bias, buf_output])
-
-        # Reshape output
+        # Compute output shape
         if len(original_shape) > 2:
             output_shape = original_shape[:-1] + (output_dim,)
-            return result.reshape(output_shape)
         else:
-            return result.reshape(batch_seq, output_dim)
+            output_shape = (batch_seq, output_dim)
+
+        if return_gpu_tensor:
+            result = self._wrap_output_tensor(buf_output, output_shape)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            return result
+        else:
+            result = self._download_buffer(buf_output, output_size, np.float32)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            self._release_buffer(buf_output)
+            return result.reshape(output_shape)
 
     def fused_linear_relu(
         self,
-        x: np.ndarray,
+        x,
         weights: np.ndarray,
-        bias: Optional[np.ndarray] = None
+        bias: Optional[np.ndarray] = None,
+        return_gpu_tensor=False,
     ) -> np.ndarray:
         """
         Fused Linear + ReLU: ReLU(x @ W.T + b)
@@ -2033,49 +2124,50 @@ class VulkanFNN(BufferMixin):
         Uses: fused-linear-relu.glsl
 
         Args:
-            x: Input tensor (..., input_dim)
+            x: Input tensor (..., input_dim), numpy array or VulkanTensor
             weights: Weight matrix (output_dim, input_dim)
             bias: Optional bias (output_dim,)
+            return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
 
         Returns:
             ReLU(Linear(x))
         """
         if 'fused-linear-relu' not in self.shaders:
-            # Fallback to separate operations
-            linear_out = self.linear(x, weights, bias)
-            return self.activation_relu(linear_out)
+            linear_out = self.linear(x, weights, bias, return_gpu_tensor=return_gpu_tensor)
+            return self.activation_relu(linear_out, return_gpu_tensor=return_gpu_tensor)
 
-        # GPU implementation (same structure as fused_linear_gelu)
         original_shape = x.shape
-        x = x.astype(np.float32)
         input_dim = x.shape[-1]
         output_dim = weights.shape[0]
 
-        if x.ndim > 2:
-            batch_seq = int(np.prod(x.shape[:-1]))
-            x_flat = x.reshape(-1, input_dim).flatten()
+        if len(original_shape) > 2:
+            batch_seq = int(np.prod(original_shape[:-1]))
         else:
-            batch_seq = x.shape[0] if x.ndim == 2 else 1
-            x_flat = x.flatten()
+            batch_seq = original_shape[0] if len(original_shape) == 2 else 1
 
-        w_flat = weights.astype(np.float32).flatten()
+        input_nbytes = batch_seq * input_dim * 4
         output_size = batch_seq * output_dim * 4
 
+        buf_input, release_input = self._prepare_input(x, size=input_nbytes)
+
+        w_np = np.ascontiguousarray(weights, dtype=np.float32)
+        w_nbytes = int(np.prod(weights.shape)) * 4
+        buf_weights, release_weights = self._get_or_upload_weight(w_np)
+
         if bias is not None:
-            b_flat = bias.astype(np.float32).flatten()
+            bias_np = np.ascontiguousarray(bias, dtype=np.float32)
+            buf_bias, release_bias = self._get_or_upload_weight(bias_np)
+            b_nbytes = bias_np.size * 4
             has_bias = 1
         else:
             b_flat = np.zeros(output_dim, dtype=np.float32)
+            buf_bias = self._acquire_buffer(b_flat.nbytes)
+            self._upload_buffer(buf_bias, b_flat)
+            b_nbytes = b_flat.nbytes
+            release_bias = True
             has_bias = 0
 
-        buf_input = self._acquire_buffer(x_flat.nbytes)
-        buf_weights = self._acquire_buffer(w_flat.nbytes)
-        buf_bias = self._acquire_buffer(b_flat.nbytes)
         buf_output = self._acquire_buffer(output_size)
-
-        self._upload_buffer(buf_input, x_flat)
-        self._upload_buffer(buf_weights, w_flat)
-        self._upload_buffer(buf_bias, b_flat)
 
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
             'fused-linear-relu', 4, push_constant_size=16
@@ -2084,9 +2176,9 @@ class VulkanFNN(BufferMixin):
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'fused-linear-relu',
             [
-                (self._get_buffer_handle(buf_input), x_flat.nbytes),
-                (self._get_buffer_handle(buf_weights), w_flat.nbytes),
-                (self._get_buffer_handle(buf_bias), b_flat.nbytes),
+                (self._get_buffer_handle(buf_input), input_nbytes),
+                (self._get_buffer_handle(buf_weights), w_nbytes),
+                (self._get_buffer_handle(buf_bias), b_nbytes),
                 (self._get_buffer_handle(buf_output), output_size)
             ]
         )
@@ -2101,20 +2193,37 @@ class VulkanFNN(BufferMixin):
             workgroups_x, push_constants, workgroups_y
         )
 
-        result = self._download_buffer(buf_output, output_size, np.float32)
-        self._release_buffers([buf_input, buf_weights, buf_bias, buf_output])
-
         if len(original_shape) > 2:
             output_shape = original_shape[:-1] + (output_dim,)
-            return result.reshape(output_shape)
         else:
-            return result.reshape(batch_seq, output_dim)
+            output_shape = (batch_seq, output_dim)
+
+        if return_gpu_tensor:
+            result = self._wrap_output_tensor(buf_output, output_shape)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            return result
+        else:
+            result = self._download_buffer(buf_output, output_size, np.float32)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            self._release_buffer(buf_output)
+            return result.reshape(output_shape)
 
     def fused_linear_silu(
         self,
-        x: np.ndarray,
+        x,
         weights: np.ndarray,
-        bias: Optional[np.ndarray] = None
+        bias: Optional[np.ndarray] = None,
+        return_gpu_tensor=False,
     ) -> np.ndarray:
         """
         Fused Linear + SiLU: SiLU(x @ W.T + b)
@@ -2124,49 +2233,50 @@ class VulkanFNN(BufferMixin):
         Common in LLaMA, Mistral FFN layers.
 
         Args:
-            x: Input tensor (..., input_dim)
+            x: Input tensor (..., input_dim), numpy array or VulkanTensor
             weights: Weight matrix (output_dim, input_dim)
             bias: Optional bias (output_dim,)
+            return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
 
         Returns:
             SiLU(Linear(x))
         """
         if 'fused-linear-silu' not in self.shaders:
-            # Fallback to separate operations
-            linear_out = self.linear(x, weights, bias)
-            return self.activation_silu(linear_out)
+            linear_out = self.linear(x, weights, bias, return_gpu_tensor=return_gpu_tensor)
+            return self.activation_silu(linear_out, return_gpu_tensor=return_gpu_tensor)
 
-        # GPU implementation
         original_shape = x.shape
-        x = x.astype(np.float32)
         input_dim = x.shape[-1]
         output_dim = weights.shape[0]
 
-        if x.ndim > 2:
-            batch_seq = int(np.prod(x.shape[:-1]))
-            x_flat = x.reshape(-1, input_dim).flatten()
+        if len(original_shape) > 2:
+            batch_seq = int(np.prod(original_shape[:-1]))
         else:
-            batch_seq = x.shape[0] if x.ndim == 2 else 1
-            x_flat = x.flatten()
+            batch_seq = original_shape[0] if len(original_shape) == 2 else 1
 
-        w_flat = weights.astype(np.float32).flatten()
+        input_nbytes = batch_seq * input_dim * 4
         output_size = batch_seq * output_dim * 4
 
+        buf_input, release_input = self._prepare_input(x, size=input_nbytes)
+
+        w_np = np.ascontiguousarray(weights, dtype=np.float32)
+        w_nbytes = int(np.prod(weights.shape)) * 4
+        buf_weights, release_weights = self._get_or_upload_weight(w_np)
+
         if bias is not None:
-            b_flat = bias.astype(np.float32).flatten()
+            bias_np = np.ascontiguousarray(bias, dtype=np.float32)
+            buf_bias, release_bias = self._get_or_upload_weight(bias_np)
+            b_nbytes = bias_np.size * 4
             has_bias = 1
         else:
             b_flat = np.zeros(output_dim, dtype=np.float32)
+            buf_bias = self._acquire_buffer(b_flat.nbytes)
+            self._upload_buffer(buf_bias, b_flat)
+            b_nbytes = b_flat.nbytes
+            release_bias = True
             has_bias = 0
 
-        buf_input = self._acquire_buffer(x_flat.nbytes)
-        buf_weights = self._acquire_buffer(w_flat.nbytes)
-        buf_bias = self._acquire_buffer(b_flat.nbytes)
         buf_output = self._acquire_buffer(output_size)
-
-        self._upload_buffer(buf_input, x_flat)
-        self._upload_buffer(buf_weights, w_flat)
-        self._upload_buffer(buf_bias, b_flat)
 
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
             'fused-linear-silu', 4, push_constant_size=16
@@ -2175,9 +2285,9 @@ class VulkanFNN(BufferMixin):
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             'fused-linear-silu',
             [
-                (self._get_buffer_handle(buf_input), x_flat.nbytes),
-                (self._get_buffer_handle(buf_weights), w_flat.nbytes),
-                (self._get_buffer_handle(buf_bias), b_flat.nbytes),
+                (self._get_buffer_handle(buf_input), input_nbytes),
+                (self._get_buffer_handle(buf_weights), w_nbytes),
+                (self._get_buffer_handle(buf_bias), b_nbytes),
                 (self._get_buffer_handle(buf_output), output_size)
             ]
         )
@@ -2192,14 +2302,30 @@ class VulkanFNN(BufferMixin):
             workgroups_x, push_constants, workgroups_y
         )
 
-        result = self._download_buffer(buf_output, output_size, np.float32)
-        self._release_buffers([buf_input, buf_weights, buf_bias, buf_output])
-
         if len(original_shape) > 2:
             output_shape = original_shape[:-1] + (output_dim,)
-            return result.reshape(output_shape)
         else:
-            return result.reshape(batch_seq, output_dim)
+            output_shape = (batch_seq, output_dim)
+
+        if return_gpu_tensor:
+            result = self._wrap_output_tensor(buf_output, output_shape)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            return result
+        else:
+            result = self._download_buffer(buf_output, output_size, np.float32)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            self._release_buffer(buf_output)
+            return result.reshape(output_shape)
 
 
 

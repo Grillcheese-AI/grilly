@@ -104,6 +104,8 @@ class BufferMixin:
     """
 
     _pool = None  # Per-instance pool, lazily initialized
+    _weight_cache = None  # Lazily initialized weight cache
+    _WEIGHT_CACHE_MAX = 32
 
     @property
     def buffer_pool(self):
@@ -188,6 +190,47 @@ class BufferMixin:
         return buf.handle
 
     # ------------------------------------------------------------------
+    # Weight pinning cache
+    # ------------------------------------------------------------------
+    def _get_or_upload_weight(self, data):
+        """Return cached GPU buffer for weight data. Upload only on cache miss.
+
+        Cache key uses (id, shape, ctypes.data pointer) — the pointer changes
+        when the optimizer modifies weights in-place, forcing a re-upload.
+
+        Returns:
+            (buffer, release: bool) — release is always False (cache owns buffer)
+        """
+        if self._weight_cache is None:
+            self._weight_cache = {}
+
+        key = (id(data), data.shape, data.ctypes.data)
+
+        if key in self._weight_cache:
+            return self._weight_cache[key][0], False
+
+        # Cache miss: upload
+        flat = np.ascontiguousarray(data, dtype=np.float32).flatten()
+        buf = self._acquire_buffer(flat.nbytes)
+        self._upload_buffer(buf, flat)
+
+        # Evict oldest if over limit
+        if len(self._weight_cache) >= self._WEIGHT_CACHE_MAX:
+            oldest_key = next(iter(self._weight_cache))
+            old_buf, _ = self._weight_cache.pop(oldest_key)
+            self._release_buffer(old_buf)
+
+        self._weight_cache[key] = (buf, flat.nbytes)
+        return buf, False
+
+    def clear_weight_cache(self):
+        """Release all cached weight buffers."""
+        if self._weight_cache:
+            for buf, _ in self._weight_cache.values():
+                self._release_buffer(buf)
+            self._weight_cache.clear()
+
+    # ------------------------------------------------------------------
     # GPU-resident tensor helpers (Phase 3)
     # ------------------------------------------------------------------
     def _prepare_input(self, data, size=None):
@@ -209,6 +252,18 @@ class BufferMixin:
         buf = self._acquire_buffer(arr.nbytes if size is None else size)
         self._upload_buffer(buf, arr)
         return buf, True
+
+    def _wrap_output_tensor(self, buf, shape):
+        """Wrap a pooled output buffer in a VulkanTensor (no download)."""
+        from ..utils.tensor_conversion import VulkanTensor
+        vt = VulkanTensor.empty(shape)
+        vt._pooled_buffer = buf
+        vt._gpu_buffer = self._get_buffer_handle(buf)
+        vt._gpu_memory = getattr(buf, 'memory', None)
+        vt._core = self.core  # Fast download path (avoids Compute() re-init)
+        vt._gpu_valid = True
+        vt._cpu_valid = False
+        return vt
 
     def _prepare_output(self, size):
         """Create an output buffer of *size* bytes."""

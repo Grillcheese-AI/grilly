@@ -217,14 +217,14 @@ class CrossEntropyLoss(Module):
         # Apply ignore_index mask
         if target.ndim == input.ndim - 1:
             mask = (target != self.ignore_index).astype(np.float32)
-            if input.ndim == 3:
+            if input.ndim >= 2:
                 mask = mask[..., np.newaxis]
             grad_input = grad_input * mask
         
         # Apply reduction scaling
         if self.reduction == 'mean':
             if target.ndim == input.ndim - 1:
-                valid = np.sum(mask) if input.ndim == 2 else np.sum(mask[..., 0])
+                valid = np.sum(mask[..., 0])
                 grad_input = grad_input / max(valid, 1.0)
             else:
                 N = input.size / input.shape[-1]  # Number of samples

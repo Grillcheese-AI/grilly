@@ -57,7 +57,17 @@ class VulkanCompute:
 
     def cleanup(self):
         """Clean up Vulkan resources"""
-        # Clear buffer pools first (before device is destroyed)
+        # Clear weight caches for all backend modules (before device is destroyed)
+        for attr in ('fnn', 'attention', 'snn', 'memory', 'cells', 'affect',
+                     'learning', 'fft', 'contrastive', 'pooling', 'conv',
+                     'normalization', 'lora', 'faiss'):
+            module = getattr(self, attr, None)
+            if module is not None and hasattr(module, 'clear_weight_cache'):
+                try:
+                    module.clear_weight_cache()
+                except Exception:
+                    pass
+        # Clear buffer pools (before device is destroyed)
         if hasattr(self, 'fnn') and self.fnn._pool is not None:
             try:
                 self.fnn._pool.clear()

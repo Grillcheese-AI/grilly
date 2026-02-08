@@ -156,7 +156,16 @@ class VulkanCore:
             flags=VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
         )
         self.command_pool = vkCreateCommandPool(self.device, pool_info, None)
-        
+
+        # Pre-allocate a reusable command buffer (pool uses RESET_COMMAND_BUFFER_BIT)
+        cmd_alloc_info = VkCommandBufferAllocateInfo(
+            sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            commandPool=self.command_pool,
+            level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            commandBufferCount=1
+        )
+        self._cmd_buffer = vkAllocateCommandBuffers(self.device, cmd_alloc_info)[0]
+
         # Create descriptor pool (large enough for all shaders)
         pool_sizes = [
             VkDescriptorPoolSize(
@@ -380,27 +389,22 @@ class VulkanCore:
         vkUnmapMemory(self.device, memory)
         return result
     
-    def _dispatch_compute(self, pipeline, pipeline_layout, descriptor_set, 
-                         workgroup_x: int, push_constants: bytes = None, 
+    def _dispatch_compute(self, pipeline, pipeline_layout, descriptor_set,
+                         workgroup_x: int, push_constants: bytes = None,
                          workgroup_y: int = 1, workgroup_z: int = 1):
-        """Dispatch compute shader"""
-        # Allocate command buffer
-        alloc_info = VkCommandBufferAllocateInfo(
-            sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            commandPool=self.command_pool,
-            level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            commandBufferCount=1
-        )
-        
-        command_buffer = vkAllocateCommandBuffers(self.device, alloc_info)[0]
-        
+        """Dispatch compute shader using pre-allocated command buffer."""
+        command_buffer = self._cmd_buffer
+
+        # Reset and re-record the reusable command buffer
+        vkResetCommandBuffer(command_buffer, 0)
+
         # Begin command buffer
         begin_info = VkCommandBufferBeginInfo(
             sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
         )
         vkBeginCommandBuffer(command_buffer, begin_info)
-        
+
         # Bind pipeline and descriptor set
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline)
         vkCmdBindDescriptorSets(
@@ -410,7 +414,7 @@ class VulkanCore:
             0, 1, [descriptor_set],
             0, None
         )
-        
+
         # Push constants if provided
         if push_constants:
             push_buf = ctypes.create_string_buffer(push_constants)
@@ -422,24 +426,21 @@ class VulkanCore:
                 len(push_constants),
                 ctypes.addressof(push_buf)
             )
-        
+
         # Dispatch
         vkCmdDispatch(command_buffer, workgroup_x, workgroup_y, workgroup_z)
-        
+
         vkEndCommandBuffer(command_buffer)
-        
+
         # Submit
         submit_info = VkSubmitInfo(
             sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,
             commandBufferCount=1,
             pCommandBuffers=[command_buffer]
         )
-        
+
         vkQueueSubmit(self.queue, 1, [submit_info], None)
         vkQueueWaitIdle(self.queue)
-        
-        # Free command buffer
-        vkFreeCommandBuffers(self.device, self.command_pool, 1, [command_buffer])
     
     def cleanup(self):
         """Cleanup Vulkan resources"""
@@ -450,6 +451,10 @@ class VulkanCore:
                 vkDestroyDescriptorPool(device, self.descriptor_pool, None)
                 self.descriptor_pool = None
             if hasattr(self, 'command_pool') and self.command_pool:
+                # Free pre-allocated command buffer before destroying pool
+                if hasattr(self, '_cmd_buffer') and self._cmd_buffer is not None:
+                    vkFreeCommandBuffers(device, self.command_pool, 1, [self._cmd_buffer])
+                    self._cmd_buffer = None
                 vkDestroyCommandPool(device, self.command_pool, None)
                 self.command_pool = None
             vkDestroyDevice(device, None)

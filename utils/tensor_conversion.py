@@ -120,6 +120,7 @@ class VulkanTensor:
         self._gpu_buffer = None
         self._gpu_memory = None
         self._pooled_buffer = None  # For buffer pool integration
+        self._core = None  # VulkanCore reference for fast download (avoids re-init)
         self._shape = self._cpu_data.shape
         self._dtype = self._cpu_data.dtype
 
@@ -234,13 +235,18 @@ class VulkanTensor:
             raise RuntimeError("Cannot download: no valid GPU data")
 
         try:
-            from grilly import Compute
-            backend = Compute()
+            # Fast path: use cached core reference (avoids full Compute() re-init)
+            core = self._core
+            if core is None:
+                from grilly import Compute
+                backend = Compute()
+                core = backend.core
+                self._core = core
 
             # Download from GPU
-            self._cpu_data = backend.read_buffer(
+            self._cpu_data = core._download_buffer(
                 self._gpu_memory,
-                size=self._cpu_data.nbytes,
+                self._cpu_data.nbytes,
                 dtype=self._dtype
             ).reshape(self._shape)
             self._cpu_valid = True

@@ -147,14 +147,33 @@ class Linear(Module):
         if self.bias is not None:
             self.register_parameter('bias', self.bias)
     
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x) -> np.ndarray:
         """Forward pass with GEMM fast path if available."""
         backend = self._get_backend()
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias) if self.bias is not None else None
 
-        x = np.asarray(x, dtype=np.float32)
+        from ..utils.tensor_conversion import VulkanTensor
+        is_vt = isinstance(x, VulkanTensor)
+
+        if not is_vt:
+            x = np.asarray(x, dtype=np.float32)
         weight = np.asarray(weight, dtype=np.float32)
+
+        # Use fnn.linear() which handles x @ W^T + bias in a single dispatch
+        # without needing a CPU weight transpose copy
+        if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'linear'):
+            try:
+                return backend.fnn.linear(
+                    x, weight, bias,
+                    return_gpu_tensor=self._return_gpu_tensor,
+                )
+            except Exception:
+                pass  # Fall back to CPU
+
+        # CPU fallback (force numpy for CPU path)
+        if is_vt:
+            x = x.numpy()
 
         # x: (batch, in_features) or (batch, seq, in_features)
         if x.ndim == 2:
@@ -169,16 +188,6 @@ class Linear(Module):
 
         out_features = self.out_features
 
-        # Use fnn.linear() which handles x @ W^T + bias in a single dispatch
-        # without needing a CPU weight transpose copy
-        if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'linear'):
-            try:
-                out = backend.fnn.linear(x, weight, bias)
-                return out
-            except Exception:
-                pass  # Fall back to CPU
-
-        # CPU fallback
         out_2d = x_2d @ weight.T
         if bias is not None:
             out_2d += bias.reshape(1, out_features)
@@ -547,10 +556,10 @@ class ReLU(Module):
         super().__init__()
         self.inplace = inplace
     
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x) -> np.ndarray:
         """Forward pass using activation-relu.glsl"""
         backend = self._get_backend()
-        return backend.activation_relu(x)
+        return backend.activation_relu(x, return_gpu_tensor=self._return_gpu_tensor)
     
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
@@ -578,10 +587,10 @@ class GELU(Module):
     Uses: activation-gelu.glsl
     """
     
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x) -> np.ndarray:
         """Forward pass using activation-gelu.glsl"""
         backend = self._get_backend()
-        return backend.activation_gelu(x)
+        return backend.activation_gelu(x, return_gpu_tensor=self._return_gpu_tensor)
     
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
@@ -627,10 +636,10 @@ class SiLU(Module):
     Uses: activation-silu.glsl
     """
     
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x) -> np.ndarray:
         """Forward pass using activation-silu.glsl"""
         backend = self._get_backend()
-        return backend.activation_silu(x)
+        return backend.activation_silu(x, return_gpu_tensor=self._return_gpu_tensor)
     
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
@@ -1002,13 +1011,21 @@ class Embedding(Module):
         return f"Embedding(num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim})"
 
 
+_FUSED_ACTIVATION_MAP = {
+    'ReLU': 'fused_linear_relu',
+    'GELU': 'fused_linear_gelu',
+    'SiLU': 'fused_linear_silu',
+}
+
+
 class Sequential(Module):
     """
     Sequential container for modules
-    
+
     Caches intermediate activations during forward pass for efficient backward pass.
+    Automatically fuses Linear+Activation pairs when fused GPU shaders are available.
     """
-    
+
     def __init__(self, *modules):
         """Initialize the instance."""
 
@@ -1016,18 +1033,77 @@ class Sequential(Module):
         for i, module in enumerate(modules):
             self._modules[str(i)] = module
         self._cached_activations = []  # Cache intermediate activations
-    
+        self._fusion_plan = None  # Lazily computed
+
+    def _compute_fusion_plan(self):
+        """Scan module list for fusible Linear → Activation pairs.
+
+        Returns a list of tuples:
+          ('fuse', linear_idx, act_idx, fused_method_name)  — fused pair
+          ('run', idx)                                       — run module normally
+        """
+        modules_list = list(self._modules.values())
+        n = len(modules_list)
+        plan = []
+        i = 0
+        while i < n:
+            if (
+                i + 1 < n
+                and isinstance(modules_list[i], Linear)
+                and type(modules_list[i + 1]).__name__ in _FUSED_ACTIVATION_MAP
+            ):
+                method_name = _FUSED_ACTIVATION_MAP[type(modules_list[i + 1]).__name__]
+                plan.append(('fuse', i, i + 1, method_name))
+                i += 2
+            else:
+                plan.append(('run', i))
+                i += 1
+        return plan
+
     def forward(self, x: np.ndarray) -> np.ndarray:
-        """Forward pass through all modules sequentially"""
+        """Forward pass with automatic Linear+Activation fusion."""
         # Clear cached activations
         self._cached_activations = [x]  # Store initial input
-        
-        # Forward through each module, caching activations
+
+        modules_list = list(self._modules.values())
+
+        # Lazily compute fusion plan (invalidated if modules change)
+        if self._fusion_plan is None or len(modules_list) != sum(
+            2 if s[0] == 'fuse' else 1 for s in self._fusion_plan
+        ):
+            self._fusion_plan = self._compute_fusion_plan()
+
         current = x
-        for module in self._modules.values():
-            current = module(current)
-            self._cached_activations.append(current)
-        
+        for step in self._fusion_plan:
+            if step[0] == 'fuse':
+                _, lin_idx, act_idx, method_name = step
+                linear_mod = modules_list[lin_idx]
+                weight = _get_param_array(linear_mod.weight)
+                bias = _get_param_array(linear_mod.bias) if linear_mod.bias is not None else None
+                backend = linear_mod._get_backend()
+                fused_fn = getattr(backend.fnn, method_name, None)
+                if fused_fn is not None:
+                    try:
+                        current = fused_fn(
+                            current, weight, bias,
+                            return_gpu_tensor=linear_mod._return_gpu_tensor,
+                        )
+                        # Push two entries for backward indexing consistency
+                        self._cached_activations.append(current)  # output of Linear
+                        self._cached_activations.append(current)  # output of Activation
+                        continue
+                    except Exception:
+                        pass  # Fall back to sequential execution
+                # Fallback: run both modules individually
+                current = modules_list[lin_idx](current)
+                self._cached_activations.append(current)
+                current = modules_list[act_idx](current)
+                self._cached_activations.append(current)
+            else:
+                _, idx = step
+                current = modules_list[idx](current)
+                self._cached_activations.append(current)
+
         return current
     
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
