@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+from pathlib import Path
 import sys
 import time
 
@@ -43,9 +44,9 @@ def main() -> None:
     ap.add_argument("--min-complexity", type=float, default=None)
     ap.add_argument("--max-complexity", type=float, default=None)
     ap.add_argument("--sources", "-s", nargs="*", default=None, help="Only these sources")
-    ap.add_argument("--dim", "-d", type=int, default=2048)
+    ap.add_argument("--dim", "-d", type=int, default=4096)
     ap.add_argument("--chunk", type=int, default=4096, help="Entries per ingestion chunk")
-    ap.add_argument("--progress", type=int, default=500, help="Print progress every N entries")
+    ap.add_argument("--progress", type=int, default=50, help="Print progress every N entries")
     ap.add_argument("--no-templates", action="store_true", help="Skip template learning")
     ap.add_argument("--no-realm-vectors", action="store_true", help="Skip realm vector building")
     ap.add_argument(
@@ -53,13 +54,14 @@ def main() -> None:
         action="store_true",
         help="Disable n-gram HRR word encoding (much faster, less lexical similarity)",
     )
-    ap.add_argument("--verbose", "-v", action="store_true")
+    ap.add_argument("--verbose", "-v", action="store_true", default=False, help="Verbose output")
     args = ap.parse_args()
 
     # Imports here so --help is instant
     # Repo-layout compatibility: some setups package everything under "grilly",
     # others run directly from the repo root.
     try:
+        from grilly.utils.ingest_checkpoint import save_ingest_checkpoint, load_ingest_checkpoint, CheckpointView
         from grilly.experimental.language.svc_loader import load_svc_entries, SVCIngestionEngine
         from grilly.experimental.cognitive.controller import CognitiveController
         from grilly.experimental.moe.routing import ResonatorMoE
@@ -69,6 +71,7 @@ def main() -> None:
         from experimental.cognitive.controller import CognitiveController
         from experimental.moe.routing import ResonatorMoE
         from experimental.vsa.ops import BinaryOps
+        from utils.ingest_checkpoint import save_ingest_checkpoint, load_ingest_checkpoint, CheckpointView
 
     print("=" * 60)
     print("Grilly SVC Ingestion (streaming)")
@@ -135,6 +138,8 @@ def main() -> None:
             verbose=args.verbose,
             engine=engine,
         )
+        
+
         total += len(chunk)
         total_templates += res.templates_learned
         total_sentences += res.sentences_learned
@@ -147,6 +152,9 @@ def main() -> None:
     print(f"  Sentences:  {total_sentences}")
     print(f"  New words:  {total_new_words}")
     print(f"  Facts:      {len(controller.world.facts)}")
+    out = Path(args.file).with_suffix(".ingest_checkpoint")
+    print(f"  Checkpoint: {out}")
+    save_ingest_checkpoint(str(out), controller, include_fact_vectors=True, include_sentence_memory=True, sentence_compress="auto", fp16=True)
 
     realms = getattr(controller.language, "realm_vectors", {}) or {}
     if realms and not args.no_realm_vectors:

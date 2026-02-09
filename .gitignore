@@ -173,3 +173,6 @@ datasets/cifar-10-python.tar.gz
 scripts/publish_pypi.ps1
 .claude/settings.local.json
 NUL
+codegraph.html
+/personas_prompts
+/private
