@@ -225,5 +225,28 @@ if PYTORCH_OPS_AVAILABLE:
 if VULKAN_SENTENCE_TRANSFORMER_AVAILABLE:
     __all__.append('VulkanSentenceTransformer')
 
+# ONNX utilities
+try:
+    from .onnx_loader import OnnxModelLoader, OnnxOpRegistry, GrillyOnnxModel
+    from .onnx_exporter import OnnxExporter
+    from .onnx_finetune import OnnxFineTuner
+    ONNX_AVAILABLE = True
+except Exception:
+    ONNX_AVAILABLE = False
+    OnnxModelLoader = None
+    OnnxOpRegistry = None
+    GrillyOnnxModel = None
+    OnnxExporter = None
+    OnnxFineTuner = None
+
+if ONNX_AVAILABLE:
+    __all__.extend([
+        'OnnxModelLoader',
+        'OnnxOpRegistry',
+        'GrillyOnnxModel',
+        'OnnxExporter',
+        'OnnxFineTuner',
+    ])
+
 # Stable hashing
 from .stable_hash import stable_u32, stable_u64, stable_bytes, bipolar_from_key

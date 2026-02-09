@@ -117,4 +117,21 @@ try:
 except Exception:
     pass
 
+# ONNX utilities
+try:
+    from grilly.utils.onnx_loader import OnnxModelLoader, GrillyOnnxModel
+    from grilly.utils.onnx_exporter import OnnxExporter
+    from grilly.utils.onnx_finetune import OnnxFineTuner
+    ONNX_AVAILABLE = True
+except Exception:
+    ONNX_AVAILABLE = False
+
+if ONNX_AVAILABLE:
+    __all__.extend([
+        'OnnxModelLoader',
+        'OnnxExporter',
+        'GrillyOnnxModel',
+        'OnnxFineTuner',
+    ])
+
 __version__ = '0.1.0'
