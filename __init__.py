@@ -134,4 +134,7 @@ if ONNX_AVAILABLE:
         'OnnxFineTuner',
     ])
 
-__version__ = '0.1.0'
+try:
+    from grilly._version import version as __version__
+except ImportError:
+    __version__ = "0.0.0.dev0"  # fallback when _version.py not yet generated

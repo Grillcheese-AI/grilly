@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "grilly"
-version = "0.3.0.20260207103851"
+dynamic = ["version"]
 description = "GPU-accelerated neural network operations using Vulkan compute shaders"
 readme = "README.md"
 license = {text = "MIT"}
@@ -102,6 +102,9 @@ grilly = [
     "shaders/**/*.comp",
     "shaders/**/*.spv",
 ]
+
+[tool.setuptools_scm]
+write_to = "_version.py"
 
 [tool.black]
 line-length = 100

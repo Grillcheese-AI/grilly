@@ -152,6 +152,7 @@ ehthumbs.db
 Thumbs.db
 desktop.ini
 # Project-specific
+_version.py
 debug_*.py
 check_*.py
 PROJECT.md
@@ -176,3 +177,4 @@ NUL
 codegraph.html
 /personas_prompts
 /private
+Makefile
