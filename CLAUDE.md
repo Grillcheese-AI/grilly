@@ -13,12 +13,11 @@ Grilly is a GPU-accelerated neural network framework using Vulkan compute shader
 pip install -e .                    # editable install
 pip install -e ".[dev]"             # with dev dependencies (ruff, black, mypy, pytest-cov)
 
-# Testing
-pytest tests/ -v                    # all tests
-pytest tests/ -m "not gpu"          # CPU-only tests (no Vulkan required)
-pytest tests/ -k "gpu"              # GPU-only tests
-pytest tests/test_snn.py            # single test file
-pytest tests/test_snn.py -k "test_lif"  # single test
+# Testing (use uv run for consistency)
+uv run pytest tests/ -v                         # all tests
+uv run pytest tests/ -m "not gpu" -v            # CPU-only (no Vulkan)
+uv run pytest tests/ --cov=. --cov-report=term  # with coverage
+pytest tests/test_snn.py -k "test_lif"          # single test
 
 # Linting & Formatting
 ruff check .                        # lint (line-length=100, rules: E,F,W,I,N,UP; E501 ignored)

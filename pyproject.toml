@@ -162,6 +162,41 @@ ignore = [
 profile = "black"
 line_length = 100
 
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "benchmarks/*",
+    "tutorials/*",
+    "datasets/*",
+    "scripts/*",
+    "examples/*",
+    "experimental_datasets/*",
+    "mcp-servers/*",
+    "docs/*",
+    ".venv/*",
+    # Optional/integration modules (heavy deps, require GPU or external services)
+    "utils/vulkan_sentence_transformer.py",
+    "utils/hippocampal_checkpoint.py",
+    "utils/visualization.py",
+    "backend/vma_wrapper.py",
+    "backend/snn_visualizer.py",
+    "backend/hilbert.py",
+    "backend/_glu_append.py",
+]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "if typing.TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+# Target: 80%. Full run (GPU) ~45%, CPU-only ~32%. GPU coverage is priority.
+fail_under = 40
+
 [tool.pytest.ini_options]
 testpaths = ["grilly/tests"]
 python_files = ["test_*.py"]

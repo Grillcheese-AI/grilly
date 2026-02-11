@@ -143,8 +143,8 @@ class VulkanCore:
                 device_features.sparseBinding = self.device_features.sparseBinding
             if hasattr(self.device_features, "sparseResidencyBuffer"):
                 device_features.sparseResidencyBuffer = self.device_features.sparseResidencyBuffer
-        except:
-            pass
+        except Exception:
+            pass  # Sparse features not available on this device
 
         device_create_info = VkDeviceCreateInfo(
             sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,

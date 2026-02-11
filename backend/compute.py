@@ -212,6 +212,9 @@ class VulkanCompute:
 
     def activation_softmax(self, *args, **kwargs):
         """Apply softmax activation"""
+        # Map dim -> axis for API compatibility (nn.modules.Softmax uses dim)
+        if "dim" in kwargs:
+            kwargs["axis"] = kwargs.pop("dim")
         return self.fnn.activation_softmax(*args, **kwargs)
 
     def xavier_init(self, *args, **kwargs):

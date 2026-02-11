@@ -30,4 +30,4 @@ def dropout(input: np.ndarray, p: float = 0.5, training: bool = True) -> np.ndar
         return input
 
     backend = _get_backend()
-    return backend.dropout(input, p=p)
+    return backend.fnn.dropout(input, dropout_prob=p, is_training=training)

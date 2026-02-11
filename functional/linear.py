@@ -27,4 +27,4 @@ def linear(input: np.ndarray, weight: np.ndarray, bias: np.ndarray | None = None
         Output tensor of shape (..., out_features)
     """
     backend = _get_backend()
-    return backend.linear(input, weight, bias)
+    return backend.fnn.linear(input, weight, bias)

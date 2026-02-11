@@ -293,18 +293,24 @@ Run `make help` to see all available commands:
 ## CI/CD
 
 - **CI** (on push/PR): Lint (ruff), test (CPU-only), build
-- **CD** (on release): Build, attest provenance, publish to PyPI
+- **CD** (on release): Build, publish to PyPI via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
 
-Releases are published automatically when you create a GitHub Release with a tag (e.g. `v0.3.1`). Configure `PYPI_API_TOKEN` in repository Secrets.
+Releases are published automatically when you create a GitHub Release with a tag (e.g. `v0.3.1`). **No API token needed** — uses PyPI Trusted Publishing (OIDC).
 
-Build artifacts are [attested](https://github.com/actions/attest-build-provenance) with Sigstore for provenance verification.
+### One-time setup: Trusted Publisher on PyPI
+
+1. Go to [pypi.org/manage/projects](https://pypi.org/manage/projects/) → **Manage** → **Publishing**
+2. Add a **GitHub** publisher:
+   - **Owner:** `grillcheese-ai`
+   - **Repository:** `grilly`
+   - **Workflow name:** `publish.yml`
 
 ### Manual publish (local)
 
 ```bash
 make build
 twine upload dist/*
-# Requires PYPI_API_TOKEN
+# Requires PyPI API token (create at pypi.org/manage/account/token/)
 ```
 
 For Test PyPI: `twine upload --repository testpypi dist/*`

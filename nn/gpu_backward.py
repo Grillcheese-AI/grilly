@@ -84,7 +84,7 @@ class GPUBackwardOps:
             return (
                 hasattr(self.backend.core, "shaders") and shader_name in self.backend.core.shaders
             )
-        except:
+        except Exception:
             return False
 
     # ========================================================================

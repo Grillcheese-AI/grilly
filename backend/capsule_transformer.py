@@ -338,8 +338,8 @@ class PersistentBufferManager:
             try:
                 vkDestroyBuffer(self.gpu.core.device, buf, None)
                 vkFreeMemory(self.gpu.core.device, mem, None)
-            except:
-                pass
+            except Exception:
+                pass  # Ignore cleanup errors (device may already be destroyed)
         self.buffers.clear()
         self._allocated = False
 
