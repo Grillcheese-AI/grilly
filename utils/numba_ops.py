@@ -10,17 +10,17 @@ Performance hierarchy:
 3. Pure numpy (baseline)
 """
 
-
 import numpy as np
 
 # Try to import numba
 try:
     import numba
     from numba import float32, int32, int64, jit, prange
+
     NUMBA_AVAILABLE = True
 
     # Configure numba for best performance
-    numba.config.THREADING_LAYER = 'threadsafe'
+    numba.config.THREADING_LAYER = "threadsafe"
 
 except ImportError:
     NUMBA_AVAILABLE = False
@@ -33,6 +33,7 @@ except ImportError:
         def decorator(func):
             """Return the original function unchanged."""
             return func
+
         if len(args) == 1 and callable(args[0]):
             return args[0]
         return decorator
@@ -45,9 +46,11 @@ except ImportError:
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
-    def _layernorm_numba(x: np.ndarray, gamma: np.ndarray, beta: np.ndarray,
-                         eps: float = 1e-5) -> np.ndarray:
+    def _layernorm_numba(
+        x: np.ndarray, gamma: np.ndarray, beta: np.ndarray, eps: float = 1e-5
+    ) -> np.ndarray:
         """
         Numba-accelerated LayerNorm.
 
@@ -92,16 +95,19 @@ if NUMBA_AVAILABLE:
         return output.reshape(original_shape)
 
 else:
-    def _layernorm_numba(x: np.ndarray, gamma: np.ndarray, beta: np.ndarray,
-                         eps: float = 1e-5) -> np.ndarray:
+
+    def _layernorm_numba(
+        x: np.ndarray, gamma: np.ndarray, beta: np.ndarray, eps: float = 1e-5
+    ) -> np.ndarray:
         """Pure numpy fallback for LayerNorm"""
         mean = x.mean(axis=-1, keepdims=True)
         var = x.var(axis=-1, keepdims=True)
         return (x - mean) / np.sqrt(var + eps) * gamma + beta
 
 
-def layernorm(x: np.ndarray, gamma: np.ndarray = None, beta: np.ndarray = None,
-              eps: float = 1e-5) -> np.ndarray:
+def layernorm(
+    x: np.ndarray, gamma: np.ndarray = None, beta: np.ndarray = None, eps: float = 1e-5
+) -> np.ndarray:
     """
     LayerNorm with numba acceleration.
 
@@ -134,6 +140,7 @@ def layernorm(x: np.ndarray, gamma: np.ndarray = None, beta: np.ndarray = None,
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
     def _softmax_numba(x: np.ndarray) -> np.ndarray:
         """
@@ -169,6 +176,7 @@ if NUMBA_AVAILABLE:
         return output.reshape(original_shape)
 
 else:
+
     def _softmax_numba(x: np.ndarray) -> np.ndarray:
         """Pure numpy fallback for softmax"""
         x_max = x.max(axis=-1, keepdims=True)
@@ -203,9 +211,9 @@ def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
-    def _linear_numba(x: np.ndarray, weight: np.ndarray,
-                      bias: np.ndarray) -> np.ndarray:
+    def _linear_numba(x: np.ndarray, weight: np.ndarray, bias: np.ndarray) -> np.ndarray:
         """
         Numba-accelerated linear layer.
 
@@ -243,8 +251,8 @@ if NUMBA_AVAILABLE:
             return output
 
 else:
-    def _linear_numba(x: np.ndarray, weight: np.ndarray,
-                      bias: np.ndarray) -> np.ndarray:
+
+    def _linear_numba(x: np.ndarray, weight: np.ndarray, bias: np.ndarray) -> np.ndarray:
         """Pure numpy fallback for linear"""
         return x @ weight.T + bias
 
@@ -289,6 +297,7 @@ def linear(x: np.ndarray, weight: np.ndarray, bias: np.ndarray = None) -> np.nda
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
     def _gelu_numba(x: np.ndarray) -> np.ndarray:
         """
@@ -311,6 +320,7 @@ if NUMBA_AVAILABLE:
         return output
 
 else:
+
     def _gelu_numba(x: np.ndarray) -> np.ndarray:
         """Pure numpy fallback for GELU"""
         return 0.5 * x * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * x**3)))
@@ -335,6 +345,7 @@ def gelu(x: np.ndarray) -> np.ndarray:
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
     def _silu_numba(x: np.ndarray) -> np.ndarray:
         """
@@ -354,6 +365,7 @@ if NUMBA_AVAILABLE:
         return output
 
 else:
+
     def _silu_numba(x: np.ndarray) -> np.ndarray:
         """Pure numpy fallback for SiLU"""
         return x / (1.0 + np.exp(-x))
@@ -378,6 +390,7 @@ def silu(x: np.ndarray) -> np.ndarray:
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
     def _relu_numba(x: np.ndarray) -> np.ndarray:
         """Numba-accelerated ReLU"""
@@ -391,6 +404,7 @@ if NUMBA_AVAILABLE:
         return output
 
 else:
+
     def _relu_numba(x: np.ndarray) -> np.ndarray:
         """Pure numpy fallback for ReLU"""
         return np.maximum(0, x)
@@ -415,6 +429,7 @@ def relu(x: np.ndarray) -> np.ndarray:
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
     def _gcu_numba(x: np.ndarray) -> np.ndarray:
         """
@@ -432,6 +447,7 @@ if NUMBA_AVAILABLE:
 
         return output
 else:
+
     def _gcu_numba(x: np.ndarray) -> np.ndarray:
         """Fallback GCU (pure numpy)"""
         return x * np.cos(x)
@@ -456,6 +472,7 @@ def gcu(x: np.ndarray) -> np.ndarray:
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
     def _roswish_numba(x: np.ndarray, alpha: float, beta: float) -> np.ndarray:
         """
@@ -482,6 +499,7 @@ if NUMBA_AVAILABLE:
 
         return output
 else:
+
     def _roswish_numba(x: np.ndarray, alpha: float, beta: float) -> np.ndarray:
         """Fallback RoSwish (pure numpy)"""
         sigmoid_bx = 1.0 / (1.0 + np.exp(-beta * x))
@@ -509,6 +527,7 @@ def roswish(x: np.ndarray, alpha: float = 1.0, beta: float = 1.0) -> np.ndarray:
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
     def _swiglu_numba(x: np.ndarray) -> np.ndarray:
         """
@@ -546,6 +565,7 @@ if NUMBA_AVAILABLE:
         output_shape = original_shape[:-1] + (hidden_dim,)
         return output.reshape(output_shape)
 else:
+
     def _swiglu_numba(x: np.ndarray) -> np.ndarray:
         """Fallback SwiGLU (pure numpy)"""
         hidden_dim = x.shape[-1] // 2
@@ -577,9 +597,9 @@ def swiglu(x: np.ndarray) -> np.ndarray:
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
-    def _attention_scores_numba(q: np.ndarray, k: np.ndarray,
-                                 scale: float) -> np.ndarray:
+    def _attention_scores_numba(q: np.ndarray, k: np.ndarray, scale: float) -> np.ndarray:
         """
         Numba-accelerated attention score computation.
 
@@ -611,8 +631,8 @@ if NUMBA_AVAILABLE:
         return scores
 
 else:
-    def _attention_scores_numba(q: np.ndarray, k: np.ndarray,
-                                 scale: float) -> np.ndarray:
+
+    def _attention_scores_numba(q: np.ndarray, k: np.ndarray, scale: float) -> np.ndarray:
         """Pure numpy fallback for attention scores"""
         return np.matmul(q, k.transpose(0, 1, 3, 2)) / scale
 
@@ -643,6 +663,7 @@ def attention_scores(q: np.ndarray, k: np.ndarray, scale: float = None) -> np.nd
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, cache=True)
     def _embedding_lookup_numba(indices: np.ndarray, weight: np.ndarray) -> np.ndarray:
         """
@@ -669,6 +690,7 @@ if NUMBA_AVAILABLE:
         return output
 
 else:
+
     def _embedding_lookup_numba(indices: np.ndarray, weight: np.ndarray) -> np.ndarray:
         """Pure numpy fallback for embedding lookup"""
         return weight[indices]
@@ -703,9 +725,11 @@ def embedding_lookup(indices: np.ndarray, weight: np.ndarray) -> np.ndarray:
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
-    def _rope_numba(q_or_k: np.ndarray, position_ids: np.ndarray,
-                    rope_base: float, rope_scaling: float) -> np.ndarray:
+    def _rope_numba(
+        q_or_k: np.ndarray, position_ids: np.ndarray, rope_base: float, rope_scaling: float
+    ) -> np.ndarray:
         """
         Numba-accelerated RoPE using PyTorch's rotate_half approach.
 
@@ -754,8 +778,10 @@ if NUMBA_AVAILABLE:
         return result
 
 else:
-    def _rope_numba(q_or_k: np.ndarray, position_ids: np.ndarray,
-                    rope_base: float, rope_scaling: float) -> np.ndarray:
+
+    def _rope_numba(
+        q_or_k: np.ndarray, position_ids: np.ndarray, rope_base: float, rope_scaling: float
+    ) -> np.ndarray:
         """Pure numpy fallback for RoPE"""
         batch_size, seq_len, num_heads, head_dim = q_or_k.shape
         half_dim = head_dim // 2
@@ -782,8 +808,12 @@ else:
         return result
 
 
-def rope(q_or_k: np.ndarray, position_ids: np.ndarray = None,
-         rope_base: float = 10000.0, rope_scaling: float = 1.0) -> np.ndarray:
+def rope(
+    q_or_k: np.ndarray,
+    position_ids: np.ndarray = None,
+    rope_base: float = 10000.0,
+    rope_scaling: float = 1.0,
+) -> np.ndarray:
     """
     Apply RoPE (Rotary Position Embeddings) with numba acceleration.
 
@@ -813,11 +843,14 @@ def rope(q_or_k: np.ndarray, position_ids: np.ndarray = None,
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
-    def _prosody_modulation_numba(attention_scores: np.ndarray,
-                                   prosody_features: np.ndarray,
-                                   prosody_weights: np.ndarray,
-                                   prosody_strength: float) -> np.ndarray:
+    def _prosody_modulation_numba(
+        attention_scores: np.ndarray,
+        prosody_features: np.ndarray,
+        prosody_weights: np.ndarray,
+        prosody_strength: float,
+    ) -> np.ndarray:
         """
         Numba-accelerated prosody modulation.
 
@@ -850,17 +883,20 @@ if NUMBA_AVAILABLE:
         return result
 
 else:
-    def _prosody_modulation_numba(attention_scores: np.ndarray,
-                                   prosody_features: np.ndarray,
-                                   prosody_weights: np.ndarray,
-                                   prosody_strength: float) -> np.ndarray:
+
+    def _prosody_modulation_numba(
+        attention_scores: np.ndarray,
+        prosody_features: np.ndarray,
+        prosody_weights: np.ndarray,
+        prosody_strength: float,
+    ) -> np.ndarray:
         """Pure numpy fallback for prosody modulation"""
         batch_size, num_heads, seq_len, _ = attention_scores.shape
 
         # prosody_features: (batch, seq_len, prosody_dim)
         # prosody_weights: (num_heads, prosody_dim)
         # Compute: prosody_bias = prosody_features @ prosody_weights.T -> (batch, seq_len, num_heads)
-        prosody_bias = np.einsum('bsd,hd->bsh', prosody_features, prosody_weights)
+        prosody_bias = np.einsum("bsd,hd->bsh", prosody_features, prosody_weights)
 
         # Broadcast to attention shape: (batch, num_heads, seq_len, seq_len)
         # prosody_bias[:, :, h] applies to all query positions for head h at key position
@@ -870,10 +906,12 @@ else:
         return attention_scores + prosody_strength * prosody_bias
 
 
-def prosody_modulation(attention_scores: np.ndarray,
-                       prosody_features: np.ndarray,
-                       prosody_weights: np.ndarray,
-                       prosody_strength: float = 0.3) -> np.ndarray:
+def prosody_modulation(
+    attention_scores: np.ndarray,
+    prosody_features: np.ndarray,
+    prosody_weights: np.ndarray,
+    prosody_strength: float = 0.3,
+) -> np.ndarray:
     """
     Apply prosody modulation to attention scores with numba acceleration.
 
@@ -890,8 +928,9 @@ def prosody_modulation(attention_scores: np.ndarray,
     prosody_features = np.ascontiguousarray(prosody_features, dtype=np.float32)
     prosody_weights = np.ascontiguousarray(prosody_weights, dtype=np.float32)
 
-    return _prosody_modulation_numba(attention_scores, prosody_features,
-                                      prosody_weights, prosody_strength)
+    return _prosody_modulation_numba(
+        attention_scores, prosody_features, prosody_weights, prosody_strength
+    )
 
 
 # ============================================================================
@@ -899,6 +938,7 @@ def prosody_modulation(attention_scores: np.ndarray,
 # ============================================================================
 
 if NUMBA_AVAILABLE:
+
     @jit(nopython=True, parallel=True, fastmath=True, cache=True)
     def _attention_output_numba(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
         """
@@ -930,6 +970,7 @@ if NUMBA_AVAILABLE:
         return output
 
 else:
+
     def _attention_output_numba(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
         """Pure numpy fallback for attention output"""
         return np.matmul(weights, values)
@@ -956,6 +997,7 @@ def attention_output(weights: np.ndarray, values: np.ndarray) -> np.ndarray:
 # Utility: Check if numba is available
 # ============================================================================
 
+
 def is_numba_available() -> bool:
     """Check if numba is available for JIT compilation"""
     return NUMBA_AVAILABLE
@@ -964,12 +1006,12 @@ def is_numba_available() -> bool:
 def get_backend_info() -> dict:
     """Get information about available backends"""
     info = {
-        'numba_available': NUMBA_AVAILABLE,
-        'backend': 'numba' if NUMBA_AVAILABLE else 'numpy',
+        "numba_available": NUMBA_AVAILABLE,
+        "backend": "numba" if NUMBA_AVAILABLE else "numpy",
     }
 
     if NUMBA_AVAILABLE:
-        info['numba_version'] = numba.__version__
-        info['threading_layer'] = numba.config.THREADING_LAYER
+        info["numba_version"] = numba.__version__
+        info["threading_layer"] = numba.config.THREADING_LAYER
 
     return info

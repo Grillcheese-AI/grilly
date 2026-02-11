@@ -16,16 +16,16 @@ from .modules import Linear, Softmax
 class DomainRouter(Module):
     """
     Domain Router layer - Route inputs to domain experts.
-    
+
     Uses: domain-router.glsl
-    
+
     Reference: ref/brain/gpu_brain.py domain_routing
     """
 
     def __init__(self, embed_dim: int, num_domains: int, num_experts: int):
         """
         Initialize DomainRouter layer.
-        
+
         Args:
             embed_dim: Embedding dimension
             num_domains: Number of domains
@@ -38,23 +38,25 @@ class DomainRouter(Module):
 
         # Domain predictor
         self.domain_predictor = Linear(embed_dim, num_domains)
-        self._modules['domain_predictor'] = self.domain_predictor
+        self._modules["domain_predictor"] = self.domain_predictor
 
         # Expert weights per domain
         limit = np.sqrt(6.0 / (num_domains + num_experts))
-        self.expert_weights = np.random.uniform(-limit, limit, (num_domains, num_experts)).astype(np.float32)
-        self._parameters['expert_weights'] = self.expert_weights
+        self.expert_weights = np.random.uniform(-limit, limit, (num_domains, num_experts)).astype(
+            np.float32
+        )
+        self._parameters["expert_weights"] = self.expert_weights
 
         self.softmax = Softmax(dim=-1)
-        self._modules['softmax'] = self.softmax
+        self._modules["softmax"] = self.softmax
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - route to experts.
-        
+
         Args:
             x: Input embeddings (batch, embed_dim)
-        
+
         Returns:
             Routing weights (batch, num_experts)
         """
@@ -65,7 +67,7 @@ class DomainRouter(Module):
         domain_probs = self.softmax(domain_probs)
 
         # Route to experts
-        if hasattr(backend, 'domain_route'):
+        if hasattr(backend, "domain_route"):
             routing_weights = backend.domain_route(domain_probs, self.expert_weights)
         else:
             # CPU fallback: domain_probs @ expert_weights
@@ -82,14 +84,14 @@ class DomainRouter(Module):
 class DomainPredictor(Module):
     """
     Domain Predictor layer - Predict domain from input.
-    
+
     Uses: domain-predict.glsl
     """
 
     def __init__(self, embed_dim: int, num_domains: int):
         """
         Initialize DomainPredictor layer.
-        
+
         Args:
             embed_dim: Embedding dimension
             num_domains: Number of domains
@@ -99,17 +101,17 @@ class DomainPredictor(Module):
         self.num_domains = num_domains
 
         self.predictor = Linear(embed_dim, num_domains)
-        self._modules['predictor'] = self.predictor
+        self._modules["predictor"] = self.predictor
         self.softmax = Softmax(dim=-1)
-        self._modules['softmax'] = self.softmax
+        self._modules["softmax"] = self.softmax
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - predict domain.
-        
+
         Args:
             x: Input embeddings (batch, embed_dim)
-        
+
         Returns:
             Domain probabilities (batch, num_domains)
         """
@@ -125,14 +127,14 @@ class DomainPredictor(Module):
 class DomainClassifier(Module):
     """
     Domain Classifier layer - Classify domain.
-    
+
     Uses: domain-classifier.glsl
     """
 
     def __init__(self, embed_dim: int, num_domains: int):
         """
         Initialize DomainClassifier layer.
-        
+
         Args:
             embed_dim: Embedding dimension
             num_domains: Number of domains
@@ -142,17 +144,17 @@ class DomainClassifier(Module):
         self.num_domains = num_domains
 
         self.classifier = Linear(embed_dim, num_domains)
-        self._modules['classifier'] = self.classifier
+        self._modules["classifier"] = self.classifier
         self.softmax = Softmax(dim=-1)
-        self._modules['softmax'] = self.softmax
+        self._modules["softmax"] = self.softmax
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - classify domain.
-        
+
         Args:
             x: Input embeddings (batch, embed_dim)
-        
+
         Returns:
             Domain class probabilities (batch, num_domains)
         """
@@ -168,14 +170,14 @@ class DomainClassifier(Module):
 class ExpertCombiner(Module):
     """
     Expert Combiner layer - Combine expert outputs.
-    
+
     Uses: domain-combine-experts.glsl
     """
 
     def __init__(self, expert_dim: int, num_experts: int, output_dim: int):
         """
         Initialize ExpertCombiner layer.
-        
+
         Args:
             expert_dim: Dimension of each expert output
             num_experts: Number of experts
@@ -188,27 +190,29 @@ class ExpertCombiner(Module):
 
         # Combination weights
         limit = np.sqrt(6.0 / (expert_dim * num_experts + output_dim))
-        self.combine_weight = np.random.uniform(-limit, limit, (output_dim, expert_dim * num_experts)).astype(np.float32)
+        self.combine_weight = np.random.uniform(
+            -limit, limit, (output_dim, expert_dim * num_experts)
+        ).astype(np.float32)
         self.combine_bias = np.zeros(output_dim, dtype=np.float32)
 
-        self._parameters['combine_weight'] = self.combine_weight
-        self._parameters['combine_bias'] = self.combine_bias
+        self._parameters["combine_weight"] = self.combine_weight
+        self._parameters["combine_bias"] = self.combine_bias
 
     def forward(self, expert_outputs: np.ndarray, routing_weights: np.ndarray) -> np.ndarray:
         """
         Forward pass - combine expert outputs.
-        
+
         Args:
             expert_outputs: Expert outputs (batch, num_experts, expert_dim)
             routing_weights: Routing weights (batch, num_experts)
-        
+
         Returns:
             Combined output (batch, output_dim)
         """
         backend = self._get_backend()
 
         # Try GPU shader if available
-        if hasattr(backend, 'shaders') and 'domain-combine-experts' in backend.shaders:
+        if hasattr(backend, "shaders") and "domain-combine-experts" in backend.shaders:
             try:
                 # GPU implementation would go here
                 pass

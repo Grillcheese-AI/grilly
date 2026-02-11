@@ -14,6 +14,7 @@ Supported architectures:
 - XLM-RoBERTa (xlm-roberta): Multilingual RoBERTa
 - ALBERT (albert): Factorized embeddings, parameter sharing
 """
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,28 +34,19 @@ class ShaderRegistry:
         """Register a generic shader (works for all architectures)"""
         self._generic_shaders[shader_name] = shader_file
 
-    def register_architecture_specific(
-        self,
-        shader_name: str,
-        architecture: str,
-        shader_file: str
-    ):
+    def register_architecture_specific(self, shader_name: str, architecture: str, shader_file: str):
         """Register an architecture-specific shader"""
         key = (shader_name, architecture.lower())
         self._registry[key] = shader_file
 
-    def get_shader(
-        self,
-        shader_name: str,
-        architecture: str | None = None
-    ) -> str | None:
+    def get_shader(self, shader_name: str, architecture: str | None = None) -> str | None:
         """
         Get shader file name for given architecture.
-        
+
         Args:
             shader_name: Base shader name (e.g., 'attention-output')
             architecture: Model architecture (e.g., 'bert', 'gpt', 't5')
-        
+
         Returns:
             Shader file name (without .glsl extension) or None if not found
         """
@@ -111,11 +103,7 @@ def register_generic_shader(shader_name: str, shader_file: str):
     _registry.register_generic(shader_name, shader_file)
 
 
-def register_architecture_shader(
-    shader_name: str,
-    architecture: str,
-    shader_file: str
-):
+def register_architecture_shader(shader_name: str, architecture: str, shader_file: str):
     """Register an architecture-specific shader"""
     _registry.register_architecture_specific(shader_name, architecture, shader_file)
 
@@ -130,21 +118,21 @@ def _initialize_registry():
     """Initialize the registry with default shaders"""
     # Generic shaders (work for all architectures)
     generic_shaders = [
-        'activation-gelu',
-        'activation-relu',
-        'activation-silu',
-        'activation-softmax',
-        'attention-scores',
-        'attention-mask',
-        'attention-output',
-        'attention-concat-heads',
-        'embedding-lookup',
-        'embedding-pool-mask',
-        'fnn-linear',
-        'fnn-layernorm',
-        'fnn-dropout',
-        'fnn-residual',
-        'rope',  # RoPE (Rotary Position Embeddings)
+        "activation-gelu",
+        "activation-relu",
+        "activation-silu",
+        "activation-softmax",
+        "attention-scores",
+        "attention-mask",
+        "attention-output",
+        "attention-concat-heads",
+        "embedding-lookup",
+        "embedding-pool-mask",
+        "fnn-linear",
+        "fnn-layernorm",
+        "fnn-dropout",
+        "fnn-residual",
+        "rope",  # RoPE (Rotary Position Embeddings)
     ]
 
     for shader in generic_shaders:
@@ -152,9 +140,11 @@ def _initialize_registry():
 
     # Register architecture-specific shaders
     # These are optimized variants for specific architectures
-    _registry.register_architecture_specific('attention-output', 'gpt', 'attention-output-gpt')
-    _registry.register_architecture_specific('attention-output', 'granite', 'attention-output-gpt')  # Granite uses GPT-style causal attention
-    _registry.register_architecture_specific('attention-output', 't5', 'attention-output-t5')
+    _registry.register_architecture_specific("attention-output", "gpt", "attention-output-gpt")
+    _registry.register_architecture_specific(
+        "attention-output", "granite", "attention-output-gpt"
+    )  # Granite uses GPT-style causal attention
+    _registry.register_architecture_specific("attention-output", "t5", "attention-output-t5")
 
     # Note: BERT, DistilBERT, RoBERTa, MPNet, XLM-RoBERTa, ALBERT all use the generic
     # 'attention-output' shader since they share the same bidirectional attention pattern.

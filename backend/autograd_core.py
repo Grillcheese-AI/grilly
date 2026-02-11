@@ -16,12 +16,12 @@ import numpy as np
 _local = threading.local()
 
 
-def _get_tape() -> Optional['GradientTape']:
+def _get_tape() -> Optional["GradientTape"]:
     """Get the current active gradient tape, if any."""
-    return getattr(_local, 'tape', None)
+    return getattr(_local, "tape", None)
 
 
-def _set_tape(tape: Optional['GradientTape']):
+def _set_tape(tape: Optional["GradientTape"]):
     """Set the current active gradient tape."""
     _local.tape = tape
 
@@ -72,7 +72,7 @@ class GradientTape:
         """Explicitly watch a tensor for gradient computation."""
         if isinstance(tensor, np.ndarray):
             self._watched[id(tensor)] = tensor
-        elif hasattr(tensor, 'data'):
+        elif hasattr(tensor, "data"):
             self._watched[id(tensor.data)] = tensor
 
     def record(self, output: np.ndarray, backward_fn: Callable, inputs: list[Any]):
@@ -87,7 +87,9 @@ class GradientTape:
         if self._enabled:
             self._operations.append((output, backward_fn, inputs))
 
-    def gradient(self, target: np.ndarray, sources: list, output_gradients: np.ndarray = None) -> list[np.ndarray]:
+    def gradient(
+        self, target: np.ndarray, sources: list, output_gradients: np.ndarray = None
+    ) -> list[np.ndarray]:
         """
         Compute gradients of target w.r.t. sources.
 
@@ -103,7 +105,7 @@ class GradientTape:
             output_gradients = np.ones_like(target, dtype=np.float32)
 
         # Build gradient accumulator for each source
-        source_ids = {id(s.data if hasattr(s, 'data') else s): i for i, s in enumerate(sources)}
+        source_ids = {id(s.data if hasattr(s, "data") else s): i for i, s in enumerate(sources)}
         grads = [None] * len(sources)
 
         # Current gradient being propagated
@@ -126,7 +128,7 @@ class GradientTape:
             for inp, grad_in in zip(inputs, grad_inputs):
                 if grad_in is None:
                     continue
-                inp_data = inp.data if hasattr(inp, 'data') else inp
+                inp_data = inp.data if hasattr(inp, "data") else inp
                 inp_id = id(inp_data)
 
                 # Accumulate gradient
@@ -171,8 +173,8 @@ class ComputationNode:
         data: np.ndarray,
         requires_grad: bool = False,
         grad_fn: Callable = None,
-        inputs: list['ComputationNode'] = None,
-        name: str = None
+        inputs: list["ComputationNode"] = None,
+        name: str = None,
     ):
         """Initialize the instance."""
 
@@ -229,14 +231,14 @@ class ComputationNode:
                 grad_inputs = [grad_inputs]
 
             for inp, grad_in in zip(self.inputs, grad_inputs):
-                if grad_in is not None and hasattr(inp, 'backward'):
+                if grad_in is not None and hasattr(inp, "backward"):
                     inp.backward(grad_in)
 
     def zero_grad(self):
         """Clear gradient."""
         self.grad = None
 
-    def detach(self) -> 'ComputationNode':
+    def detach(self) -> "ComputationNode":
         """Return a new node without gradient tracking."""
         return ComputationNode(self.data.copy(), requires_grad=False)
 
@@ -285,13 +287,10 @@ class ModuleTracer:
     def _traced_forward(self, module, *args, **kwargs):
         """Recursively trace forward pass through submodules."""
         # Cache input
-        cache_entry = {
-            'input': args[0] if len(args) == 1 else args,
-            'module': module
-        }
+        cache_entry = {"input": args[0] if len(args) == 1 else args, "module": module}
 
         # Get submodules to trace
-        if hasattr(module, '_modules') and module._modules:
+        if hasattr(module, "_modules") and module._modules:
             # This is a container module - trace submodules
             x = args[0]
             for name, submodule in module._modules.items():
@@ -301,7 +300,7 @@ class ModuleTracer:
             # Leaf module - call forward directly
             output = module(*args, **kwargs)
 
-        cache_entry['output'] = output
+        cache_entry["output"] = output
         self._forward_cache[id(module)] = cache_entry
         self._backward_order.append(module)
 
@@ -322,12 +321,12 @@ class ModuleTracer:
             if cache is None:
                 continue
 
-            x = cache['input']
+            x = cache["input"]
             if isinstance(x, tuple):
                 x = x[0]
 
             # Call module's backward method
-            if hasattr(module, 'backward'):
+            if hasattr(module, "backward"):
                 grad = module.backward(grad, x)
             else:
                 # No backward method - assume identity gradient
@@ -370,6 +369,7 @@ class AutogradEngine:
         if self._backend is None:
             try:
                 from grilly import Compute
+
                 self._backend = Compute()
             except Exception:
                 pass
@@ -407,7 +407,7 @@ class AutogradEngine:
         tensors: np.ndarray | list[np.ndarray],
         grad_tensors: np.ndarray | list[np.ndarray] = None,
         retain_graph: bool = False,
-        create_graph: bool = False
+        create_graph: bool = False,
     ):
         """
         Compute gradients for tensors.
@@ -426,7 +426,7 @@ class AutogradEngine:
             grad_tensors = [grad_tensors]
 
         for tensor, grad in zip(tensors, grad_tensors):
-            if hasattr(tensor, 'backward'):
+            if hasattr(tensor, "backward"):
                 tensor.backward(grad)
 
 
@@ -459,6 +459,7 @@ def backward(tensors, grad_tensors=None, retain_graph=False, create_graph=False)
 # GPU-Accelerated Backward Operations
 # ============================================================================
 
+
 class VulkanBackwardOps:
     """
     GPU-accelerated backward pass operations using Vulkan shaders.
@@ -476,17 +477,14 @@ class VulkanBackwardOps:
         if self._backend is None:
             try:
                 from grilly import Compute
+
                 self._backend = Compute()
             except Exception:
                 pass
         return self._backend
 
     def linear_backward(
-        self,
-        grad_output: np.ndarray,
-        x: np.ndarray,
-        weight: np.ndarray,
-        bias: np.ndarray = None
+        self, grad_output: np.ndarray, x: np.ndarray, weight: np.ndarray, bias: np.ndarray = None
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
         """
         GPU-accelerated linear layer backward pass.
@@ -503,7 +501,7 @@ class VulkanBackwardOps:
             Tuple of (grad_input, grad_weight, grad_bias)
         """
         backend = self.backend
-        if backend and hasattr(backend, 'fnn') and hasattr(backend.fnn, 'linear_backward'):
+        if backend and hasattr(backend, "fnn") and hasattr(backend.fnn, "linear_backward"):
             try:
                 return backend.fnn.linear_backward(grad_output, x, weight, bias)
             except Exception:
@@ -522,7 +520,7 @@ class VulkanBackwardOps:
         Uses activation-gelu-backward.glsl shader.
         """
         backend = self.backend
-        if backend and hasattr(backend, 'activation_gelu_backward'):
+        if backend and hasattr(backend, "activation_gelu_backward"):
             try:
                 return backend.activation_gelu_backward(grad_output, x)
             except Exception:
@@ -531,6 +529,7 @@ class VulkanBackwardOps:
         # CPU fallback: d/dx[GELU(x)] = d/dx[x * Phi(x)]
         # where Phi is the CDF of standard normal
         from scipy.special import erf
+
         sqrt_2 = np.sqrt(2.0)
         sqrt_2_pi = np.sqrt(2.0 / np.pi)
 
@@ -554,10 +553,7 @@ class VulkanBackwardOps:
         return grad_input.astype(np.float32)
 
     def softmax_backward(
-        self,
-        grad_output: np.ndarray,
-        softmax_output: np.ndarray,
-        dim: int = -1
+        self, grad_output: np.ndarray, softmax_output: np.ndarray, dim: int = -1
     ) -> np.ndarray:
         """
         Softmax backward pass.
@@ -576,7 +572,7 @@ class VulkanBackwardOps:
         gamma: np.ndarray,
         mean: np.ndarray,
         var: np.ndarray,
-        eps: float = 1e-5
+        eps: float = 1e-5,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         LayerNorm backward pass.
@@ -606,11 +602,17 @@ class VulkanBackwardOps:
 
         # d(x_norm)/dx = (1/std) * (I - (1/N) - x_norm * x_norm.T / N)
         dvar = np.sum(dx_norm * (x - mean) * (-0.5) * (var + eps) ** (-1.5), axis=-1, keepdims=True)
-        dmean = np.sum(dx_norm * (-1.0 / std), axis=-1, keepdims=True) + dvar * np.mean(-2.0 * (x - mean), axis=-1, keepdims=True)
+        dmean = np.sum(dx_norm * (-1.0 / std), axis=-1, keepdims=True) + dvar * np.mean(
+            -2.0 * (x - mean), axis=-1, keepdims=True
+        )
 
         grad_input = dx_norm / std + dvar * 2.0 * (x - mean) / N + dmean / N
 
-        return grad_input.astype(np.float32), grad_gamma.astype(np.float32), grad_beta.astype(np.float32)
+        return (
+            grad_input.astype(np.float32),
+            grad_gamma.astype(np.float32),
+            grad_beta.astype(np.float32),
+        )
 
     def attention_backward(
         self,
@@ -619,7 +621,7 @@ class VulkanBackwardOps:
         k: np.ndarray,
         v: np.ndarray,
         attn_weights: np.ndarray,
-        scale: float
+        scale: float,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Multi-head attention backward pass.
@@ -659,6 +661,7 @@ backward_ops = VulkanBackwardOps()
 # ============================================================================
 # Training Context Manager
 # ============================================================================
+
 
 class TrainingContext:
     """

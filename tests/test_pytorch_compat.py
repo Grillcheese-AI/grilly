@@ -3,6 +3,7 @@ Tests for PyTorch Compatibility Layer
 
 Tests PyTorch-like tensor operations using Vulkan backend
 """
+
 import numpy as np
 import pytest
 
@@ -19,6 +20,7 @@ try:
         to_numpy,
         zeros,
     )
+
     PYTORCH_COMPAT_AVAILABLE = True
 except ImportError:
     PYTORCH_COMPAT_AVAILABLE = False
@@ -53,9 +55,9 @@ class TestTensor:
     def test_tensor_cpu(self):
         """Test moving tensor to CPU"""
         arr = np.random.randn(10, 10).astype(np.float32)
-        t = Tensor(arr, device='vulkan')
+        t = Tensor(arr, device="vulkan")
         t_cpu = t.cpu()
-        assert t_cpu.device == 'cpu'
+        assert t_cpu.device == "cpu"
         np.testing.assert_array_equal(t_cpu.numpy(), arr)
 
     def test_tensor_add(self):

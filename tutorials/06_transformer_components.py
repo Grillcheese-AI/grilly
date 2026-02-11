@@ -28,7 +28,9 @@ d_model = 256
 n_heads = 4
 d_k = d_model // n_heads  # 64
 
-print(f"\nTransformer config: batch={batch_size}, seq={seq_len}, d_model={d_model}, heads={n_heads}")
+print(
+    f"\nTransformer config: batch={batch_size}, seq={seq_len}, d_model={d_model}, heads={n_heads}"
+)
 print("=" * 70)
 
 # Create sample input (like token embeddings)
@@ -127,7 +129,7 @@ ffn_sep = compute.fnn.activation_gelu(ffn_sep)
 separate_time = (time.perf_counter() - start) * 1000
 
 print(f"   Time (separate): {separate_time:.2f}ms")
-print(f"   Fused speedup: {separate_time/fused_time:.2f}x")
+print(f"   Fused speedup: {separate_time / fused_time:.2f}x")
 
 # ============ Summary ============
 print("\n" + "=" * 70)

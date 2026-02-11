@@ -4,7 +4,6 @@ ResonatorParser for parsing sentences via resonator factorization.
 Recovers word-role pairs from sentence vectors.
 """
 
-
 import numpy as np
 
 from grilly.experimental.language.encoder import SentenceEncoder
@@ -14,20 +13,16 @@ from grilly.experimental.vsa.ops import HolographicOps
 class ResonatorParser:
     """
     Parse sentences using resonator factorization.
-    
+
     Given a sentence vector, recover:
     - What words are present
     - What roles they fill
     - The phrase structure
-    
+
     This is PARALLEL - all factors resolved simultaneously!
     """
 
-    def __init__(
-        self,
-        sentence_encoder: SentenceEncoder,
-        max_iterations: int = 15
-    ):
+    def __init__(self, sentence_encoder: SentenceEncoder, max_iterations: int = 15):
         """Initialize the instance."""
 
         self.encoder = sentence_encoder
@@ -41,25 +36,19 @@ class ResonatorParser:
     def _build_codebooks(self):
         """Build codebooks from known words and roles."""
         # Role codebook
-        self.role_codebook = np.array([
-            vec for vec in self.encoder.roles.values()
-        ])
+        self.role_codebook = np.array([vec for vec in self.encoder.roles.values()])
         self.role_names = list(self.encoder.roles.keys())
 
         # Position codebook
         self.position_codebook = np.array(self.encoder.position_vectors[:20])
 
-    def parse(
-        self,
-        sentence_vec: np.ndarray,
-        num_slots: int = 5
-    ) -> list[tuple[str, str, float]]:
+    def parse(self, sentence_vec: np.ndarray, num_slots: int = 5) -> list[tuple[str, str, float]]:
         """
         Parse sentence vector into word-role pairs.
-        
+
         Uses resonator dynamics to factorize:
         sentence = Σ (word_i ⊗ role_i ⊗ position_i)
-        
+
         Returns:
             List of (word, role, confidence) tuples
         """
@@ -104,14 +93,11 @@ class ResonatorParser:
         return results
 
     def parallel_parse(
-        self,
-        sentence_vec: np.ndarray,
-        known_words: list[str],
-        num_iterations: int = 10
+        self, sentence_vec: np.ndarray, known_words: list[str], num_iterations: int = 10
     ) -> dict[str, tuple[str, float]]:
         """
         Parallel resonator parsing.
-        
+
         Given known vocabulary, find which words are present
         and what roles they fill - ALL SIMULTANEOUSLY.
         """

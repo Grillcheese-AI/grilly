@@ -1,4 +1,5 @@
 """Quick test to verify basic functionality"""
+
 import sys
 
 print(f"Python: {sys.version}")
@@ -24,6 +25,7 @@ print(f"Roundtrip works: {np.allclose(x, x_back)}")
 # Test numba ops (if available)
 try:
     from grilly.utils.numba_ops import NUMBA_AVAILABLE, layernorm, softmax
+
     print(f"Numba available: {NUMBA_AVAILABLE}")
     if NUMBA_AVAILABLE:
         # Test layernorm

@@ -71,6 +71,7 @@ class VmaVulkanFunctions(Structure):
     The struct layout depends on VMA_VULKAN_VERSION and feature macros.
     For Vulkan 1.1+ (VMA default), includes all KHR extension fields.
     """
+
     _fields_ = [
         # Core functions
         ("vkGetInstanceProcAddr", c_void_p),
@@ -110,6 +111,7 @@ class VmaVulkanFunctions(Structure):
 
 class VmaAllocatorCreateInfo(Structure):
     """Parameters for creating VMA allocator"""
+
     _fields_ = [
         ("flags", c_uint32),
         ("physicalDevice", c_void_p),
@@ -127,6 +129,7 @@ class VmaAllocatorCreateInfo(Structure):
 
 class VmaAllocationCreateInfo(Structure):
     """Parameters for creating an allocation"""
+
     _fields_ = [
         ("flags", c_uint32),
         ("usage", c_uint32),  # VmaMemoryUsage
@@ -141,6 +144,7 @@ class VmaAllocationCreateInfo(Structure):
 
 class VmaAllocationInfo(Structure):
     """Returned info about an allocation"""
+
     _fields_ = [
         ("memoryType", c_uint32),
         ("deviceMemory", c_void_p),
@@ -154,6 +158,7 @@ class VmaAllocationInfo(Structure):
 
 class VkBufferCreateInfo(Structure):
     """VkBufferCreateInfo structure"""
+
     _fields_ = [
         ("sType", c_uint32),
         ("pNext", c_void_p),
@@ -175,20 +180,20 @@ def _get_vma_lib_path():
     """Get path to VMA shared library"""
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    if platform.system() == 'Windows':
-        lib_name = 'vma.dll'
-    elif platform.system() == 'Darwin':
-        lib_name = 'libvma.dylib'
+    if platform.system() == "Windows":
+        lib_name = "vma.dll"
+    elif platform.system() == "Darwin":
+        lib_name = "libvma.dylib"
     else:
-        lib_name = 'libvma.so'
+        lib_name = "libvma.so"
 
     # Check multiple locations
     search_paths = [
-        os.path.join(base_dir, 'lib', lib_name),
+        os.path.join(base_dir, "lib", lib_name),
         os.path.join(base_dir, lib_name),
-        os.path.join(base_dir, 'backend', lib_name),
-        os.path.join(base_dir, 'VulkanMemoryAllocator', 'build', lib_name),
-        os.path.join(base_dir, 'VulkanMemoryAllocator', 'build', 'Release', lib_name),
+        os.path.join(base_dir, "backend", lib_name),
+        os.path.join(base_dir, "VulkanMemoryAllocator", "build", lib_name),
+        os.path.join(base_dir, "VulkanMemoryAllocator", "build", "Release", lib_name),
     ]
 
     for path in search_paths:
@@ -302,21 +307,29 @@ class VMAAllocator:
         import vulkan as vk
 
         # Get Vulkan handles as integers
-        physical_device_int = int(vk.ffi.cast('uintptr_t', self.core.physical_device))
-        device_int = int(vk.ffi.cast('uintptr_t', self.core.device))
-        instance_int = int(vk.ffi.cast('uintptr_t', self.core.instance)) if hasattr(self.core, 'instance') else 0
+        physical_device_int = int(vk.ffi.cast("uintptr_t", self.core.physical_device))
+        device_int = int(vk.ffi.cast("uintptr_t", self.core.device))
+        instance_int = (
+            int(vk.ffi.cast("uintptr_t", self.core.instance))
+            if hasattr(self.core, "instance")
+            else 0
+        )
 
         # Load vulkan-1.dll
-        if platform.system() == 'Windows':
-            vulkan_dll = ctypes.WinDLL('vulkan-1.dll')
+        if platform.system() == "Windows":
+            vulkan_dll = ctypes.WinDLL("vulkan-1.dll")
         else:
-            vulkan_dll = ctypes.CDLL('libvulkan.so.1')
+            vulkan_dll = ctypes.CDLL("libvulkan.so.1")
 
         # VMA with VMA_DYNAMIC_VULKAN_FUNCTIONS=1 only needs these two functions
         # It will load all other functions dynamically using these
         vulkan_functions = VmaVulkanFunctions()
-        vulkan_functions.vkGetInstanceProcAddr = ctypes.cast(vulkan_dll.vkGetInstanceProcAddr, c_void_p).value
-        vulkan_functions.vkGetDeviceProcAddr = ctypes.cast(vulkan_dll.vkGetDeviceProcAddr, c_void_p).value
+        vulkan_functions.vkGetInstanceProcAddr = ctypes.cast(
+            vulkan_dll.vkGetInstanceProcAddr, c_void_p
+        ).value
+        vulkan_functions.vkGetDeviceProcAddr = ctypes.cast(
+            vulkan_dll.vkGetDeviceProcAddr, c_void_p
+        ).value
 
         logger.debug(f"vkGetInstanceProcAddr: {hex(vulkan_functions.vkGetInstanceProcAddr)}")
         logger.debug(f"vkGetDeviceProcAddr: {hex(vulkan_functions.vkGetDeviceProcAddr)}")
@@ -374,7 +387,7 @@ class VMAAllocator:
             byref(alloc_info),
             byref(buffer),
             byref(allocation),
-            byref(allocation_info)
+            byref(allocation_info),
         )
 
         if result != VK_SUCCESS:
@@ -385,16 +398,14 @@ class VMAAllocator:
             handle=buffer.value,
             allocation=allocation.value,
             size=size,
-            mapped_ptr=allocation_info.pMappedData
+            mapped_ptr=allocation_info.pMappedData,
         )
 
-    def destroy_buffer(self, buffer: 'VMABuffer'):
+    def destroy_buffer(self, buffer: "VMABuffer"):
         """Destroy a VMA-allocated buffer"""
         if buffer.handle and buffer.allocation:
             self._lib.vmaDestroyBuffer(
-                self._allocator,
-                c_void_p(buffer.handle),
-                c_void_p(buffer.allocation)
+                self._allocator, c_void_p(buffer.handle), c_void_p(buffer.allocation)
             )
             buffer.handle = None
             buffer.allocation = None
@@ -402,11 +413,7 @@ class VMAAllocator:
     def map_memory(self, allocation) -> c_void_p:
         """Map allocation memory for CPU access"""
         mapped_ptr = c_void_p()
-        result = self._lib.vmaMapMemory(
-            self._allocator,
-            c_void_p(allocation),
-            byref(mapped_ptr)
-        )
+        result = self._lib.vmaMapMemory(self._allocator, c_void_p(allocation), byref(mapped_ptr))
         if result != VK_SUCCESS:
             raise RuntimeError(f"vmaMapMemory failed with code {result}")
         return mapped_ptr.value
@@ -418,20 +425,14 @@ class VMAAllocator:
     def flush_allocation(self, allocation, offset: int = 0, size: int = 0xFFFFFFFFFFFFFFFF):
         """Flush allocation to make CPU writes visible to GPU"""
         result = self._lib.vmaFlushAllocation(
-            self._allocator,
-            c_void_p(allocation),
-            c_uint64(offset),
-            c_uint64(size)
+            self._allocator, c_void_p(allocation), c_uint64(offset), c_uint64(size)
         )
         return result == VK_SUCCESS
 
     def invalidate_allocation(self, allocation, offset: int = 0, size: int = 0xFFFFFFFFFFFFFFFF):
         """Invalidate allocation to make GPU writes visible to CPU"""
         result = self._lib.vmaInvalidateAllocation(
-            self._allocator,
-            c_void_p(allocation),
-            c_uint64(offset),
-            c_uint64(size)
+            self._allocator, c_void_p(allocation), c_uint64(offset), c_uint64(size)
         )
         return result == VK_SUCCESS
 
@@ -454,8 +455,17 @@ class VMABuffer:
         size: Buffer size in bytes
     """
 
-    __slots__ = ('allocator', 'handle', 'allocation', 'size', 'mapped_ptr',
-                 'in_use', 'last_used', 'bucket_size', '_vk_handle')
+    __slots__ = (
+        "allocator",
+        "handle",
+        "allocation",
+        "size",
+        "mapped_ptr",
+        "in_use",
+        "last_used",
+        "bucket_size",
+        "_vk_handle",
+    )
 
     def __init__(self, allocator, handle, allocation, size, mapped_ptr=None):
         """Initialize the instance."""
@@ -474,7 +484,8 @@ class VMABuffer:
         """Get buffer handle compatible with vulkan package"""
         if self._vk_handle is None and self.handle is not None:
             import vulkan as vk
-            self._vk_handle = vk.ffi.cast('VkBuffer', self.handle)
+
+            self._vk_handle = vk.ffi.cast("VkBuffer", self.handle)
         return self._vk_handle
 
     def upload(self, data: np.ndarray):
@@ -515,7 +526,7 @@ class VMABuffer:
 
     def __del__(self):
         """Auto-cleanup"""
-        if getattr(self, 'in_use', False) and getattr(self, 'handle', None):
+        if getattr(self, "in_use", False) and getattr(self, "handle", None):
             try:
                 self.release()
             except Exception:
@@ -535,19 +546,19 @@ def build_vma_library():
     import subprocess
 
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    vma_dir = os.path.join(base_dir, 'VulkanMemoryAllocator')
+    vma_dir = os.path.join(base_dir, "VulkanMemoryAllocator")
 
     if not os.path.exists(vma_dir):
         raise RuntimeError(f"VMA source not found at {vma_dir}")
 
     # Create build directory
-    build_dir = os.path.join(vma_dir, 'build')
+    build_dir = os.path.join(vma_dir, "build")
     os.makedirs(build_dir, exist_ok=True)
 
     # Create wrapper source that exports VMA functions
-    wrapper_src = os.path.join(build_dir, 'vma_wrapper.cpp')
-    with open(wrapper_src, 'w') as f:
-        f.write('''
+    wrapper_src = os.path.join(build_dir, "vma_wrapper.cpp")
+    with open(wrapper_src, "w") as f:
+        f.write("""
 // VMA Wrapper - exports VMA functions as a shared library
 #define VMA_IMPLEMENTATION
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
@@ -602,37 +613,40 @@ extern "C" {
         return ::vmaInvalidateAllocation(allocator, allocation, offset, size);
     }
 }
-''')
+""")
 
     print(f"Building VMA library in {build_dir}...")
 
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         # Find Vulkan SDK
-        vulkan_sdk = os.environ.get('VULKAN_SDK', r'C:\VulkanSDK\1.3.290.0')
+        vulkan_sdk = os.environ.get("VULKAN_SDK", r"C:\VulkanSDK\1.3.290.0")
         if not os.path.exists(vulkan_sdk):
             # Try to find it
-            vulkan_base = r'C:\VulkanSDK'
+            vulkan_base = r"C:\VulkanSDK"
             if os.path.exists(vulkan_base):
                 versions = os.listdir(vulkan_base)
                 if versions:
                     vulkan_sdk = os.path.join(vulkan_base, sorted(versions)[-1])
 
-        vulkan_include = os.path.join(vulkan_sdk, 'Include')
-        vulkan_lib = os.path.join(vulkan_sdk, 'Lib')
+        vulkan_include = os.path.join(vulkan_sdk, "Include")
+        os.path.join(vulkan_sdk, "Lib")
 
         # Use CMake
         cmake_cmd = [
-            'cmake', '..',
-            f'-DVULKAN_SDK={vulkan_sdk}',
-            '-DCMAKE_BUILD_TYPE=Release',
-            '-G', 'Visual Studio 17 2022',
-            '-A', 'x64'
+            "cmake",
+            "..",
+            f"-DVULKAN_SDK={vulkan_sdk}",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-G",
+            "Visual Studio 17 2022",
+            "-A",
+            "x64",
         ]
 
         # Create CMakeLists.txt
-        cmake_file = os.path.join(build_dir, 'CMakeLists.txt')
-        with open(cmake_file, 'w') as f:
-            f.write('''
+        cmake_file = os.path.join(build_dir, "CMakeLists.txt")
+        with open(cmake_file, "w") as f:
+            f.write("""
 cmake_minimum_required(VERSION 3.10)
 project(vma_wrapper)
 
@@ -650,22 +664,22 @@ if(WIN32)
         LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
     )
 endif()
-''')
+""")
 
         # Run CMake
         subprocess.run(cmake_cmd, cwd=build_dir, check=True)
-        subprocess.run(['cmake', '--build', '.', '--config', 'Release'], cwd=build_dir, check=True)
+        subprocess.run(["cmake", "--build", ".", "--config", "Release"], cwd=build_dir, check=True)
 
         # Copy DLL to lib directory
-        lib_dir = os.path.join(base_dir, 'lib')
+        lib_dir = os.path.join(base_dir, "lib")
         os.makedirs(lib_dir, exist_ok=True)
 
-        dll_src = os.path.join(build_dir, 'Release', 'vma.dll')
+        dll_src = os.path.join(build_dir, "Release", "vma.dll")
         if not os.path.exists(dll_src):
-            dll_src = os.path.join(build_dir, 'vma.dll')
+            dll_src = os.path.join(build_dir, "vma.dll")
 
         if os.path.exists(dll_src):
-            dll_dst = os.path.join(lib_dir, 'vma.dll')
+            dll_dst = os.path.join(lib_dir, "vma.dll")
             shutil.copy2(dll_src, dll_dst)
             print(f"VMA library built: {dll_dst}")
         else:
@@ -673,35 +687,39 @@ endif()
 
     else:
         # Linux/macOS - use g++
-        vulkan_include = '/usr/include'
-        if os.path.exists('/usr/include/vulkan'):
-            vulkan_include = '/usr/include'
+        vulkan_include = "/usr/include"
+        if os.path.exists("/usr/include/vulkan"):
+            vulkan_include = "/usr/include"
 
-        output_lib = 'libvma.so' if platform.system() == 'Linux' else 'libvma.dylib'
+        output_lib = "libvma.so" if platform.system() == "Linux" else "libvma.dylib"
         output_path = os.path.join(build_dir, output_lib)
 
         compile_cmd = [
-            'g++', '-shared', '-fPIC', '-O2',
-            '-std=c++11',
-            f'-I{vulkan_include}',
-            '-I' + os.path.join(vma_dir, 'include'),
+            "g++",
+            "-shared",
+            "-fPIC",
+            "-O2",
+            "-std=c++11",
+            f"-I{vulkan_include}",
+            "-I" + os.path.join(vma_dir, "include"),
             wrapper_src,
-            '-o', output_path,
-            '-lvulkan'
+            "-o",
+            output_path,
+            "-lvulkan",
         ]
 
         subprocess.run(compile_cmd, check=True)
 
         # Copy to lib directory
-        lib_dir = os.path.join(base_dir, 'lib')
+        lib_dir = os.path.join(base_dir, "lib")
         os.makedirs(lib_dir, exist_ok=True)
         dst = os.path.join(lib_dir, output_lib)
         shutil.copy2(output_path, dst)
         print(f"VMA library built: {dst}")
 
 
-if __name__ == '__main__':
-    if '--build' in sys.argv:
+if __name__ == "__main__":
+    if "--build" in sys.argv:
         build_vma_library()
     else:
         print("VMA Wrapper")

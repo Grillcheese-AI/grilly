@@ -32,7 +32,7 @@ class WordEncoder:
     - Semantic similarity preserved (similar words = similar vectors)
     - Instant relationship extraction via correlation
     - No training needed for basic operations
-    
+
     Uses character n-gram composition for OOV handling.
     """
 
@@ -53,8 +53,7 @@ class WordEncoder:
 
         # Position vectors for n-gram positions
         self.position_vectors: list[np.ndarray] = [
-            HolographicOps.random_vector(dim, seed=10000 + i)
-            for i in range(20)
+            HolographicOps.random_vector(dim, seed=10000 + i) for i in range(20)
         ]
 
         # Relation primitives
@@ -65,11 +64,9 @@ class WordEncoder:
         """Initialize character-level vectors."""
         chars = "abcdefghijklmnopqrstuvwxyz0123456789 .,!?'-"
         for i, char in enumerate(chars):
-            self.char_vectors[char] = HolographicOps.random_vector(
-                self.dim, seed=1000 + i
-            )
+            self.char_vectors[char] = HolographicOps.random_vector(self.dim, seed=1000 + i)
         # Unknown char
-        self.char_vectors['<UNK>'] = HolographicOps.random_vector(self.dim, seed=999)
+        self.char_vectors["<UNK>"] = HolographicOps.random_vector(self.dim, seed=999)
 
     def _init_relations(self):
         """Initialize relation vectors for word relationships."""
@@ -91,7 +88,7 @@ class WordEncoder:
     def encode_word(self, word: str) -> np.ndarray:
         """
         Encode a word as a hypervector.
-        
+
         Uses cached vector if available, otherwise builds from n-grams.
         """
         word = word.lower().strip()
@@ -103,7 +100,10 @@ class WordEncoder:
             vec = self._encode_ngrams(word)
         else:
             # Deterministic random from hash
-            vec = HolographicOps.random_vector(self.dim, seed=(stable_u32(word, domain='grilly.word') % (2**31) if stable_u32 else 0))
+            vec = HolographicOps.random_vector(
+                self.dim,
+                seed=(stable_u32(word, domain="grilly.word") % (2**31) if stable_u32 else 0),
+            )
 
         self.word_vectors[word] = vec
         return vec
@@ -111,7 +111,7 @@ class WordEncoder:
     def _encode_ngrams(self, word: str, n: int = 3) -> np.ndarray:
         """
         Encode word using character n-grams.
-        
+
         Similar spelling = similar vectors.
         """
         # Pad word
@@ -119,18 +119,17 @@ class WordEncoder:
 
         ngrams = []
         for i in range(len(padded) - n + 1):
-            ngram = padded[i:i+n]
+            ngram = padded[i : i + n]
 
             # Encode n-gram as bound character sequence
             ngram_vec = np.zeros(self.dim, dtype=np.float32)
             ngram_vec[0] = 1.0
             for j, char in enumerate(ngram):
-                char_vec = self.char_vectors.get(char, self.char_vectors['<UNK>'])
+                char_vec = self.char_vectors.get(char, self.char_vectors["<UNK>"])
                 pos_vec = self.position_vectors[j % len(self.position_vectors)]
                 # Bind character with position
                 ngram_vec = HolographicOps.convolve(
-                    ngram_vec,
-                    HolographicOps.convolve(char_vec, pos_vec)
+                    ngram_vec, HolographicOps.convolve(char_vec, pos_vec)
                 )
 
             ngrams.append(ngram_vec)
@@ -141,7 +140,7 @@ class WordEncoder:
     def extract_relation(self, word_a: str, word_b: str) -> np.ndarray:
         """
         Extract the relational transformation between two words.
-        
+
         relation = correlate(encode(b), encode(a))
         """
         vec_a = self.encode_word(word_a)
@@ -151,7 +150,7 @@ class WordEncoder:
     def apply_relation(self, word: str, relation: np.ndarray) -> np.ndarray:
         """
         Apply a relation vector to get a new word vector.
-        
+
         result = convolve(encode(word), relation)
         """
         word_vec = self.encode_word(word)
@@ -170,7 +169,7 @@ class WordEncoder:
     def learn_relation(self, pairs: list[tuple[str, str]], relation_name: str) -> np.ndarray:
         """
         Learn a relation from word pairs.
-        
+
         Given: [(king, queen), (man, woman)]
         Learn: the "gender" relation
         """
@@ -189,9 +188,9 @@ class WordEncoder:
 class SentenceEncoder:
     """
     Encodes sentences as compositional hypervectors.
-    
+
     Sentence = Σ (word_i ⊗ role_i ⊗ position_i)
-    
+
     Allows instant parsing via unbinding and role queries.
     """
 
@@ -221,8 +220,7 @@ class SentenceEncoder:
 
         # Position encoding vectors
         self.position_vectors = [
-            _unitary(HolographicOps.random_vector(self.dim, seed=4000 + i))
-            for i in range(100)
+            _unitary(HolographicOps.random_vector(self.dim, seed=4000 + i)) for i in range(100)
         ]
 
         # Phrase structure vectors
@@ -235,19 +233,16 @@ class SentenceEncoder:
         }
 
     def encode_sentence(
-        self,
-        words: list[str],
-        roles: list[str] | None = None,
-        return_components: bool = False
+        self, words: list[str], roles: list[str] | None = None, return_components: bool = False
     ) -> np.ndarray | tuple[np.ndarray, list[np.ndarray]]:
         """
         Encode a sentence as a holographic vector.
-        
+
         Args:
             words: List of words in order
             roles: Optional syntactic roles (auto-assigned if None)
             return_components: Whether to return individual word-role bindings
-            
+
         Returns:
             Sentence vector (and optionally component vectors)
         """
@@ -278,14 +273,48 @@ class SentenceEncoder:
     def _auto_assign_roles(self, words: list[str]) -> list[str]:
         """
         Simple heuristic role assignment.
-        
+
         For production, use a proper POS tagger or dependency parser.
         """
         roles = []
 
-        determiners = {"the", "a", "an", "this", "that", "these", "those", "my", "your", "his", "her"}
+        determiners = {
+            "the",
+            "a",
+            "an",
+            "this",
+            "that",
+            "these",
+            "those",
+            "my",
+            "your",
+            "his",
+            "her",
+        }
         prepositions = {"in", "on", "at", "to", "for", "with", "by", "from", "of", "about"}
-        auxiliaries = {"is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "must", "can"}
+        auxiliaries = {
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "must",
+            "can",
+        }
 
         found_verb = False
         found_subj = False
@@ -302,10 +331,18 @@ class SentenceEncoder:
                 found_verb = True
             elif not found_verb:
                 if not found_subj:
-                    if i > 0 and len(roles) > 0 and roles[i-1] == "DET":
+                    if i > 0 and len(roles) > 0 and roles[i - 1] == "DET":
                         roles.append("SUBJ")
                         found_subj = True
-                    elif word[0].isupper() or word_lower in {"i", "he", "she", "it", "they", "we", "you"}:
+                    elif word[0].isupper() or word_lower in {
+                        "i",
+                        "he",
+                        "she",
+                        "it",
+                        "they",
+                        "we",
+                        "you",
+                    }:
                         roles.append("SUBJ")
                         found_subj = True
                     else:
@@ -318,7 +355,7 @@ class SentenceEncoder:
                 roles.append("VERB")
                 found_verb = True
             else:
-                if i > 0 and len(roles) > 0 and roles[i-1] == "PREP":
+                if i > 0 and len(roles) > 0 and roles[i - 1] == "PREP":
                     roles.append("POBJ")
                 else:
                     roles.append("OBJ")
@@ -329,17 +366,14 @@ class SentenceEncoder:
         elif len(roles) < len(words):
             roles.extend(["ROOT"] * (len(words) - len(roles)))
 
-        return roles[:len(words)]
+        return roles[: len(words)]
 
     def query_role(
-        self,
-        sentence_vec: np.ndarray,
-        role: str,
-        position: int | None = None
+        self, sentence_vec: np.ndarray, role: str, position: int | None = None
     ) -> np.ndarray:
         """
         Query: "What fills this role in the sentence?"
-        
+
         Unbind the role (and optionally position) to recover the word.
         """
         role_vec = self.roles.get(role, self.roles["ROOT"])
@@ -355,23 +389,18 @@ class SentenceEncoder:
         return result
 
     def find_role_filler(
-        self,
-        sentence_vec: np.ndarray,
-        role: str,
-        top_k: int = 5
+        self, sentence_vec: np.ndarray, role: str, top_k: int = 5
     ) -> list[tuple[str, float]]:
         """
         Find what word fills a role in the sentence.
-        
+
         "Who is the subject?" -> query SUBJ role -> find closest word
         """
         query_result = self.query_role(sentence_vec, role)
         return self.word_encoder.find_closest(query_result, top_k)
 
     def sentence_similarity(
-        self,
-        sent_a: str | list[str] | np.ndarray,
-        sent_b: str | list[str] | np.ndarray
+        self, sent_a: str | list[str] | np.ndarray, sent_b: str | list[str] | np.ndarray
     ) -> float:
         """Compare two sentences semantically."""
         if isinstance(sent_a, str):

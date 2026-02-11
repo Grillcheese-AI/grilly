@@ -13,6 +13,7 @@ def test_hash_to_bipolar_is_deterministic():
     assert np.array_equal(v1, v2)
     assert set(np.unique(v1)).issubset({-1.0, 1.0})
 
+
 def test_stable_hash_seed_exists():
     try:
         from utils.stable_hash import stable_u32, stable_u64

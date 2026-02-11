@@ -3,6 +3,7 @@ Tests for sentence-transformers GPU integration
 
 Tests sentence-transformers integration with GPU support (CUDA or CPU for AMD).
 """
+
 import numpy as np
 import pytest
 
@@ -10,19 +11,23 @@ try:
     from grilly import nn
     from grilly.utils.huggingface_bridge import HuggingFaceBridge, get_huggingface_bridge
     from grilly.utils.tensor_conversion import to_vulkan, to_vulkan_gpu
+
     BRIDGE_AVAILABLE = True
 except ImportError:
     BRIDGE_AVAILABLE = False
 
 try:
     from sentence_transformers import SentenceTransformer
+
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 
 @pytest.mark.skipif(not BRIDGE_AVAILABLE, reason="HuggingFace bridge not available")
-@pytest.mark.skipif(not SENTENCE_TRANSFORMERS_AVAILABLE, reason="sentence-transformers not available")
+@pytest.mark.skipif(
+    not SENTENCE_TRANSFORMERS_AVAILABLE, reason="sentence-transformers not available"
+)
 class TestSentenceTransformersGPU:
     """Test sentence-transformers with GPU support"""
 
@@ -37,7 +42,7 @@ class TestSentenceTransformersGPU:
     def test_load_sentence_transformer(self):
         """Test loading sentence-transformer model"""
         try:
-            model = self.bridge.load_sentence_transformer('all-MiniLM-L6-v2')
+            model = self.bridge.load_sentence_transformer("all-MiniLM-L6-v2")
             assert model is not None
         except Exception as e:
             pytest.skip(f"Could not load model: {e}")
@@ -58,11 +63,7 @@ class TestSentenceTransformersGPU:
     def test_encode_batch(self):
         """Test batch encoding"""
         try:
-            texts = [
-                "First sentence",
-                "Second sentence",
-                "Third sentence"
-            ]
+            texts = ["First sentence", "Second sentence", "Third sentence"]
             embeddings = self.bridge.encode_sentence_transformer(texts)
 
             assert isinstance(embeddings, np.ndarray)
@@ -95,8 +96,7 @@ class TestSentenceTransformersGPU:
         try:
             texts = ["Hello, world!", "How are you?"]
             embeddings = self.bridge.encode_sentence_transformer_gpu(
-                texts,
-                use_vulkan_postprocessing=True
+                texts, use_vulkan_postprocessing=True
             )
 
             assert isinstance(embeddings, np.ndarray)
@@ -111,9 +111,7 @@ class TestSentenceTransformersGPU:
         try:
             text = "Test text"
             embeddings = self.bridge.encode_sentence_transformer(
-                text,
-                model_name='all-MiniLM-L6-v2',
-                normalize_embeddings=True
+                text, model_name="all-MiniLM-L6-v2", normalize_embeddings=True
             )
 
             assert isinstance(embeddings, np.ndarray)
@@ -138,7 +136,9 @@ class TestSentenceTransformersGPU:
 
 
 @pytest.mark.skipif(not BRIDGE_AVAILABLE, reason="HuggingFace bridge not available")
-@pytest.mark.skipif(not SENTENCE_TRANSFORMERS_AVAILABLE, reason="sentence-transformers not available")
+@pytest.mark.skipif(
+    not SENTENCE_TRANSFORMERS_AVAILABLE, reason="sentence-transformers not available"
+)
 class TestSentenceTransformersIntegration:
     """Test sentence-transformers integration with Vulkan operations"""
 
@@ -163,9 +163,7 @@ class TestSentenceTransformersIntegration:
 
             # Step 3: Process with Vulkan model
             model = nn.Sequential(
-                nn.Linear(vulkan_emb.shape[-1], 256),
-                nn.ReLU(),
-                nn.Linear(256, 128)
+                nn.Linear(vulkan_emb.shape[-1], 256), nn.ReLU(), nn.Linear(256, 128)
             )
 
             result = model(vulkan_emb)
@@ -182,7 +180,7 @@ class TestSentenceTransformersIntegration:
             documents = [
                 "Machine learning is a subset of AI",
                 "Python is a programming language",
-                "Deep learning uses neural networks"
+                "Deep learning uses neural networks",
             ]
 
             # Encode all

@@ -25,11 +25,11 @@ def time_fn(fn, *args, warmup=2, repeats=5, **kwargs):
         times.append((t1 - t0) * 1000)  # ms
 
     return {
-        'mean': np.mean(times),
-        'std': np.std(times),
-        'min': np.min(times),
-        'max': np.max(times),
-        'result': result,
+        "mean": np.mean(times),
+        "std": np.std(times),
+        "min": np.min(times),
+        "max": np.max(times),
+        "result": result,
     }
 
 
@@ -41,7 +41,7 @@ def time_cpu(fn, *args, warmup=2, repeats=5, **kwargs):
 def compute_speedup(gpu_ms, cpu_ms):
     """Compute speedup ratio. Returns 'N/A' if either is zero."""
     if cpu_ms <= 0 or gpu_ms <= 0:
-        return 'N/A'
+        return "N/A"
     return cpu_ms / gpu_ms
 
 
@@ -58,11 +58,11 @@ def format_size(nbytes):
     """Format byte count to human-readable string."""
     if nbytes < 1024:
         return f"{nbytes} B"
-    if nbytes < 1024 ** 2:
+    if nbytes < 1024**2:
         return f"{nbytes / 1024:.1f} KB"
-    if nbytes < 1024 ** 3:
-        return f"{nbytes / 1024 ** 2:.1f} MB"
-    return f"{nbytes / 1024 ** 3:.2f} GB"
+    if nbytes < 1024**3:
+        return f"{nbytes / 1024**2:.1f} MB"
+    return f"{nbytes / 1024**3:.2f} GB"
 
 
 def print_header(title):
@@ -92,12 +92,12 @@ def print_summary_table(results):
     print(f"\n{'Label':<30} {'GPU':>10} {'CPU':>10} {'Speedup':>8} {'Shape'}")
     print("-" * 75)
     for r in results:
-        gpu_str = format_time(r['gpu_ms'])
-        cpu_str = format_time(r.get('cpu_ms', 0)) if r.get('cpu_ms') else 'N/A'
-        speedup = ''
-        if r.get('cpu_ms') and r['gpu_ms'] > 0:
+        gpu_str = format_time(r["gpu_ms"])
+        cpu_str = format_time(r.get("cpu_ms", 0)) if r.get("cpu_ms") else "N/A"
+        speedup = ""
+        if r.get("cpu_ms") and r["gpu_ms"] > 0:
             speedup = f"{r['cpu_ms'] / r['gpu_ms']:.1f}x"
-        shape = r.get('shape', '')
+        shape = r.get("shape", "")
         print(f"  {r['label']:<28} {gpu_str:>10} {cpu_str:>10} {speedup:>8} {shape}")
 
 
@@ -105,6 +105,7 @@ def get_gpu_backend():
     """Get Grilly GPU backend, or None if unavailable."""
     try:
         from grilly import Compute
+
         backend = Compute()
         return backend
     except Exception as e:
@@ -119,7 +120,7 @@ def check_gpu_available():
         print("WARNING: GPU backend not available. Only CPU benchmarks will run.")
         return False
     print("GPU backend initialized successfully")
-    if hasattr(backend, 'core') and hasattr(backend.core, 'device_name'):
+    if hasattr(backend, "core") and hasattr(backend.core, "device_name"):
         print(f"  Device: {backend.core.device_name}")
     return True
 
@@ -129,7 +130,7 @@ def get_buffer_pool_stats(backend):
     if backend is None:
         return None
     try:
-        if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'buffer_pool'):
+        if hasattr(backend, "fnn") and hasattr(backend.fnn, "buffer_pool"):
             pool = backend.fnn.buffer_pool
             if pool is not None:
                 return pool.get_stats()

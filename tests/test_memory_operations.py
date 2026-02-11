@@ -1,6 +1,7 @@
 """
 Tests for memory operations
 """
+
 import numpy as np
 import pytest
 

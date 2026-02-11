@@ -35,17 +35,17 @@ class ResonatorNetwork:
         codebooks: dict[str, np.ndarray],
         max_iterations: int = 20,
         convergence_threshold: float = 0.95,
-        vsa_backend: Any | None = None
+        vsa_backend: Any | None = None,
     ):
         """
         Initialize resonator network.
-        
+
         Args:
             codebooks: Dict mapping factor_name -> (num_items, dim) array
                        Each codebook contains possible values for that factor
             max_iterations: Maximum resonator iterations
             convergence_threshold: Similarity threshold for convergence
-        
+
         Raises:
             ValueError: If codebooks is empty
             AssertionError: If codebooks have different dimensions
@@ -65,19 +65,17 @@ class ResonatorNetwork:
         self.vsa_backend = vsa_backend
 
     def factorize(
-        self,
-        composite: np.ndarray,
-        init_estimates: dict[str, np.ndarray] | None = None
+        self, composite: np.ndarray, init_estimates: dict[str, np.ndarray] | None = None
     ) -> tuple[dict[str, np.ndarray], dict[str, int], int]:
         """
         Factorize composite vector into components.
-        
+
         Uses multiple random restarts to avoid local minima.
-        
+
         Args:
             composite: The bound composite vector to factorize
             init_estimates: Optional initial estimates for each factor
-            
+
         Returns:
             Tuple of:
                 - estimates: Dict of factor_name -> estimated vector
@@ -128,9 +126,7 @@ class ResonatorNetwork:
         return best_result[0], best_result[1], best_iterations
 
     def _factorize_single_run(
-        self,
-        composite: np.ndarray,
-        init_estimates: dict[str, np.ndarray]
+        self, composite: np.ndarray, init_estimates: dict[str, np.ndarray]
     ) -> tuple[dict[str, np.ndarray], dict[str, int], int]:
         """Single factorization run with given initialization."""
         estimates = {k: v.copy() for k, v in init_estimates.items()}
@@ -150,14 +146,12 @@ class ResonatorNetwork:
                 # Project onto codebook (find best match)
                 codebook = self.codebooks[name]
 
-                if self.vsa_backend is not None and hasattr(self.vsa_backend, 'similarity_topk'):
-
+                if self.vsa_backend is not None and hasattr(self.vsa_backend, "similarity_topk"):
                     idx, _val = self.vsa_backend.similarity_topk(unbound, codebook, top_k=1)
 
                     best_idx = int(idx.reshape(-1)[0])
 
                 else:
-
                     similarities = codebook @ unbound  # (num_items,)
 
                     best_idx = int(np.argmax(similarities))
@@ -181,14 +175,12 @@ class ResonatorNetwork:
         for name in self.factor_names:
             codebook = self.codebooks[name]
 
-            if self.vsa_backend is not None and hasattr(self.vsa_backend, 'similarity_topk'):
-
+            if self.vsa_backend is not None and hasattr(self.vsa_backend, "similarity_topk"):
                 idx, _val = self.vsa_backend.similarity_topk(estimates[name], codebook, top_k=1)
 
                 indices[name] = int(idx.reshape(-1)[0])
 
             else:
-
                 similarities = codebook @ estimates[name]
 
                 indices[name] = int(np.argmax(similarities))
@@ -198,7 +190,7 @@ class ResonatorNetwork:
     def _init_estimate(self, name: str, composite: np.ndarray = None) -> np.ndarray:
         """
         Initialize estimate for a factor.
-        
+
         If composite is provided, uses best matching codebook entry.
         Otherwise uses random codebook entry.
         """
@@ -207,14 +199,12 @@ class ResonatorNetwork:
         if composite is not None:
             # Find best matching item in codebook
 
-            if self.vsa_backend is not None and hasattr(self.vsa_backend, 'similarity_topk'):
-
+            if self.vsa_backend is not None and hasattr(self.vsa_backend, "similarity_topk"):
                 idx, _val = self.vsa_backend.similarity_topk(composite, codebook, top_k=1)
 
                 best_idx = int(idx.reshape(-1)[0])
 
             else:
-
                 similarities = codebook @ composite
 
                 best_idx = int(np.argmax(similarities))
@@ -225,22 +215,20 @@ class ResonatorNetwork:
             return codebook[idx].copy()
 
     def factorize_partial(
-        self,
-        composite: np.ndarray,
-        known_factors: dict[str, np.ndarray]
+        self, composite: np.ndarray, known_factors: dict[str, np.ndarray]
     ) -> np.ndarray:
         """
         Extract unknown factor when some factors are known.
-        
+
         If composite = bind(A, bind(B, Z)) and we know A and B:
         Z = unbind(unbind(composite, A), B) for bipolar vectors.
-        
+
         This is O(d) - instant extraction!
-        
+
         Args:
             composite: The composite vector
             known_factors: Dict of factor_name -> known factor vector
-            
+
         Returns:
             The recovered unknown factor
         """

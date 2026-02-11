@@ -19,18 +19,19 @@ from grilly.experimental.vsa.ops import HolographicOps
 class TemporalState:
     """
     A state at a specific time point.
-    
+
     Contains:
     - Variables and their values
     - The holographic encoding
     - Links to causes (past states that caused this)
     - Links to effects (future states this causes)
     """
+
     time: int
     variables: dict[str, Any]
     vector: np.ndarray
-    causes: list['TemporalState'] = field(default_factory=list)
-    effects: list['TemporalState'] = field(default_factory=list)
+    causes: list["TemporalState"] = field(default_factory=list)
+    effects: list["TemporalState"] = field(default_factory=list)
     is_counterfactual: bool = False
 
     def __hash__(self):
@@ -46,7 +47,7 @@ class TemporalWorldModel:
     - Current state (present)
     - Predicted states (future)
     - Counterfactual branches
-    
+
     Supports validation across any time point.
     """
 
@@ -73,21 +74,14 @@ class TemporalWorldModel:
         self.timeline_vector: np.ndarray = np.zeros(dim, dtype=np.float32)
 
     def set_state(
-        self,
-        time: int,
-        variables: dict[str, Any],
-        is_observation: bool = True
+        self, time: int, variables: dict[str, Any], is_observation: bool = True
     ) -> TemporalState:
         """Set state at a specific time."""
         # Encode state
         state_vec = self.causal_chain.encode_state(variables)
         temporal_vec = self.temporal_encoder.bind_with_time(state_vec, time)
 
-        state = TemporalState(
-            time=time,
-            variables=variables.copy(),
-            vector=temporal_vec
-        )
+        state = TemporalState(time=time, variables=variables.copy(), vector=temporal_vec)
 
         # Link to previous state if exists
         if time - 1 in self.timeline:
@@ -98,10 +92,13 @@ class TemporalWorldModel:
         self.timeline[time] = state
 
         # Update holographic timeline
-        self.timeline_vector = HolographicOps.bundle([
-            self.timeline_vector * 0.9,  # Decay old
-            temporal_vec
-        ], normalize=False)
+        self.timeline_vector = HolographicOps.bundle(
+            [
+                self.timeline_vector * 0.9,  # Decay old
+                temporal_vec,
+            ],
+            normalize=False,
+        )
 
         # Update current time
         if time > self.current_time:
@@ -113,22 +110,14 @@ class TemporalWorldModel:
         """Get state at a specific time."""
         return self.timeline.get(time)
 
-    def query_variable_at_time(
-        self,
-        variable: str,
-        time: int
-    ) -> Any | None:
+    def query_variable_at_time(self, variable: str, time: int) -> Any | None:
         """Query a specific variable at a specific time."""
         state = self.get_state(time)
         if state:
             return state.variables.get(variable)
         return None
 
-    def predict_future(
-        self,
-        from_time: int,
-        steps: int
-    ) -> dict[int, TemporalState]:
+    def predict_future(self, from_time: int, steps: int) -> dict[int, TemporalState]:
         """
         Predict future states using causal rules.
         """
@@ -147,9 +136,7 @@ class TemporalWorldModel:
             temporal_vec = self.temporal_encoder.bind_with_time(state_vec, future_time)
 
             predicted_state = TemporalState(
-                time=future_time,
-                variables=future_vars,
-                vector=temporal_vec
+                time=future_time, variables=future_vars, vector=temporal_vec
             )
 
             predictions[future_time] = predicted_state
@@ -158,22 +145,16 @@ class TemporalWorldModel:
         return predictions
 
     def add_constraint(
-        self,
-        constraint_fn: Callable[[int, dict], tuple[bool, str]],
-        name: str = "unnamed"
+        self, constraint_fn: Callable[[int, dict], tuple[bool, str]], name: str = "unnamed"
     ):
         """
         Add a temporal constraint.
-        
+
         constraint_fn(time, variables) -> (is_valid, reason)
         """
         self.temporal_constraints.append(constraint_fn)
 
-    def validate_state(
-        self,
-        time: int,
-        variables: dict[str, Any]
-    ) -> tuple[bool, list[str]]:
+    def validate_state(self, time: int, variables: dict[str, Any]) -> tuple[bool, list[str]]:
         """
         Validate a state against all constraints.
         """

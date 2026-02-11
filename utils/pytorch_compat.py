@@ -4,12 +4,14 @@ PyTorch Compatibility Layer
 Provides PyTorch-like tensor operations and utilities for seamless
 integration with PyTorch workflows while using Vulkan backend.
 """
+
 from typing import Any, Union
 
 import numpy as np
 
 try:
     import torch
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -21,14 +23,14 @@ from .device_manager import get_device_manager
 class Tensor:
     """
     PyTorch-compatible tensor wrapper that uses Vulkan backend.
-    
+
     Provides PyTorch-like API while using Vulkan for computation.
     """
 
-    def __init__(self, data: Union[np.ndarray, 'Tensor', Any], device: str | None = None):
+    def __init__(self, data: Union[np.ndarray, "Tensor", Any], device: str | None = None):
         """
         Initialize tensor.
-        
+
         Args:
             data: numpy array, PyTorch tensor, or other array-like
             device: Device ('vulkan', 'cuda', 'cpu')
@@ -53,9 +55,9 @@ class Tensor:
         """Convert to numpy array"""
         return self._data
 
-    def cpu(self) -> 'Tensor':
+    def cpu(self) -> "Tensor":
         """Move to CPU"""
-        return Tensor(self._data, device='cpu')
+        return Tensor(self._data, device="cpu")
 
     def cuda(self, device: int | None = None) -> torch.Tensor:
         """Move to CUDA (returns PyTorch tensor)"""
@@ -63,12 +65,12 @@ class Tensor:
             raise RuntimeError("PyTorch is required for CUDA operations")
         return self.device_manager.to_cuda(self._data)
 
-    def to(self, device: str | torch.device) -> Union['Tensor', torch.Tensor]:
+    def to(self, device: str | torch.device) -> Union["Tensor", torch.Tensor]:
         """Move to device"""
         if isinstance(device, str):
-            if device == 'cpu':
+            if device == "cpu":
                 return self.cpu()
-            elif device.startswith('cuda'):
+            elif device.startswith("cuda"):
                 return self.cuda()
             else:
                 return Tensor(self._data, device=device)
@@ -111,11 +113,11 @@ class Tensor:
 
         return f"Tensor(shape={self.shape}, dtype={self.dtype}, device={self.device})"
 
-    def detach(self) -> 'Tensor':
+    def detach(self) -> "Tensor":
         """Detach (no-op for numpy backend)"""
         return Tensor(self._data.copy(), device=self.device)
 
-    def requires_grad_(self, requires_grad: bool = True) -> 'Tensor':
+    def requires_grad_(self, requires_grad: bool = True) -> "Tensor":
         """Set requires_grad (no-op for numpy backend)"""
         return self
 

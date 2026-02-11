@@ -14,6 +14,7 @@ try:
     from torch.optim.lr_scheduler import OneCycleLR as TorchOneCycleLR
     from torch.optim.lr_scheduler import ReduceLROnPlateau as TorchReduceLROnPlateau
     from torch.optim.lr_scheduler import StepLR as TorchStepLR
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -25,21 +26,25 @@ class TestSchedulersBasic:
     def test_steplr_import(self):
         """Test StepLR can be imported"""
         from grilly.optim import StepLR
+
         assert StepLR is not None
 
     def test_cosine_import(self):
         """Test CosineAnnealingLR can be imported"""
         from grilly.optim import CosineAnnealingLR
+
         assert CosineAnnealingLR is not None
 
     def test_plateau_import(self):
         """Test ReduceLROnPlateau can be imported"""
         from grilly.optim import ReduceLROnPlateau
+
         assert ReduceLROnPlateau is not None
 
     def test_onecycle_import(self):
         """Test OneCycleLR can be imported"""
         from grilly.optim import OneCycleLR
+
         assert OneCycleLR is not None
 
     def test_steplr_init(self):
@@ -66,19 +71,19 @@ class TestSchedulersBasic:
         scheduler = StepLR(optimizer, step_size=3, gamma=0.1)
 
         # Initial LR should be 0.1
-        assert optimizer.param_groups[0]['lr'] == 0.1
+        assert optimizer.param_groups[0]["lr"] == 0.1
 
         # After 3 steps, should decay
         scheduler.step()
         scheduler.step()
         scheduler.step()
-        assert abs(optimizer.param_groups[0]['lr'] - 0.01) < 1e-6
+        assert abs(optimizer.param_groups[0]["lr"] - 0.01) < 1e-6
 
         # Another 3 steps, decay again
         scheduler.step()
         scheduler.step()
         scheduler.step()
-        assert abs(optimizer.param_groups[0]['lr'] - 0.001) < 1e-6
+        assert abs(optimizer.param_groups[0]["lr"] - 0.001) < 1e-6
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch not available")
@@ -107,10 +112,12 @@ class TestStepLRVsPyTorch:
             grilly_scheduler.step()
             torch_scheduler.step()
 
-            grilly_lr = grilly_opt.param_groups[0]['lr']
-            torch_lr = torch_opt.param_groups[0]['lr']
+            grilly_lr = grilly_opt.param_groups[0]["lr"]
+            torch_lr = torch_opt.param_groups[0]["lr"]
 
-            assert abs(grilly_lr - torch_lr) < 1e-6, f"LR mismatch at step {i}: {grilly_lr} vs {torch_lr}"
+            assert abs(grilly_lr - torch_lr) < 1e-6, (
+                f"LR mismatch at step {i}: {grilly_lr} vs {torch_lr}"
+            )
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch not available")
@@ -138,10 +145,12 @@ class TestCosineAnnealingLRVsPyTorch:
             grilly_scheduler.step()
             torch_scheduler.step()
 
-            grilly_lr = grilly_opt.param_groups[0]['lr']
-            torch_lr = torch_opt.param_groups[0]['lr']
+            grilly_lr = grilly_opt.param_groups[0]["lr"]
+            torch_lr = torch_opt.param_groups[0]["lr"]
 
-            assert abs(grilly_lr - torch_lr) < 1e-6, f"LR mismatch at step {i}: {grilly_lr} vs {torch_lr}"
+            assert abs(grilly_lr - torch_lr) < 1e-6, (
+                f"LR mismatch at step {i}: {grilly_lr} vs {torch_lr}"
+            )
 
     def test_cosine_min_max(self):
         """Test CosineAnnealingLR reaches min and max values"""
@@ -154,7 +163,7 @@ class TestCosineAnnealingLRVsPyTorch:
 
         lrs = []
         for i in range(20):
-            lrs.append(optimizer.param_groups[0]['lr'])
+            lrs.append(optimizer.param_groups[0]["lr"])
             scheduler.step()
 
         # Should reach maximum at start
@@ -181,8 +190,8 @@ class TestReduceLROnPlateauVsPyTorch:
         grilly_opt = GrillySGD([grilly_param], lr=0.1)
         torch_opt = torch_optim.SGD([torch_param], lr=0.1)
 
-        grilly_scheduler = GrillyReduceLROnPlateau(grilly_opt, mode='min', factor=0.1, patience=5)
-        torch_scheduler = TorchReduceLROnPlateau(torch_opt, mode='min', factor=0.1, patience=5)
+        grilly_scheduler = GrillyReduceLROnPlateau(grilly_opt, mode="min", factor=0.1, patience=5)
+        torch_scheduler = TorchReduceLROnPlateau(torch_opt, mode="min", factor=0.1, patience=5)
 
         # Simulate training with plateauing metric
         metrics = [1.0, 0.9, 0.8, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75]
@@ -191,8 +200,8 @@ class TestReduceLROnPlateauVsPyTorch:
             grilly_scheduler.step(metric)
             torch_scheduler.step(metric)
 
-            grilly_lr = grilly_opt.param_groups[0]['lr']
-            torch_lr = torch_opt.param_groups[0]['lr']
+            grilly_lr = grilly_opt.param_groups[0]["lr"]
+            torch_lr = torch_opt.param_groups[0]["lr"]
 
             assert abs(grilly_lr - torch_lr) < 1e-6, f"LR mismatch: {grilly_lr} vs {torch_lr}"
 
@@ -203,16 +212,16 @@ class TestReduceLROnPlateauVsPyTorch:
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         optimizer = SGD([param], lr=0.1)
-        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
 
-        initial_lr = optimizer.param_groups[0]['lr']
+        initial_lr = optimizer.param_groups[0]["lr"]
 
         # Simulate plateau (same loss for patience+1 epochs)
         for _ in range(5):
             scheduler.step(0.5)
 
         # LR should have been reduced
-        final_lr = optimizer.param_groups[0]['lr']
+        final_lr = optimizer.param_groups[0]["lr"]
         assert final_lr < initial_lr
 
 
@@ -242,11 +251,13 @@ class TestOneCycleLRVsPyTorch:
             grilly_scheduler.step()
             torch_scheduler.step()
 
-            grilly_lr = grilly_opt.param_groups[0]['lr']
-            torch_lr = torch_opt.param_groups[0]['lr']
+            grilly_lr = grilly_opt.param_groups[0]["lr"]
+            torch_lr = torch_opt.param_groups[0]["lr"]
 
             # Allow small tolerance for floating-point differences
-            assert abs(grilly_lr - torch_lr) < 1e-5, f"LR mismatch at step {i}: {grilly_lr} vs {torch_lr}"
+            assert abs(grilly_lr - torch_lr) < 1e-5, (
+                f"LR mismatch at step {i}: {grilly_lr} vs {torch_lr}"
+            )
 
     def test_onecycle_reaches_max(self):
         """Test OneCycleLR reaches max_lr"""
@@ -259,7 +270,7 @@ class TestOneCycleLRVsPyTorch:
 
         lrs = []
         for _ in range(100):
-            lrs.append(optimizer.param_groups[0]['lr'])
+            lrs.append(optimizer.param_groups[0]["lr"])
             scheduler.step()
 
         # Should reach max_lr around pct_start of cycle
@@ -279,7 +290,7 @@ class TestOneCycleLRVsPyTorch:
             scheduler.step()
 
         # Beta1 should have been cycled
-        assert 'betas' in optimizer.param_groups[0]
+        assert "betas" in optimizer.param_groups[0]
 
 
 class TestSchedulersEdgeCases:
@@ -295,8 +306,8 @@ class TestSchedulersEdgeCases:
         scheduler = StepLR(optimizer, step_size=1, gamma=0.9)
 
         for i in range(10):
-            expected_lr = 0.1 * (0.9 ** i)
-            current_lr = optimizer.param_groups[0]['lr']
+            expected_lr = 0.1 * (0.9**i)
+            current_lr = optimizer.param_groups[0]["lr"]
             assert abs(current_lr - expected_lr) < 1e-6
             scheduler.step()
 
@@ -313,7 +324,7 @@ class TestSchedulersEdgeCases:
 
         lrs = []
         for _ in range(T_max):
-            lrs.append(optimizer.param_groups[0]['lr'])
+            lrs.append(optimizer.param_groups[0]["lr"])
             scheduler.step()
 
         # At T_max, should return to near max
@@ -327,23 +338,23 @@ class TestSchedulersEdgeCases:
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         optimizer = SGD([param], lr=0.1)
-        scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=3)
+        scheduler = ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=3)
 
-        initial_lr = optimizer.param_groups[0]['lr']
+        initial_lr = optimizer.param_groups[0]["lr"]
 
         # Improving metric (increasing)
         for i in range(3):
             scheduler.step(0.9 + i * 0.01)
 
         # LR should not have changed
-        assert optimizer.param_groups[0]['lr'] == initial_lr
+        assert optimizer.param_groups[0]["lr"] == initial_lr
 
         # Plateau (same value)
         for _ in range(5):
             scheduler.step(0.92)
 
         # LR should have been reduced
-        assert optimizer.param_groups[0]['lr'] < initial_lr
+        assert optimizer.param_groups[0]["lr"] < initial_lr
 
     def test_onecycle_error_on_no_total_steps(self):
         """Test OneCycleLR raises error without total_steps"""
@@ -354,7 +365,7 @@ class TestSchedulersEdgeCases:
         optimizer = SGD([param], lr=0.1)
 
         with pytest.raises(ValueError):
-            scheduler = OneCycleLR(optimizer, max_lr=1.0)
+            OneCycleLR(optimizer, max_lr=1.0)
 
 
 if __name__ == "__main__":

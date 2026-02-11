@@ -5,7 +5,6 @@ Tests template-based sentence generation and relation-based generation.
 """
 
 
-
 class TestSentenceGeneratorBasic:
     """Basic tests for SentenceGenerator initialization."""
 
@@ -34,11 +33,7 @@ class TestGenerateFromRoles:
         sentence_encoder = SentenceEncoder(word_encoder)
         generator = SentenceGenerator(sentence_encoder)
 
-        role_fillers = {
-            "SUBJ": "The dog",
-            "VERB": "chased",
-            "OBJ": "the cat"
-        }
+        role_fillers = {"SUBJ": "The dog", "VERB": "chased", "OBJ": "the cat"}
 
         words = generator.generate_from_roles(role_fillers, "simple_transitive")
 
@@ -54,11 +49,7 @@ class TestGenerateFromRoles:
         sentence_encoder = SentenceEncoder(word_encoder)
         generator = SentenceGenerator(sentence_encoder)
 
-        role_fillers = {
-            "SUBJ": "The robot",
-            "VERB": "learned",
-            "OBJ": "language"
-        }
+        role_fillers = {"SUBJ": "The robot", "VERB": "learned", "OBJ": "language"}
 
         words = generator.generate_from_roles(role_fillers, "simple_transitive")
 

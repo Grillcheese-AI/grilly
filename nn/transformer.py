@@ -15,9 +15,9 @@ from .modules import Dropout, LayerNorm, Linear, MultiheadAttention
 class RoPE(Module):
     """
     Rotary Position Embeddings (RoPE).
-    
+
     Uses: rope.glsl
-    
+
     Reference: grilly/shaders/rope.glsl
     """
 
@@ -27,11 +27,11 @@ class RoPE(Module):
         max_seq_len: int = 512,
         base: float = 10000.0,
         scaling: float = 1.0,
-        use_precomputed: bool = True
+        use_precomputed: bool = True,
     ):
         """
         Initialize RoPE layer.
-        
+
         Args:
             head_dim: Dimension of each attention head (must be even)
             max_seq_len: Maximum sequence length
@@ -51,8 +51,8 @@ class RoPE(Module):
         # Precompute cos/sin tables if requested
         if use_precomputed:
             self.cos_table, self.sin_table = self._precompute_tables()
-            self._buffers['cos_table'] = self.cos_table
-            self._buffers['sin_table'] = self.sin_table
+            self._buffers["cos_table"] = self.cos_table
+            self._buffers["sin_table"] = self.sin_table
         else:
             self.cos_table = None
             self.sin_table = None
@@ -74,24 +74,24 @@ class RoPE(Module):
         """Compute theta for a given position and dimension pair"""
         position = pos / self.scaling
         freq_exp = -2.0 * dim_pair / self.head_dim
-        freq = self.base ** freq_exp
+        freq = self.base**freq_exp
         return position * freq
 
     def forward(self, x: np.ndarray, position_ids: np.ndarray = None) -> np.ndarray:
         """
         Forward pass - apply RoPE to Q or K.
-        
+
         Args:
             x: Input tensor (batch, seq_len, num_heads, head_dim)
             position_ids: Optional position indices (batch, seq_len). If None, uses [0, 1, 2, ...]
-        
+
         Returns:
             Rotated tensor (same shape)
         """
         backend = self._get_backend()
 
         # Try GPU shader if available
-        if hasattr(backend, 'attention') and hasattr(backend.attention, 'apply_rope'):
+        if hasattr(backend, "attention") and hasattr(backend.attention, "apply_rope"):
             try:
                 return backend.attention.apply_rope(x, position_ids, self.base, self.scaling)
             except Exception:
@@ -140,9 +140,9 @@ class RoPE(Module):
 class ProsodyModulatedAttention(Module):
     """
     Prosody-modulated attention.
-    
+
     Uses: attention-prosody-modulation.glsl
-    
+
     Reference: ref/brain/gpu_brain.py attention-prosody-modulation
     """
 
@@ -151,11 +151,11 @@ class ProsodyModulatedAttention(Module):
         embed_dim: int,
         num_heads: int,
         prosody_dim: int = 2,  # valence, arousal
-        dropout: float = 0.0
+        dropout: float = 0.0,
     ):
         """
         Initialize ProsodyModulatedAttention layer.
-        
+
         Args:
             embed_dim: Embedding dimension
             num_heads: Number of attention heads
@@ -173,12 +173,14 @@ class ProsodyModulatedAttention(Module):
 
         # Standard attention
         self.attention = MultiheadAttention(embed_dim, num_heads, dropout)
-        self._modules['attention'] = self.attention
+        self._modules["attention"] = self.attention
 
         # Prosody modulation weights
         limit = np.sqrt(6.0 / (prosody_dim + embed_dim))
-        self.prosody_weight = np.random.uniform(-limit, limit, (embed_dim, prosody_dim)).astype(np.float32)
-        self._parameters['prosody_weight'] = self.prosody_weight
+        self.prosody_weight = np.random.uniform(-limit, limit, (embed_dim, prosody_dim)).astype(
+            np.float32
+        )
+        self._parameters["prosody_weight"] = self.prosody_weight
 
     def forward(
         self,
@@ -186,18 +188,18 @@ class ProsodyModulatedAttention(Module):
         key: np.ndarray,
         value: np.ndarray,
         prosody: np.ndarray,
-        mask: np.ndarray | None = None
+        mask: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Forward pass with prosody modulation.
-        
+
         Args:
             query: Query tensor (batch, seq_len, embed_dim)
             key: Key tensor (batch, seq_len, embed_dim)
             value: Value tensor (batch, seq_len, embed_dim)
             prosody: Prosody features (batch, prosody_dim) - e.g., [valence, arousal]
             mask: Optional attention mask
-        
+
         Returns:
             (output, attention_weights)
         """
@@ -212,22 +214,28 @@ class ProsodyModulatedAttention(Module):
         # Reshape prosody_weight to (num_heads, prosody_dim)
         # Original: (embed_dim, prosody_dim) -> split per head: (num_heads, head_dim, prosody_dim)
         # For simplicity, use average per head or reshape
-        prosody_weight_per_head = self.prosody_weight.reshape(self.num_heads, self.head_dim, self.prosody_dim)
+        prosody_weight_per_head = self.prosody_weight.reshape(
+            self.num_heads, self.head_dim, self.prosody_dim
+        )
         # Average across head_dim to get (num_heads, prosody_dim)
         prosody_weight_reshaped = prosody_weight_per_head.mean(axis=1)
 
         # Try GPU shader if available
-        if hasattr(backend, 'attention') and hasattr(backend.attention, 'apply_prosody_modulation'):
+        if hasattr(backend, "attention") and hasattr(backend.attention, "apply_prosody_modulation"):
             try:
                 # Get attention scores first
-                q_reshaped = query.reshape(query.shape[0], query.shape[1], self.num_heads, self.head_dim)
+                q_reshaped = query.reshape(
+                    query.shape[0], query.shape[1], self.num_heads, self.head_dim
+                )
                 k_reshaped = key.reshape(key.shape[0], key.shape[1], self.num_heads, self.head_dim)
 
                 # Compute attention scores
-                scores = backend.attention.attention_scores(q_reshaped, k_reshaped, self.num_heads, self.head_dim)
+                scores = backend.attention.attention_scores(
+                    q_reshaped, k_reshaped, self.num_heads, self.head_dim
+                )
 
                 # Apply prosody modulation
-                scores_modulated = backend.attention.apply_prosody_modulation(
+                backend.attention.apply_prosody_modulation(
                     scores, prosody, prosody_weight_reshaped, prosody_strength=0.3
                 )
 
@@ -262,7 +270,7 @@ class ProsodyModulatedAttention(Module):
 class TransformerEncoderLayer(Module):
     """
     Transformer Encoder Layer.
-    
+
     Combines attention, feed-forward, and normalization.
     """
 
@@ -272,13 +280,13 @@ class TransformerEncoderLayer(Module):
         nhead: int,
         dim_feedforward: int = None,
         dropout: float = 0.1,
-        activation: str = 'gelu',
+        activation: str = "gelu",
         use_rope: bool = False,
-        use_prosody: bool = False
+        use_prosody: bool = False,
     ):
         """
         Initialize TransformerEncoderLayer.
-        
+
         Args:
             d_model: Model dimension
             nhead: Number of attention heads
@@ -301,61 +309,61 @@ class TransformerEncoderLayer(Module):
             self.self_attn = ProsodyModulatedAttention(d_model, nhead, dropout=dropout)
         else:
             self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
-        self._modules['self_attn'] = self.self_attn
+        self._modules["self_attn"] = self.self_attn
 
         # RoPE if requested
         if use_rope:
             self.rope = RoPE(d_model // nhead)
-            self._modules['rope'] = self.rope
+            self._modules["rope"] = self.rope
         else:
             self.rope = None
 
         # Feed-forward
         self.linear1 = Linear(d_model, self.dim_feedforward)
         self.linear2 = Linear(self.dim_feedforward, d_model)
-        self._modules['linear1'] = self.linear1
-        self._modules['linear2'] = self.linear2
+        self._modules["linear1"] = self.linear1
+        self._modules["linear2"] = self.linear2
 
         # Normalization
         self.norm1 = LayerNorm(d_model)
         self.norm2 = LayerNorm(d_model)
-        self._modules['norm1'] = self.norm1
-        self._modules['norm2'] = self.norm2
+        self._modules["norm1"] = self.norm1
+        self._modules["norm2"] = self.norm2
 
         # Dropout
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
-        self._modules['dropout1'] = self.dropout1
-        self._modules['dropout2'] = self.dropout2
+        self._modules["dropout1"] = self.dropout1
+        self._modules["dropout2"] = self.dropout2
 
         # Activation
-        if activation == 'gelu':
+        if activation == "gelu":
             from .modules import GELU
+
             self.activation = GELU()
-        elif activation == 'relu':
+        elif activation == "relu":
             from .modules import ReLU
+
             self.activation = ReLU()
-        elif activation == 'silu':
+        elif activation == "silu":
             from .modules import SiLU
+
             self.activation = SiLU()
         else:
             raise ValueError(f"Unknown activation: {activation}")
-        self._modules['activation'] = self.activation
+        self._modules["activation"] = self.activation
 
     def forward(
-        self,
-        src: np.ndarray,
-        src_mask: np.ndarray | None = None,
-        prosody: np.ndarray | None = None
+        self, src: np.ndarray, src_mask: np.ndarray | None = None, prosody: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Forward pass.
-        
+
         Args:
             src: Source tensor (batch, seq_len, d_model)
             src_mask: Optional source mask
             prosody: Optional prosody features (batch, prosody_dim)
-        
+
         Returns:
             Output tensor (batch, seq_len, d_model)
         """
@@ -385,7 +393,7 @@ class TransformerEncoderLayer(Module):
 class TransformerDecoderLayer(Module):
     """
     Transformer Decoder Layer.
-    
+
     Similar to encoder but with cross-attention.
     """
 
@@ -395,12 +403,12 @@ class TransformerDecoderLayer(Module):
         nhead: int,
         dim_feedforward: int = None,
         dropout: float = 0.1,
-        activation: str = 'gelu',
-        use_rope: bool = False
+        activation: str = "gelu",
+        use_rope: bool = False,
     ):
         """
         Initialize TransformerDecoderLayer.
-        
+
         Args are the same as TransformerEncoderLayer.
         """
         super().__init__()
@@ -412,71 +420,74 @@ class TransformerDecoderLayer(Module):
 
         # Self-attention
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
-        self._modules['self_attn'] = self.self_attn
+        self._modules["self_attn"] = self.self_attn
 
         # Cross-attention
         self.cross_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
-        self._modules['cross_attn'] = self.cross_attn
+        self._modules["cross_attn"] = self.cross_attn
 
         # RoPE if requested
         if use_rope:
             self.rope = RoPE(d_model // nhead)
-            self._modules['rope'] = self.rope
+            self._modules["rope"] = self.rope
         else:
             self.rope = None
 
         # Feed-forward
         self.linear1 = Linear(d_model, self.dim_feedforward)
         self.linear2 = Linear(self.dim_feedforward, d_model)
-        self._modules['linear1'] = self.linear1
-        self._modules['linear2'] = self.linear2
+        self._modules["linear1"] = self.linear1
+        self._modules["linear2"] = self.linear2
 
         # Normalization
         self.norm1 = LayerNorm(d_model)
         self.norm2 = LayerNorm(d_model)
         self.norm3 = LayerNorm(d_model)
-        self._modules['norm1'] = self.norm1
-        self._modules['norm2'] = self.norm2
-        self._modules['norm3'] = self.norm3
+        self._modules["norm1"] = self.norm1
+        self._modules["norm2"] = self.norm2
+        self._modules["norm3"] = self.norm3
 
         # Dropout
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
-        self._modules['dropout1'] = self.dropout1
-        self._modules['dropout2'] = self.dropout2
-        self._modules['dropout3'] = self.dropout3
+        self._modules["dropout1"] = self.dropout1
+        self._modules["dropout2"] = self.dropout2
+        self._modules["dropout3"] = self.dropout3
 
         # Activation
-        if activation == 'gelu':
+        if activation == "gelu":
             from .modules import GELU
+
             self.activation = GELU()
-        elif activation == 'relu':
+        elif activation == "relu":
             from .modules import ReLU
+
             self.activation = ReLU()
-        elif activation == 'silu':
+        elif activation == "silu":
             from .modules import SiLU
+
             self.activation = SiLU()
         else:
             raise ValueError(f"Unknown activation: {activation}")
-        self._modules['activation'] = self.activation
+        self._modules["activation"] = self.activation
 
     def forward(
         self,
         tgt: np.ndarray,
         memory: np.ndarray,
         tgt_mask: np.ndarray | None = None,
-        memory_mask: np.ndarray | None = None
+        memory_mask: np.ndarray | None = None,
     ) -> np.ndarray:
         """
         Forward pass.
-        
+
         Args:
             tgt: Target tensor (batch, seq_len, d_model)
             memory: Memory tensor from encoder (batch, seq_len, d_model)
             tgt_mask: Optional target mask
             memory_mask: Optional memory mask
-        
+
         Returns:
             Output tensor (batch, seq_len, d_model)
         """

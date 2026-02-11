@@ -41,9 +41,9 @@ def benchmark_activation(name, activation_fn, x=None, num_iterations=100):
 
 def demo_basic_activations():
     """Demo all basic activation functions"""
-    print("="*70)
+    print("=" * 70)
     print("1. BASIC ACTIVATION FUNCTIONS")
-    print("="*70)
+    print("=" * 70)
 
     compute = grilly.Compute()
     x = np.array([-2.0, -1.0, 0.0, 1.0, 2.0], dtype=np.float32)
@@ -61,14 +61,14 @@ def demo_basic_activations():
 
 def demo_gcu_oscillatory():
     """Demonstrate GCU's oscillatory behavior"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("2. GCU (GROWING COSINE UNIT) - Oscillatory Activation")
-    print("="*70)
+    print("=" * 70)
 
     compute = grilly.Compute()
 
     # Create oscillatory input pattern
-    x = np.linspace(-2*np.pi, 2*np.pi, 100).astype(np.float32)
+    x = np.linspace(-2 * np.pi, 2 * np.pi, 100).astype(np.float32)
 
     gcu_output = compute.activation_gcu(x)
     relu_output = compute.activation_relu(x)
@@ -86,9 +86,9 @@ def demo_gcu_oscillatory():
 
 def demo_roswish_learnable():
     """Demonstrate RoSwish with learnable parameters"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("3. RoSwish - Learnable Adaptive Gating")
-    print("="*70)
+    print("=" * 70)
 
     # Test different parameter combinations
     x = np.array([0.0, 1.0, 2.0, 3.0], dtype=np.float32)
@@ -122,9 +122,9 @@ def demo_roswish_learnable():
 
 def demo_swiglu_transformer():
     """Demonstrate SwiGLU for transformer FFN"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("4. SwiGLU - Gated Activation for Transformers")
-    print("="*70)
+    print("=" * 70)
 
     compute = grilly.Compute()
 
@@ -140,10 +140,10 @@ def demo_swiglu_transformer():
     print(f"  Input shape: (batch={batch_size}, seq={seq_len}, d={d_model})")
 
     # Create input
-    x = np.random.randn(batch_size, seq_len, d_model).astype(np.float32)
+    np.random.randn(batch_size, seq_len, d_model).astype(np.float32)
 
     # SwiGLU requires input of 2*d_ff (splits into x1, x2)
-    x_ffn = np.random.randn(batch_size, seq_len, 2*d_ff).astype(np.float32)
+    x_ffn = np.random.randn(batch_size, seq_len, 2 * d_ff).astype(np.float32)
 
     print("\nSwiGLU formula: f([x1, x2]) = x1 * silu(x2)")
     print(f"  FFN input (after Linear): {x_ffn.shape}")
@@ -165,9 +165,9 @@ def demo_swiglu_transformer():
 
 def demo_fused_operations():
     """Demonstrate fused Linear + Activation for performance"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("5. FUSED OPERATIONS - Performance Optimization")
-    print("="*70)
+    print("=" * 70)
 
     compute = grilly.Compute()
 
@@ -226,9 +226,9 @@ def demo_fused_operations():
 
 def demo_performance_comparison():
     """Compare all activations on same input"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("6. PERFORMANCE COMPARISON")
-    print("="*70)
+    print("=" * 70)
 
     compute = grilly.Compute()
 
@@ -259,9 +259,9 @@ def demo_performance_comparison():
 
 def demo_selection_guide():
     """Guide for selecting the right activation"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("7. ACTIVATION SELECTION GUIDE")
-    print("="*70)
+    print("=" * 70)
 
     guide = """
     Use Case                          | Recommended Activation | Why?
@@ -303,9 +303,9 @@ def demo_selection_guide():
 
 def main():
     """Run all demos"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("ADVANCED ACTIVATION FUNCTIONS TUTORIAL")
-    print("="*70)
+    print("=" * 70)
     print("\nGrilly SDK - GPU-Accelerated Neural Network Operations")
     print("Device: AMD RX 6750 XT (12GB VRAM)")
 
@@ -318,9 +318,9 @@ def main():
     demo_performance_comparison()
     demo_selection_guide()
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("TUTORIAL COMPLETE")
-    print("="*70)
+    print("=" * 70)
     print("\nNext steps:")
     print("- See docs/advanced-activations.md for detailed documentation")
     print("- Integrate activations into your models via grilly.nn modules")

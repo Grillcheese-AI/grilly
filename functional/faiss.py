@@ -12,42 +12,40 @@ def _get_backend():
     """Get backend instance"""
     try:
         from ..backend.compute import Compute
+
         return Compute()
     except Exception:
         return None
 
 
-def faiss_distance(
-    query: np.ndarray,
-    vectors: np.ndarray,
-    distance_type: str = 'l2'
-) -> np.ndarray:
+def faiss_distance(query: np.ndarray, vectors: np.ndarray, distance_type: str = "l2") -> np.ndarray:
     """
     Compute distances between query and vectors.
-    
+
     Uses: faiss-distance.glsl
-    
+
     Args:
         query: Query vectors (batch, dim) or (dim,)
         vectors: Database vectors (num_vectors, dim)
         distance_type: Distance type ('l2', 'cosine', 'dot')
-    
+
     Returns:
         Distances (batch, num_vectors) or (num_vectors,)
     """
     from grilly import Compute
+
     backend = Compute()
-    if hasattr(backend, 'faiss') and hasattr(backend.faiss, 'compute_distances'):
+    if hasattr(backend, "faiss") and hasattr(backend.faiss, "compute_distances"):
         return backend.faiss.compute_distances(query, vectors, distance_type=distance_type)
     else:
         # CPU fallback
         if query.ndim == 1:
             query = query.reshape(1, -1)
 
-        if distance_type == 'l2':
+        if distance_type == "l2":
             diff = query[:, None, :] - vectors[None, :, :]
-            return np.sqrt(np.sum(diff ** 2, axis=2))
-        elif distance_type == 'cosine':
+            return np.sqrt(np.sum(diff**2, axis=2))
+        elif distance_type == "cosine":
             q_norm = query / (np.linalg.norm(query, axis=1, keepdims=True) + 1e-8)
             v_norm = vectors / (np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-8)
             return 1 - np.dot(q_norm, v_norm.T)
@@ -55,25 +53,23 @@ def faiss_distance(
             return -np.dot(query, vectors.T)
 
 
-def faiss_topk(
-    distances: np.ndarray,
-    k: int
-) -> tuple[np.ndarray, np.ndarray]:
+def faiss_topk(distances: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
     """
     Get top-k nearest neighbors.
-    
+
     Uses: faiss-topk.glsl
-    
+
     Args:
         distances: Distance matrix (batch, num_vectors)
         k: Number of neighbors to retrieve
-    
+
     Returns:
         (indices, topk_distances) - both (batch, k)
     """
     from grilly import Compute
+
     backend = Compute()
-    if hasattr(backend, 'faiss') and hasattr(backend.faiss, 'topk'):
+    if hasattr(backend, "faiss") and hasattr(backend.faiss, "topk"):
         return backend.faiss.topk(distances, k)
     else:
         # CPU fallback
@@ -82,28 +78,24 @@ def faiss_topk(
         return indices, topk_distances
 
 
-def faiss_ivf_filter(
-    vectors: np.ndarray,
-    centroids: np.ndarray,
-    nlist: int = 100
-) -> np.ndarray:
+def faiss_ivf_filter(vectors: np.ndarray, centroids: np.ndarray, nlist: int = 100) -> np.ndarray:
     """
     Filter vectors using IVF (Inverted File Index) structure.
-    
+
     Uses: faiss-ivf-filter.glsl
-    
+
     Args:
         vectors: Input vectors (num_vectors, dim)
         centroids: Cluster centroids (nlist, dim)
         nlist: Number of clusters
-    
+
     Returns:
         Cluster assignments (num_vectors,)
     """
     backend = _get_backend()
 
     # Try GPU shader if available
-    if backend and hasattr(backend, 'shaders') and 'faiss-kmeans-update' in backend.shaders:
+    if backend and hasattr(backend, "shaders") and "faiss-kmeans-update" in backend.shaders:
         try:
             # GPU FAISS kmeans update would go here
             # For now, use CPU fallback
@@ -118,29 +110,26 @@ def faiss_ivf_filter(
 
 
 def faiss_kmeans_update(
-    vectors: np.ndarray,
-    centroids: np.ndarray,
-    assignments: np.ndarray,
-    nlist: int
+    vectors: np.ndarray, centroids: np.ndarray, assignments: np.ndarray, nlist: int
 ) -> np.ndarray:
     """
     Update K-means centroids.
-    
+
     Uses: faiss-kmeans-update.glsl
-    
+
     Args:
         vectors: Input vectors (num_vectors, dim)
         centroids: Current centroids (nlist, dim)
         assignments: Cluster assignments (num_vectors,)
         nlist: Number of clusters
-    
+
     Returns:
         Updated centroids (nlist, dim)
     """
     backend = _get_backend()
 
     # Try GPU shader if available
-    if backend and hasattr(backend, 'shaders') and 'faiss-kmeans-update' in backend.shaders:
+    if backend and hasattr(backend, "shaders") and "faiss-kmeans-update" in backend.shaders:
         try:
             # GPU FAISS kmeans update would go here
             # For now, use CPU fallback
@@ -168,27 +157,25 @@ def faiss_kmeans_update(
 
 
 def faiss_quantize(
-    vectors: np.ndarray,
-    codebook: np.ndarray,
-    nbits: int = 8
+    vectors: np.ndarray, codebook: np.ndarray, nbits: int = 8
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Quantize vectors using codebook.
-    
+
     Uses: faiss-quantize.glsl
-    
+
     Args:
         vectors: Input vectors (num_vectors, dim)
         codebook: Codebook (num_codes, dim)
         nbits: Number of bits for quantization
-    
+
     Returns:
         (quantized_vectors, codes) - codes (num_vectors,)
     """
     backend = _get_backend()
 
     # Try GPU shader if available
-    if backend and hasattr(backend, 'shaders') and 'faiss-quantize' in backend.shaders:
+    if backend and hasattr(backend, "shaders") and "faiss-quantize" in backend.shaders:
         try:
             # GPU FAISS quantization would go here
             # For now, use CPU fallback

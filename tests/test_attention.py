@@ -1,6 +1,7 @@
 """
 Tests for attention operations
 """
+
 import numpy as np
 import pytest
 

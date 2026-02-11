@@ -15,6 +15,7 @@ import numpy as np
 # Dataset Base Classes
 # ============================================================================
 
+
 class Dataset(ABC):
     """
     Abstract base class for datasets.
@@ -64,8 +65,9 @@ class TensorDataset(Dataset):
     def __init__(self, *tensors: np.ndarray):
         """Initialize the instance."""
 
-        assert all(tensors[0].shape[0] == t.shape[0] for t in tensors), \
+        assert all(tensors[0].shape[0] == t.shape[0] for t in tensors), (
             "All tensors must have the same first dimension"
+        )
         self.tensors = tensors
 
     def __len__(self) -> int:
@@ -185,13 +187,14 @@ class ConcatDataset(Dataset):
             if idx < cumsize:
                 if i == 0:
                     return self.datasets[i][idx]
-                return self.datasets[i][idx - self.cumulative_sizes[i-1]]
+                return self.datasets[i][idx - self.cumulative_sizes[i - 1]]
         raise IndexError(f"Index {idx} out of range")
 
 
 # ============================================================================
 # Samplers
 # ============================================================================
+
 
 class RandomSampler:
     """
@@ -204,10 +207,7 @@ class RandomSampler:
     """
 
     def __init__(
-        self,
-        data_source: Dataset,
-        replacement: bool = False,
-        num_samples: int | None = None
+        self, data_source: Dataset, replacement: bool = False, num_samples: int | None = None
     ):
         """Initialize the instance."""
 
@@ -282,7 +282,7 @@ class BatchSampler:
         sampler,
         batch_size: int,
         drop_last: bool = False,
-        shuffle: bool = False  # Legacy parameter
+        shuffle: bool = False,  # Legacy parameter
     ):
         # Legacy compatibility: if sampler is an int, create a sampler
         """Initialize the instance."""
@@ -298,14 +298,17 @@ class BatchSampler:
                     def __len__(self):
                         """Return the synthetic dataset length."""
                         return sampler
+
                 self.sampler = RS(DummyDataset())
             else:
+
                 class DummyDataset:
                     """Minimal dataset shim for sequential sampling."""
 
                     def __len__(self):
                         """Return the synthetic dataset length."""
                         return sampler
+
                 self.sampler = SequentialSampler(DummyDataset())
         else:
             self.sampler = sampler
@@ -338,6 +341,7 @@ class BatchSampler:
 # Collate Functions
 # ============================================================================
 
+
 def default_collate(batch: list[tuple]) -> tuple[np.ndarray, ...]:
     """
     Default collate function that stacks samples into batches.
@@ -361,6 +365,7 @@ def default_collate(batch: list[tuple]) -> tuple[np.ndarray, ...]:
 # ============================================================================
 # DataLoader
 # ============================================================================
+
 
 class DataLoader:
     """
@@ -432,7 +437,7 @@ class DataLoader:
                 np.random.shuffle(indices)
 
             for i in range(0, len(self.dataset), self.batch_size):
-                batch_indices = indices[i:i + self.batch_size]
+                batch_indices = indices[i : i + self.batch_size]
                 if len(batch_indices) < self.batch_size and self.drop_last:
                     break
                 yield [self.dataset[idx] for idx in batch_indices]
@@ -456,10 +461,9 @@ class DataLoader:
 # Utility Functions
 # ============================================================================
 
+
 def random_split(
-    dataset: Dataset,
-    lengths: Sequence[int],
-    generator: np.random.Generator | None = None
+    dataset: Dataset, lengths: Sequence[int], generator: np.random.Generator | None = None
 ) -> list[Subset]:
     """
     Randomly split a dataset into non-overlapping subsets.
@@ -486,7 +490,7 @@ def random_split(
     subsets = []
     offset = 0
     for length in lengths:
-        subsets.append(Subset(dataset, indices[offset:offset + length]))
+        subsets.append(Subset(dataset, indices[offset : offset + length]))
         offset += length
 
     return subsets
@@ -495,6 +499,7 @@ def random_split(
 # ============================================================================
 # Transforms
 # ============================================================================
+
 
 class Compose:
     """Compose multiple transforms together."""
@@ -529,11 +534,7 @@ class ToFloat32:
 class Normalize:
     """Normalize with mean and std."""
 
-    def __init__(
-        self,
-        mean: float | np.ndarray,
-        std: float | np.ndarray
-    ):
+    def __init__(self, mean: float | np.ndarray, std: float | np.ndarray):
         """Initialize the instance."""
 
         self.mean = np.array(mean, dtype=np.float32)
@@ -559,7 +560,7 @@ class Flatten:
         if self.start_dim == 0:
             return x.flatten()
         # Keep first start_dim dimensions, flatten the rest
-        return x.reshape(x.shape[:self.start_dim] + (-1,))
+        return x.reshape(x.shape[: self.start_dim] + (-1,))
 
 
 class RandomNoise:

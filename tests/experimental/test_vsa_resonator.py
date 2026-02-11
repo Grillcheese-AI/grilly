@@ -17,10 +17,7 @@ class TestResonatorNetworkBasic:
 
         codebook = np.sign(rng.standard_normal((10, small_dim))).astype(np.float32)
 
-        resonator = ResonatorNetwork(
-            codebooks={"factor_a": codebook},
-            max_iterations=20
-        )
+        resonator = ResonatorNetwork(codebooks={"factor_a": codebook}, max_iterations=20)
 
         assert resonator.dim == small_dim
         assert len(resonator.factor_names) == 1
@@ -34,8 +31,7 @@ class TestResonatorNetworkBasic:
         cb_b = np.sign(rng.standard_normal((8, small_dim))).astype(np.float32)
 
         resonator = ResonatorNetwork(
-            codebooks={"factor_a": cb_a, "factor_b": cb_b},
-            max_iterations=20
+            codebooks={"factor_a": cb_a, "factor_b": cb_b}, max_iterations=20
         )
 
         assert resonator.dim == small_dim
@@ -63,10 +59,7 @@ class TestResonatorFactorizeSingleFactor:
         # Create codebook with 10 items
         codebook = np.sign(rng.standard_normal((10, small_dim))).astype(np.float32)
 
-        resonator = ResonatorNetwork(
-            codebooks={"item": codebook},
-            max_iterations=20
-        )
+        resonator = ResonatorNetwork(codebooks={"item": codebook}, max_iterations=20)
 
         # The composite is just one item from the codebook
         target_idx = 5
@@ -87,10 +80,7 @@ class TestResonatorFactorizeSingleFactor:
 
         codebook = np.sign(rng.standard_normal((10, small_dim))).astype(np.float32)
 
-        resonator = ResonatorNetwork(
-            codebooks={"item": codebook},
-            max_iterations=30
-        )
+        resonator = ResonatorNetwork(codebooks={"item": codebook}, max_iterations=30)
 
         target_idx = 3
         # Add noise (flip some bits)
@@ -119,8 +109,7 @@ class TestResonatorFactorizeMultipleFactors:
         cb_b = np.sign(np.random.randn(8, large_dim)).astype(np.float32)
 
         resonator = ResonatorNetwork(
-            codebooks={"factor_a": cb_a, "factor_b": cb_b},
-            max_iterations=50
+            codebooks={"factor_a": cb_a, "factor_b": cb_b}, max_iterations=50
         )
 
         # Create composite by binding two items
@@ -144,8 +133,7 @@ class TestResonatorFactorizeMultipleFactors:
         cb_c = np.sign(np.random.randn(6, large_dim)).astype(np.float32)
 
         resonator = ResonatorNetwork(
-            codebooks={"a": cb_a, "b": cb_b, "c": cb_c},
-            max_iterations=100
+            codebooks={"a": cb_a, "b": cb_b, "c": cb_c}, max_iterations=100
         )
 
         idx_a, idx_b, idx_c = 2, 4, 5
@@ -170,10 +158,7 @@ class TestResonatorConvergence:
         cb_b = np.sign(rng.standard_normal((8, small_dim))).astype(np.float32)
 
         max_iter = 30
-        resonator = ResonatorNetwork(
-            codebooks={"a": cb_a, "b": cb_b},
-            max_iterations=max_iter
-        )
+        resonator = ResonatorNetwork(codebooks={"a": cb_a, "b": cb_b}, max_iterations=max_iter)
 
         idx_a, idx_b = 2, 5
         composite = BinaryOps.bind(cb_a[idx_a], cb_b[idx_b])
@@ -190,9 +175,7 @@ class TestResonatorConvergence:
 
         # Create resonator with high threshold
         resonator = ResonatorNetwork(
-            codebooks={"item": codebook},
-            max_iterations=50,
-            convergence_threshold=0.99
+            codebooks={"item": codebook}, max_iterations=50, convergence_threshold=0.99
         )
 
         # Clean input should converge quickly
@@ -215,10 +198,7 @@ class TestResonatorPartialFactorization:
         cb_a = np.sign(rng.standard_normal((8, small_dim))).astype(np.float32)
         cb_b = np.sign(rng.standard_normal((8, small_dim))).astype(np.float32)
 
-        resonator = ResonatorNetwork(
-            codebooks={"a": cb_a, "b": cb_b},
-            max_iterations=20
-        )
+        resonator = ResonatorNetwork(codebooks={"a": cb_a, "b": cb_b}, max_iterations=20)
 
         idx_a, idx_b = 2, 5
         composite = BinaryOps.bind(cb_a[idx_a], cb_b[idx_b])
@@ -241,10 +221,7 @@ class TestResonatorPartialFactorization:
         cb_b = np.sign(rng.standard_normal((6, small_dim))).astype(np.float32)
         cb_c = np.sign(rng.standard_normal((6, small_dim))).astype(np.float32)
 
-        resonator = ResonatorNetwork(
-            codebooks={"a": cb_a, "b": cb_b, "c": cb_c},
-            max_iterations=20
-        )
+        resonator = ResonatorNetwork(codebooks={"a": cb_a, "b": cb_b, "c": cb_c}, max_iterations=20)
 
         idx_a, idx_b, idx_c = 1, 3, 4
         composite = BinaryOps.bind(BinaryOps.bind(cb_a[idx_a], cb_b[idx_b]), cb_c[idx_c])
@@ -274,10 +251,7 @@ class TestResonatorEdgeCases:
 
         codebook = np.sign(rng.standard_normal((1, small_dim))).astype(np.float32)
 
-        resonator = ResonatorNetwork(
-            codebooks={"item": codebook},
-            max_iterations=10
-        )
+        resonator = ResonatorNetwork(codebooks={"item": codebook}, max_iterations=10)
 
         composite = codebook[0].copy()
 
@@ -293,19 +267,13 @@ class TestResonatorEdgeCases:
         cb_a = np.sign(rng.standard_normal((8, small_dim))).astype(np.float32)
         cb_b = np.sign(rng.standard_normal((8, small_dim))).astype(np.float32)
 
-        resonator = ResonatorNetwork(
-            codebooks={"a": cb_a, "b": cb_b},
-            max_iterations=30
-        )
+        resonator = ResonatorNetwork(codebooks={"a": cb_a, "b": cb_b}, max_iterations=30)
 
         idx_a, idx_b = 2, 5
         composite = BinaryOps.bind(cb_a[idx_a], cb_b[idx_b])
 
         # Provide correct initial estimates - should converge quickly
-        init_estimates = {
-            "a": cb_a[idx_a].copy(),
-            "b": cb_b[idx_b].copy()
-        }
+        init_estimates = {"a": cb_a[idx_a].copy(), "b": cb_b[idx_b].copy()}
 
         estimates, indices, iterations = resonator.factorize(composite, init_estimates)
 
@@ -328,10 +296,7 @@ class TestResonatorDeterminism:
         cb_a = np.sign(np.random.randn(8, small_dim)).astype(np.float32)
         cb_b = np.sign(np.random.randn(8, small_dim)).astype(np.float32)
 
-        resonator = ResonatorNetwork(
-            codebooks={"a": cb_a, "b": cb_b},
-            max_iterations=30
-        )
+        resonator = ResonatorNetwork(codebooks={"a": cb_a, "b": cb_b}, max_iterations=30)
 
         idx_a, idx_b = 2, 5
         composite = BinaryOps.bind(cb_a[idx_a], cb_b[idx_b])

@@ -22,7 +22,15 @@ class VulkanCells(BufferMixin):
         self.pipelines = pipelines
         self.shaders = shaders
 
-    def place_cell(self, agent_position, field_centers, field_width=1.0, max_rate=20.0, baseline_rate=0.1, spatial_dims=2):
+    def place_cell(
+        self,
+        agent_position,
+        field_centers,
+        field_width=1.0,
+        max_rate=20.0,
+        baseline_rate=0.1,
+        spatial_dims=2,
+    ):
         """
         Generate place cell firing rates based on agent position
 
@@ -51,24 +59,25 @@ class VulkanCells(BufferMixin):
             self._upload_buffer(buf_centers, centers_flat)
 
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'place-cell', 3, push_constant_size=20
+                "place-cell", 3, push_constant_size=20
             )
 
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'place-cell',
+                "place-cell",
                 [
                     (self._get_buffer_handle(buf_pos), pos.nbytes),
                     (self._get_buffer_handle(buf_centers), centers_flat.nbytes),
-                    (self._get_buffer_handle(buf_rates), n_neurons * 4)
-                ]
+                    (self._get_buffer_handle(buf_rates), n_neurons * 4),
+                ],
             )
 
-            push_constants = struct.pack('IIfff', n_neurons, spatial_dims, field_width, max_rate, baseline_rate)
+            push_constants = struct.pack(
+                "IIfff", n_neurons, spatial_dims, field_width, max_rate, baseline_rate
+            )
 
             workgroups = (n_neurons + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             result = self._download_buffer(buf_rates, n_neurons * 4, np.float32)
@@ -76,7 +85,9 @@ class VulkanCells(BufferMixin):
         finally:
             self._release_buffers([buf_pos, buf_centers, buf_rates])
 
-    def time_cell(self, current_time, preferred_times, time_constant=1.0, max_rate=20.0, baseline_rate=0.1):
+    def time_cell(
+        self, current_time, preferred_times, time_constant=1.0, max_rate=20.0, baseline_rate=0.1
+    ):
         """
         Generate time cell firing rates based on elapsed time
 
@@ -105,25 +116,26 @@ class VulkanCells(BufferMixin):
             self._upload_buffer(buf_prefs, prefs)
 
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'time-cell', 4, push_constant_size=20
+                "time-cell", 4, push_constant_size=20
             )
 
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'time-cell',
+                "time-cell",
                 [
                     (self._get_buffer_handle(buf_time), time_arr.nbytes),
                     (self._get_buffer_handle(buf_prefs), prefs.nbytes),
                     (self._get_buffer_handle(buf_rates), n_neurons * 4),
-                    (self._get_buffer_handle(buf_mem), n_neurons * 4)
-                ]
+                    (self._get_buffer_handle(buf_mem), n_neurons * 4),
+                ],
             )
 
-            push_constants = struct.pack('Iffff', n_neurons, time_constant, max_rate, baseline_rate, 0.0)
+            push_constants = struct.pack(
+                "Iffff", n_neurons, time_constant, max_rate, baseline_rate, 0.0
+            )
 
             workgroups = (n_neurons + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             result = self._download_buffer(buf_rates, n_neurons * 4, np.float32)

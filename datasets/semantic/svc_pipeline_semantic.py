@@ -4,7 +4,7 @@ Converts instruct_55k_clean.jsonl to sentence-level SEMANTIC SVC format
 
 SEMANTIC SVC: Subject = what the sentence is ABOUT (not grammatical subject)
 - Imperatives: "Discuss the challenges" → S="the challenges", V="Discuss"
-- Questions: "What causes rain?" → S="rain", V="causes"  
+- Questions: "What causes rain?" → S="rain", V="causes"
 - Passives: "The ball was kicked" → S="The ball" (already correct)
 - Normal: "Dogs eat food" → S="Dogs", V="eat", C="food"
 """
@@ -24,12 +24,14 @@ print("Loading spaCy model...")
 nlp = spacy.load("en_core_web_sm")
 nlp.max_length = 2000000
 
+
 @dataclass
 class SVCResult:
     subject: str
     verb: str
     complement: str
     valid: bool
+
 
 def extract_svc(doc) -> SVCResult:
     """Extract SEMANTIC Subject-Verb-Complement from a spaCy Doc."""
@@ -95,13 +97,33 @@ def extract_svc(doc) -> SVCResult:
     valid = bool(verb and len(doc) >= 3)
     return SVCResult(subject, verb, complement, valid)
 
+
 def classify_realm(text: str, pos_tags: list) -> str:
     """Simple realm classification based on keywords."""
     text_lower = text.lower()
 
     realms = {
-        "technology": ["computer", "software", "code", "programming", "algorithm", "data", "ai", "machine", "digital"],
-        "science": ["atom", "molecule", "cell", "energy", "physics", "chemistry", "biology", "experiment"],
+        "technology": [
+            "computer",
+            "software",
+            "code",
+            "programming",
+            "algorithm",
+            "data",
+            "ai",
+            "machine",
+            "digital",
+        ],
+        "science": [
+            "atom",
+            "molecule",
+            "cell",
+            "energy",
+            "physics",
+            "chemistry",
+            "biology",
+            "experiment",
+        ],
         "health": ["health", "medical", "disease", "exercise", "diet", "body", "sleep", "doctor"],
         "history": ["war", "century", "king", "empire", "ancient", "historical", "revolution"],
         "nature": ["animal", "plant", "environment", "climate", "ocean", "forest", "species"],
@@ -114,6 +136,7 @@ def classify_realm(text: str, pos_tags: list) -> str:
         if any(kw in text_lower for kw in keywords):
             return realm
     return "general"
+
 
 def compute_complexity(doc) -> float:
     """Compute syntactic complexity score 0-1."""
@@ -128,6 +151,7 @@ def compute_complexity(doc) -> float:
     depth_score = min(avg_depth / 5, 1.0)
 
     return round((length_score + clause_score + depth_score) / 3, 2)
+
 
 def process_sentence(doc, sent_id: str, source: str) -> dict[str, Any] | None:
     """Process a single sentence into lean SVC format."""
@@ -162,19 +186,21 @@ def process_sentence(doc, sent_id: str, source: str) -> dict[str, Any] | None:
         "root_verb": root_verb,
         "realm": classify_realm(doc.text, pos),
         "source": source,
-        "complexity": compute_complexity(doc)
+        "complexity": compute_complexity(doc),
     }
+
 
 def split_into_sentences(text: str) -> Generator[str, None, None]:
     """Split text into clean sentences."""
     doc = nlp(text)
     for sent in doc.sents:
         cleaned = sent.text.strip()
-        if re.match(r'^\d+\.\s*$', cleaned):
+        if re.match(r"^\d+\.\s*$", cleaned):
             continue
         if len(cleaned.split()) < 3:
             continue
         yield cleaned
+
 
 def process_instruct_file(input_path: Path, output_path: Path, max_entries: int = None):
     """Process instruct_55k_clean.jsonl to lean SVC format."""
@@ -182,9 +208,10 @@ def process_instruct_file(input_path: Path, output_path: Path, max_entries: int 
     stats = Counter()
     entry_count = 0
 
-    with open(input_path, encoding='utf-8') as fin, \
-         open(output_path, 'w', encoding='utf-8') as fout:
-
+    with (
+        open(input_path, encoding="utf-8") as fin,
+        open(output_path, "w", encoding="utf-8") as fout,
+    ):
         for line_num, line in enumerate(fin):
             if max_entries and entry_count >= max_entries:
                 break
@@ -192,14 +219,14 @@ def process_instruct_file(input_path: Path, output_path: Path, max_entries: int 
             try:
                 data = json.loads(line)
             except json.JSONDecodeError:
-                stats['json_errors'] += 1
+                stats["json_errors"] += 1
                 continue
 
             texts = []
-            if 'prompt' in data:
-                texts.append(('prompt', data['prompt']))
-            if 'response' in data:
-                texts.append(('response', data['response']))
+            if "prompt" in data:
+                texts.append(("prompt", data["prompt"]))
+            if "response" in data:
+                texts.append(("response", data["response"]))
 
             for text_type, text in texts:
                 for sent_num, sentence in enumerate(split_into_sentences(text)):
@@ -210,22 +237,27 @@ def process_instruct_file(input_path: Path, output_path: Path, max_entries: int 
                         result = process_sentence(sent_doc, sent_id, "instruct")
 
                         if result:
-                            fout.write(json.dumps(result) + '\n')
-                            stats['success'] += 1
+                            fout.write(json.dumps(result) + "\n")
+                            stats["success"] += 1
                             entry_count += 1
                         else:
-                            stats['filtered'] += 1
+                            stats["filtered"] += 1
                     except Exception:
-                        stats['process_errors'] += 1
+                        stats["process_errors"] += 1
 
             if (line_num + 1) % 1000 == 0:
                 print(f"Processed {line_num + 1} entries, {stats['success']} sentences...")
 
     return stats
 
+
 def main():
-    input_path = Path(r"C:\Users\grill\Desktop\GrillCheese\data_learning\jsonl\instruct_55k_clean.jsonl")
-    output_path = Path(r"C:\Users\grill\Desktop\GrillCheese\data_learning\instruct_svc_semantic.jsonl")
+    input_path = Path(
+        r"C:\Users\grill\Desktop\GrillCheese\data_learning\jsonl\instruct_55k_clean.jsonl"
+    )
+    output_path = Path(
+        r"C:\Users\grill\Desktop\GrillCheese\data_learning\instruct_svc_semantic.jsonl"
+    )
 
     print(f"Input: {input_path}")
     print(f"Output: {output_path}")
@@ -239,6 +271,7 @@ def main():
     print(f"Filtered: {stats['filtered']}")
     print(f"Errors: {stats['json_errors'] + stats['process_errors']}")
     print(f"Output: {output_path}")
+
 
 if __name__ == "__main__":
     main()

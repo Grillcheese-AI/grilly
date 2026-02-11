@@ -10,6 +10,7 @@ from .module import Module
 # Try to import Parameter class
 try:
     from .parameter import Parameter as ParameterClass
+
     _PARAMETER_AVAILABLE = True
 except ImportError:
     _PARAMETER_AVAILABLE = False
@@ -32,18 +33,27 @@ class Linear(Module):
 
         # Initialize weights using Xavier initialization (fnn-xavier-init.glsl)
         backend = self._get_backend()
-        if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'xavier_init') and hasattr(backend, 'core') and 'fnn-xavier-init' in backend.core.shaders:
+        if (
+            hasattr(backend, "fnn")
+            and hasattr(backend.fnn, "xavier_init")
+            and hasattr(backend, "core")
+            and "fnn-xavier-init" in backend.core.shaders
+        ):
             try:
                 # Use GPU Xavier init
                 weight_data = backend.fnn.xavier_init(in_features, out_features)
             except Exception:
                 # CPU fallback
                 limit = np.sqrt(6.0 / (in_features + out_features))
-                weight_data = np.random.uniform(-limit, limit, (out_features, in_features)).astype(np.float32)
+                weight_data = np.random.uniform(-limit, limit, (out_features, in_features)).astype(
+                    np.float32
+                )
         else:
             # CPU fallback
             limit = np.sqrt(6.0 / (in_features + out_features))
-            weight_data = np.random.uniform(-limit, limit, (out_features, in_features)).astype(np.float32)
+            weight_data = np.random.uniform(-limit, limit, (out_features, in_features)).astype(
+                np.float32
+            )
 
         # Create Parameter objects (support .grad attribute)
         if _PARAMETER_AVAILABLE and ParameterClass is not None:
@@ -55,47 +65,63 @@ class Linear(Module):
 
                 def __init__(self, data):
                     """Initialize the wrapped parameter array."""
-                    self.data = data.copy() if isinstance(data, np.ndarray) else np.array(data, dtype=np.float32)
+                    self.data = (
+                        data.copy()
+                        if isinstance(data, np.ndarray)
+                        else np.array(data, dtype=np.float32)
+                    )
                     self.grad = None
+
                 def __array__(self):
                     """Expose the wrapped array to numpy operations."""
                     return self.data
+
                 def __getitem__(self, key):
                     """Read parameter slices by index."""
                     return self.data[key]
+
                 def __setitem__(self, key, value):
                     """Write parameter slices by index."""
                     self.data[key] = value
+
                 def __sub__(self, other):
                     """Return elementwise subtraction as a wrapped parameter."""
-                    result = self.data - (other.data if hasattr(other, 'data') else other)
+                    result = self.data - (other.data if hasattr(other, "data") else other)
                     return ParamWrapper(result)
+
                 def __isub__(self, other):
                     """Apply in-place subtraction to the wrapped array."""
-                    self.data -= (other.data if hasattr(other, 'data') else other)
+                    self.data -= other.data if hasattr(other, "data") else other
                     return self
+
                 def copy(self):
                     """Return a copy of the wrapped parameter."""
                     return ParamWrapper(self.data.copy())
+
                 @property
                 def shape(self):
                     """Expose the wrapped array shape."""
                     return self.data.shape
+
                 @property
                 def dtype(self):
                     """Expose the wrapped array dtype."""
                     return self.data.dtype
+
                 def zero_grad(self):
                     """Reset gradients to zeros."""
                     if self.grad is not None:
                         self.grad.fill(0.0)
                     else:
                         self.grad = np.zeros_like(self.data, dtype=np.float32)
+
             self.weight = ParamWrapper(weight_data)
 
         if bias:
             if _PARAMETER_AVAILABLE and ParameterClass is not None:
-                self.bias = ParameterClass(np.zeros(out_features, dtype=np.float32), requires_grad=True)
+                self.bias = ParameterClass(
+                    np.zeros(out_features, dtype=np.float32), requires_grad=True
+                )
             else:
                 # Use same wrapper approach
                 class ParamWrapper:
@@ -103,50 +129,64 @@ class Linear(Module):
 
                     def __init__(self, data):
                         """Initialize the wrapped bias array."""
-                        self.data = data.copy() if isinstance(data, np.ndarray) else np.array(data, dtype=np.float32)
+                        self.data = (
+                            data.copy()
+                            if isinstance(data, np.ndarray)
+                            else np.array(data, dtype=np.float32)
+                        )
                         self.grad = None
+
                     def __array__(self):
                         """Expose the wrapped array to numpy operations."""
                         return self.data
+
                     def __getitem__(self, key):
                         """Read bias entries by index."""
                         return self.data[key]
+
                     def __setitem__(self, key, value):
                         """Write bias entries by index."""
                         self.data[key] = value
+
                     def __sub__(self, other):
                         """Return elementwise subtraction as a wrapped bias."""
-                        result = self.data - (other.data if hasattr(other, 'data') else other)
+                        result = self.data - (other.data if hasattr(other, "data") else other)
                         return ParamWrapper(result)
+
                     def __isub__(self, other):
                         """Apply in-place subtraction to the wrapped bias."""
-                        self.data -= (other.data if hasattr(other, 'data') else other)
+                        self.data -= other.data if hasattr(other, "data") else other
                         return self
+
                     def copy(self):
                         """Return a copy of the wrapped bias."""
                         return ParamWrapper(self.data.copy())
+
                     @property
                     def shape(self):
                         """Expose the wrapped array shape."""
                         return self.data.shape
+
                     @property
                     def dtype(self):
                         """Expose the wrapped array dtype."""
                         return self.data.dtype
+
                     def zero_grad(self):
                         """Reset gradients to zeros."""
                         if self.grad is not None:
                             self.grad.fill(0.0)
                         else:
                             self.grad = np.zeros_like(self.data, dtype=np.float32)
+
                 self.bias = ParamWrapper(np.zeros(out_features, dtype=np.float32))
         else:
             self.bias = None
 
         # Register parameters
-        self.register_parameter('weight', self.weight)
+        self.register_parameter("weight", self.weight)
         if self.bias is not None:
-            self.register_parameter('bias', self.bias)
+            self.register_parameter("bias", self.bias)
 
     def forward(self, x) -> np.ndarray:
         """Forward pass with GEMM fast path if available."""
@@ -155,6 +195,7 @@ class Linear(Module):
         bias = _get_param_array(self.bias) if self.bias is not None else None
 
         from ..utils.tensor_conversion import VulkanTensor
+
         is_vt = isinstance(x, VulkanTensor)
 
         if not is_vt:
@@ -163,10 +204,12 @@ class Linear(Module):
 
         # Use fnn.linear() which handles x @ W^T + bias in a single dispatch
         # without needing a CPU weight transpose copy
-        if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'linear'):
+        if hasattr(backend, "fnn") and hasattr(backend.fnn, "linear"):
             try:
                 return backend.fnn.linear(
-                    x, weight, bias,
+                    x,
+                    weight,
+                    bias,
                     return_gpu_tensor=self._return_gpu_tensor,
                 )
             except Exception:
@@ -199,17 +242,16 @@ class Linear(Module):
         else:
             return out_2d.reshape(b, s, out_features)
 
-
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass using fnn-linear-backward.glsl
-        
+
         Computes gradients and stores them in self.weight.grad and self.bias.grad.
-        
+
         Args:
             grad_output: Gradient w.r.t. output (batch, out_features)
             x: Input from forward pass (batch, in_features)
-        
+
         Returns:
             grad_input: Gradient w.r.t. input (batch, in_features)
         """
@@ -220,7 +262,11 @@ class Linear(Module):
         bias = _get_param_array(self.bias) if self.bias is not None else None
 
         # Try GPU shader if available (2D only; 3D uses CPU for numerical parity)
-        use_gpu = grad_output.ndim == 2 and hasattr(backend, 'fnn') and hasattr(backend.fnn, 'linear_backward')
+        use_gpu = (
+            grad_output.ndim == 2
+            and hasattr(backend, "fnn")
+            and hasattr(backend.fnn, "linear_backward")
+        )
         if use_gpu:
             try:
                 grad_input, grad_weight, grad_bias = backend.fnn.linear_backward(
@@ -229,13 +275,13 @@ class Linear(Module):
 
                 # Store gradients in parameters (from backward pass)
                 if self.weight is not None:
-                    if not hasattr(self.weight, 'grad') or self.weight.grad is None:
+                    if not hasattr(self.weight, "grad") or self.weight.grad is None:
                         self.weight.grad = grad_weight
                     else:
                         self.weight.grad += grad_weight
 
                 if self.bias is not None and grad_bias is not None:
-                    if not hasattr(self.bias, 'grad') or self.bias.grad is None:
+                    if not hasattr(self.bias, "grad") or self.bias.grad is None:
                         self.bias.grad = grad_bias
                     else:
                         self.bias.grad += grad_bias
@@ -247,7 +293,6 @@ class Linear(Module):
         # CPU fallback
         # Handle both 2D and 3D inputs
         grad_output_shape = grad_output.shape
-        x_shape = x.shape
 
         # Flatten to 2D for gradient computation
         if grad_output.ndim == 3:
@@ -270,13 +315,13 @@ class Linear(Module):
 
         # Store gradients in parameters (from backward pass)
         if self.weight is not None:
-            if not hasattr(self.weight, 'grad') or self.weight.grad is None:
+            if not hasattr(self.weight, "grad") or self.weight.grad is None:
                 self.weight.grad = grad_weight
             else:
                 self.weight.grad += grad_weight
 
         if self.bias is not None and grad_bias is not None:
-            if not hasattr(self.bias, 'grad') or self.bias.grad is None:
+            if not hasattr(self.bias, "grad") or self.bias.grad is None:
                 self.bias.grad = grad_bias
             else:
                 self.bias.grad += grad_bias
@@ -303,10 +348,10 @@ def _get_param_array(param) -> np.ndarray:
     if isinstance(param, np.ndarray):
         # Parameter is a numpy subclass, or plain numpy array
         return param
-    elif hasattr(param, 'data') and not isinstance(param.data, memoryview):
+    elif hasattr(param, "data") and not isinstance(param.data, memoryview):
         # ParamWrapper with .data as numpy array
         return param.data
-    elif hasattr(param, '__array__'):
+    elif hasattr(param, "__array__"):
         # Has __array__ method
         return np.asarray(param)
     else:
@@ -318,6 +363,7 @@ def _create_param_wrapper(data: np.ndarray):
     if _PARAMETER_AVAILABLE and ParameterClass is not None:
         return ParameterClass(data, requires_grad=True)
     else:
+
         class ParamWrapper:
             """Fallback parameter wrapper used when Parameter is unavailable."""
 
@@ -326,52 +372,63 @@ def _create_param_wrapper(data: np.ndarray):
                 # Ensure data is a numpy array
                 if isinstance(data, np.ndarray):
                     self.data = data.copy()
-                elif hasattr(data, '__array__'):
+                elif hasattr(data, "__array__"):
                     self.data = np.array(data, dtype=np.float32)
                 else:
                     self.data = np.array(data, dtype=np.float32)
                 # Ensure it's contiguous and writable
-                if not self.data.flags['C_CONTIGUOUS']:
+                if not self.data.flags["C_CONTIGUOUS"]:
                     self.data = np.ascontiguousarray(self.data)
                 self.grad = None
+
             def __array__(self):
                 """Expose the wrapped array to numpy operations."""
                 return self.data
+
             def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
                 """Delegate numpy ufuncs to the wrapped array."""
                 # Delegate to numpy
                 return getattr(ufunc, method)(*inputs, **kwargs)
+
             def __getitem__(self, key):
                 """Read wrapped values by index."""
                 return self.data[key]
+
             def __setitem__(self, key, value):
                 """Write wrapped values by index."""
                 self.data[key] = value
+
             def __sub__(self, other):
                 """Return elementwise subtraction as a wrapped value."""
-                result = self.data - (other.data if hasattr(other, 'data') else other)
+                result = self.data - (other.data if hasattr(other, "data") else other)
                 return ParamWrapper(result)
+
             def __isub__(self, other):
                 """Apply in-place subtraction to wrapped values."""
-                self.data -= (other.data if hasattr(other, 'data') else other)
+                self.data -= other.data if hasattr(other, "data") else other
                 return self
+
             def copy(self):
                 """Return a copy of the wrapped parameter."""
                 return ParamWrapper(self.data.copy())
+
             @property
             def shape(self):
                 """Expose the wrapped array shape."""
                 return self.data.shape
+
             @property
             def dtype(self):
                 """Expose the wrapped array dtype."""
                 return self.data.dtype
+
             def zero_grad(self):
                 """Reset gradients to zeros."""
                 if self.grad is not None:
                     self.grad.fill(0.0)
                 else:
                     self.grad = np.zeros_like(self.data, dtype=np.float32)
+
         return ParamWrapper(data)
 
 
@@ -393,8 +450,8 @@ class LayerNorm(Module):
         self.bias = _create_param_wrapper(np.zeros(normalized_shape, dtype=np.float32))
 
         # Register parameters
-        self.register_parameter('weight', self.weight)
-        self.register_parameter('bias', self.bias)
+        self.register_parameter("weight", self.weight)
+        self.register_parameter("bias", self.bias)
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using fnn-layernorm.glsl"""
@@ -406,18 +463,18 @@ class LayerNorm(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for LayerNorm.
-        
+
         LayerNorm: y = (x - mean) / sqrt(var + eps) * weight + bias
-        
+
         Gradients:
         - grad_weight = sum(grad_output * normalized_x, dim=normalized_dims)
         - grad_bias = sum(grad_output, dim=normalized_dims)
         - grad_input = grad_output * weight / sqrt(var + eps) - mean(grad_output * weight) / N - normalized_x * mean(grad_output * weight * normalized_x) / N
-        
+
         Args:
             grad_output: Gradient w.r.t. output (same shape as x)
             x: Input from forward pass (required for LayerNorm backward)
-        
+
         Returns:
             grad_input: Gradient w.r.t. input (same shape as x)
         """
@@ -438,14 +495,14 @@ class LayerNorm(Module):
 
         if self.weight is not None:
             grad_weight = np.sum(grad_output * normalized_x, axis=reduce_dims)
-            if not hasattr(self.weight, 'grad') or self.weight.grad is None:
+            if not hasattr(self.weight, "grad") or self.weight.grad is None:
                 self.weight.grad = grad_weight
             else:
                 self.weight.grad += grad_weight
 
         if self.bias is not None:
             grad_bias = np.sum(grad_output, axis=reduce_dims)
-            if not hasattr(self.bias, 'grad') or self.bias.grad is None:
+            if not hasattr(self.bias, "grad") or self.bias.grad is None:
                 self.bias.grad = grad_bias
             else:
                 self.bias.grad += grad_bias
@@ -453,7 +510,7 @@ class LayerNorm(Module):
         # Compute gradient w.r.t. input
         # grad_input = (grad_output * weight) / std - mean((grad_output * weight) / std) / N
         #            - normalized_x * mean((grad_output * weight) * normalized_x) / N
-        N = x.shape[-1]
+        x.shape[-1]
         grad_weighted = grad_output * weight
         grad_scaled = grad_weighted / std
 
@@ -496,7 +553,7 @@ class Dropout(Module):
             return x
 
         backend = self._get_backend()
-        if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'dropout'):
+        if hasattr(backend, "fnn") and hasattr(backend.fnn, "dropout"):
             try:
                 # GPU dropout - need to get mask for backward pass
                 # For now, use CPU to get mask, then apply
@@ -515,14 +572,14 @@ class Dropout(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for Dropout.
-        
+
         Dropout: y = x * mask / (1 - p) during training
         Gradient: grad_input = grad_output * mask / (1 - p)
-        
+
         Args:
             grad_output: Gradient w.r.t. output
             x: Input from forward pass (not used, but kept for API consistency)
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
@@ -565,11 +622,11 @@ class ReLU(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for ReLU.
-        
+
         Args:
             grad_output: Gradient w.r.t. output
             x: Input from forward pass
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
@@ -596,11 +653,11 @@ class GELU(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for GELU.
-        
+
         Args:
             grad_output: Gradient w.r.t. output
             x: Input from forward pass (required for GELU backward)
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
@@ -610,7 +667,7 @@ class GELU(Module):
         # GELU backward: d/dx GELU(x) = 0.5 * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3))) +
         #                 0.5 * x * (1 - tanh^2(...)) * sqrt(2/pi) * (1 + 3 * 0.044715 * x^2)
         backend = self._get_backend()
-        if hasattr(backend, 'activation_gelu_backward'):
+        if hasattr(backend, "activation_gelu_backward"):
             try:
                 return backend.activation_gelu_backward(grad_output, x)
             except Exception:
@@ -619,10 +676,12 @@ class GELU(Module):
         # CPU fallback
         sqrt_2_pi = np.sqrt(2.0 / np.pi)
         coeff = 0.044715
-        x_cubed = x ** 3
+        x_cubed = x**3
         inner = sqrt_2_pi * (x + coeff * x_cubed)
         tanh_inner = np.tanh(inner)
-        gelu_grad = 0.5 * (1.0 + tanh_inner) + 0.5 * x * (1.0 - tanh_inner ** 2) * sqrt_2_pi * (1.0 + 3.0 * coeff * x ** 2)
+        gelu_grad = 0.5 * (1.0 + tanh_inner) + 0.5 * x * (1.0 - tanh_inner**2) * sqrt_2_pi * (
+            1.0 + 3.0 * coeff * x**2
+        )
         return grad_output * gelu_grad
 
     def __repr__(self):
@@ -645,11 +704,11 @@ class SiLU(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for SiLU.
-        
+
         Args:
             grad_output: Gradient w.r.t. output
             x: Input from forward pass
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
@@ -721,7 +780,9 @@ class RoSwish(Module):
 
         if learnable and _PARAMETER_AVAILABLE and ParameterClass is not None:
             # Create learnable parameters
-            self.alpha = ParameterClass(np.array([alpha_init], dtype=np.float32), requires_grad=True)
+            self.alpha = ParameterClass(
+                np.array([alpha_init], dtype=np.float32), requires_grad=True
+            )
             self.beta = ParameterClass(np.array([beta_init], dtype=np.float32), requires_grad=True)
         else:
             # Fixed parameters
@@ -733,8 +794,8 @@ class RoSwish(Module):
         backend = self._get_backend()
 
         # Extract scalar values from parameters
-        alpha_val = float(self.alpha[0] if hasattr(self.alpha, '__getitem__') else self.alpha)
-        beta_val = float(self.beta[0] if hasattr(self.beta, '__getitem__') else self.beta)
+        alpha_val = float(self.alpha[0] if hasattr(self.alpha, "__getitem__") else self.alpha)
+        beta_val = float(self.beta[0] if hasattr(self.beta, "__getitem__") else self.beta)
 
         return backend.activation_roswish(x, alpha=alpha_val, beta=beta_val)
 
@@ -752,13 +813,15 @@ class RoSwish(Module):
         backend = self._get_backend()
 
         # Extract scalar values
-        alpha_val = float(self.alpha[0] if hasattr(self.alpha, '__getitem__') else self.alpha)
-        beta_val = float(self.beta[0] if hasattr(self.beta, '__getitem__') else self.beta)
+        alpha_val = float(self.alpha[0] if hasattr(self.alpha, "__getitem__") else self.alpha)
+        beta_val = float(self.beta[0] if hasattr(self.beta, "__getitem__") else self.beta)
 
-        grad_input = backend.activation_roswish_backward(grad_output, x, alpha=alpha_val, beta=beta_val)
+        grad_input = backend.activation_roswish_backward(
+            grad_output, x, alpha=alpha_val, beta=beta_val
+        )
 
         # Compute gradients w.r.t. parameters if learnable
-        if self.learnable and hasattr(self.alpha, 'grad'):
+        if self.learnable and hasattr(self.alpha, "grad"):
             # d/dα RoSwish = sigmoid(β*x) - 0.5
             # d/dβ RoSwish = (x + α) * x * sigmoid(β*x) * (1 - sigmoid(β*x))
             beta_x = beta_val * x
@@ -783,8 +846,8 @@ class RoSwish(Module):
     def __repr__(self):
         """Return a debug representation."""
 
-        alpha_val = float(self.alpha[0] if hasattr(self.alpha, '__getitem__') else self.alpha)
-        beta_val = float(self.beta[0] if hasattr(self.beta, '__getitem__') else self.beta)
+        alpha_val = float(self.alpha[0] if hasattr(self.alpha, "__getitem__") else self.alpha)
+        beta_val = float(self.beta[0] if hasattr(self.beta, "__getitem__") else self.beta)
         return f"RoSwish(alpha={alpha_val:.3f}, beta={beta_val:.3f}, learnable={self.learnable})"
 
 
@@ -858,17 +921,19 @@ class Softmax(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for Softmax.
-        
+
         Args:
             grad_output: Gradient w.r.t. output
             x: Input from forward pass
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
         # Softmax backward: grad_input = softmax(x) * (grad_output - sum(grad_output * softmax(x)))
         softmax_x = self.forward(x)
-        grad_input = softmax_x * (grad_output - np.sum(grad_output * softmax_x, axis=self.dim, keepdims=True))
+        grad_input = softmax_x * (
+            grad_output - np.sum(grad_output * softmax_x, axis=self.dim, keepdims=True)
+        )
         return grad_input
 
     def __repr__(self):
@@ -886,7 +951,7 @@ class Softplus(Module):
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using activation-softplus.glsl"""
         backend = self._get_backend()
-        if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'activation_softplus'):
+        if hasattr(backend, "fnn") and hasattr(backend.fnn, "activation_softplus"):
             try:
                 return backend.fnn.activation_softplus(x)
             except Exception:
@@ -898,11 +963,11 @@ class Softplus(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for Softplus.
-        
+
         Args:
             grad_output: Gradient w.r.t. output
             x: Input from forward pass
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
@@ -934,14 +999,14 @@ class Embedding(Module):
         self.weight = _create_param_wrapper(embedding_data)
 
         # Register parameter
-        self.register_parameter('weight', self.weight)
+        self.register_parameter("weight", self.weight)
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using embedding-lookup.glsl"""
         backend = self._get_backend()
         weight = _get_param_array(self.weight)
 
-        if hasattr(backend, 'learning') and hasattr(backend.learning, 'embedding_lookup'):
+        if hasattr(backend, "learning") and hasattr(backend.learning, "embedding_lookup"):
             try:
                 return backend.learning.embedding_lookup(x, weight)
             except Exception:
@@ -955,11 +1020,11 @@ class Embedding(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for Embedding.
-        
+
         Args:
             grad_output: Gradient w.r.t. output (batch, seq_len, embedding_dim)
             x: Input token IDs (batch, seq_len)
-        
+
         Returns:
             grad_input: Gradient w.r.t. input (usually None for embedding indices)
         """
@@ -971,14 +1036,14 @@ class Embedding(Module):
             backend = self._get_backend()
 
             # Try GPU-accelerated backward if available
-            if hasattr(backend, 'learning') and hasattr(backend.learning, 'embedding_backward'):
+            if hasattr(backend, "learning") and hasattr(backend.learning, "embedding_backward"):
                 try:
                     grad_weight = backend.learning.embedding_backward(
                         grad_output, x, self.num_embeddings, self.embedding_dim
                     )
 
                     # Store gradients in parameter
-                    if not hasattr(self.weight, 'grad') or self.weight.grad is None:
+                    if not hasattr(self.weight, "grad") or self.weight.grad is None:
                         self.weight.grad = grad_weight
                     else:
                         self.weight.grad += grad_weight
@@ -998,7 +1063,7 @@ class Embedding(Module):
                 if 0 <= token_id < self.num_embeddings:
                     grad_weight[int(token_id)] += grad_flat[i]
 
-            if not hasattr(self.weight, 'grad') or self.weight.grad is None:
+            if not hasattr(self.weight, "grad") or self.weight.grad is None:
                 self.weight.grad = grad_weight
             else:
                 self.weight.grad += grad_weight
@@ -1009,13 +1074,15 @@ class Embedding(Module):
     def __repr__(self):
         """Return a debug representation."""
 
-        return f"Embedding(num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim})"
+        return (
+            f"Embedding(num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim})"
+        )
 
 
 _FUSED_ACTIVATION_MAP = {
-    'ReLU': 'fused_linear_relu',
-    'GELU': 'fused_linear_gelu',
-    'SiLU': 'fused_linear_silu',
+    "ReLU": "fused_linear_relu",
+    "GELU": "fused_linear_gelu",
+    "SiLU": "fused_linear_silu",
 }
 
 
@@ -1054,10 +1121,10 @@ class Sequential(Module):
                 and type(modules_list[i + 1]).__name__ in _FUSED_ACTIVATION_MAP
             ):
                 method_name = _FUSED_ACTIVATION_MAP[type(modules_list[i + 1]).__name__]
-                plan.append(('fuse', i, i + 1, method_name))
+                plan.append(("fuse", i, i + 1, method_name))
                 i += 2
             else:
-                plan.append(('run', i))
+                plan.append(("run", i))
                 i += 1
         return plan
 
@@ -1070,13 +1137,13 @@ class Sequential(Module):
 
         # Lazily compute fusion plan (invalidated if modules change)
         if self._fusion_plan is None or len(modules_list) != sum(
-            2 if s[0] == 'fuse' else 1 for s in self._fusion_plan
+            2 if s[0] == "fuse" else 1 for s in self._fusion_plan
         ):
             self._fusion_plan = self._compute_fusion_plan()
 
         current = x
         for step in self._fusion_plan:
-            if step[0] == 'fuse':
+            if step[0] == "fuse":
                 _, lin_idx, act_idx, method_name = step
                 linear_mod = modules_list[lin_idx]
                 weight = _get_param_array(linear_mod.weight)
@@ -1086,7 +1153,9 @@ class Sequential(Module):
                 if fused_fn is not None:
                     try:
                         current = fused_fn(
-                            current, weight, bias,
+                            current,
+                            weight,
+                            bias,
                             return_gpu_tensor=linear_mod._return_gpu_tensor,
                         )
                         # Push two entries for backward indexing consistency
@@ -1110,13 +1179,13 @@ class Sequential(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass through all modules in reverse order.
-        
+
         Uses cached activations from forward pass.
-        
+
         Args:
             grad_output: Gradient w.r.t. output
             x: Original input (optional, uses cached if available)
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
@@ -1134,9 +1203,9 @@ class Sequential(Module):
         for i in range(len(modules_list) - 1, -1, -1):
             module = modules_list[i]
             module_input = self._cached_activations[i]  # Input to module i
-            module_output = self._cached_activations[i + 1]  # Output of module i
+            self._cached_activations[i + 1]  # Output of module i
 
-            if hasattr(module, 'backward'):
+            if hasattr(module, "backward"):
                 try:
                     # Pass both input and output for backward (some modules need both)
                     grad = module.backward(grad, module_input)
@@ -1152,7 +1221,7 @@ class Sequential(Module):
     def __repr__(self):
         """Return a debug representation."""
 
-        modules_str = ',\n  '.join([str(m) for m in self._modules.values()])
+        modules_str = ",\n  ".join([str(m) for m in self._modules.values()])
         return f"Sequential(\n  {modules_str}\n)"
 
 
@@ -1167,7 +1236,7 @@ class Residual(Module):
 
         super().__init__()
         self.module = module
-        self._modules['module'] = module
+        self._modules["module"] = module
         self._cached_input = None
         self._cached_module_output = None
 
@@ -1181,7 +1250,7 @@ class Residual(Module):
         self._cached_module_output = module_out
 
         # Try GPU shader if available
-        if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'residual'):
+        if hasattr(backend, "fnn") and hasattr(backend.fnn, "residual"):
             try:
                 return backend.fnn.residual(x, module_out)
             except Exception:
@@ -1193,14 +1262,14 @@ class Residual(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for Residual.
-        
+
         Residual: output = input + module(input)
         Gradient: grad_input = grad_output + grad_module(input)
-        
+
         Args:
             grad_output: Gradient w.r.t. output
             x: Input from forward pass (optional, uses cached if available)
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
@@ -1212,7 +1281,7 @@ class Residual(Module):
 
         # Residual backward: grad_input = grad_output + grad_module
         # The gradient flows through both the residual connection and the module
-        if hasattr(self.module, 'backward'):
+        if hasattr(self.module, "backward"):
             try:
                 grad_module = self.module.backward(grad_output, x)
                 return grad_output + grad_module
@@ -1243,7 +1312,9 @@ class MultiheadAttention(Module):
         self.dropout = dropout
 
         if embed_dim % num_heads != 0:
-            raise ValueError(f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})")
+            raise ValueError(
+                f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})"
+            )
 
         # Create projection layers
         self.q_proj = Linear(embed_dim, embed_dim)
@@ -1251,10 +1322,10 @@ class MultiheadAttention(Module):
         self.v_proj = Linear(embed_dim, embed_dim)
         self.out_proj = Linear(embed_dim, embed_dim)
 
-        self._modules['q_proj'] = self.q_proj
-        self._modules['k_proj'] = self.k_proj
-        self._modules['v_proj'] = self.v_proj
-        self._modules['out_proj'] = self.out_proj
+        self._modules["q_proj"] = self.q_proj
+        self._modules["k_proj"] = self.k_proj
+        self._modules["v_proj"] = self.v_proj
+        self._modules["out_proj"] = self.out_proj
 
         # Initialize cached values for backward pass
         self._cached_query = None
@@ -1268,17 +1339,18 @@ class MultiheadAttention(Module):
         self._cached_scores_pre_softmax = None
         self._cached_attn_output = None
 
-    def forward(self, query: np.ndarray, key: np.ndarray, value: np.ndarray,
-                mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    def forward(
+        self, query: np.ndarray, key: np.ndarray, value: np.ndarray, mask: np.ndarray | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Forward pass for multi-head attention.
-        
+
         Args:
             query: Query tensor (batch, seq_len_q, embed_dim)
             key: Key tensor (batch, seq_len_k, embed_dim)
             value: Value tensor (batch, seq_len_k, embed_dim)
             mask: Optional attention mask
-        
+
         Returns:
             (output, attention_weights)
         """
@@ -1326,11 +1398,16 @@ class MultiheadAttention(Module):
             scores = scores.transpose(0, 2, 1, 3)
         elif scores.shape != (batch_size, self.num_heads, seq_len_q, seq_len_k):
             # Unexpected shape - try to infer
-            if scores.ndim == 4 and scores.size == batch_size * self.num_heads * seq_len_q * seq_len_k:
+            if (
+                scores.ndim == 4
+                and scores.size == batch_size * self.num_heads * seq_len_q * seq_len_k
+            ):
                 scores = scores.reshape(batch_size, self.num_heads, seq_len_q, seq_len_k)
             else:
                 # Fallback: compute manually
-                scores = np.einsum('bhqd,bhkd->bhqk', q_reshaped, k_reshaped) / np.sqrt(self.head_dim)
+                scores = np.einsum("bhqd,bhkd->bhqk", q_reshaped, k_reshaped) / np.sqrt(
+                    self.head_dim
+                )
 
         # Cache pre-softmax scores for backward
         self._cached_scores_pre_softmax = scores.copy()
@@ -1352,13 +1429,15 @@ class MultiheadAttention(Module):
         # scores_softmax: (batch, num_heads, seq_len_q, seq_len_k)
         # v_reshaped: (batch, num_heads, seq_len_k, head_dim)
         # Output: (batch, num_heads, seq_len_q, head_dim)
-        attn_output = np.einsum('bhqk,bhkd->bhqd', scores_softmax, v_reshaped)
+        attn_output = np.einsum("bhqk,bhkd->bhqd", scores_softmax, v_reshaped)
 
         # Cache attention output for backward (in shape: batch, num_heads, seq_len_q, head_dim)
         self._cached_attn_output = attn_output.copy()
 
         # Reshape back: (batch, num_heads, seq_len_q, head_dim) -> (batch, seq_len_q, embed_dim)
-        attn_output_reshaped = attn_output.transpose(0, 2, 1, 3).reshape(batch_size, seq_len_q, self.embed_dim)
+        attn_output_reshaped = attn_output.transpose(0, 2, 1, 3).reshape(
+            batch_size, seq_len_q, self.embed_dim
+        )
         attn_weights = scores_softmax
 
         # Project output
@@ -1366,22 +1445,27 @@ class MultiheadAttention(Module):
 
         return output, attn_weights
 
-    def backward(self, grad_output: np.ndarray, query: np.ndarray = None,
-                 key: np.ndarray = None, value: np.ndarray = None,
-                 mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def backward(
+        self,
+        grad_output: np.ndarray,
+        query: np.ndarray = None,
+        key: np.ndarray = None,
+        value: np.ndarray = None,
+        mask: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Backward pass for multi-head attention.
-        
+
         Attention: output = softmax(Q @ K^T / sqrt(d)) @ V
         Then: final_output = out_proj(attention_output)
-        
+
         Args:
             grad_output: Gradient w.r.t. output (batch, seq_len_q, embed_dim)
             query: Query tensor (optional, uses cached if available)
             key: Key tensor (optional, uses cached if available)
             value: Value tensor (optional, uses cached if available)
             mask: Optional attention mask (optional, uses cached if available)
-        
+
         Returns:
             (grad_query, grad_key, grad_value)
         """
@@ -1396,11 +1480,12 @@ class MultiheadAttention(Module):
             mask = self._cached_mask
 
         if query is None or key is None or value is None:
-            raise ValueError("Query, key, and value are required for MultiheadAttention backward pass")
+            raise ValueError(
+                "Query, key, and value are required for MultiheadAttention backward pass"
+            )
 
         # Get cached intermediate values
         scores = self._cached_scores  # (batch, num_heads, seq_len_q, seq_len_k)
-        attn_output = self._cached_attn_output  # (batch, num_heads, seq_len_q, head_dim)
         q = self._cached_q  # (batch, seq_len_q, embed_dim)
         k = self._cached_k  # (batch, seq_len_k, embed_dim)
         v = self._cached_v  # (batch, seq_len_k, embed_dim)
@@ -1411,13 +1496,15 @@ class MultiheadAttention(Module):
         # Step 1: Backward through output projection
         # _cached_attn_output is (batch, num_heads, seq_len_q, head_dim)
         # Need to reshape to (batch, seq_len_q, embed_dim) for out_proj backward
-        attn_output_for_proj = self._cached_attn_output.transpose(0, 2, 1, 3).reshape(batch_size, seq_len_q, self.embed_dim)
+        attn_output_for_proj = self._cached_attn_output.transpose(0, 2, 1, 3).reshape(
+            batch_size, seq_len_q, self.embed_dim
+        )
 
         # Flatten batch and seq_len for Linear backward: (batch * seq_len, embed_dim)
         grad_output_flat = grad_output.reshape(-1, self.embed_dim)
         attn_output_flat = attn_output_for_proj.reshape(-1, self.embed_dim)
 
-        if hasattr(self.out_proj, 'backward'):
+        if hasattr(self.out_proj, "backward"):
             grad_attn_output_flat = self.out_proj.backward(grad_output_flat, attn_output_flat)
             grad_attn_output = grad_attn_output_flat.reshape(batch_size, seq_len_q, self.embed_dim)
         else:
@@ -1426,18 +1513,26 @@ class MultiheadAttention(Module):
             grad_attn_output = grad_output @ weight.T
 
         # Reshape grad_attn_output: (batch, seq_len_q, embed_dim) -> (batch, num_heads, seq_len_q, head_dim)
-        grad_attn_output = grad_attn_output.reshape(batch_size, seq_len_q, self.num_heads, self.head_dim)
-        grad_attn_output = grad_attn_output.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len_q, head_dim)
+        grad_attn_output = grad_attn_output.reshape(
+            batch_size, seq_len_q, self.num_heads, self.head_dim
+        )
+        grad_attn_output = grad_attn_output.transpose(
+            0, 2, 1, 3
+        )  # (batch, num_heads, seq_len_q, head_dim)
 
         # Reshape V for backward: (batch, seq_len_k, embed_dim) -> (batch, num_heads, seq_len_k, head_dim)
-        v_reshaped = v.reshape(batch_size, seq_len_k, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        v_reshaped = v.reshape(batch_size, seq_len_k, self.num_heads, self.head_dim).transpose(
+            0, 2, 1, 3
+        )
 
         # Step 2: Backward through attention output: grad_V and grad_scores
         # grad_V = scores^T @ grad_attn_output
         # grad_scores = grad_attn_output @ V^T
         # v_reshaped: (batch, num_heads, seq_len_k, head_dim) -> transpose to (batch, num_heads, head_dim, seq_len_k)
         v_reshaped_T = v_reshaped.transpose(0, 1, 3, 2)  # (batch, num_heads, head_dim, seq_len_k)
-        grad_scores = np.matmul(grad_attn_output, v_reshaped_T)  # (batch, num_heads, seq_len_q, seq_len_k)
+        grad_scores = np.matmul(
+            grad_attn_output, v_reshaped_T
+        )  # (batch, num_heads, seq_len_q, seq_len_k)
 
         # scores: (batch, num_heads, seq_len_q, seq_len_k) -> transpose to (batch, num_heads, seq_len_k, seq_len_q)
         scores_T = scores.transpose(0, 1, 3, 2)  # (batch, num_heads, seq_len_k, seq_len_q)
@@ -1456,20 +1551,34 @@ class MultiheadAttention(Module):
         scale = 1.0 / np.sqrt(self.head_dim)
 
         # Reshape Q and K for backward
-        q_reshaped = q.reshape(batch_size, seq_len_q, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        k_reshaped = k.reshape(batch_size, seq_len_k, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        q_reshaped = q.reshape(batch_size, seq_len_q, self.num_heads, self.head_dim).transpose(
+            0, 2, 1, 3
+        )
+        k_reshaped = k.reshape(batch_size, seq_len_k, self.num_heads, self.head_dim).transpose(
+            0, 2, 1, 3
+        )
 
         # grad_pre_softmax: (batch, num_heads, seq_len_q, seq_len_k)
         # k_reshaped: (batch, num_heads, seq_len_k, head_dim)
-        grad_q_reshaped = np.matmul(grad_pre_softmax, k_reshaped) * scale  # (batch, num_heads, seq_len_q, head_dim)
+        grad_q_reshaped = (
+            np.matmul(grad_pre_softmax, k_reshaped) * scale
+        )  # (batch, num_heads, seq_len_q, head_dim)
 
         # grad_pre_softmax^T: (batch, num_heads, seq_len_k, seq_len_q)
-        grad_pre_softmax_T = grad_pre_softmax.transpose(0, 1, 3, 2)  # (batch, num_heads, seq_len_k, seq_len_q)
-        grad_k_reshaped = np.matmul(grad_pre_softmax_T, q_reshaped) * scale  # (batch, num_heads, seq_len_k, head_dim)
+        grad_pre_softmax_T = grad_pre_softmax.transpose(
+            0, 1, 3, 2
+        )  # (batch, num_heads, seq_len_k, seq_len_q)
+        grad_k_reshaped = (
+            np.matmul(grad_pre_softmax_T, q_reshaped) * scale
+        )  # (batch, num_heads, seq_len_k, head_dim)
 
         # Reshape back: (batch, num_heads, seq_len, head_dim) -> (batch, seq_len, embed_dim)
-        grad_q = grad_q_reshaped.transpose(0, 2, 1, 3).reshape(batch_size, seq_len_q, self.embed_dim)
-        grad_k = grad_k_reshaped.transpose(0, 2, 1, 3).reshape(batch_size, seq_len_k, self.embed_dim)
+        grad_q = grad_q_reshaped.transpose(0, 2, 1, 3).reshape(
+            batch_size, seq_len_q, self.embed_dim
+        )
+        grad_k = grad_k_reshaped.transpose(0, 2, 1, 3).reshape(
+            batch_size, seq_len_k, self.embed_dim
+        )
         grad_v = grad_v.transpose(0, 2, 1, 3).reshape(batch_size, seq_len_k, self.embed_dim)
 
         # Step 5: Backward through Q, K, V projections
@@ -1481,19 +1590,19 @@ class MultiheadAttention(Module):
         key_flat = key.reshape(-1, self.embed_dim)
         value_flat = value.reshape(-1, self.embed_dim)
 
-        if hasattr(self.q_proj, 'backward'):
+        if hasattr(self.q_proj, "backward"):
             grad_query_flat = self.q_proj.backward(grad_q_flat, query_flat)
             grad_query = grad_query_flat.reshape(batch_size, seq_len_q, self.embed_dim)
         else:
             grad_query = grad_q
 
-        if hasattr(self.k_proj, 'backward'):
+        if hasattr(self.k_proj, "backward"):
             grad_key_flat = self.k_proj.backward(grad_k_flat, key_flat)
             grad_key = grad_key_flat.reshape(batch_size, seq_len_k, self.embed_dim)
         else:
             grad_key = grad_k
 
-        if hasattr(self.v_proj, 'backward'):
+        if hasattr(self.v_proj, "backward"):
             grad_value_flat = self.v_proj.backward(grad_v_flat, value_flat)
             grad_value = grad_value_flat.reshape(batch_size, seq_len_k, self.embed_dim)
         else:
@@ -1523,7 +1632,9 @@ class FlashAttention2(Module):
         self.use_rope = use_rope
 
         if embed_dim % num_heads != 0:
-            raise ValueError(f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})")
+            raise ValueError(
+                f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})"
+            )
 
         # Initialize cached values for backward pass
         self._cached_q = None
@@ -1532,17 +1643,18 @@ class FlashAttention2(Module):
         self._cached_mask = None
         self._cached_output = None
 
-    def forward(self, q: np.ndarray, k: np.ndarray, v: np.ndarray,
-                mask: np.ndarray | None = None) -> np.ndarray:
+    def forward(
+        self, q: np.ndarray, k: np.ndarray, v: np.ndarray, mask: np.ndarray | None = None
+    ) -> np.ndarray:
         """
         Forward pass using Flash Attention 2.
-        
+
         Args:
             q: Query (batch, seq_len, num_heads, head_dim) or (batch, seq_len, embed_dim)
             k: Key (batch, seq_len, num_heads, head_dim) or (batch, seq_len, embed_dim)
             v: Value (batch, seq_len, num_heads, head_dim) or (batch, seq_len, embed_dim)
             mask: Optional attention mask
-        
+
         Returns:
             Output tensor (batch, seq_len, num_heads, head_dim) or (batch, seq_len, embed_dim)
         """
@@ -1561,7 +1673,7 @@ class FlashAttention2(Module):
             v = v.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
 
         backend = self._get_backend()
-        if hasattr(backend, 'flash_attention2'):
+        if hasattr(backend, "flash_attention2"):
             try:
                 output = backend.flash_attention2(q, k, v, mask=mask, use_rope=self.use_rope)
                 self._cached_output = output.copy()
@@ -1580,7 +1692,7 @@ class FlashAttention2(Module):
 
         # Compute attention scores: Q @ K^T / sqrt(head_dim)
         scale = 1.0 / np.sqrt(self.head_dim)
-        scores = np.einsum('bhqd,bhkd->bhqk', q_reshaped, k_reshaped) * scale
+        scores = np.einsum("bhqd,bhkd->bhqk", q_reshaped, k_reshaped) * scale
 
         # Apply mask if provided
         if mask is not None:
@@ -1598,7 +1710,7 @@ class FlashAttention2(Module):
         scores_softmax = scores_exp / scores_exp.sum(axis=-1, keepdims=True)
 
         # Compute attention output: scores @ V
-        output = np.einsum('bhqk,bhkd->bhqd', scores_softmax, v_reshaped)
+        output = np.einsum("bhqk,bhkd->bhqd", scores_softmax, v_reshaped)
 
         # Reshape back: (batch, num_heads, seq_len, head_dim) -> (batch, seq_len, num_heads, head_dim)
         output = output.transpose(0, 2, 1, 3)
@@ -1606,22 +1718,27 @@ class FlashAttention2(Module):
         self._cached_output = output.copy()
         return output
 
-    def backward(self, grad_output: np.ndarray, q: np.ndarray = None,
-                 k: np.ndarray = None, v: np.ndarray = None,
-                 mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def backward(
+        self,
+        grad_output: np.ndarray,
+        q: np.ndarray = None,
+        k: np.ndarray = None,
+        v: np.ndarray = None,
+        mask: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Backward pass for Flash Attention 2.
-        
+
         FlashAttention2 uses the same mathematical operations as standard attention,
         so the backward pass is similar to MultiheadAttention backward.
-        
+
         Args:
             grad_output: Gradient w.r.t. output (batch, seq_len, num_heads, head_dim) or (batch, seq_len, embed_dim)
             q: Query tensor (optional, uses cached if available)
             k: Key tensor (optional, uses cached if available)
             v: Value tensor (optional, uses cached if available)
             mask: Optional attention mask (optional, uses cached if available)
-        
+
         Returns:
             (grad_q, grad_k, grad_v)
         """
@@ -1657,11 +1774,13 @@ class FlashAttention2(Module):
         q_reshaped = q.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
         k_reshaped = k.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
         v_reshaped = v.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
-        grad_output_reshaped = grad_output.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
+        grad_output_reshaped = grad_output.transpose(
+            0, 2, 1, 3
+        )  # (batch, num_heads, seq_len, head_dim)
 
         # Recompute attention scores for backward (same as forward)
         scale = 1.0 / np.sqrt(self.head_dim)
-        scores = np.einsum('bhqd,bhkd->bhqk', q_reshaped, k_reshaped) * scale
+        scores = np.einsum("bhqd,bhkd->bhqk", q_reshaped, k_reshaped) * scale
 
         # Apply mask if provided
         if mask is not None:
@@ -1681,7 +1800,9 @@ class FlashAttention2(Module):
         # grad_V = scores^T @ grad_output
         # grad_scores = grad_output @ V^T
         v_reshaped_T = v_reshaped.transpose(0, 1, 3, 2)  # (batch, num_heads, head_dim, seq_len)
-        grad_scores = np.matmul(grad_output_reshaped, v_reshaped_T)  # (batch, num_heads, seq_len, seq_len)
+        grad_scores = np.matmul(
+            grad_output_reshaped, v_reshaped_T
+        )  # (batch, num_heads, seq_len, seq_len)
 
         scores_T = scores_softmax.transpose(0, 1, 3, 2)  # (batch, num_heads, seq_len, seq_len)
         grad_v = np.matmul(scores_T, grad_output_reshaped)  # (batch, num_heads, seq_len, head_dim)
@@ -1695,9 +1816,15 @@ class FlashAttention2(Module):
         # scores = Q @ K^T / sqrt(head_dim)
         # grad_Q = grad_pre_softmax @ K / sqrt(head_dim)
         # grad_K = grad_pre_softmax^T @ Q / sqrt(head_dim)
-        grad_q_reshaped = np.matmul(grad_pre_softmax, k_reshaped) * scale  # (batch, num_heads, seq_len, head_dim)
-        grad_pre_softmax_T = grad_pre_softmax.transpose(0, 1, 3, 2)  # (batch, num_heads, seq_len, seq_len)
-        grad_k_reshaped = np.matmul(grad_pre_softmax_T, q_reshaped) * scale  # (batch, num_heads, seq_len, head_dim)
+        grad_q_reshaped = (
+            np.matmul(grad_pre_softmax, k_reshaped) * scale
+        )  # (batch, num_heads, seq_len, head_dim)
+        grad_pre_softmax_T = grad_pre_softmax.transpose(
+            0, 1, 3, 2
+        )  # (batch, num_heads, seq_len, seq_len)
+        grad_k_reshaped = (
+            np.matmul(grad_pre_softmax_T, q_reshaped) * scale
+        )  # (batch, num_heads, seq_len, head_dim)
 
         # Reshape back: (batch, num_heads, seq_len, head_dim) -> (batch, seq_len, num_heads, head_dim)
         grad_q = grad_q_reshaped.transpose(0, 2, 1, 3)  # (batch, seq_len, num_heads, head_dim)

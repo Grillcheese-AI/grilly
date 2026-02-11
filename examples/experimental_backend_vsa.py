@@ -34,7 +34,7 @@ vsa = VulkanVSA(core)
 print("VulkanCore initialized")
 print("VulkanVSA initialized")
 
-available_shaders = [k for k in core.shaders.keys() if k.startswith('vsa-')]
+available_shaders = [k for k in core.shaders.keys() if k.startswith("vsa-")]
 print(f"Available VSA shaders: {available_shaders}")
 
 # Bipolar Binding
@@ -60,10 +60,7 @@ print(f"GPU matches CPU: {match}")
 print("\n3. Bundling (GPU)")
 print("-" * 60)
 
-vectors = [
-    BinaryOps.random_bipolar(dim).astype(np.float32)
-    for _ in range(5)
-]
+vectors = [BinaryOps.random_bipolar(dim).astype(np.float32) for _ in range(5)]
 
 gpu_bundled = vsa.bundle(vectors)
 cpu_bundled = BinaryOps.bundle(vectors)
@@ -79,17 +76,12 @@ print("\n4. Batch Similarity (GPU)")
 print("-" * 60)
 
 query = HolographicOps.random_vector(dim).astype(np.float32)
-codebook = [
-    HolographicOps.random_vector(dim).astype(np.float32)
-    for _ in range(100)
-]
+codebook = [HolographicOps.random_vector(dim).astype(np.float32) for _ in range(100)]
 
 gpu_similarities = vsa.similarity_batch(query, codebook)
 print(f"GPU similarities: shape={gpu_similarities.shape}")
 
-cpu_similarities = np.array([
-    HolographicOps.similarity(query, vec) for vec in codebook
-])
+cpu_similarities = np.array([HolographicOps.similarity(query, vec) for vec in codebook])
 
 print(f"CPU similarities: shape={cpu_similarities.shape}")
 
@@ -140,6 +132,6 @@ for _ in range(10):
 cpu_time = (time.time() - start) / 10
 
 print(f"Dimension: {large_dim}")
-print(f"GPU time (avg): {gpu_time*1000:.2f} ms")
-print(f"CPU time (avg): {cpu_time*1000:.2f} ms")
-print(f"Speedup: {cpu_time/gpu_time:.2f}x")
+print(f"GPU time (avg): {gpu_time * 1000:.2f} ms")
+print(f"CPU time (avg): {cpu_time * 1000:.2f} ms")
+print(f"Speedup: {cpu_time / gpu_time:.2f}x")

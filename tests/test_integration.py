@@ -1,6 +1,7 @@
 """
 Integration tests for Grilly SDK
 """
+
 import numpy as np
 import pytest
 
@@ -19,9 +20,7 @@ class TestSNNIntegration:
         snn = SNNCompute(n_neurons=100, use_vulkan=False)
 
         # Process multiple embeddings
-        embeddings = [
-            np.random.randn(384).astype(np.float32) for _ in range(5)
-        ]
+        embeddings = [np.random.randn(384).astype(np.float32) for _ in range(5)]
 
         results = []
         for emb in embeddings:
@@ -31,8 +30,8 @@ class TestSNNIntegration:
 
         assert len(results) == 5
         for result in results:
-            assert 'spike_activity' in result
-            assert 'firing_rate' in result
+            assert "spike_activity" in result
+            assert "firing_rate" in result
 
     def test_snn_temporal_dynamics(self):
         """Test SNN over multiple timesteps"""
@@ -71,9 +70,7 @@ class TestGPUIntegration:
         membrane = np.zeros(100, dtype=np.float32)
         refractory = np.zeros(100, dtype=np.float32)
 
-        mem_out, ref_out, spikes = gpu.lif_step(
-            input_current, membrane, refractory
-        )
+        mem_out, ref_out, spikes = gpu.lif_step(input_current, membrane, refractory)
 
         assert spikes.shape == (100,)
 
@@ -98,9 +95,7 @@ class TestGPUIntegration:
         membrane = np.zeros(n, dtype=np.float32)
         refractory = np.zeros(n, dtype=np.float32)
 
-        mem_out, ref_out, spikes = gpu.lif_step(
-            input_current, membrane, refractory
-        )
+        mem_out, ref_out, spikes = gpu.lif_step(input_current, membrane, refractory)
 
         spike_count = spikes.sum()
 

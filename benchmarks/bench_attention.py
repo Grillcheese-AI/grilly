@@ -6,7 +6,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 
 from benchmarks.utils import (
     format_size,
@@ -37,7 +37,7 @@ def main():
         print("GPU backend unavailable, skipping.")
         return
 
-    has_attention = hasattr(backend, 'attention')
+    has_attention = hasattr(backend, "attention")
     if not has_attention:
         print("Attention module not available on backend.")
         return
@@ -65,7 +65,7 @@ def main():
 
         # CPU timing
         cpu_result = time_cpu(cpu_attention_scores, q, k, scale, warmup=1, repeats=3)
-        cpu_ms = cpu_result['mean']
+        cpu_ms = cpu_result["mean"]
 
         # GPU timing
         try:
@@ -73,26 +73,37 @@ def main():
                 backend.attention.attention_scores,
                 q.reshape(batch, seq, embed_dim),
                 k.reshape(batch, seq, embed_dim),
-                heads, hdim, scale,
-                warmup=1, repeats=3
+                heads,
+                hdim,
+                scale,
+                warmup=1,
+                repeats=3,
             )
-            gpu_ms = gpu_result['mean']
+            gpu_ms = gpu_result["mean"]
             print_row(label, gpu_ms, cpu_ms)
-            results.append({
-                'label': label, 'gpu_ms': gpu_ms, 'cpu_ms': cpu_ms,
-                'shape': f"({batch},{seq},{heads},{hdim})"
-            })
+            results.append(
+                {
+                    "label": label,
+                    "gpu_ms": gpu_ms,
+                    "cpu_ms": cpu_ms,
+                    "shape": f"({batch},{seq},{heads},{hdim})",
+                }
+            )
         except Exception as e:
             print(f"    GPU failed: {e}")
-            results.append({
-                'label': label, 'gpu_ms': 0, 'cpu_ms': cpu_ms,
-                'shape': f"({batch},{seq},{heads},{hdim})"
-            })
+            results.append(
+                {
+                    "label": label,
+                    "gpu_ms": 0,
+                    "cpu_ms": cpu_ms,
+                    "shape": f"({batch},{seq},{heads},{hdim})",
+                }
+            )
 
     if results:
         print_header("Attention Summary")
         print_summary_table(results)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

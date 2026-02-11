@@ -124,6 +124,7 @@ class OnnxOpRegistry:
 # Op handler helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_attrs(node) -> dict[str, Any]:
     """Extract attributes from an ONNX node as a dict."""
     attrs: dict[str, Any] = {}
@@ -148,6 +149,7 @@ def _get_attrs(node) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Stateful op handlers — create nn.Module instances
 # ---------------------------------------------------------------------------
+
 
 def _handle_gemm(node, inputs, initializers, attrs):
     """Gemm -> nn.Linear with optional transpose."""
@@ -249,6 +251,7 @@ def _handle_matmul(node, inputs, initializers, attrs):
 # Stateful op handlers — LayerNorm, Embedding
 # ---------------------------------------------------------------------------
 
+
 def _handle_layernorm(node, inputs, initializers, attrs):
     """LayerNormalization -> nn.LayerNorm."""
     epsilon = attrs.get("epsilon", 1e-5)
@@ -326,16 +329,19 @@ def _handle_gather(node, inputs, initializers, attrs):
 # Stateless activation handlers
 # ---------------------------------------------------------------------------
 
+
 def _handle_relu(node, inputs, initializers, attrs):
     def relu_fn(*args):
         return np.maximum(args[0], 0)
+
     return "callable", relu_fn
 
 
 def _handle_gelu(node, inputs, initializers, attrs):
     def gelu_fn(*args):
         x = args[0]
-        return 0.5 * x * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * x ** 3)))
+        return 0.5 * x * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * x**3)))
+
     return "callable", gelu_fn
 
 
@@ -343,12 +349,14 @@ def _handle_sigmoid(node, inputs, initializers, attrs):
     def sigmoid_fn(*args):
         x = args[0].astype(np.float64)
         return (1.0 / (1.0 + np.exp(-x))).astype(np.float32)
+
     return "callable", sigmoid_fn
 
 
 def _handle_tanh(node, inputs, initializers, attrs):
     def tanh_fn(*args):
         return np.tanh(args[0])
+
     return "callable", tanh_fn
 
 
@@ -359,6 +367,7 @@ def _handle_softmax(node, inputs, initializers, attrs):
         x = args[0]
         e_x = np.exp(x - np.max(x, axis=axis, keepdims=True))
         return e_x / np.sum(e_x, axis=axis, keepdims=True)
+
     return "callable", softmax_fn
 
 
@@ -366,70 +375,82 @@ def _handle_softmax(node, inputs, initializers, attrs):
 # Stateless elementwise / math handlers
 # ---------------------------------------------------------------------------
 
+
 def _handle_add(node, inputs, initializers, attrs):
     # If one operand is a constant bias, embed it
     def add_fn(*args):
         return args[0] + args[1]
+
     return "callable", add_fn
 
 
 def _handle_mul(node, inputs, initializers, attrs):
     def mul_fn(*args):
         return args[0] * args[1]
+
     return "callable", mul_fn
 
 
 def _handle_sub(node, inputs, initializers, attrs):
     def sub_fn(*args):
         return args[0] - args[1]
+
     return "callable", sub_fn
 
 
 def _handle_div(node, inputs, initializers, attrs):
     def div_fn(*args):
         return args[0] / args[1]
+
     return "callable", div_fn
 
 
 def _handle_pow(node, inputs, initializers, attrs):
     def pow_fn(*args):
         return np.power(args[0], args[1])
+
     return "callable", pow_fn
 
 
 def _handle_sqrt(node, inputs, initializers, attrs):
     def sqrt_fn(*args):
         return np.sqrt(args[0])
+
     return "callable", sqrt_fn
 
 
 def _handle_neg(node, inputs, initializers, attrs):
     def neg_fn(*args):
         return -args[0]
+
     return "callable", neg_fn
 
 
 def _handle_abs(node, inputs, initializers, attrs):
     def abs_fn(*args):
         return np.abs(args[0])
+
     return "callable", abs_fn
 
 
 def _handle_log(node, inputs, initializers, attrs):
     def log_fn(*args):
         return np.log(args[0])
+
     return "callable", log_fn
 
 
 def _handle_exp(node, inputs, initializers, attrs):
     def exp_fn(*args):
         return np.exp(args[0])
+
     return "callable", exp_fn
 
 
 def _handle_reciprocal(node, inputs, initializers, attrs):
     def reciprocal_fn(*args):
         return 1.0 / args[0]
+
     return "callable", reciprocal_fn
 
 
@@ -439,6 +460,7 @@ def _handle_min(node, inputs, initializers, attrs):
         for a in args[1:]:
             result = np.minimum(result, a)
         return result
+
     return "callable", min_fn
 
 
@@ -448,18 +470,21 @@ def _handle_max(node, inputs, initializers, attrs):
         for a in args[1:]:
             result = np.maximum(result, a)
         return result
+
     return "callable", max_fn
 
 
 def _handle_ceil(node, inputs, initializers, attrs):
     def ceil_fn(*args):
         return np.ceil(args[0])
+
     return "callable", ceil_fn
 
 
 def _handle_floor(node, inputs, initializers, attrs):
     def floor_fn(*args):
         return np.floor(args[0])
+
     return "callable", floor_fn
 
 
@@ -485,6 +510,7 @@ def _handle_clip(node, inputs, initializers, attrs):
 # Shape manipulation handlers
 # ---------------------------------------------------------------------------
 
+
 def _handle_reshape(node, inputs, initializers, attrs):
     def reshape_fn(*args):
         data = args[0]
@@ -492,6 +518,7 @@ def _handle_reshape(node, inputs, initializers, attrs):
         if isinstance(shape, np.ndarray):
             shape = tuple(shape.astype(np.int64).tolist())
         return np.reshape(data, shape)
+
     return "callable", reshape_fn
 
 
@@ -502,6 +529,7 @@ def _handle_transpose(node, inputs, initializers, attrs):
         if perm is not None:
             return np.transpose(args[0], axes=perm)
         return np.transpose(args[0])
+
     return "callable", transpose_fn
 
 
@@ -546,6 +574,7 @@ def _handle_concat(node, inputs, initializers, attrs):
 
     def concat_fn(*args):
         return np.concatenate(list(args), axis=axis)
+
     return "callable", concat_fn
 
 
@@ -625,39 +654,46 @@ def _handle_flatten(node, inputs, initializers, attrs):
 # Comparison / logic handlers
 # ---------------------------------------------------------------------------
 
+
 def _handle_where(node, inputs, initializers, attrs):
     def where_fn(*args):
         return np.where(args[0], args[1], args[2])
+
     return "callable", where_fn
 
 
 def _handle_equal(node, inputs, initializers, attrs):
     def equal_fn(*args):
         return np.equal(args[0], args[1])
+
     return "callable", equal_fn
 
 
 def _handle_less(node, inputs, initializers, attrs):
     def less_fn(*args):
         return np.less(args[0], args[1])
+
     return "callable", less_fn
 
 
 def _handle_greater(node, inputs, initializers, attrs):
     def greater_fn(*args):
         return np.greater(args[0], args[1])
+
     return "callable", greater_fn
 
 
 def _handle_not(node, inputs, initializers, attrs):
     def not_fn(*args):
         return np.logical_not(args[0])
+
     return "callable", not_fn
 
 
 # ---------------------------------------------------------------------------
 # Reduction / type-casting handlers
 # ---------------------------------------------------------------------------
+
 
 def _handle_reducemean(node, inputs, initializers, attrs):
     axes = attrs.get("axes", None)
@@ -683,12 +719,14 @@ def _handle_cast(node, inputs, initializers, attrs):
 
     def cast_fn(*args):
         return args[0].astype(np_dtype)
+
     return "callable", cast_fn
 
 
 def _handle_shape(node, inputs, initializers, attrs):
     def shape_fn(*args):
         return np.array(args[0].shape, dtype=np.int64)
+
     return "callable", shape_fn
 
 
@@ -697,21 +735,21 @@ def _handle_erf(node, inputs, initializers, attrs):
         # Approximate erf for float32 without scipy dependency
         x = args[0].astype(np.float64)
         # Abramowitz and Stegun approximation
-        a1, a2, a3, a4, a5 = (
-            0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429
-        )
+        a1, a2, a3, a4, a5 = (0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429)
         p = 0.3275911
         sign = np.sign(x)
         x = np.abs(x)
         t = 1.0 / (1.0 + p * x)
         y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * np.exp(-x * x)
         return (sign * y).astype(np.float32)
+
     return "callable", erf_fn
 
 
 # ---------------------------------------------------------------------------
 # Constant / initialization handlers
 # ---------------------------------------------------------------------------
+
 
 def _handle_constant(node, inputs, initializers, attrs):
     value = attrs.get("value", None)
@@ -735,6 +773,7 @@ def _handle_constant(node, inputs, initializers, attrs):
 
     def constant_fn(*args):
         return const.copy()
+
     return "callable", constant_fn
 
 
@@ -748,6 +787,7 @@ def _handle_constantofshape(node, inputs, initializers, attrs):
     def constantofshape_fn(*args):
         shape = tuple(args[0].astype(np.int64).tolist())
         return np.full(shape, fill_val, dtype=np.float32)
+
     return "callable", constantofshape_fn
 
 
@@ -756,6 +796,7 @@ def _handle_expand(node, inputs, initializers, attrs):
         data = args[0]
         shape = tuple(args[1].astype(np.int64).tolist())
         return np.broadcast_to(data, shape).copy()
+
     return "callable", expand_fn
 
 
@@ -763,16 +804,19 @@ def _handle_expand(node, inputs, initializers, attrs):
 # Misc handlers
 # ---------------------------------------------------------------------------
 
+
 def _handle_dropout(node, inputs, initializers, attrs):
     # During inference, dropout is identity
     def dropout_fn(*args):
         return args[0]
+
     return "callable", dropout_fn
 
 
 def _handle_identity(node, inputs, initializers, attrs):
     def identity_fn(*args):
         return args[0]
+
     return "callable", identity_fn
 
 
@@ -804,6 +848,7 @@ def _handle_batchnorm(node, inputs, initializers, attrs):
 # ===========================================================================
 # GrillyOnnxModel — the reconstructed model
 # ===========================================================================
+
 
 class _NodeExec:
     """Execution descriptor for a single ONNX node."""
@@ -932,6 +977,7 @@ class GrillyOnnxModel(Module):
 # OnnxModelLoader — main entry point
 # ===========================================================================
 
+
 class OnnxModelLoader:
     """Load an ONNX model and convert it to a Grilly Module graph."""
 
@@ -975,9 +1021,7 @@ class OnnxModelLoader:
 
         # 2. Determine graph input names (exclude initializer-only inputs)
         init_names = set(initializers.keys())
-        graph_input_names = [
-            inp.name for inp in graph.input if inp.name not in init_names
-        ]
+        graph_input_names = [inp.name for inp in graph.input if inp.name not in init_names]
         graph_output_names = [out.name for out in graph.output]
 
         # 3. Build execution nodes
@@ -989,6 +1033,7 @@ class OnnxModelLoader:
             if handler_fn is None:
                 # Unknown op — create a pass-through with warning
                 import warnings
+
                 warnings.warn(f"Unsupported ONNX op: {op_type}, using identity fallback")
 
                 def _identity(*args, _op=op_type):
@@ -1006,9 +1051,7 @@ class OnnxModelLoader:
                 )
                 continue
 
-            kind, handler = handler_fn(
-                node, list(node.input), initializers, attrs
-            )
+            kind, handler = handler_fn(node, list(node.input), initializers, attrs)
 
             exec_nodes.append(
                 _NodeExec(

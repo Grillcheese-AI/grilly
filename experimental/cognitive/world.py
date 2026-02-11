@@ -24,6 +24,7 @@ from grilly.experimental.vsa.ops import HolographicOps
 @dataclass
 class Fact:
     """A fact in the world model."""
+
     subject: str
     relation: str
     object: str
@@ -36,23 +37,18 @@ class Fact:
 class WorldModel:
     """
     World model for coherence checking.
-    
+
     Stores:
     - Facts (subject-relation-object triples)
     - Constraints (what can't be true together)
     - Expectations (what typically follows what)
-    
+
     Used to verify that candidate outputs make sense.
     """
 
     DEFAULT_DIM = 4096
 
-    def __init__(
-        self,
-        dim: int = DEFAULT_DIM,
-        capsule_dim: int = 32,
-        semantic_dims: int = 28
-    ):
+    def __init__(self, dim: int = DEFAULT_DIM, capsule_dim: int = 32, semantic_dims: int = 28):
         """Initialize the instance."""
 
         self.dim = dim
@@ -61,9 +57,7 @@ class WorldModel:
         self.capsule_encoder: CapsuleEncoder | None = None
         if capsule_dim > 0:
             self.capsule_encoder = CapsuleEncoder(
-                input_dim=dim,
-                capsule_dim=capsule_dim,
-                semantic_dims=semantic_dims
+                input_dim=dim, capsule_dim=capsule_dim, semantic_dims=semantic_dims
             )
 
         # Fact storage
@@ -84,25 +78,49 @@ class WorldModel:
     def _init_relations(self):
         """Initialize relation vectors."""
         relations = [
-            "is", "is_not", "has", "can", "cannot",
-            "causes", "prevents", "before", "after",
-            "part_of", "contains", "similar_to", "opposite_of",
-            "wants", "believes", "knows", "thinks"
+            "is",
+            "is_not",
+            "has",
+            "can",
+            "cannot",
+            "causes",
+            "prevents",
+            "before",
+            "after",
+            "part_of",
+            "contains",
+            "similar_to",
+            "opposite_of",
+            "wants",
+            "believes",
+            "knows",
+            "thinks",
         ]
         for i, rel in enumerate(relations):
-            self.relations[rel] = HolographicOps.random_vector(self.dim, seed=6000+i)
+            self.relations[rel] = HolographicOps.random_vector(self.dim, seed=6000 + i)
 
     def encode_fact(self, subject: str, relation: str, object_: str) -> np.ndarray:
         """Encode a fact as a holographic vector."""
-        subj_vec = HolographicOps.random_vector(self.dim, seed=(stable_u32('subj', subject, domain='grilly.fact') % (2**31) if stable_u32 else 0))
-        rel_vec = self.relations.get(relation, HolographicOps.random_vector(self.dim, seed=(stable_u32('rel', relation, domain='grilly.fact') % (2**31) if stable_u32 else 0)))
-        obj_vec = HolographicOps.random_vector(self.dim, seed=(stable_u32('obj', object_, domain='grilly.fact') % (2**31) if stable_u32 else 0))
+        subj_vec = HolographicOps.random_vector(
+            self.dim,
+            seed=(stable_u32("subj", subject, domain="grilly.fact") % (2**31) if stable_u32 else 0),
+        )
+        rel_vec = self.relations.get(
+            relation,
+            HolographicOps.random_vector(
+                self.dim,
+                seed=(
+                    stable_u32("rel", relation, domain="grilly.fact") % (2**31) if stable_u32 else 0
+                ),
+            ),
+        )
+        obj_vec = HolographicOps.random_vector(
+            self.dim,
+            seed=(stable_u32("obj", object_, domain="grilly.fact") % (2**31) if stable_u32 else 0),
+        )
 
         # Fact = subject ⊗ relation ⊗ object
-        return HolographicOps.convolve(
-            HolographicOps.convolve(subj_vec, rel_vec),
-            obj_vec
-        )
+        return HolographicOps.convolve(HolographicOps.convolve(subj_vec, rel_vec), obj_vec)
 
     def add_fact(
         self,
@@ -111,7 +129,7 @@ class WorldModel:
         object_: str,
         confidence: float = 1.0,
         source: str = "observed",
-        cognitive_features: np.ndarray | None = None
+        cognitive_features: np.ndarray | None = None,
     ):
         """Add a fact to the world model."""
         vector = self.encode_fact(subject, relation, object_)
@@ -127,7 +145,7 @@ class WorldModel:
             vector=vector,
             capsule_vector=capsule_vec,
             confidence=confidence,
-            source=source
+            source=source,
         )
 
         self.facts.append(fact)
@@ -141,7 +159,7 @@ class WorldModel:
     def query_fact(self, subject: str, relation: str, object_: str) -> tuple[bool, float]:
         """
         Query if a fact is in the world model.
-        
+
         Returns (is_known, confidence)
         """
         query_vec = self.encode_fact(subject, relation, object_)
@@ -165,22 +183,19 @@ class WorldModel:
     def check_coherence(self, statement_vec: np.ndarray) -> tuple[bool, float, str]:
         """
         Check if a statement is coherent with known facts.
-        
+
         Returns (is_coherent, confidence, reason)
         """
         # Check against known facts (should be consistent)
         max_support = 0.0
-        supporting_fact = None
 
         for fact, fact_vec in zip(self.facts, self.fact_vectors):
             sim = HolographicOps.similarity(statement_vec, fact_vec)
             if sim > max_support:
                 max_support = sim
-                supporting_fact = fact
 
         # Check against constraints (should not violate)
         max_violation = 0.0
-        violating_constraint = None
 
         for fact_vec, neg_vec in self.constraints:
             # If statement is similar to the negation of a known fact, that's bad

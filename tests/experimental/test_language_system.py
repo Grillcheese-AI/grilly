@@ -5,7 +5,6 @@ Tests the complete language learning system integration.
 """
 
 
-
 class TestInstantLanguageBasic:
     """Basic tests for InstantLanguage initialization."""
 
@@ -16,10 +15,10 @@ class TestInstantLanguageBasic:
         lang = InstantLanguage()
 
         assert lang.dim > 0
-        assert hasattr(lang, 'word_encoder')
-        assert hasattr(lang, 'sentence_encoder')
-        assert hasattr(lang, 'generator')
-        assert hasattr(lang, 'parser')
+        assert hasattr(lang, "word_encoder")
+        assert hasattr(lang, "sentence_encoder")
+        assert hasattr(lang, "generator")
+        assert hasattr(lang, "parser")
 
     def test_init_custom_dimension(self):
         """Should initialize with custom dimension."""

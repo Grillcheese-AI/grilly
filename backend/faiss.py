@@ -24,7 +24,7 @@ class VulkanFAISS(BufferMixin):
         self.core = core
         self.pipelines = pipelines
 
-    def compute_distances(self, queries, database, distance_type='cosine'):
+    def compute_distances(self, queries, database, distance_type="cosine"):
         """
         Compute pairwise distances between query and database vectors.
 
@@ -45,7 +45,7 @@ class VulkanFAISS(BufferMixin):
         num_queries, dim = queries.shape
         num_database = database.shape[0]
 
-        distance_map = {'l2': 0, 'cosine': 1, 'dot': 2}
+        distance_map = {"l2": 0, "cosine": 1, "dot": 2}
         dist_type_int = distance_map.get(distance_type, 1)
 
         queries_flat = queries.flatten()
@@ -61,32 +61,37 @@ class VulkanFAISS(BufferMixin):
 
             # Get or create pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'faiss-distance', 3, push_constant_size=16
+                "faiss-distance", 3, push_constant_size=16
             )
 
             # Get cached descriptor set (reuses existing or creates new)
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'faiss-distance',
+                "faiss-distance",
                 [
                     (self._get_buffer_handle(buf_queries), queries_flat.nbytes),
                     (self._get_buffer_handle(buf_database), database_flat.nbytes),
-                    (self._get_buffer_handle(buf_distances), num_queries * num_database * 4)
-                ]
+                    (self._get_buffer_handle(buf_distances), num_queries * num_database * 4),
+                ],
             )
 
-            push_constants = struct.pack('IIII', num_queries, num_database, dim, dist_type_int)
+            push_constants = struct.pack("IIII", num_queries, num_database, dim, dist_type_int)
 
             workgroups_x = (num_database + 15) // 16
             workgroups_y = (num_queries + 15) // 16
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups_x, push_constants, workgroups_y, 1
+                pipeline,
+                pipeline_layout,
+                descriptor_set,
+                workgroups_x,
+                push_constants,
+                workgroups_y,
+                1,
             )
 
             distances = self._download_buffer(
                 buf_distances, num_queries * num_database * 4, np.float32
             )
-            distances = distances[:num_queries * num_database].reshape(num_queries, num_database)
+            distances = distances[: num_queries * num_database].reshape(num_queries, num_database)
 
             # Don't free cached descriptor sets - they're reused
             # vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])
@@ -148,40 +153,44 @@ class VulkanFAISS(BufferMixin):
             self._upload_buffer(buf_db_indices, db_indices)
 
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'faiss-topk', 4, push_constant_size=12
+                "faiss-topk", 4, push_constant_size=12
             )
 
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'faiss-topk',
+                "faiss-topk",
                 [
                     (self._get_buffer_handle(buf_distances), distances_flat.nbytes),
                     (self._get_buffer_handle(buf_db_indices), db_indices.nbytes),
                     (self._get_buffer_handle(buf_topk_indices), num_queries * k * 4),
-                    (self._get_buffer_handle(buf_topk_distances), num_queries * k * 4)
-                ]
+                    (self._get_buffer_handle(buf_topk_distances), num_queries * k * 4),
+                ],
             )
 
-            push_constants = struct.pack('III', num_queries, num_database, k)
+            push_constants = struct.pack("III", num_queries, num_database, k)
             workgroups = (num_queries + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
-            topk_indices = self._download_buffer(
-                buf_topk_indices, num_queries * k * 4, np.uint32
-            )
+            topk_indices = self._download_buffer(buf_topk_indices, num_queries * k * 4, np.uint32)
             topk_distances_result = self._download_buffer(
                 buf_topk_distances, num_queries * k * 4, np.float32
             )
 
-            topk_indices = topk_indices[:num_queries * k].reshape(num_queries, k)
-            topk_distances_result = topk_distances_result[:num_queries * k].reshape(num_queries, k)
+            topk_indices = topk_indices[: num_queries * k].reshape(num_queries, k)
+            topk_distances_result = topk_distances_result[: num_queries * k].reshape(num_queries, k)
 
             # Optional validation against CPU for correctness; fallback if mismatch
             cpu_idx, cpu_dist = self._cpu_topk(distances, k)
-            if not (np.array_equal(np.sort(topk_indices, axis=1), np.sort(cpu_idx, axis=1)) and
-                    np.allclose(np.sort(topk_distances_result, axis=1), np.sort(cpu_dist, axis=1), rtol=1e-4, atol=1e-5)):
+            if not (
+                np.array_equal(np.sort(topk_indices, axis=1), np.sort(cpu_idx, axis=1))
+                and np.allclose(
+                    np.sort(topk_distances_result, axis=1),
+                    np.sort(cpu_dist, axis=1),
+                    rtol=1e-4,
+                    atol=1e-5,
+                )
+            ):
                 logger.warning("GPU topk mismatch detected, falling back to CPU results")
                 topk_indices, topk_distances_result = cpu_idx, cpu_dist
 
@@ -193,6 +202,10 @@ class VulkanFAISS(BufferMixin):
 
         finally:
             # Cleanup (guarded in case buffers weren't created)
-            buffers = [b for b in [buf_distances, buf_db_indices, buf_topk_indices, buf_topk_distances] if b is not None]
+            buffers = [
+                b
+                for b in [buf_distances, buf_db_indices, buf_topk_indices, buf_topk_distances]
+                if b is not None
+            ]
             if buffers:
                 self._release_buffers(buffers)

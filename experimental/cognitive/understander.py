@@ -19,19 +19,20 @@ from grilly.experimental.vsa.ops import HolographicOps
 @dataclass
 class UnderstandingResult:
     """Result of understanding an input."""
-    surface_meaning: np.ndarray      # Direct encoding
-    deep_meaning: np.ndarray         # After inference
-    inferences: list[str]            # What was inferred
-    questions: list[str]             # Remaining questions
+
+    surface_meaning: np.ndarray  # Direct encoding
+    deep_meaning: np.ndarray  # After inference
+    inferences: list[str]  # What was inferred
+    questions: list[str]  # Remaining questions
     confidence: float
-    parsed_roles: dict[str, str]     # Extracted semantic roles
-    words: list[str]                 # Parsed words
+    parsed_roles: dict[str, str]  # Extracted semantic roles
+    words: list[str]  # Parsed words
 
 
 class Understander:
     """
     Deep understanding beyond surface encoding.
-    
+
     Understanding involves:
     1. Parse surface structure
     2. Retrieve relevant knowledge
@@ -44,7 +45,7 @@ class Understander:
         self,
         language_system: InstantLanguage,
         world_model: WorldModel,
-        working_memory: WorkingMemory
+        working_memory: WorkingMemory,
     ):
         """Initialize the instance."""
 
@@ -83,14 +84,10 @@ class Understander:
 
         self.inference_rules.append((isa_pattern, "inheritance", inheritance_inference))
 
-    def understand(
-        self,
-        input_text: str,
-        verbose: bool = False
-    ) -> UnderstandingResult:
+    def understand(self, input_text: str, verbose: bool = False) -> UnderstandingResult:
         """
         Deeply understand an input.
-        
+
         This is more than encoding - it builds a mental model.
         """
         # 1. Parse surface structure
@@ -103,11 +100,7 @@ class Understander:
 
         # 2. Add to working memory
         self.wm.add(
-            surface_vec,
-            input_text,
-            WorkingMemorySlot.FOCUS,
-            confidence=1.0,
-            source="input"
+            surface_vec, input_text, WorkingMemorySlot.FOCUS, confidence=1.0, source="input"
         )
 
         # 3. Retrieve relevant knowledge
@@ -118,7 +111,7 @@ class Understander:
                 fact_str,
                 WorkingMemorySlot.RETRIEVED,
                 confidence=0.8,
-                source="world_model"
+                source="world_model",
             )
 
         # 4. Make inferences
@@ -129,8 +122,7 @@ class Understander:
 
         # 6. Build deep meaning (surface + inferences)
         inference_vecs = [
-            self.language.sentence_encoder.encode_sentence(inf.split())
-            for inf in inferences
+            self.language.sentence_encoder.encode_sentence(inf.split()) for inf in inferences
         ]
 
         if inference_vecs:
@@ -139,9 +131,7 @@ class Understander:
             deep_vec = surface_vec
 
         # 7. Compute understanding confidence
-        confidence = self._compute_understanding_confidence(
-            surface_vec, retrieved, inferences
-        )
+        confidence = self._compute_understanding_confidence(surface_vec, retrieved, inferences)
 
         return UnderstandingResult(
             surface_meaning=surface_vec,
@@ -150,13 +140,11 @@ class Understander:
             questions=questions,
             confidence=confidence,
             parsed_roles=roles,
-            words=words
+            words=words,
         )
 
     def _retrieve_relevant(
-        self,
-        query_vec: np.ndarray,
-        top_k: int = 3
+        self, query_vec: np.ndarray, top_k: int = 3
     ) -> list[tuple[str, np.ndarray]]:
         """Retrieve relevant facts from world model."""
         results = []
@@ -183,7 +171,7 @@ class Understander:
         self,
         surface_vec: np.ndarray,
         roles: dict[str, str],
-        retrieved: list[tuple[str, np.ndarray]]
+        retrieved: list[tuple[str, np.ndarray]],
     ) -> list[str]:
         """Make inferences based on input and knowledge."""
         inferences = []
@@ -208,7 +196,7 @@ class Understander:
             if "causes" in parts:
                 idx = parts.index("causes")
                 cause = " ".join(parts[:idx])
-                effect = " ".join(parts[idx+1:])
+                effect = " ".join(parts[idx + 1 :])
 
                 # Check if cause is mentioned in input
                 cause_vec = self.language.word_encoder.encode_word(cause)
@@ -217,11 +205,7 @@ class Understander:
 
         return inferences
 
-    def _identify_gaps(
-        self,
-        surface_vec: np.ndarray,
-        roles: dict[str, str]
-    ) -> list[str]:
+    def _identify_gaps(self, surface_vec: np.ndarray, roles: dict[str, str]) -> list[str]:
         """Identify what's not understood / needs clarification."""
         questions = []
 
@@ -249,7 +233,7 @@ class Understander:
         self,
         surface_vec: np.ndarray,
         retrieved: list[tuple[str, np.ndarray]],
-        inferences: list[str]
+        inferences: list[str],
     ) -> float:
         """Compute how well we understand the input."""
         # Factors:

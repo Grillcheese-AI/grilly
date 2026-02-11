@@ -63,9 +63,7 @@ def index_file(file_path: str) -> list[MemoryEntry]:
 # ------------------------------------------------------------------
 
 
-def _module_entry(
-    file_path: str, tree: ast.Module, source: str, file_mtime: float
-) -> MemoryEntry:
+def _module_entry(file_path: str, tree: ast.Module, source: str, file_mtime: float) -> MemoryEntry:
     """Build a module-level summary."""
     doc = _get_docstring(tree)
     imports = _extract_imports(tree)
@@ -86,9 +84,7 @@ def _module_entry(
         summary_parts.append("Defines: " + ", ".join(top_symbols))
 
     module_name = Path(file_path).stem
-    keywords = _extract_keywords_from_strings(
-        [module_name, doc or ""] + top_symbols + imports
-    )
+    keywords = _extract_keywords_from_strings([module_name, doc or ""] + top_symbols + imports)
 
     return MemoryEntry(
         memory_id=make_memory_id(file_path, module_name, "module"),
@@ -102,9 +98,7 @@ def _module_entry(
     )
 
 
-def _class_entry(
-    file_path: str, node: ast.ClassDef, source: str, file_mtime: float
-) -> MemoryEntry:
+def _class_entry(file_path: str, node: ast.ClassDef, source: str, file_mtime: float) -> MemoryEntry:
     """Build a class summary: name, bases, docstring, method signatures."""
     doc = _get_docstring(node)
     bases = [_unparse_safe(b) for b in node.bases]
@@ -135,9 +129,7 @@ def _class_entry(
             summary_parts.append(f"  ... +{len(methods) - _MAX_METHODS} more")
 
     keywords = _extract_keywords_from_strings(
-        [node.name, doc or ""]
-        + bases
-        + [m.split("(")[0].replace("def ", "") for m in methods]
+        [node.name, doc or ""] + bases + [m.split("(")[0].replace("def ", "") for m in methods]
     )
     deps = bases + _extract_calls(node)
 
@@ -173,9 +165,7 @@ def _function_entry(
     if calls:
         summary_parts.append(f"Calls: {', '.join(calls[:15])}")
 
-    keywords = _extract_keywords_from_strings(
-        [node.name, doc or ""] + calls
-    )
+    keywords = _extract_keywords_from_strings([node.name, doc or ""] + calls)
 
     return MemoryEntry(
         memory_id=make_memory_id(file_path, node.name, "function"),
@@ -240,10 +230,7 @@ def _extract_all(tree: ast.Module) -> list[str] | None:
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "__all__":
                     if isinstance(node.value, (ast.List, ast.Tuple)):
-                        return [
-                            _unparse_safe(elt)
-                            for elt in node.value.elts
-                        ]
+                        return [_unparse_safe(elt) for elt in node.value.elts]
     return None
 
 
@@ -295,10 +282,48 @@ def _extract_keywords_from_strings(strings: list[str]) -> list[str]:
 
 
 # Common words that don't help discriminate code symbols
-_STOP_WORDS = frozenset({
-    "the", "is", "in", "of", "to", "and", "or", "for", "if", "not",
-    "with", "as", "from", "by", "on", "at", "be", "it", "an", "no",
-    "do", "self", "cls", "none", "true", "false", "return", "def",
-    "class", "import", "str", "int", "float", "bool", "list", "dict",
-    "set", "tuple", "type", "any", "optional",
-})
+_STOP_WORDS = frozenset(
+    {
+        "the",
+        "is",
+        "in",
+        "of",
+        "to",
+        "and",
+        "or",
+        "for",
+        "if",
+        "not",
+        "with",
+        "as",
+        "from",
+        "by",
+        "on",
+        "at",
+        "be",
+        "it",
+        "an",
+        "no",
+        "do",
+        "self",
+        "cls",
+        "none",
+        "true",
+        "false",
+        "return",
+        "def",
+        "class",
+        "import",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "type",
+        "any",
+        "optional",
+    }
+)

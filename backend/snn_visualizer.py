@@ -2,6 +2,7 @@
 Real-time SNN (Spiking Neural Network) Visualization
 Provides WebSocket-based real-time visualization of SNN activity
 """
+
 import json
 import logging
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SNNState:
     """Snapshot of SNN state at a point in time"""
+
     timestamp: float
     neuron_potentials: list[float]
     spike_events: list[int]  # Indices of neurons that spiked
@@ -24,13 +26,13 @@ class SNNState:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         return {
-            'timestamp': self.timestamp,
-            'neuron_potentials': self.neuron_potentials[:100],  # Limit to first 100 for bandwidth
-            'spike_events': self.spike_events,
-            'spike_count': len(self.spike_events),
-            'avg_potential': float(np.mean(self.neuron_potentials)),
-            'max_potential': float(np.max(self.neuron_potentials)),
-            'stdp_trace': self.stdp_trace[:20] if self.stdp_trace else None
+            "timestamp": self.timestamp,
+            "neuron_potentials": self.neuron_potentials[:100],  # Limit to first 100 for bandwidth
+            "spike_events": self.spike_events,
+            "spike_count": len(self.spike_events),
+            "avg_potential": float(np.mean(self.neuron_potentials)),
+            "max_potential": float(np.max(self.neuron_potentials)),
+            "stdp_trace": self.stdp_trace[:20] if self.stdp_trace else None,
         }
 
 
@@ -59,7 +61,7 @@ class SNNVisualizer:
         neuron_potentials: np.ndarray,
         spike_events: np.ndarray,
         synaptic_weights: np.ndarray | None = None,
-        stdp_trace: np.ndarray | None = None
+        stdp_trace: np.ndarray | None = None,
     ) -> SNNState:
         """
         Capture current SNN state
@@ -78,9 +80,11 @@ class SNNVisualizer:
         state = SNNState(
             timestamp=time.time(),
             neuron_potentials=neuron_potentials.tolist(),
-            spike_events=spike_events.tolist() if isinstance(spike_events, np.ndarray) else spike_events,
+            spike_events=spike_events.tolist()
+            if isinstance(spike_events, np.ndarray)
+            else spike_events,
             synaptic_weights=synaptic_weights.tolist() if synaptic_weights is not None else None,
-            stdp_trace=stdp_trace.tolist() if stdp_trace is not None else None
+            stdp_trace=stdp_trace.tolist() if stdp_trace is not None else None,
         )
 
         # Add to history
@@ -88,7 +92,7 @@ class SNNVisualizer:
 
         # Trim history if needed
         if len(self.state_history) > self.max_history:
-            self.state_history = self.state_history[-self.max_history:]
+            self.state_history = self.state_history[-self.max_history :]
 
         return state
 
@@ -102,10 +106,7 @@ class SNNVisualizer:
         if not self.active_clients or not self.enabled:
             return
 
-        message = json.dumps({
-            'type': 'snn_state',
-            'data': state.to_dict()
-        })
+        message = json.dumps({"type": "snn_state", "data": state.to_dict()})
 
         # Broadcast to all clients
         disconnected = set()
@@ -160,7 +161,7 @@ class SNNVisualizer:
             Dictionary of statistics
         """
         if not self.state_history:
-            return {'error': 'No history available'}
+            return {"error": "No history available"}
 
         recent_states = self.state_history[-20:]
 
@@ -168,11 +169,11 @@ class SNNVisualizer:
         avg_potential = np.mean([np.mean(s.neuron_potentials) for s in recent_states])
 
         return {
-            'total_snapshots': len(self.state_history),
-            'avg_spike_rate': float(avg_spike_rate),
-            'avg_membrane_potential': float(avg_potential),
-            'active_clients': len(self.active_clients),
-            'visualization_enabled': self.enabled
+            "total_snapshots": len(self.state_history),
+            "avg_spike_rate": float(avg_spike_rate),
+            "avg_membrane_potential": float(avg_potential),
+            "active_clients": len(self.active_clients),
+            "visualization_enabled": self.enabled,
         }
 
 

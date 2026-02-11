@@ -4,6 +4,7 @@ Integration tests for grilly.experimental modules.
 Verifies that all experimental modules work together correctly,
 including cross-module interactions and end-to-end workflows.
 """
+
 import numpy as np
 import pytest
 
@@ -46,10 +47,7 @@ class TestVSAAndMoEIntegration:
         }
 
         moe = RelationalMoE(
-            dim=dim,
-            experts=experts,
-            expert_relations=expert_relations,
-            relational_encoder=encoder
+            dim=dim, experts=experts, expert_relations=expert_relations, relational_encoder=encoder
         )
 
         query_entity = "query"
@@ -116,12 +114,7 @@ class TestTemporalAndVSAIntegration:
         chain = CausalChain(dim=dim)
 
         # Add a rule
-        chain.add_rule(
-            name="rule1",
-            conditions={"A": True},
-            effects={"B": True},
-            probability=0.9
-        )
+        chain.add_rule(name="rule1", conditions={"A": True}, effects={"B": True}, probability=0.9)
 
         # Encode initial state
         initial = chain.encode_state({"A": True})
@@ -192,15 +185,12 @@ class TestEndToEndWorkflow:
         encoder = TemporalEncoder(dim=dim)
         chain = CausalChain(dim=dim)
         chain.add_rule(
-            name="rain_rule",
-            conditions={"raining": True},
-            effects={"wet": True},
-            probability=0.9
+            name="rain_rule", conditions={"raining": True}, effects={"wet": True}, probability=0.9
         )
 
         # Step 2: Encode temporal state
         state = chain.encode_state({"raining": True})
-        time_state = encoder.bind_with_time(state, t=1)
+        encoder.bind_with_time(state, t=1)
 
         # Step 3: Use cognitive controller to reason about it
         controller = CognitiveController(dim=dim)
@@ -257,7 +247,7 @@ class TestCrossModuleCompatibility:
         # Create composite vector
         composite = HolographicOps.convolve(
             codebook[0],  # cat
-            codebook[2]   # bird
+            codebook[2],  # bird
         )
 
         # Factorize should recover words
@@ -299,7 +289,9 @@ class TestPerformanceIntegration:
     def test_moe_with_many_experts(self, large_dim):
         """Test MoE routing with large number of experts."""
         experts = {f"expert_{i}": lambda x: x for i in range(100)}
-        expert_vectors = {f"expert_{i}": HolographicOps.random_vector(large_dim) for i in range(100)}
+        expert_vectors = {
+            f"expert_{i}": HolographicOps.random_vector(large_dim) for i in range(100)
+        }
         moe = ResonatorMoE(dim=large_dim, experts=experts, expert_vectors=expert_vectors)
 
         query = HolographicOps.random_vector(large_dim)

@@ -99,6 +99,7 @@ class OnnxFineTuner:
             if layer.bias is not None:
                 bias_data = _get_param_array(layer.bias).copy()
                 from ..nn.autograd import Variable
+
                 lora.bias = Variable(bias_data.astype(np.float32), requires_grad=True)
 
             self._lora_layers[name] = lora
@@ -112,9 +113,7 @@ class OnnxFineTuner:
         self._applied = True
         return self
 
-    def _find_linear_layers(
-        self, module: Module, prefix: str
-    ) -> list[tuple[str, Linear]]:
+    def _find_linear_layers(self, module: Module, prefix: str) -> list[tuple[str, Linear]]:
         """Recursively find all Linear layers in the module tree."""
         results = []
         for key, child in module._modules.items():
@@ -286,9 +285,7 @@ class OnnxFineTuner:
 
         return _LoRAWrapper(lora)
 
-    def _backward_lora(
-        self, predictions: np.ndarray, targets: np.ndarray, loss_fn: Callable
-    ):
+    def _backward_lora(self, predictions: np.ndarray, targets: np.ndarray, loss_fn: Callable):
         """Simple gradient estimation for LoRA parameters.
 
         Uses numerical differentiation (parameter perturbation) since the
@@ -326,7 +323,7 @@ class OnnxFineTuner:
         total_norm_sq = 0.0
         for p in params:
             if hasattr(p, "grad") and p.grad is not None:
-                total_norm_sq += float(np.sum(p.grad ** 2))
+                total_norm_sq += float(np.sum(p.grad**2))
         total_norm = np.sqrt(total_norm_sq)
         if total_norm > max_norm:
             scale = max_norm / (total_norm + 1e-6)
@@ -343,6 +340,7 @@ class OnnxFineTuner:
         if callable(loss_fn):
             return loss_fn
         if loss_fn == "cross_entropy":
+
             def ce_loss(pred, target):
                 # Numerically stable cross-entropy
                 pred = np.asarray(pred, dtype=np.float64)
@@ -358,10 +356,13 @@ class OnnxFineTuner:
                     return np.mean(loss).astype(np.float32)
                 # target is one-hot or soft labels
                 return np.float32(-np.mean(np.sum(target * log_probs, axis=-1)))
+
             return ce_loss
         if loss_fn == "mse":
+
             def mse_loss(pred, target):
                 return np.mean((pred - target) ** 2).astype(np.float32)
+
             return mse_loss
         raise ValueError(f"Unknown loss_fn: {loss_fn}")
 
@@ -369,9 +370,11 @@ class OnnxFineTuner:
     def _build_optimizer(name, params, lr):
         if name == "adamw":
             from ..optim.adamw import AdamW
+
             return AdamW(iter(params), lr=lr)
         if name == "adam":
             from ..optim.adam import Adam
+
             return Adam(iter(params), lr=lr)
         raise ValueError(f"Unknown optimizer: {name}")
 
@@ -381,6 +384,7 @@ class OnnxFineTuner:
             return None
         if name == "cosine":
             from ..optim.lr_scheduler import CosineAnnealingLR
+
             return CosineAnnealingLR(optimizer, T_max=epochs)
         raise ValueError(f"Unknown scheduler: {name}")
 
@@ -418,10 +422,7 @@ class OnnxFineTuner:
         trainable = self.num_trainable_params()
         total = self.num_total_params()
         pct = 100.0 * trainable / total if total > 0 else 0.0
-        print(
-            f"trainable params: {trainable:,} || all params: {total:,} || "
-            f"trainable%: {pct:.4f}"
-        )
+        print(f"trainable params: {trainable:,} || all params: {total:,} || trainable%: {pct:.4f}")
 
     # ------------------------------------------------------------------
     # Save / load
@@ -491,6 +492,7 @@ class OnnxFineTuner:
         self._merge_lora_into_model()
 
         from .onnx_exporter import OnnxExporter
+
         exporter = OnnxExporter()
         exporter.export(self.model, path, **export_kwargs)
 

@@ -4,14 +4,13 @@ Parameter class for storing parameters with gradients (PyTorch-like)
 Parameters can have .grad attribute for storing gradients from backward pass.
 """
 
-
 import numpy as np
 
 
 class Parameter(np.ndarray):
     """
     A Parameter is a numpy array that can store gradients.
-    
+
     Similar to torch.nn.Parameter, but based on numpy arrays.
     Gradients are stored in the .grad attribute.
     """
@@ -19,7 +18,7 @@ class Parameter(np.ndarray):
     def __new__(cls, data: np.ndarray, requires_grad: bool = True):
         """
         Create a new Parameter from a numpy array.
-        
+
         Args:
             data: Numpy array containing parameter values
             requires_grad: Whether this parameter requires gradients (default: True)
@@ -33,8 +32,8 @@ class Parameter(np.ndarray):
         """Called when creating new arrays from this one"""
         if obj is None:
             return
-        self.requires_grad = getattr(obj, 'requires_grad', True)
-        self.grad = getattr(obj, 'grad', None)
+        self.requires_grad = getattr(obj, "requires_grad", True)
+        self.grad = getattr(obj, "grad", None)
 
     def zero_grad(self):
         """Clear gradients"""
@@ -52,11 +51,11 @@ class Parameter(np.ndarray):
 def parameter(data: np.ndarray, requires_grad: bool = True) -> Parameter:
     """
     Create a Parameter from a numpy array.
-    
+
     Args:
         data: Numpy array
         requires_grad: Whether gradients are needed (default: True)
-    
+
     Returns:
         Parameter object
     """

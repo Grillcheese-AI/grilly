@@ -173,8 +173,9 @@ class TestBinaryOps:
             similarities.append(abs(BinaryOps.similarity(a, b)))
 
         avg_similarity = np.mean(similarities)
-        assert avg_similarity < orthogonality_threshold, \
+        assert avg_similarity < orthogonality_threshold, (
             f"Average similarity {avg_similarity} exceeds threshold {orthogonality_threshold}"
+        )
 
     def test_random_bipolar_deterministic_with_seed(self, dim):
         """Random bipolar with same seed should produce same vector."""
@@ -358,8 +359,9 @@ class TestHolographicOps:
             similarities.append(abs(HolographicOps.similarity(a, b)))
 
         avg_similarity = np.mean(similarities)
-        assert avg_similarity < orthogonality_threshold, \
+        assert avg_similarity < orthogonality_threshold, (
             f"Average similarity {avg_similarity} exceeds threshold {orthogonality_threshold}"
+        )
 
 
 class TestBindUnbindRoundTrip:

@@ -3,6 +3,7 @@ GPU GEMM-based similarity tests (RDNA2-friendly tiled kernel).
 
 These tests validate that vsa-similarity-gemm matches the CPU dot baseline.
 """
+
 import numpy as np
 import pytest
 
@@ -17,7 +18,7 @@ class TestVulkanVSASimilarityGEMM:
             core = VulkanCore()
             vsa = VulkanVSA(core)
 
-            if 'vsa-similarity-gemm' not in core.shaders:
+            if "vsa-similarity-gemm" not in core.shaders:
                 pytest.skip("vsa-similarity-gemm shader not available")
 
             B = 4

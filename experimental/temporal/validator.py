@@ -14,6 +14,7 @@ from grilly.experimental.temporal.state import TemporalWorldModel
 @dataclass
 class ValidationResult:
     """Result of temporal validation."""
+
     is_valid: bool
     past_consistent: bool
     present_consistent: bool
@@ -25,7 +26,7 @@ class ValidationResult:
 class TemporalDecisionValidator:
     """
     Validates decisions against past, present, and future states.
-    
+
     A decision is valid if:
     1. It's consistent with established past (doesn't contradict history)
     2. It's achievable from present (preconditions met)
@@ -33,9 +34,7 @@ class TemporalDecisionValidator:
     """
 
     def __init__(
-        self,
-        world_model: TemporalWorldModel,
-        counterfactual_reasoner: CounterfactualReasoner
+        self, world_model: TemporalWorldModel, counterfactual_reasoner: CounterfactualReasoner
     ):
         """Initialize the instance."""
 
@@ -47,7 +46,7 @@ class TemporalDecisionValidator:
         self,
         decision_time: int,
         decision: dict[str, Any],  # Variable changes
-        check_horizon: int = 5     # How far into future to check
+        check_horizon: int = 5,  # How far into future to check
     ) -> ValidationResult:
         """
         Validate a decision against temporal constraints.
@@ -80,14 +79,10 @@ class TemporalDecisionValidator:
             present_consistent=present_ok,
             future_consistent=future_ok,
             violations=violations,
-            confidence=confidence
+            confidence=confidence,
         )
 
-    def _check_past_consistency(
-        self,
-        decision_time: int,
-        decision: dict[str, Any]
-    ) -> bool:
+    def _check_past_consistency(self, decision_time: int, decision: dict[str, Any]) -> bool:
         """
         Check that decision doesn't contradict past.
         """
@@ -118,11 +113,7 @@ class TemporalDecisionValidator:
 
         return pair in contradictions or reverse_pair in contradictions
 
-    def _check_present_preconditions(
-        self,
-        decision_time: int,
-        decision: dict[str, Any]
-    ) -> bool:
+    def _check_present_preconditions(self, decision_time: int, decision: dict[str, Any]) -> bool:
         """
         Check that preconditions for decision are met.
         """
@@ -132,7 +123,7 @@ class TemporalDecisionValidator:
 
         # For each decision variable, check if change is possible
         for var, new_val in decision.items():
-            current_val = present_state.variables.get(var)
+            present_state.variables.get(var)
 
             # Check causal rules: is there a rule that allows this transition?
             transition_possible = False
@@ -156,10 +147,7 @@ class TemporalDecisionValidator:
         return True
 
     def _check_future_consistency(
-        self,
-        decision_time: int,
-        decision: dict[str, Any],
-        horizon: int
+        self, decision_time: int, decision: dict[str, Any], horizon: int
     ) -> tuple[bool, list[str]]:
         """
         Check that decision doesn't lead to invalid future states.
@@ -181,9 +169,7 @@ class TemporalDecisionValidator:
             future_vars = self.world.causal_chain.propagate_forward(new_vars, steps=1)
 
             # Check constraints
-            is_valid, constraint_violations = self.world.validate_state(
-                future_time, future_vars
-            )
+            is_valid, constraint_violations = self.world.validate_state(future_time, future_vars)
 
             if not is_valid:
                 for v in constraint_violations:
@@ -199,7 +185,7 @@ class TemporalDecisionValidator:
         decision: dict[str, Any],
         counterfactual_var: str,
         counterfactual_val: Any,
-        counterfactual_time: int
+        counterfactual_time: int,
     ) -> tuple[ValidationResult, ValidationResult]:
         """
         Compare decision validity in actual vs counterfactual world.
@@ -209,9 +195,7 @@ class TemporalDecisionValidator:
 
         # Create counterfactual branch
         branch_id = self.cf_reasoner.intervene(
-            counterfactual_time,
-            counterfactual_var,
-            counterfactual_val
+            counterfactual_time, counterfactual_var, counterfactual_val
         )
 
         # Temporarily swap timelines

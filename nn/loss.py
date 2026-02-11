@@ -4,7 +4,6 @@ Loss Functions (PyTorch-like)
 Loss functions with backward pass support for training.
 """
 
-
 import numpy as np
 
 from .module import Module
@@ -13,11 +12,11 @@ from .module import Module
 class MSELoss(Module):
     """
     Mean Squared Error Loss
-    
+
     Loss = mean((input - target)^2)
     """
 
-    def __init__(self, reduction: str = 'mean'):
+    def __init__(self, reduction: str = "mean"):
         """
         Args:
             reduction: 'mean' (default) or 'sum' or 'none'
@@ -28,35 +27,37 @@ class MSELoss(Module):
     def forward(self, input: np.ndarray, target: np.ndarray) -> np.ndarray:
         """
         Compute MSE loss.
-        
+
         Args:
             input: Predictions (any shape)
             target: Targets (same shape as input)
-        
+
         Returns:
             Loss value (scalar if reduction='mean' or 'sum', array if reduction='none')
         """
         diff = input - target
-        squared = diff ** 2
+        squared = diff**2
 
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             return np.mean(squared)
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return np.sum(squared)
         else:  # 'none'
             return squared
 
-    def backward(self, grad_output: np.ndarray = None, input: np.ndarray = None, target: np.ndarray = None) -> np.ndarray:
+    def backward(
+        self, grad_output: np.ndarray = None, input: np.ndarray = None, target: np.ndarray = None
+    ) -> np.ndarray:
         """
         Backward pass for MSE loss.
-        
+
         Gradient: d/dx MSE = 2 * (input - target) / N (for mean reduction)
-        
+
         Args:
             grad_output: Gradient w.r.t. loss (usually 1.0 for loss functions)
             input: Input from forward pass
             target: Target from forward pass
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
@@ -69,10 +70,10 @@ class MSELoss(Module):
         # Gradient: 2 * (input - target) / N for mean, 2 * (input - target) for sum
         diff = input - target
 
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             N = input.size
             grad_input = 2.0 * diff / N * grad_output
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             grad_input = 2.0 * diff * grad_output
         else:  # 'none'
             grad_input = 2.0 * diff * grad_output
@@ -83,11 +84,11 @@ class MSELoss(Module):
 class CrossEntropyLoss(Module):
     """
     Cross Entropy Loss (with softmax)
-    
+
     Loss = -sum(target * log(softmax(input))) / N
     """
 
-    def __init__(self, reduction: str = 'mean', ignore_index: int = -100):
+    def __init__(self, reduction: str = "mean", ignore_index: int = -100):
         """
         Args:
             reduction: 'mean' (default) or 'sum' or 'none'
@@ -101,11 +102,11 @@ class CrossEntropyLoss(Module):
     def forward(self, input: np.ndarray, target: np.ndarray) -> np.ndarray:
         """
         Compute cross entropy loss.
-        
+
         Args:
             input: Logits (batch, num_classes) or (batch, seq_len, num_classes)
             target: Class indices (batch,) or (batch, seq_len)
-        
+
         Returns:
             Loss value (scalar if reduction='mean' or 'sum', array if reduction='none')
         """
@@ -152,27 +153,29 @@ class CrossEntropyLoss(Module):
             mask = (target != self.ignore_index).astype(np.float32)
             loss = loss * mask
 
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             if target.ndim == input.ndim - 1:
                 valid = np.sum(mask)
                 return np.sum(loss) / max(valid, 1.0)
             return np.mean(loss)
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return np.sum(loss)
         else:  # 'none'
             return loss
 
-    def backward(self, grad_output: np.ndarray = None, input: np.ndarray = None, target: np.ndarray = None) -> np.ndarray:
+    def backward(
+        self, grad_output: np.ndarray = None, input: np.ndarray = None, target: np.ndarray = None
+    ) -> np.ndarray:
         """
         Backward pass for cross entropy loss.
-        
+
         Gradient: d/dx CE = softmax(input) - target
-        
+
         Args:
             grad_output: Gradient w.r.t. loss (usually 1.0 for loss functions)
             input: Input from forward pass
             target: Target from forward pass
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
@@ -223,7 +226,7 @@ class CrossEntropyLoss(Module):
             grad_input = grad_input * mask
 
         # Apply reduction scaling
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             if target.ndim == input.ndim - 1:
                 valid = np.sum(mask[..., 0])
                 grad_input = grad_input / max(valid, 1.0)
@@ -238,11 +241,11 @@ class CrossEntropyLoss(Module):
 class BCELoss(Module):
     """
     Binary Cross Entropy Loss
-    
+
     Loss = -sum(target * log(sigmoid(input)) + (1 - target) * log(1 - sigmoid(input))) / N
     """
 
-    def __init__(self, reduction: str = 'mean'):
+    def __init__(self, reduction: str = "mean"):
         """
         Args:
             reduction: 'mean' (default) or 'sum' or 'none'
@@ -253,11 +256,11 @@ class BCELoss(Module):
     def forward(self, input: np.ndarray, target: np.ndarray) -> np.ndarray:
         """
         Compute BCE loss.
-        
+
         Args:
             input: Logits (any shape)
             target: Targets in [0, 1] (same shape as input)
-        
+
         Returns:
             Loss value (scalar if reduction='mean' or 'sum', array if reduction='none')
         """
@@ -270,24 +273,26 @@ class BCELoss(Module):
         # Compute loss
         loss = -(target * np.log(sigmoid) + (1.0 - target) * np.log(1.0 - sigmoid))
 
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             return np.mean(loss)
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return np.sum(loss)
         else:  # 'none'
             return loss
 
-    def backward(self, grad_output: np.ndarray = None, input: np.ndarray = None, target: np.ndarray = None) -> np.ndarray:
+    def backward(
+        self, grad_output: np.ndarray = None, input: np.ndarray = None, target: np.ndarray = None
+    ) -> np.ndarray:
         """
         Backward pass for BCE loss.
-        
+
         Gradient: d/dx BCE = sigmoid(input) - target
-        
+
         Args:
             grad_output: Gradient w.r.t. loss (usually 1.0 for loss functions)
             input: Input from forward pass
             target: Target from forward pass
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
@@ -304,7 +309,7 @@ class BCELoss(Module):
         grad_input = sigmoid - target
 
         # Apply reduction scaling
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             N = input.size
             grad_input = grad_input / N
         # For 'sum' and 'none', no additional scaling needed

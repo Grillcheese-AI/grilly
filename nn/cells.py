@@ -14,9 +14,9 @@ from .module import Module
 class PlaceCell(Module):
     """
     Place Cell layer - Spatial encoding.
-    
+
     Uses: place-cell.glsl
-    
+
     Reference: ref/brain/gpu_brain.py compute_place_cells
     """
 
@@ -26,11 +26,11 @@ class PlaceCell(Module):
         spatial_dims: int = 2,
         field_width: float = 1.0,
         max_rate: float = 20.0,
-        baseline_rate: float = 0.1
+        baseline_rate: float = 0.1,
     ):
         """
         Initialize PlaceCell layer.
-        
+
         Args:
             n_neurons: Number of place cells
             spatial_dims: Number of spatial dimensions (2D or 3D)
@@ -47,24 +47,25 @@ class PlaceCell(Module):
 
         # Place field centers (randomly initialized)
         self.field_centers = np.random.randn(n_neurons, spatial_dims).astype(np.float32)
-        self._parameters['field_centers'] = self.field_centers
+        self._parameters["field_centers"] = self.field_centers
 
     def forward(self, agent_position: np.ndarray) -> np.ndarray:
         """
         Forward pass - compute place cell firing rates.
-        
+
         Args:
             agent_position: Agent position (spatial_dims,) or (batch, spatial_dims)
-        
+
         Returns:
             Firing rates (n_neurons,) or (batch, n_neurons)
         """
         backend = self._get_backend()
         return backend.place_cell(
-            agent_position, self.field_centers,
+            agent_position,
+            self.field_centers,
             field_width=self.field_width,
             max_rate=self.max_rate,
-            baseline_rate=self.baseline_rate
+            baseline_rate=self.baseline_rate,
         )
 
     def __repr__(self):
@@ -76,9 +77,9 @@ class PlaceCell(Module):
 class TimeCell(Module):
     """
     Time Cell layer - Temporal encoding.
-    
+
     Uses: time-cell.glsl
-    
+
     Reference: ref/brain/gpu_brain.py compute_time_cells
     """
 
@@ -87,11 +88,11 @@ class TimeCell(Module):
         n_neurons: int,
         temporal_width: float = 1.0,
         max_rate: float = 15.0,
-        baseline_rate: float = 0.1
+        baseline_rate: float = 0.1,
     ):
         """
         Initialize TimeCell layer.
-        
+
         Args:
             n_neurons: Number of time cells
             temporal_width: Width of time fields
@@ -106,29 +107,30 @@ class TimeCell(Module):
 
         # Preferred times (randomly initialized)
         self.preferred_times = np.random.uniform(0, 10, n_neurons).astype(np.float32)
-        self._parameters['preferred_times'] = self.preferred_times
+        self._parameters["preferred_times"] = self.preferred_times
 
         # Membrane state for dynamics
         self.membrane = np.zeros(n_neurons, dtype=np.float32)
-        self._buffers['membrane'] = self.membrane
+        self._buffers["membrane"] = self.membrane
 
     def forward(self, current_time: float) -> np.ndarray:
         """
         Forward pass - compute time cell firing rates.
-        
+
         Args:
             current_time: Current time value
-        
+
         Returns:
             Firing rates (n_neurons,)
         """
         backend = self._get_backend()
         rates, self.membrane = backend.time_cell(
-            current_time, self.preferred_times,
+            current_time,
+            self.preferred_times,
             temporal_width=self.temporal_width,
             max_rate=self.max_rate,
             baseline_rate=self.baseline_rate,
-            membrane_state=self.membrane
+            membrane_state=self.membrane,
         )
         return rates
 
@@ -145,9 +147,9 @@ class TimeCell(Module):
 class ThetaGammaEncoder(Module):
     """
     Theta-Gamma Encoder - Phase-amplitude coupling.
-    
+
     Uses: theta-gamma-encoding.glsl
-    
+
     Reference: ref/brain/gpu_brain.py compute_theta_gamma
     """
 
@@ -157,11 +159,11 @@ class ThetaGammaEncoder(Module):
         n_gamma: int = 40,
         theta_freq: float = 8.0,
         gamma_freq: float = 40.0,
-        coupling_strength: float = 0.5
+        coupling_strength: float = 0.5,
     ):
         """
         Initialize ThetaGammaEncoder layer.
-        
+
         Args:
             n_theta: Number of theta phase bins
             n_gamma: Number of gamma amplitude bins
@@ -179,17 +181,17 @@ class ThetaGammaEncoder(Module):
     def forward(self, time: float) -> np.ndarray:
         """
         Forward pass - compute theta-gamma encoding.
-        
+
         Args:
             time: Current time value
-        
+
         Returns:
             Theta-gamma encoding (n_theta * n_gamma,)
         """
         backend = self._get_backend()
 
         # Try GPU shader if available
-        if hasattr(backend, 'shaders') and 'theta-gamma-encoding' in backend.shaders:
+        if hasattr(backend, "shaders") and "theta-gamma-encoding" in backend.shaders:
             try:
                 # GPU theta-gamma encoding would go here
                 # For now, use CPU fallback
@@ -201,8 +203,8 @@ class ThetaGammaEncoder(Module):
         theta_phase = 2 * np.pi * self.theta_freq * time
         gamma_phase = 2 * np.pi * self.gamma_freq * time
 
-        theta_encoding = np.sin(theta_phase + np.linspace(0, 2*np.pi, self.n_theta))
-        gamma_encoding = np.sin(gamma_phase + np.linspace(0, 2*np.pi, self.n_gamma))
+        theta_encoding = np.sin(theta_phase + np.linspace(0, 2 * np.pi, self.n_theta))
+        gamma_encoding = np.sin(gamma_phase + np.linspace(0, 2 * np.pi, self.n_gamma))
 
         # Phase-amplitude coupling
         coupling = self.coupling_strength * np.outer(theta_encoding, gamma_encoding)

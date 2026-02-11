@@ -26,9 +26,11 @@ if TYPE_CHECKING:
 # Data layer - parsing and filtering
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SVCEntry:
     """A parsed SVC entry from the training data."""
+
     id: str
     text: str
     svc_s: str
@@ -43,7 +45,7 @@ class SVCEntry:
     complexity: float
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'SVCEntry':
+    def from_dict(cls, data: dict) -> "SVCEntry":
         """Create SVCEntry from JSON dict."""
         return cls(
             id=data.get("id", ""),
@@ -62,7 +64,7 @@ class SVCEntry:
 
     def tokenize(self) -> list[str]:
         """Tokenize text the same way InstantLanguage does."""
-        text = re.sub(r'[^\w\s]', '', self.text.lower())
+        text = re.sub(r"[^\w\s]", "", self.text.lower())
         return text.split()
 
     def to_roles(self) -> tuple[list[str], list[str]]:
@@ -72,9 +74,9 @@ class SVCEntry:
             (words, roles) where words are tokenized and lowercased.
         """
         words = self.tokenize()
-        v_words = set(re.sub(r'[^\w\s]', '', self.svc_v.lower()).split())
-        s_words = set(re.sub(r'[^\w\s]', '', self.svc_s.lower()).split())
-        c_words = set(re.sub(r'[^\w\s]', '', self.svc_c.lower()).split())
+        v_words = set(re.sub(r"[^\w\s]", "", self.svc_v.lower()).split())
+        s_words = set(re.sub(r"[^\w\s]", "", self.svc_s.lower()).split())
+        c_words = set(re.sub(r"[^\w\s]", "", self.svc_c.lower()).split())
 
         roles: list[str] = []
         for w in words:
@@ -96,6 +98,7 @@ class SVCEntry:
 @dataclass
 class SVCBatch:
     """A batch of loaded SVC entries with statistics."""
+
     entries: list[SVCEntry]
     realm_counts: dict[str, int] = field(default_factory=dict)
     source_counts: dict[str, int] = field(default_factory=dict)
@@ -123,8 +126,7 @@ class SVCBatch:
         """Execute summary."""
 
         lines = [
-            f"SVCBatch: {len(self.entries)} entries loaded "
-            f"({self.total_skipped} skipped)",
+            f"SVCBatch: {len(self.entries)} entries loaded ({self.total_skipped} skipped)",
             f"  Realms: {self.realm_counts}",
             f"  Sources: {self.source_counts}",
             f"  Top verbs: {dict(sorted(self.verb_counts.items(), key=lambda x: -x[1])[:10])}",
@@ -136,6 +138,7 @@ class SVCBatch:
 # ---------------------------------------------------------------------------
 # File loaders
 # ---------------------------------------------------------------------------
+
 
 def load_svc_entries(
     path: str,
@@ -151,7 +154,7 @@ def load_svc_entries(
         raise FileNotFoundError(f"SVC data file not found: {path}")
 
     count = 0
-    with open(path_obj, encoding='utf-8') as f:
+    with open(path_obj, encoding="utf-8") as f:
         for line in f:
             if max_entries is not None and count >= max_entries:
                 break
@@ -195,7 +198,7 @@ def load_svc_batch(
     if not path_obj.exists():
         raise FileNotFoundError(f"SVC data file not found: {path}")
 
-    with open(path_obj, encoding='utf-8') as f:
+    with open(path_obj, encoding="utf-8") as f:
         for line in f:
             if max_entries is not None and len(entries) >= max_entries:
                 break
@@ -256,11 +259,13 @@ def load_svc_entries_from_dicts(
 # GPU-aware Ingestion Engine
 # ---------------------------------------------------------------------------
 
-def _try_get_vulkan_vsa() -> Optional['VulkanVSA']:
+
+def _try_get_vulkan_vsa() -> Optional["VulkanVSA"]:
     """Attempt to create a VulkanVSA instance.  Returns None on failure."""
     try:
         from grilly.backend.core import VulkanCore
         from grilly.backend.experimental.vsa import VulkanVSA
+
         core = VulkanCore()
         return VulkanVSA(core)
     except Exception:
@@ -406,8 +411,8 @@ class SVCIngestionEngine:
     def batch_encode_sentences(
         self,
         entries: list[SVCEntry],
-        word_encoder: 'WordEncoder',
-        sentence_encoder: 'SentenceEncoder',
+        word_encoder: "WordEncoder",
+        sentence_encoder: "SentenceEncoder",
     ) -> tuple[list[np.ndarray], list[list[str]]]:
         """Encode a batch of SVC entries into sentence vectors.
 

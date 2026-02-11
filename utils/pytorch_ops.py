@@ -4,6 +4,7 @@ Common PyTorch Operations (80% Coverage)
 Provides implementations of the most commonly used PyTorch operations
 using Vulkan backend. Covers approximately 80% of common PyTorch usage.
 """
+
 import numpy as np
 
 from .device_manager import get_device_manager
@@ -19,6 +20,7 @@ def _get_backend():
 # ============================================================================
 # Basic Operations
 # ============================================================================
+
 
 def add(input: Tensor | np.ndarray, other: Tensor | np.ndarray, alpha: float = 1.0) -> Tensor:
     """Add tensors: output = input + alpha * other"""
@@ -41,7 +43,7 @@ def matmul(input: Tensor | np.ndarray, other: Tensor | np.ndarray) -> Tensor:
     backend = _get_backend()
 
     # Try GPU shader if available
-    if hasattr(backend, 'linear'):
+    if hasattr(backend, "linear"):
         try:
             # Use linear backend (matmul is similar)
             result = backend.linear(input_arr, other_arr.T, None)
@@ -59,19 +61,20 @@ def bmm(input: Tensor | np.ndarray, mat2: Tensor | np.ndarray) -> Tensor:
     mat2_arr = to_numpy(mat2) if not isinstance(mat2, np.ndarray) else mat2
 
     # Batch matmul: (batch, n, m) @ (batch, m, p) -> (batch, n, p)
-    return tensor(np.einsum('bij,bjk->bik', input_arr, mat2_arr))
+    return tensor(np.einsum("bij,bjk->bik", input_arr, mat2_arr))
 
 
 # ============================================================================
 # Activation Functions
 # ============================================================================
 
+
 def relu(input: Tensor | np.ndarray) -> Tensor:
     """ReLU activation"""
     input_arr = to_numpy(input) if not isinstance(input, np.ndarray) else input
     backend = _get_backend()
 
-    if hasattr(backend, 'activation_relu'):
+    if hasattr(backend, "activation_relu"):
         try:
             return tensor(backend.activation_relu(input_arr))
         except Exception:
@@ -85,14 +88,16 @@ def gelu(input: Tensor | np.ndarray) -> Tensor:
     input_arr = to_numpy(input) if not isinstance(input, np.ndarray) else input
     backend = _get_backend()
 
-    if hasattr(backend, 'activation_gelu'):
+    if hasattr(backend, "activation_gelu"):
         try:
             return tensor(backend.activation_gelu(input_arr))
         except Exception:
             pass
 
     # CPU fallback
-    return tensor(0.5 * input_arr * (1 + np.tanh(np.sqrt(2 / np.pi) * (input_arr + 0.044715 * input_arr**3))))
+    return tensor(
+        0.5 * input_arr * (1 + np.tanh(np.sqrt(2 / np.pi) * (input_arr + 0.044715 * input_arr**3)))
+    )
 
 
 def softmax(input: Tensor | np.ndarray, dim: int = -1) -> Tensor:
@@ -100,7 +105,7 @@ def softmax(input: Tensor | np.ndarray, dim: int = -1) -> Tensor:
     input_arr = to_numpy(input) if not isinstance(input, np.ndarray) else input
     backend = _get_backend()
 
-    if hasattr(backend, 'activation_softmax'):
+    if hasattr(backend, "activation_softmax"):
         try:
             return tensor(backend.activation_softmax(input_arr))
         except Exception:
@@ -127,18 +132,19 @@ def tanh(input: Tensor | np.ndarray) -> Tensor:
 # Normalization
 # ============================================================================
 
+
 def layer_norm(
     input: Tensor | np.ndarray,
     normalized_shape: tuple[int, ...],
     weight: np.ndarray | None = None,
     bias: np.ndarray | None = None,
-    eps: float = 1e-5
+    eps: float = 1e-5,
 ) -> Tensor:
     """Layer normalization"""
     input_arr = to_numpy(input) if not isinstance(input, np.ndarray) else input
     backend = _get_backend()
 
-    if hasattr(backend, 'layernorm') and weight is not None and bias is not None:
+    if hasattr(backend, "layernorm") and weight is not None and bias is not None:
         try:
             return tensor(backend.layernorm(input_arr, weight, bias, eps))
         except Exception:
@@ -161,7 +167,7 @@ def batch_norm(
     bias: np.ndarray | None = None,
     training: bool = False,
     momentum: float = 0.1,
-    eps: float = 1e-5
+    eps: float = 1e-5,
 ) -> Tensor:
     """Batch normalization"""
     input_arr = to_numpy(input) if not isinstance(input, np.ndarray) else input
@@ -179,10 +185,20 @@ def batch_norm(
         use_var = var
     else:
         if running_mean is not None and running_var is not None:
-            use_mean = running_mean.reshape(1, -1, 1, 1) if input_arr.ndim == 4 else running_mean.reshape(1, -1)
-            use_var = running_var.reshape(1, -1, 1, 1) if input_arr.ndim == 4 else running_var.reshape(1, -1)
+            use_mean = (
+                running_mean.reshape(1, -1, 1, 1)
+                if input_arr.ndim == 4
+                else running_mean.reshape(1, -1)
+            )
+            use_var = (
+                running_var.reshape(1, -1, 1, 1)
+                if input_arr.ndim == 4
+                else running_var.reshape(1, -1)
+            )
         else:
-            use_mean = np.mean(input_arr, axis=(0, 2, 3) if input_arr.ndim == 4 else 0, keepdims=True)
+            use_mean = np.mean(
+                input_arr, axis=(0, 2, 3) if input_arr.ndim == 4 else 0, keepdims=True
+            )
             use_var = np.var(input_arr, axis=(0, 2, 3) if input_arr.ndim == 4 else 0, keepdims=True)
 
     # Normalize
@@ -206,17 +222,15 @@ def batch_norm(
 # Dropout
 # ============================================================================
 
+
 def dropout(
-    input: Tensor | np.ndarray,
-    p: float = 0.5,
-    training: bool = True,
-    inplace: bool = False
+    input: Tensor | np.ndarray, p: float = 0.5, training: bool = True, inplace: bool = False
 ) -> Tensor:
     """Dropout"""
     input_arr = to_numpy(input) if not isinstance(input, np.ndarray) else input
     backend = _get_backend()
 
-    if hasattr(backend, 'dropout'):
+    if hasattr(backend, "dropout"):
         try:
             return tensor(backend.dropout(input_arr, p, training))
         except Exception:
@@ -236,6 +250,7 @@ def dropout(
 # Convolution (2D)
 # ============================================================================
 
+
 def conv2d(
     input: Tensor | np.ndarray,
     weight: np.ndarray,
@@ -243,11 +258,11 @@ def conv2d(
     stride: tuple[int, int] = (1, 1),
     padding: tuple[int, int] = (0, 0),
     dilation: tuple[int, int] = (1, 1),
-    groups: int = 1
+    groups: int = 1,
 ) -> Tensor:
     """
     2D Convolution (CPU fallback for now)
-    
+
     Args:
         input: Input tensor (batch, in_channels, height, width)
         weight: Weight tensor (out_channels, in_channels, kernel_h, kernel_w)
@@ -268,7 +283,11 @@ def conv2d(
 
     # Add padding
     if padding[0] > 0 or padding[1] > 0:
-        input_arr = np.pad(input_arr, ((0, 0), (0, 0), (padding[0], padding[0]), (padding[1], padding[1])), mode='constant')
+        input_arr = np.pad(
+            input_arr,
+            ((0, 0), (0, 0), (padding[0], padding[0]), (padding[1], padding[1])),
+            mode="constant",
+        )
 
     output = np.zeros((batch, out_channels, out_h, out_w), dtype=np.float32)
 
@@ -294,11 +313,12 @@ def conv2d(
 # Pooling
 # ============================================================================
 
+
 def max_pool2d(
     input: Tensor | np.ndarray,
     kernel_size: int | tuple[int, int],
     stride: int | tuple[int, int] | None = None,
-    padding: int | tuple[int, int] = (0, 0)
+    padding: int | tuple[int, int] = (0, 0),
 ) -> Tensor:
     """2D Max pooling"""
     input_arr = to_numpy(input) if not isinstance(input, np.ndarray) else input
@@ -321,7 +341,12 @@ def max_pool2d(
     out_w = (in_w + 2 * pad_w - kernel_w) // stride_w + 1
 
     if pad_h > 0 or pad_w > 0:
-        input_arr = np.pad(input_arr, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=-np.inf)
+        input_arr = np.pad(
+            input_arr,
+            ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)),
+            mode="constant",
+            constant_values=-np.inf,
+        )
 
     output = np.zeros((batch, channels, out_h, out_w), dtype=np.float32)
 
@@ -343,7 +368,7 @@ def avg_pool2d(
     input: Tensor | np.ndarray,
     kernel_size: int | tuple[int, int],
     stride: int | tuple[int, int] | None = None,
-    padding: int | tuple[int, int] = (0, 0)
+    padding: int | tuple[int, int] = (0, 0),
 ) -> Tensor:
     """2D Average pooling"""
     input_arr = to_numpy(input) if not isinstance(input, np.ndarray) else input
@@ -366,7 +391,9 @@ def avg_pool2d(
     out_w = (in_w + 2 * pad_w - kernel_w) // stride_w + 1
 
     if pad_h > 0 or pad_w > 0:
-        input_arr = np.pad(input_arr, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)), mode='constant')
+        input_arr = np.pad(
+            input_arr, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)), mode="constant"
+        )
 
     output = np.zeros((batch, channels, out_h, out_w), dtype=np.float32)
 
@@ -388,16 +415,19 @@ def avg_pool2d(
 # Loss Functions
 # ============================================================================
 
-def mse_loss(input: Tensor | np.ndarray, target: Tensor | np.ndarray, reduction: str = 'mean') -> Tensor:
+
+def mse_loss(
+    input: Tensor | np.ndarray, target: Tensor | np.ndarray, reduction: str = "mean"
+) -> Tensor:
     """Mean Squared Error loss"""
     input_arr = to_numpy(input) if not isinstance(input, np.ndarray) else input
     target_arr = to_numpy(target) if not isinstance(target, np.ndarray) else target
 
     loss = (input_arr - target_arr) ** 2
 
-    if reduction == 'mean':
+    if reduction == "mean":
         return tensor(np.mean(loss))
-    elif reduction == 'sum':
+    elif reduction == "sum":
         return tensor(np.sum(loss))
     else:
         return tensor(loss)
@@ -407,8 +437,8 @@ def cross_entropy_loss(
     input: Tensor | np.ndarray,
     target: Tensor | np.ndarray,
     weight: np.ndarray | None = None,
-    reduction: str = 'mean',
-    ignore_index: int = -100
+    reduction: str = "mean",
+    ignore_index: int = -100,
 ) -> Tensor:
     """Cross entropy loss"""
     input_arr = to_numpy(input) if not isinstance(input, np.ndarray) else input
@@ -435,9 +465,9 @@ def cross_entropy_loss(
     if weight is not None:
         loss = loss * weight[target_arr.astype(int)]
 
-    if reduction == 'mean':
+    if reduction == "mean":
         return tensor(np.mean(loss))
-    elif reduction == 'sum':
+    elif reduction == "sum":
         return tensor(np.sum(loss))
     else:
         return tensor(loss)
@@ -447,6 +477,7 @@ def cross_entropy_loss(
 # Utility Functions
 # ============================================================================
 
+
 def flatten(input: Tensor | np.ndarray, start_dim: int = 0, end_dim: int = -1) -> Tensor:
     """Flatten tensor"""
     input_arr = to_numpy(input) if not isinstance(input, np.ndarray) else input
@@ -455,7 +486,7 @@ def flatten(input: Tensor | np.ndarray, start_dim: int = 0, end_dim: int = -1) -
         end_dim = len(input_arr.shape) - 1
 
     shape = list(input_arr.shape)
-    new_shape = shape[:start_dim] + [-1] + shape[end_dim + 1:]
+    new_shape = shape[:start_dim] + [-1] + shape[end_dim + 1 :]
 
     return tensor(input_arr.reshape(new_shape))
 

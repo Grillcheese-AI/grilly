@@ -7,6 +7,7 @@ Tests GPU-accelerated LoRA operations including:
 - LoRA save/load checkpoints
 - LoRAModel wrapper
 """
+
 import tempfile
 from pathlib import Path
 
@@ -34,7 +35,7 @@ class TestLoRAConfig:
         assert config.rank == 8
         assert config.alpha == 16.0
         assert config.dropout == 0.0
-        assert config.target_modules == ['q_proj', 'v_proj']
+        assert config.target_modules == ["q_proj", "v_proj"]
 
     def test_custom_config(self):
         """Test custom configuration"""
@@ -42,7 +43,7 @@ class TestLoRAConfig:
             rank=16,
             alpha=32.0,
             dropout=0.1,
-            target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj']
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
         )
         assert config.rank == 16
         assert config.alpha == 32.0
@@ -59,10 +60,10 @@ class TestLoRAConfig:
 
     def test_config_save_load(self):
         """Test config save and load"""
-        config = LoRAConfig(rank=4, alpha=8.0, target_modules=['q', 'v'])
+        config = LoRAConfig(rank=4, alpha=8.0, target_modules=["q", "v"])
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / 'config.json'
+            path = Path(tmpdir) / "config.json"
             config.save(path)
 
             loaded = LoRAConfig.load(path)
@@ -94,7 +95,7 @@ class TestLoRALinear:
         lora = LoRALinear(128, 64, rank=4, base_weights=base_weights)
 
         x = Variable(np.random.randn(4, 128).astype(np.float32))
-        y = lora.forward(x)
+        lora.forward(x)
 
         # Verify base weights are used
         np.testing.assert_array_almost_equal(lora.W.data, base_weights)
@@ -247,20 +248,20 @@ class TestLoRAModel:
         config = LoRAConfig(rank=4, alpha=8)
         model = LoRAModel(config)
 
-        model.add_lora_layer('layer.0.q_proj', 768, 768)
-        model.add_lora_layer('layer.0.v_proj', 768, 768)
-        model.add_lora_layer('layer.1.q_proj', 768, 768)
+        model.add_lora_layer("layer.0.q_proj", 768, 768)
+        model.add_lora_layer("layer.0.v_proj", 768, 768)
+        model.add_lora_layer("layer.1.q_proj", 768, 768)
 
         assert len(model.lora_layers) == 3
-        assert 'layer.0.q_proj' in model.lora_layers
+        assert "layer.0.q_proj" in model.lora_layers
 
     def test_parameter_iteration(self):
         """Test iterating over parameters"""
         config = LoRAConfig(rank=4, alpha=8)
         model = LoRAModel(config)
 
-        model.add_lora_layer('layer.0.q_proj', 256, 256)
-        model.add_lora_layer('layer.0.v_proj', 256, 256)
+        model.add_lora_layer("layer.0.q_proj", 256, 256)
+        model.add_lora_layer("layer.0.v_proj", 256, 256)
 
         params = list(model.parameters())
         # Each layer has 2 params (A and B)
@@ -270,11 +271,11 @@ class TestLoRAModel:
         """Test saving and loading checkpoints"""
         np.random.seed(42)
 
-        config = LoRAConfig(rank=4, alpha=8, target_modules=['q_proj'])
+        config = LoRAConfig(rank=4, alpha=8, target_modules=["q_proj"])
         model = LoRAModel(config)
 
-        model.add_lora_layer('layer.0.q_proj', 256, 256)
-        model.add_lora_layer('layer.1.q_proj', 256, 256)
+        model.add_lora_layer("layer.0.q_proj", 256, 256)
+        model.add_lora_layer("layer.1.q_proj", 256, 256)
 
         # Set random weights
         for layer in model.lora_layers.values():
@@ -282,7 +283,7 @@ class TestLoRAModel:
             layer.lora_B.data = np.random.randn(*layer.lora_B.data.shape).astype(np.float32)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            save_path = Path(tmpdir) / 'checkpoint'
+            save_path = Path(tmpdir) / "checkpoint"
             model.save_checkpoint(save_path)
 
             # Load back
@@ -295,20 +296,16 @@ class TestLoRAModel:
             for name in model.lora_layers:
                 orig = model.lora_layers[name]
                 load = loaded.lora_layers[name]
-                np.testing.assert_array_almost_equal(
-                    orig.lora_A.data, load.lora_A.data, decimal=5
-                )
-                np.testing.assert_array_almost_equal(
-                    orig.lora_B.data, load.lora_B.data, decimal=5
-                )
+                np.testing.assert_array_almost_equal(orig.lora_A.data, load.lora_A.data, decimal=5)
+                np.testing.assert_array_almost_equal(orig.lora_B.data, load.lora_B.data, decimal=5)
 
     def test_merge_all(self):
         """Test merging all LoRA weights"""
         config = LoRAConfig(rank=4, alpha=8)
         model = LoRAModel(config)
 
-        model.add_lora_layer('layer.0.q_proj', 256, 256)
-        model.add_lora_layer('layer.0.v_proj', 256, 256)
+        model.add_lora_layer("layer.0.q_proj", 256, 256)
+        model.add_lora_layer("layer.0.v_proj", 256, 256)
 
         # Set non-zero weights
         for layer in model.lora_layers.values():
@@ -325,14 +322,14 @@ class TestLoRAModel:
         config = LoRAConfig(rank=8, alpha=16)
         model = LoRAModel(config)
 
-        model.add_lora_layer('layer.0.q_proj', 768, 768)
-        model.add_lora_layer('layer.0.v_proj', 768, 768)
+        model.add_lora_layer("layer.0.q_proj", 768, 768)
+        model.add_lora_layer("layer.0.v_proj", 768, 768)
 
         model.print_trainable_parameters()
 
         captured = capsys.readouterr()
-        assert 'trainable params' in captured.out
-        assert 'trainable%' in captured.out
+        assert "trainable params" in captured.out
+        assert "trainable%" in captured.out
 
 
 class TestLoRAAttention:
@@ -340,13 +337,7 @@ class TestLoRAAttention:
 
     def test_attention_creation(self):
         """Test creating LoRA attention"""
-        attn = LoRAAttention(
-            embed_dim=512,
-            num_heads=8,
-            rank=4,
-            alpha=8,
-            apply_lora_to=['q', 'v']
-        )
+        attn = LoRAAttention(embed_dim=512, num_heads=8, rank=4, alpha=8, apply_lora_to=["q", "v"])
 
         assert attn.q_proj is not None
         assert attn.k_proj is None  # Not in apply_lora_to
@@ -356,11 +347,7 @@ class TestLoRAAttention:
     def test_attention_params(self):
         """Test attention parameter counting"""
         attn = LoRAAttention(
-            embed_dim=768,
-            num_heads=12,
-            rank=8,
-            alpha=16,
-            apply_lora_to=['q', 'v']
+            embed_dim=768, num_heads=12, rank=8, alpha=16, apply_lora_to=["q", "v"]
         )
 
         # Each projection: 8 * (768 + 768) = 12,288
@@ -396,16 +383,16 @@ class TestConvenienceFunctions:
             rank=8,
         )
 
-        assert 'base_params' in stats
-        assert 'lora_params' in stats
-        assert 'trainable_ratio' in stats
-        assert 'total_training_memory_gb' in stats
+        assert "base_params" in stats
+        assert "lora_params" in stats
+        assert "trainable_ratio" in stats
+        assert "total_training_memory_gb" in stats
 
         # Verify ratio is small
-        assert stats['trainable_ratio'] < 0.01
+        assert stats["trainable_ratio"] < 0.01
 
         # Verify memory is reasonable
-        assert stats['total_training_memory_gb'] < 1.0
+        assert stats["total_training_memory_gb"] < 1.0
 
 
 class TestLoRAEmbedding:
@@ -435,5 +422,5 @@ class TestLoRAEmbedding:
         assert len(params) == 2  # A and B
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

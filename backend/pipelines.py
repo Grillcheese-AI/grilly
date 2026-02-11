@@ -28,17 +28,19 @@ class VulkanPipelines:
         """Create descriptor set layout for storage buffers"""
         bindings = []
         for i in range(num_buffers):
-            bindings.append(VkDescriptorSetLayoutBinding(
-                binding=i,
-                descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                descriptorCount=1,
-                stageFlags=VK_SHADER_STAGE_COMPUTE_BIT
-            ))
+            bindings.append(
+                VkDescriptorSetLayoutBinding(
+                    binding=i,
+                    descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                    descriptorCount=1,
+                    stageFlags=VK_SHADER_STAGE_COMPUTE_BIT,
+                )
+            )
 
         layout_info = VkDescriptorSetLayoutCreateInfo(
             sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             bindingCount=len(bindings),
-            pBindings=bindings
+            pBindings=bindings,
         )
 
         return vkCreateDescriptorSetLayout(self.core.device, layout_info, None)
@@ -48,9 +50,7 @@ class VulkanPipelines:
         push_constant_range = None
         if push_constant_size > 0:
             push_constant_range = VkPushConstantRange(
-                stageFlags=VK_SHADER_STAGE_COMPUTE_BIT,
-                offset=0,
-                size=push_constant_size
+                stageFlags=VK_SHADER_STAGE_COMPUTE_BIT, offset=0, size=push_constant_size
             )
 
         layout_info = VkPipelineLayoutCreateInfo(
@@ -58,7 +58,7 @@ class VulkanPipelines:
             setLayoutCount=1,
             pSetLayouts=[descriptor_set_layout],
             pushConstantRangeCount=1 if push_constant_range else 0,
-            pPushConstantRanges=[push_constant_range] if push_constant_range else None
+            pPushConstantRanges=[push_constant_range] if push_constant_range else None,
         )
 
         return vkCreatePipelineLayout(self.core.device, layout_info, None)
@@ -69,7 +69,7 @@ class VulkanPipelines:
         shader_info = VkShaderModuleCreateInfo(
             sType=VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
             codeSize=len(shader_code),
-            pCode=shader_code
+            pCode=shader_code,
         )
         shader_module = vkCreateShaderModule(self.core.device, shader_info, None)
 
@@ -78,13 +78,13 @@ class VulkanPipelines:
             sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             stage=VK_SHADER_STAGE_COMPUTE_BIT,
             module=shader_module,
-            pName="main"
+            pName="main",
         )
 
         pipeline_info = VkComputePipelineCreateInfo(
             sType=VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
             stage=stage_info,
-            layout=pipeline_layout
+            layout=pipeline_layout,
         )
 
         pipeline = vkCreateComputePipelines(self.core.device, None, 1, [pipeline_info], None)[0]
@@ -94,13 +94,15 @@ class VulkanPipelines:
 
         return pipeline
 
-    def get_or_create_pipeline(self, shader_name: str, num_buffers: int, push_constant_size: int = 0):
+    def get_or_create_pipeline(
+        self, shader_name: str, num_buffers: int, push_constant_size: int = 0
+    ):
         """
         Get or create a pipeline for a shader.
-        
+
         Raises:
             KeyError: If shader is not found in shaders dictionary
-        
+
         Returns:
             Tuple of (pipeline, pipeline_layout, descriptor_set_layout)
         """
@@ -114,10 +116,7 @@ class VulkanPipelines:
 
             desc_layout = self._create_descriptor_set_layout(num_buffers)
             pipe_layout = self._create_pipeline_layout(desc_layout, push_constant_size)
-            pipeline = self._create_compute_pipeline(
-                self.core.shaders[shader_name],
-                pipe_layout
-            )
+            pipeline = self._create_compute_pipeline(self.core.shaders[shader_name], pipe_layout)
 
             self.descriptor_set_layouts[shader_name] = desc_layout
             self.pipeline_layouts[shader_name] = pipe_layout
@@ -126,7 +125,7 @@ class VulkanPipelines:
         return (
             self.pipelines[shader_name],
             self.pipeline_layouts[shader_name],
-            self.descriptor_set_layouts[shader_name]
+            self.descriptor_set_layouts[shader_name],
         )
 
     def _create_descriptor_set(self, layout, buffers: list):
@@ -135,7 +134,7 @@ class VulkanPipelines:
             sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
             descriptorPool=self.core.descriptor_pool,
             descriptorSetCount=1,
-            pSetLayouts=[layout]
+            pSetLayouts=[layout],
         )
 
         descriptor_set = vkAllocateDescriptorSets(self.core.device, alloc_info)[0]
@@ -143,11 +142,7 @@ class VulkanPipelines:
         # Update descriptor set with buffer bindings
         writes = []
         for i, (buffer, size) in enumerate(buffers):
-            buffer_info = VkDescriptorBufferInfo(
-                buffer=buffer,
-                offset=0,
-                range=size
-            )
+            buffer_info = VkDescriptorBufferInfo(buffer=buffer, offset=0, range=size)
 
             write = VkWriteDescriptorSet(
                 sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -156,7 +151,7 @@ class VulkanPipelines:
                 dstArrayElement=0,
                 descriptorCount=1,
                 descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                pBufferInfo=[buffer_info]
+                pBufferInfo=[buffer_info],
             )
             writes.append(write)
 
@@ -168,11 +163,11 @@ class VulkanPipelines:
         """
         Get a cached descriptor set or create a new one.
         Implements LRU eviction to prevent descriptor pool exhaustion.
-        
+
         Args:
             shader_name: Name of the shader
             buffers: List of (buffer, size) tuples
-            
+
         Returns:
             Descriptor set handle
         """
@@ -191,11 +186,7 @@ class VulkanPipelines:
             # Update buffer bindings for the cached set
             writes = []
             for i, (buffer, size) in enumerate(buffers):
-                buffer_info = VkDescriptorBufferInfo(
-                    buffer=buffer,
-                    offset=0,
-                    range=size
-                )
+                buffer_info = VkDescriptorBufferInfo(buffer=buffer, offset=0, range=size)
                 write = VkWriteDescriptorSet(
                     sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                     dstSet=cached_set,
@@ -203,7 +194,7 @@ class VulkanPipelines:
                     dstArrayElement=0,
                     descriptorCount=1,
                     descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    pBufferInfo=[buffer_info]
+                    pBufferInfo=[buffer_info],
                 )
                 writes.append(write)
             vkUpdateDescriptorSets(self.core.device, len(writes), writes, 0, None)
@@ -259,17 +250,17 @@ class VulkanPipelines:
         hit_rate = (self.cache_hits / total * 100) if total > 0 else 0
 
         return {
-            'cache_hits': self.cache_hits,
-            'cache_misses': self.cache_misses,
-            'hit_rate': hit_rate,
-            'cached_sets': len(self.descriptor_set_cache),
-            'max_cache_size': self.max_cache_size,
-            'max_pool_size': 500
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
+            "hit_rate": hit_rate,
+            "cached_sets": len(self.descriptor_set_cache),
+            "max_cache_size": self.max_cache_size,
+            "max_pool_size": 500,
         }
 
     def clear_descriptor_cache(self):
         """Clear all cached descriptor sets"""
-        if hasattr(self.core, 'device') and self.core.device:
+        if hasattr(self.core, "device") and self.core.device:
             for desc_set in self.descriptor_set_cache.values():
                 try:
                     vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [desc_set])
@@ -283,7 +274,7 @@ class VulkanPipelines:
 
     def cleanup(self):
         """Cleanup pipeline resources"""
-        if hasattr(self.core, 'device') and self.core.device:
+        if hasattr(self.core, "device") and self.core.device:
             # Destroy pipelines
             for pipeline in self.pipelines.values():
                 vkDestroyPipeline(self.core.device, pipeline, None)

@@ -19,6 +19,7 @@ def setup_grilly_path():
     # Try importing grilly first
     try:
         import grilly
+
         return  # Already importable
     except ImportError:
         pass

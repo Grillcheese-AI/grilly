@@ -25,13 +25,12 @@ from .lora import VulkanLoRA
 from .snn_compute import SNNCompute
 
 __all__ = [
-    'VULKAN_AVAILABLE',
-    'VulkanCompute',
-    'SNNCompute',
-    'VulkanLearning',
-    'CapsuleMemory',
-    'CapsuleTransformerConfig',
-    'CognitiveFeatures',
-    'MemoryType',
+    "VULKAN_AVAILABLE",
+    "VulkanCompute",
+    "SNNCompute",
+    "VulkanLearning",
+    "CapsuleMemory",
+    "CapsuleTransformerConfig",
+    "CognitiveFeatures",
+    "MemoryType",
 ]
-

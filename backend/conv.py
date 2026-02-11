@@ -29,16 +29,15 @@ class VulkanConv(BufferMixin):
         self.shaders = shaders
 
     def _conv2d_gemm(
-    self,
-    input_data: np.ndarray,
-    weight: np.ndarray,
-    bias: np.ndarray | None,
-    stride: tuple[int, int],
-    padding: tuple[int, int],
-    dilation: tuple[int, int],
-    groups: int,
-) -> np.ndarray:
-
+        self,
+        input_data: np.ndarray,
+        weight: np.ndarray,
+        bias: np.ndarray | None,
+        stride: tuple[int, int],
+        padding: tuple[int, int],
+        dilation: tuple[int, int],
+        groups: int,
+    ) -> np.ndarray:
         # 1) Extract shapes and check assumptions
         """Execute conv2d gemm."""
 
@@ -56,17 +55,17 @@ class VulkanConv(BufferMixin):
         out_h = (in_h + 2 * padding_h - kernel_h) // stride_h + 1
         out_w = (in_w + 2 * padding_w - kernel_w) // stride_w + 1
 
-        K_dim  = in_channels * kernel_h * kernel_w     # rows in im2col
-        N_cols = batch_size * out_h * out_w            # columns in im2col and GEMM
+        K_dim = in_channels * kernel_h * kernel_w  # rows in im2col
+        N_cols = batch_size * out_h * out_w  # columns in im2col and GEMM
 
         # 3) Prepare data (weights as (M,K) row-major)
         M = out_channels
         A = weight.reshape(M, K_dim).astype(np.float32)  # (M,K)
 
         # 4) Allocate GPU buffers: input, A, cols, mat_out
-        buf_input  = self._acquire_buffer(input_data.nbytes)
-        buf_A      = self._acquire_buffer(A.nbytes)
-        buf_cols   = self._acquire_buffer(K_dim * N_cols * 4)
+        buf_input = self._acquire_buffer(input_data.nbytes)
+        buf_A = self._acquire_buffer(A.nbytes)
+        buf_cols = self._acquire_buffer(K_dim * N_cols * 4)
         buf_matout = self._acquire_buffer(M * N_cols * 4)
 
         try:
@@ -76,66 +75,74 @@ class VulkanConv(BufferMixin):
 
             # --- Step 1: im2col ---
             pipeline_im2col, layout_im2col, _ = self.pipelines.get_or_create_pipeline(
-                'convd_im2col', 2, push_constant_size=56  # adjust size as needed
+                "convd_im2col",
+                2,
+                push_constant_size=56,  # adjust size as needed
             )
 
-            in_handle   = self._get_buffer_handle(buf_input)
+            in_handle = self._get_buffer_handle(buf_input)
             cols_handle = self._get_buffer_handle(buf_cols)
 
             desc_im2col = self.pipelines.get_cached_descriptor_set(
-                'convd_im2col',
+                "convd_im2col",
                 [
-                    (in_handle,   input_data.nbytes),
+                    (in_handle, input_data.nbytes),
                     (cols_handle, K_dim * N_cols * 4),
-                ]
+                ],
             )
 
             push_im2col = struct.pack(
-                '14I',
-                batch_size, in_channels, in_h, in_w,
-                out_h, out_w,
-                kernel_h, kernel_w,
-                stride_h, stride_w,
-                padding_h, padding_w,
-                dilation_h, dilation_w
+                "14I",
+                batch_size,
+                in_channels,
+                in_h,
+                in_w,
+                out_h,
+                out_w,
+                kernel_h,
+                kernel_w,
+                stride_h,
+                stride_w,
+                padding_h,
+                padding_w,
+                dilation_h,
+                dilation_w,
             )
 
-            group_x = (K_dim  + 15) // 16
+            group_x = (K_dim + 15) // 16
             group_y = (N_cols + 15) // 16
             group_z = 1
 
             self.core._dispatch_compute(
-                pipeline_im2col, layout_im2col, desc_im2col,
-                group_x, push_im2col, group_y, group_z
+                pipeline_im2col, layout_im2col, desc_im2col, group_x, push_im2col, group_y, group_z
             )
 
             # --- Step 2: GEMM (A * cols -> mat_out) ---
             pipeline_gemm, layout_gemm, _ = self.pipelines.get_or_create_pipeline(
-                'gemm_mnk', 3, push_constant_size=12
+                "gemm_mnk", 3, push_constant_size=12
             )
 
-            A_handle   = self._get_buffer_handle(buf_A)
-            B_handle   = cols_handle
-            C_handle   = self._get_buffer_handle(buf_matout)
+            A_handle = self._get_buffer_handle(buf_A)
+            B_handle = cols_handle
+            C_handle = self._get_buffer_handle(buf_matout)
 
             desc_gemm = self.pipelines.get_cached_descriptor_set(
-                'gemm_mnk',
+                "gemm_mnk",
                 [
                     (A_handle, A.nbytes),
                     (B_handle, K_dim * N_cols * 4),
                     (C_handle, M * N_cols * 4),
-                ]
+                ],
             )
 
-            push_gemm = struct.pack('3I', M, K_dim, N_cols)
+            push_gemm = struct.pack("3I", M, K_dim, N_cols)
 
             group_x = (N_cols + 15) // 16
-            group_y = (M      + 15) // 16
+            group_y = (M + 15) // 16
             group_z = 1
 
             self.core._dispatch_compute(
-                pipeline_gemm, layout_gemm, desc_gemm,
-                group_x, push_gemm, group_y, group_z
+                pipeline_gemm, layout_gemm, desc_gemm, group_x, push_gemm, group_y, group_z
             )
 
             # --- Step 3: download & reshape + bias on CPU (for now) ---
@@ -153,16 +160,15 @@ class VulkanConv(BufferMixin):
         finally:
             self._release_buffers([buf_input, buf_A, buf_cols, buf_matout])
 
-
     def conv2d(
         self,
         input_data: np.ndarray,  # (batch, in_channels, height, width)
-        weight: np.ndarray,      # (out_channels, in_channels/groups, kernel_h, kernel_w)
+        weight: np.ndarray,  # (out_channels, in_channels/groups, kernel_h, kernel_w)
         bias: np.ndarray | None = None,  # (out_channels,)
         stride: tuple[int, int] = (1, 1),
         padding: tuple[int, int] = (0, 0),
         dilation: tuple[int, int] = (1, 1),
-        groups: int = 1
+        groups: int = 1,
     ) -> np.ndarray:
         """
         2D Convolution forward pass.
@@ -180,7 +186,7 @@ class VulkanConv(BufferMixin):
             Output tensor (batch, out_channels, out_h, out_w)
         """
         # Check if shader is available
-        if 'conv2d-forward' not in self.shaders:
+        if "conv2d-forward" not in self.shaders:
             return self._conv2d_cpu(input_data, weight, bias, stride, padding, dilation, groups)
 
         # Ensure float32 and convert to numpy if needed
@@ -197,10 +203,11 @@ class VulkanConv(BufferMixin):
         dilation_h, dilation_w = dilation
 
         use_gemm = (
-        'convd_im2col' in self.shaders and
-        'gemm_mnk'      in self.shaders and
-        channels_per_group == in_channels and  # groups == 1
-        dilation_h == 1 and dilation_w == 1
+            "convd_im2col" in self.shaders
+            and "gemm_mnk" in self.shaders
+            and channels_per_group == in_channels  # groups == 1
+            and dilation_h == 1
+            and dilation_w == 1
         )
         if use_gemm:
             return self._conv2d_gemm(input_data, weight, bias, stride, padding, dilation, groups)
@@ -208,7 +215,7 @@ class VulkanConv(BufferMixin):
         out_height = (in_height + 2 * padding_h - dilation_h * (kernel_h - 1) - 1) // stride_h + 1
         out_width = (in_width + 2 * padding_w - dilation_w * (kernel_w - 1) - 1) // stride_w + 1
 
-        output_size = batch_size * out_channels * out_height * out_width * 4  # BYTES (float32)
+        batch_size * out_channels * out_height * out_width * 4  # BYTES (float32)
         num_elements = batch_size * out_channels * out_height * out_width
         output_bytes = num_elements * 4  # float32
 
@@ -216,9 +223,9 @@ class VulkanConv(BufferMixin):
         # Allocate buffers
         buf_input = self._acquire_buffer(input_data.nbytes)
         buf_weight = self._acquire_buffer(weight.nbytes)
-        buf_bias = self._acquire_buffer(bias.nbytes if bias is not None else 4)  # Dummy buffer if no bias
-
-
+        buf_bias = self._acquire_buffer(
+            bias.nbytes if bias is not None else 4
+        )  # Dummy buffer if no bias
 
         try:
             # Upload data
@@ -231,7 +238,7 @@ class VulkanConv(BufferMixin):
 
             # Create pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'conv2d-forward', 4, push_constant_size=68
+                "conv2d-forward", 4, push_constant_size=68
             )
 
             # Get buffer handles
@@ -242,26 +249,35 @@ class VulkanConv(BufferMixin):
 
             # Get cached descriptor set
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'conv2d-forward',
+                "conv2d-forward",
                 [
                     (in_handle, input_data.nbytes),
                     (weight_handle, weight.nbytes),
                     (bias_handle, (bias.nbytes if bias is not None else 4)),
-                    (out_handle, output_bytes)
-                ]
+                    (out_handle, output_bytes),
+                ],
             )
 
             # Pack push constants
             push_data = struct.pack(
-                '17I',
-                batch_size, in_channels, in_height, in_width,
-                out_channels, out_height, out_width,
-                kernel_h, kernel_w,
-                stride_h, stride_w,
-                padding_h, padding_w,
-                dilation_h, dilation_w,
+                "17I",
+                batch_size,
+                in_channels,
+                in_height,
+                in_width,
+                out_channels,
+                out_height,
+                out_width,
+                kernel_h,
+                kernel_w,
+                stride_h,
+                stride_w,
+                padding_h,
+                padding_w,
+                dilation_h,
+                dilation_w,
                 groups,
-                1 if bias is not None else 0
+                1 if bias is not None else 0,
             )
 
             # Dispatch compute shader
@@ -270,8 +286,13 @@ class VulkanConv(BufferMixin):
             group_count_z = batch_size * out_channels
 
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                group_count_x, push_data, group_count_y, group_count_z
+                pipeline,
+                pipeline_layout,
+                descriptor_set,
+                group_count_x,
+                push_data,
+                group_count_y,
+                group_count_z,
             )
 
             # Download result
@@ -284,12 +305,12 @@ class VulkanConv(BufferMixin):
     def _conv2d_backward_input_gemm(
         self,
         grad_output: np.ndarray,  # (batch, out_channels, out_h, out_w)
-        weight: np.ndarray,       # (out_channels, in_channels, kernel_h, kernel_w)
+        weight: np.ndarray,  # (out_channels, in_channels, kernel_h, kernel_w)
         input_shape: tuple[int, int, int, int],
         stride: tuple[int, int],
         padding: tuple[int, int],
         dilation: tuple[int, int],
-        groups: int
+        groups: int,
     ) -> np.ndarray:
         """
         Conv2d backward input using GEMM + col2im.
@@ -333,40 +354,54 @@ class VulkanConv(BufferMixin):
             # Upload cols
             self._upload_buffer(buf_cols, cols.flatten())
             # Initialize grad_input to zero
-            self._upload_buffer(buf_grad_input, np.zeros(batch_size * in_channels * in_h * in_w, dtype=np.float32))
+            self._upload_buffer(
+                buf_grad_input, np.zeros(batch_size * in_channels * in_h * in_w, dtype=np.float32)
+            )
 
             # col2im shader
             pipeline_col2im, layout_col2im, _ = self.pipelines.get_or_create_pipeline(
-                'convd_col2im', 2, push_constant_size=56
+                "convd_col2im", 2, push_constant_size=56
             )
 
             cols_handle = self._get_buffer_handle(buf_cols)
             grad_in_handle = self._get_buffer_handle(buf_grad_input)
 
             desc_col2im = self.pipelines.get_cached_descriptor_set(
-                'convd_col2im',
-                [(cols_handle, K_dim * N_cols * 4), (grad_in_handle, batch_size * in_channels * in_h * in_w * 4)]
+                "convd_col2im",
+                [
+                    (cols_handle, K_dim * N_cols * 4),
+                    (grad_in_handle, batch_size * in_channels * in_h * in_w * 4),
+                ],
             )
 
             push_col2im = struct.pack(
-                '14I',
-                batch_size, in_channels, in_h, in_w,
-                out_h, out_w,
-                kernel_h, kernel_w,
-                stride_h, stride_w,
-                padding_h, padding_w,
-                dilation_h, dilation_w
+                "14I",
+                batch_size,
+                in_channels,
+                in_h,
+                in_w,
+                out_h,
+                out_w,
+                kernel_h,
+                kernel_w,
+                stride_h,
+                stride_w,
+                padding_h,
+                padding_w,
+                dilation_h,
+                dilation_w,
             )
 
             group_x = (K_dim + 15) // 16
             group_y = (N_cols + 15) // 16
             self.core._dispatch_compute(
-                pipeline_col2im, layout_col2im, desc_col2im,
-                group_x, push_col2im, group_y, 1
+                pipeline_col2im, layout_col2im, desc_col2im, group_x, push_col2im, group_y, 1
             )
 
             # Download result
-            grad_input_flat = self._download_buffer(buf_grad_input, batch_size * in_channels * in_h * in_w * 4, np.float32)
+            grad_input_flat = self._download_buffer(
+                buf_grad_input, batch_size * in_channels * in_h * in_w * 4, np.float32
+            )
             return grad_input_flat.reshape(batch_size, in_channels, in_h, in_w)
 
         finally:
@@ -375,12 +410,12 @@ class VulkanConv(BufferMixin):
     def conv2d_backward_input(
         self,
         grad_output: np.ndarray,  # (batch, out_channels, out_h, out_w)
-        weight: np.ndarray,       # (out_channels, in_channels/groups, kernel_h, kernel_w)
+        weight: np.ndarray,  # (out_channels, in_channels/groups, kernel_h, kernel_w)
         input_shape: tuple[int, int, int, int],  # (batch, in_channels, in_h, in_w)
         stride: tuple[int, int] = (1, 1),
         padding: tuple[int, int] = (0, 0),
         dilation: tuple[int, int] = (1, 1),
-        groups: int = 1
+        groups: int = 1,
     ) -> np.ndarray:
         """
         2D Convolution backward pass - gradient w.r.t. input.
@@ -403,9 +438,7 @@ class VulkanConv(BufferMixin):
 
         # Try GEMM path first (groups==1, dilation==1)
         use_gemm = (
-            'convd_col2im' in self.shaders and
-            groups == 1 and
-            dilation[0] == 1 and dilation[1] == 1
+            "convd_col2im" in self.shaders and groups == 1 and dilation[0] == 1 and dilation[1] == 1
         )
         if use_gemm:
             return self._conv2d_backward_input_gemm(
@@ -413,8 +446,10 @@ class VulkanConv(BufferMixin):
             )
 
         # Check if shader is available
-        if 'conv2d-backward-input' not in self.shaders:
-            return self._conv2d_backward_input_cpu(grad_output, weight, input_shape, stride, padding, dilation, groups)
+        if "conv2d-backward-input" not in self.shaders:
+            return self._conv2d_backward_input_cpu(
+                grad_output, weight, input_shape, stride, padding, dilation, groups
+            )
 
         # Ensure float32 and convert to numpy if needed
         grad_output = np.asarray(grad_output, dtype=np.float32)
@@ -428,11 +463,11 @@ class VulkanConv(BufferMixin):
         padding_h, padding_w = padding
         dilation_h, dilation_w = dilation
 
-        grad_input_size = batch_size * in_channels * in_height * in_width * 4  # BYTES
+        batch_size * in_channels * in_height * in_width * 4  # BYTES
         num_elements = batch_size * out_channels * out_height * out_width
         output_bytes = num_elements * 4  # float32
 
-        buf_output = self._acquire_buffer(output_bytes)
+        self._acquire_buffer(output_bytes)
         # Number of elements and bytes for grad_input
         num_grad_input_elems = batch_size * in_channels * in_height * in_width
         grad_input_bytes = num_grad_input_elems * 4  # float32
@@ -451,7 +486,7 @@ class VulkanConv(BufferMixin):
 
             # Create pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'conv2d-backward-input', 3, push_constant_size=64
+                "conv2d-backward-input", 3, push_constant_size=64
             )
 
             # Get buffer handles
@@ -461,24 +496,33 @@ class VulkanConv(BufferMixin):
 
             # Descriptor set: third size must be bytes, not elements
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'conv2d-backward-input',
+                "conv2d-backward-input",
                 [
                     (grad_out_handle, grad_output.nbytes),
-                    (weight_handle,   weight.nbytes),
-                    (grad_in_handle,  grad_input_bytes),
-                ]
+                    (weight_handle, weight.nbytes),
+                    (grad_in_handle, grad_input_bytes),
+                ],
             )
 
             # Pack push constants
             push_data = struct.pack(
-                '16I',
-                batch_size, in_channels, in_height, in_width,
-                out_channels, out_height, out_width,
-                kernel_h, kernel_w,
-                stride_h, stride_w,
-                padding_h, padding_w,
-                dilation_h, dilation_w,
-                groups
+                "16I",
+                batch_size,
+                in_channels,
+                in_height,
+                in_width,
+                out_channels,
+                out_height,
+                out_width,
+                kernel_h,
+                kernel_w,
+                stride_h,
+                stride_w,
+                padding_h,
+                padding_w,
+                dilation_h,
+                dilation_w,
+                groups,
             )
 
             # Dispatch compute shader (Z includes both batch and channels)
@@ -487,8 +531,13 @@ class VulkanConv(BufferMixin):
             group_count_z = batch_size * in_channels
 
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                group_count_x, push_data, group_count_y, group_count_z
+                pipeline,
+                pipeline_layout,
+                descriptor_set,
+                group_count_x,
+                push_data,
+                group_count_y,
+                group_count_z,
             )
 
             # Download result
@@ -500,13 +549,13 @@ class VulkanConv(BufferMixin):
     def _conv2d_backward_weight_gemm(
         self,
         grad_output: np.ndarray,  # (batch, out_channels, out_h, out_w)
-        input_data: np.ndarray,   # (batch, in_channels, in_h, in_w)
+        input_data: np.ndarray,  # (batch, in_channels, in_h, in_w)
         kernel_size: tuple[int, int],
         stride: tuple[int, int],
         padding: tuple[int, int],
         dilation: tuple[int, int],
         groups: int,
-        has_bias: bool
+        has_bias: bool,
     ) -> tuple[np.ndarray, np.ndarray | None]:
         """
         Conv2d backward weight using im2col + GEMM.
@@ -538,32 +587,38 @@ class VulkanConv(BufferMixin):
             self._upload_buffer(buf_input, input_data.flatten())
 
             pipeline_im2col, layout_im2col, _ = self.pipelines.get_or_create_pipeline(
-                'convd_im2col', 2, push_constant_size=56
+                "convd_im2col", 2, push_constant_size=56
             )
 
             in_handle = self._get_buffer_handle(buf_input)
             cols_handle = self._get_buffer_handle(buf_cols)
 
             desc_im2col = self.pipelines.get_cached_descriptor_set(
-                'convd_im2col',
-                [(in_handle, input_data.nbytes), (cols_handle, K_dim * N_cols * 4)]
+                "convd_im2col", [(in_handle, input_data.nbytes), (cols_handle, K_dim * N_cols * 4)]
             )
 
             push_im2col = struct.pack(
-                '14I',
-                batch_size, in_channels, in_h, in_w,
-                out_h, out_w,
-                kernel_h, kernel_w,
-                stride_h, stride_w,
-                padding_h, padding_w,
-                dilation_h, dilation_w
+                "14I",
+                batch_size,
+                in_channels,
+                in_h,
+                in_w,
+                out_h,
+                out_w,
+                kernel_h,
+                kernel_w,
+                stride_h,
+                stride_w,
+                padding_h,
+                padding_w,
+                dilation_h,
+                dilation_w,
             )
 
             group_x = (K_dim + 15) // 16
             group_y = (N_cols + 15) // 16
             self.core._dispatch_compute(
-                pipeline_im2col, layout_im2col, desc_im2col,
-                group_x, push_im2col, group_y, 1
+                pipeline_im2col, layout_im2col, desc_im2col, group_x, push_im2col, group_y, 1
             )
 
             # Download cols for GEMM (could be done on GPU, but for now download)
@@ -572,7 +627,9 @@ class VulkanConv(BufferMixin):
 
             # --- Step 2: Prepare grad_output for GEMM ---
             # grad_output: (N, C_out, H_out, W_out) -> (C_out, N*H_out*W_out)
-            grad_out_reshaped = grad_output.transpose(1, 0, 2, 3).reshape(out_channels, N_cols)  # (C_out, N_cols)
+            grad_out_reshaped = grad_output.transpose(1, 0, 2, 3).reshape(
+                out_channels, N_cols
+            )  # (C_out, N_cols)
 
             # --- Step 3: GEMM: grad_weight = grad_out @ cols.T ---
             # (C_out, N_cols) @ (N_cols, K_dim) = (C_out, K_dim)
@@ -595,13 +652,13 @@ class VulkanConv(BufferMixin):
     def conv2d_backward_weight(
         self,
         grad_output: np.ndarray,  # (batch, out_channels, out_h, out_w)
-        input_data: np.ndarray,   # (batch, in_channels, in_h, in_w)
+        input_data: np.ndarray,  # (batch, in_channels, in_h, in_w)
         kernel_size: tuple[int, int],
         stride: tuple[int, int] = (1, 1),
         padding: tuple[int, int] = (0, 0),
         dilation: tuple[int, int] = (1, 1),
         groups: int = 1,
-        has_bias: bool = True
+        has_bias: bool = True,
     ) -> tuple[np.ndarray, np.ndarray | None]:
         """
         2D Convolution backward pass - gradient w.r.t. weights and bias.
@@ -627,9 +684,7 @@ class VulkanConv(BufferMixin):
 
         # Try GEMM path first (groups==1, dilation==1)
         use_gemm = (
-            'convd_im2col' in self.shaders and
-            groups == 1 and
-            dilation[0] == 1 and dilation[1] == 1
+            "convd_im2col" in self.shaders and groups == 1 and dilation[0] == 1 and dilation[1] == 1
         )
         if use_gemm:
             return self._conv2d_backward_weight_gemm(
@@ -637,8 +692,10 @@ class VulkanConv(BufferMixin):
             )
 
         # Check if shader is available
-        if 'conv2d-backward-weight' not in self.shaders:
-            return self._conv2d_backward_weight_cpu(grad_output, input_data, kernel_size, stride, padding, dilation, groups, has_bias)
+        if "conv2d-backward-weight" not in self.shaders:
+            return self._conv2d_backward_weight_cpu(
+                grad_output, input_data, kernel_size, stride, padding, dilation, groups, has_bias
+            )
 
         # Ensure float32 and convert to numpy if needed
         grad_output = np.asarray(grad_output, dtype=np.float32)
@@ -673,7 +730,7 @@ class VulkanConv(BufferMixin):
 
             # Create pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'conv2d-backward-weight', 4, push_constant_size=68
+                "conv2d-backward-weight", 4, push_constant_size=68
             )
 
             # Get buffer handles
@@ -684,26 +741,35 @@ class VulkanConv(BufferMixin):
 
             # Get cached descriptor set
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'conv2d-backward-weight',
+                "conv2d-backward-weight",
                 [
                     (grad_out_handle, grad_output.nbytes),
                     (input_handle, input_data.nbytes),
                     (grad_weight_handle, grad_weight_size),
-                    (grad_bias_handle, (out_channels * 4 if has_bias else 4))
-                ]
+                    (grad_bias_handle, (out_channels * 4 if has_bias else 4)),
+                ],
             )
 
             # Pack push constants
             push_data = struct.pack(
-                '17I',
-                batch_size, in_channels, in_height, in_width,
-                out_channels, out_height, out_width,
-                kernel_h, kernel_w,
-                stride_h, stride_w,
-                padding_h, padding_w,
-                dilation_h, dilation_w,
+                "17I",
+                batch_size,
+                in_channels,
+                in_height,
+                in_width,
+                out_channels,
+                out_height,
+                out_width,
+                kernel_h,
+                kernel_w,
+                stride_h,
+                stride_w,
+                padding_h,
+                padding_w,
+                dilation_h,
+                dilation_w,
                 groups,
-                1 if has_bias else 0
+                1 if has_bias else 0,
             )
 
             # Dispatch compute shader
@@ -713,13 +779,20 @@ class VulkanConv(BufferMixin):
             group_count_z = 1
 
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                group_count_x, push_data, group_count_y, group_count_z
+                pipeline,
+                pipeline_layout,
+                descriptor_set,
+                group_count_x,
+                push_data,
+                group_count_y,
+                group_count_z,
             )
 
             # Download results
             grad_weight_flat = self._download_buffer(buf_grad_weight, grad_weight_size, np.float32)
-            grad_weight = grad_weight_flat.reshape(out_channels, in_channels_per_group, kernel_h, kernel_w)
+            grad_weight = grad_weight_flat.reshape(
+                out_channels, in_channels_per_group, kernel_h, kernel_w
+            )
 
             grad_bias = None
             if has_bias:
@@ -748,7 +821,7 @@ class VulkanConv(BufferMixin):
             input_padded = np.pad(
                 input_data,
                 ((0, 0), (0, 0), (padding_h, padding_h), (padding_w, padding_w)),
-                mode='constant'
+                mode="constant",
             )
         else:
             input_padded = input_data
@@ -768,14 +841,19 @@ class VulkanConv(BufferMixin):
                                 for kw in range(kernel_w):
                                     ih = oh * stride_h + kh * dilation_h
                                     iw = ow * stride_w + kw * dilation_w
-                                    val += input_padded[b, ic_start + ic, ih, iw] * weight[oc, ic, kh, kw]
+                                    val += (
+                                        input_padded[b, ic_start + ic, ih, iw]
+                                        * weight[oc, ic, kh, kw]
+                                    )
                         if bias is not None:
                             val += bias[oc]
                         output[b, oc, oh, ow] = val
 
         return output
 
-    def _conv2d_backward_input_cpu(self, grad_output, weight, input_shape, stride, padding, dilation, groups):
+    def _conv2d_backward_input_cpu(
+        self, grad_output, weight, input_shape, stride, padding, dilation, groups
+    ):
         """CPU fallback for conv2d backward input"""
         batch_size, in_channels, in_height, in_width = input_shape
         _, out_channels, out_height, out_width = grad_output.shape
@@ -804,12 +882,17 @@ class VulkanConv(BufferMixin):
                                         oh = oh_num // stride_h
                                         ow = ow_num // stride_w
                                         if 0 <= oh < out_height and 0 <= ow < out_width:
-                                            val += grad_output[b, oc, oh, ow] * weight[oc, ic % channels_per_group, kh, kw]
+                                            val += (
+                                                grad_output[b, oc, oh, ow]
+                                                * weight[oc, ic % channels_per_group, kh, kw]
+                                            )
                         grad_input[b, ic, ih, iw] = val
 
         return grad_input
 
-    def _conv2d_backward_weight_cpu(self, grad_output, input_data, kernel_size, stride, padding, dilation, groups, has_bias):
+    def _conv2d_backward_weight_cpu(
+        self, grad_output, input_data, kernel_size, stride, padding, dilation, groups, has_bias
+    ):
         """CPU fallback for conv2d backward weight"""
         batch_size, out_channels, out_height, out_width = grad_output.shape
         _, in_channels, in_height, in_width = input_data.shape
@@ -823,13 +906,15 @@ class VulkanConv(BufferMixin):
             input_padded = np.pad(
                 input_data,
                 ((0, 0), (0, 0), (padding_h, padding_h), (padding_w, padding_w)),
-                mode='constant'
+                mode="constant",
             )
         else:
             input_padded = input_data
 
         in_channels_per_group = in_channels // groups
-        grad_weight = np.zeros((out_channels, in_channels_per_group, kernel_h, kernel_w), dtype=np.float32)
+        grad_weight = np.zeros(
+            (out_channels, in_channels_per_group, kernel_h, kernel_w), dtype=np.float32
+        )
 
         # Naive backward pass
         for oc in range(out_channels):
@@ -844,7 +929,10 @@ class VulkanConv(BufferMixin):
                                 for ow in range(out_width):
                                     ih = oh * stride_h + kh * dilation_h
                                     iw = ow * stride_w + kw * dilation_w
-                                    val += grad_output[b, oc, oh, ow] * input_padded[b, ic_start + ic, ih, iw]
+                                    val += (
+                                        grad_output[b, oc, oh, ow]
+                                        * input_padded[b, ic_start + ic, ih, iw]
+                                    )
                         grad_weight[oc, ic, kh, kw] = val
 
         grad_bias = None

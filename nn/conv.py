@@ -1,6 +1,5 @@
 """Convolutional layers for the Grilly neural network API."""
 
-
 import numpy as np
 
 from .module import Module
@@ -36,18 +35,22 @@ class Conv2d(Module):
         dilation: int | tuple[int, int] = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = 'zeros'
+        padding_mode: str = "zeros",
     ):
         """Initialize a 2D convolution layer compatible with torch.nn.Conv2d."""
         super().__init__()
 
-        if padding_mode != 'zeros':
-            raise NotImplementedError(f"Only 'zeros' padding mode is supported, got '{padding_mode}'")
+        if padding_mode != "zeros":
+            raise NotImplementedError(
+                f"Only 'zeros' padding mode is supported, got '{padding_mode}'"
+            )
 
         if in_channels % groups != 0:
             raise ValueError(f"in_channels ({in_channels}) must be divisible by groups ({groups})")
         if out_channels % groups != 0:
-            raise ValueError(f"out_channels ({out_channels}) must be divisible by groups ({groups})")
+            raise ValueError(
+                f"out_channels ({out_channels}) must be divisible by groups ({groups})"
+            )
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -67,17 +70,16 @@ class Conv2d(Module):
         # Kaiming uniform initialization (same as PyTorch default)
         bound = np.sqrt(1.0 / fan_in)
         weight_data = np.random.uniform(
-            -bound, bound,
-            (out_channels, in_channels_per_group, kernel_h, kernel_w)
+            -bound, bound, (out_channels, in_channels_per_group, kernel_h, kernel_w)
         ).astype(np.float32)
 
         self.weight = Parameter(weight_data, requires_grad=True)
-        self.register_parameter('weight', self.weight)
+        self.register_parameter("weight", self.weight)
 
         if bias:
             bias_data = np.random.uniform(-bound, bound, (out_channels,)).astype(np.float32)
             self.bias = Parameter(bias_data, requires_grad=True)
-            self.register_parameter('bias', self.bias)
+            self.register_parameter("bias", self.bias)
         else:
             self.bias = None
 
@@ -105,16 +107,22 @@ class Conv2d(Module):
             self._cache_input = x.copy()
 
         backend = self._get_backend()
-        weight = self.weight.data if hasattr(self.weight, 'data') else np.asarray(self.weight)
-        bias = (self.bias.data if hasattr(self.bias, 'data') else np.asarray(self.bias)) if self.bias is not None else None
+        weight = self.weight.data if hasattr(self.weight, "data") else np.asarray(self.weight)
+        bias = (
+            (self.bias.data if hasattr(self.bias, "data") else np.asarray(self.bias))
+            if self.bias is not None
+            else None
+        )
 
         # Call backend conv2d operation
         return backend.conv.conv2d(
-            x, weight, bias,
+            x,
+            weight,
+            bias,
             stride=self.stride,
             padding=self.padding,
             dilation=self.dilation,
-            groups=self.groups
+            groups=self.groups,
         )
 
     def backward(self, grad_output: np.ndarray) -> np.ndarray:
@@ -136,25 +144,29 @@ class Conv2d(Module):
             raise RuntimeError("backward() called but no cached input from forward pass")
 
         backend = self._get_backend()
-        weight = self.weight.data if hasattr(self.weight, 'data') else np.asarray(self.weight)
+        weight = self.weight.data if hasattr(self.weight, "data") else np.asarray(self.weight)
 
         # Compute gradient w.r.t. input (for backprop to previous layers)
         grad_input = backend.conv.conv2d_backward_input(
-            grad_output, weight, self._cache_input.shape,
-            stride=self.stride,
-            padding=self.padding,
-            dilation=self.dilation,
-            groups=self.groups
-        )
-
-        # Compute gradient w.r.t. weights and bias (for parameter updates)
-        grad_weight, grad_bias = backend.conv.conv2d_backward_weight(
-            grad_output, self._cache_input, self.kernel_size,
+            grad_output,
+            weight,
+            self._cache_input.shape,
             stride=self.stride,
             padding=self.padding,
             dilation=self.dilation,
             groups=self.groups,
-            has_bias=(self.bias is not None)
+        )
+
+        # Compute gradient w.r.t. weights and bias (for parameter updates)
+        grad_weight, grad_bias = backend.conv.conv2d_backward_weight(
+            grad_output,
+            self._cache_input,
+            self.kernel_size,
+            stride=self.stride,
+            padding=self.padding,
+            dilation=self.dilation,
+            groups=self.groups,
+            has_bias=(self.bias is not None),
         )
 
         # Store gradients in parameters
@@ -209,20 +221,21 @@ class Conv1d(Module):
         padding: int = 0,
         dilation: int = 1,
         groups: int = 1,
-        bias: bool = True
+        bias: bool = True,
     ):
         """Initialize a 1D convolution layer compatible with torch.nn.Conv1d."""
         super().__init__()
 
         # Use Conv2d with height=1
         self.conv2d = Conv2d(
-            in_channels, out_channels,
+            in_channels,
+            out_channels,
             kernel_size=(1, kernel_size),
             stride=(1, stride),
             padding=(0, padding),
             dilation=(1, dilation),
             groups=groups,
-            bias=bias
+            bias=bias,
         )
 
         self.in_channels = in_channels

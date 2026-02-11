@@ -1,4 +1,5 @@
 """Neural network module namespace for the Grilly framework."""
+
 from .affect import (
     AffectMLP,
 )
@@ -224,6 +225,7 @@ try:
     from ..backend.autograd_core import (
         no_grad as autograd_no_grad,
     )
+
     AUTOGRAD_CORE_AVAILABLE = True
 except ImportError:
     AUTOGRAD_CORE_AVAILABLE = False
@@ -242,222 +244,210 @@ from .multimodal import (
 
 __all__ = [
     # Base class
-    'Module',
-
+    "Module",
     # Standard layers
-    'Linear',
-    'LayerNorm',
-    'Dropout',
-    'ReLU',
-    'GELU',
-    'SiLU',
-    'GCU',
-    'RoSwish',
-    'SwiGLU',
-    'Softmax',
-    'Softplus',
-    'MultiheadAttention',
-    'FlashAttention2',
-    'Embedding',
-    'Sequential',
-    'Residual',
-
+    "Linear",
+    "LayerNorm",
+    "Dropout",
+    "ReLU",
+    "GELU",
+    "SiLU",
+    "GCU",
+    "RoSwish",
+    "SwiGLU",
+    "Softmax",
+    "Softplus",
+    "MultiheadAttention",
+    "FlashAttention2",
+    "Embedding",
+    "Sequential",
+    "Residual",
     # SNN layers
-    'LIFNeuron',
-    'SNNLayer',
-    'HebbianLayer',
-    'STDPLayer',
-    'GIFNeuron',
-    'SNNMatMul',
-    'SNNSoftmax',
-    'SNNRMSNorm',
-    'SNNReadout',
-    'Synapse',
-
+    "LIFNeuron",
+    "SNNLayer",
+    "HebbianLayer",
+    "STDPLayer",
+    "GIFNeuron",
+    "SNNMatMul",
+    "SNNSoftmax",
+    "SNNRMSNorm",
+    "SNNReadout",
+    "Synapse",
     # Memory layers (when implemented)
-    'MemoryRead',
-    'MemoryWrite',
-    'MemoryContextAggregate',
-    'MemoryQueryPooling',
-    'MemoryInject',
-    'MemoryInjectConcat',
-    'MemoryInjectGate',
-    'MemoryInjectResidual',
-
+    "MemoryRead",
+    "MemoryWrite",
+    "MemoryContextAggregate",
+    "MemoryQueryPooling",
+    "MemoryInject",
+    "MemoryInjectConcat",
+    "MemoryInjectGate",
+    "MemoryInjectResidual",
     # Cell layers (when implemented)
-    'PlaceCell',
-    'TimeCell',
-    'ThetaGammaEncoder',
-
+    "PlaceCell",
+    "TimeCell",
+    "ThetaGammaEncoder",
     # Transformer layers (when implemented)
-    'TransformerEncoderLayer',
-    'TransformerDecoderLayer',
-    'RoPE',
-    'ProsodyModulatedAttention',
-
+    "TransformerEncoderLayer",
+    "TransformerDecoderLayer",
+    "RoPE",
+    "ProsodyModulatedAttention",
     # Hippocampal transformer (when implemented)
-    'HippocampalTransformerLayer',
-
+    "HippocampalTransformerLayer",
     # Routing layers (when implemented)
-    'DomainRouter',
-    'DomainPredictor',
-    'DomainClassifier',
-    'ExpertCombiner',
-
+    "DomainRouter",
+    "DomainPredictor",
+    "DomainClassifier",
+    "ExpertCombiner",
     # Affect layers (when implemented)
-    'AffectMLP',
-
+    "AffectMLP",
     # Capsule layers
-    'CapsuleProject',
-    'SemanticEncoder',
-    'DentateGyrus',
-    'CapsuleEmbedding',
-    'ContrastiveLoss',
-
+    "CapsuleProject",
+    "SemanticEncoder",
+    "DentateGyrus",
+    "CapsuleEmbedding",
+    "ContrastiveLoss",
     # Decoding layers (when implemented)
-    'GreedyDecoder',
-    'SampleDecoder',
-
+    "GreedyDecoder",
+    "SampleDecoder",
     # Loss functions
-    'MSELoss',
-    'CrossEntropyLoss',
-    'BCELoss',
-
+    "MSELoss",
+    "CrossEntropyLoss",
+    "BCELoss",
     # Convolutional layers
-    'Conv1d',
-    'Conv2d',
-
+    "Conv1d",
+    "Conv2d",
     # Normalization layers
-    'BatchNorm1d',
-    'BatchNorm2d',
-
+    "BatchNorm1d",
+    "BatchNorm2d",
     # Pooling layers
-    'MaxPool2d',
-    'AvgPool2d',
-    'AdaptiveMaxPool2d',
-    'AdaptiveAvgPool2d',
-
+    "MaxPool2d",
+    "AvgPool2d",
+    "AdaptiveMaxPool2d",
+    "AdaptiveAvgPool2d",
     # Recurrent layers
-    'LSTM',
-    'LSTMCell',
-    'GRU',
-    'GRUCell',
-
+    "LSTM",
+    "LSTMCell",
+    "GRU",
+    "GRUCell",
     # Autograd - Core
-    'Variable',
-    'GradFn',
-    'Function',
-    'FunctionCtx',
+    "Variable",
+    "GradFn",
+    "Function",
+    "FunctionCtx",
     # Arithmetic
-    'add',
-    'sub',
-    'mul',
-    'div',
-    'neg',
-    'pow',
-    'matmul',
+    "add",
+    "sub",
+    "mul",
+    "div",
+    "neg",
+    "pow",
+    "matmul",
     # Reductions
-    'sum',
-    'mean',
-    'max',
-    'min',
-    'var',
-    'std',
-    'norm',
+    "sum",
+    "mean",
+    "max",
+    "min",
+    "var",
+    "std",
+    "norm",
     # Activations
-    'relu',
-    'sigmoid',
-    'tanh',
-    'exp',
-    'log',
-    'sqrt',
-    'abs',
-    'clamp',
-    'gelu',
-    'silu',
-    'leaky_relu',
-    'elu',
-    'softplus',
-    'softmax',
+    "relu",
+    "sigmoid",
+    "tanh",
+    "exp",
+    "log",
+    "sqrt",
+    "abs",
+    "clamp",
+    "gelu",
+    "silu",
+    "leaky_relu",
+    "elu",
+    "softplus",
+    "softmax",
     # Trigonometric
-    'sin',
-    'cos',
-    'tan',
-    'asin',
-    'acos',
-    'atan',
-    'atan2',
+    "sin",
+    "cos",
+    "tan",
+    "asin",
+    "acos",
+    "atan",
+    "atan2",
     # Shapes
-    'reshape',
-    'transpose',
-    'squeeze',
-    'unsqueeze',
-    'index',
-    'flatten',
-    'view',
-    'expand',
-    'repeat',
-    'permute',
-    'contiguous',
-    'clone',
-    'concat',
-    'stack',
-    'where',
+    "reshape",
+    "transpose",
+    "squeeze",
+    "unsqueeze",
+    "index",
+    "flatten",
+    "view",
+    "expand",
+    "repeat",
+    "permute",
+    "contiguous",
+    "clone",
+    "concat",
+    "stack",
+    "where",
     # Comparisons
-    'eq',
-    'ne',
-    'lt',
-    'le',
-    'gt',
-    'ge',
+    "eq",
+    "ne",
+    "lt",
+    "le",
+    "gt",
+    "ge",
     # Loss functions
-    'cross_entropy',
-    'mse_loss',
-    'l1_loss',
-    'smooth_l1_loss',
-    'bce_loss',
-    'bce_with_logits_loss',
-    'nll_loss',
-    'kl_div_loss',
+    "cross_entropy",
+    "mse_loss",
+    "l1_loss",
+    "smooth_l1_loss",
+    "bce_loss",
+    "bce_with_logits_loss",
+    "nll_loss",
+    "kl_div_loss",
     # Context managers
-    'enable_grad',
-    'no_grad',
-    'is_grad_enabled',
+    "enable_grad",
+    "no_grad",
+    "is_grad_enabled",
     # Factory functions
-    'tensor',
-    'zeros',
-    'ones',
-    'randn',
-    'rand',
-    'linspace',
-    'arange',
-    'eye',
-    'full',
+    "tensor",
+    "zeros",
+    "ones",
+    "randn",
+    "rand",
+    "linspace",
+    "arange",
+    "eye",
+    "full",
 ]
 
 # Add autograd core exports if available
 if AUTOGRAD_CORE_AVAILABLE:
-    __all__.extend([
-        'GradientTape',
-        'ComputationNode',
-        'ModuleTracer',
-        'TrainingContext',
-        'backward_ops',
-        'is_grad_enabled',
-        'backward',
-    ])
+    __all__.extend(
+        [
+            "GradientTape",
+            "ComputationNode",
+            "ModuleTracer",
+            "TrainingContext",
+            "backward_ops",
+            "is_grad_enabled",
+            "backward",
+        ]
+    )
 
 # Multimodal techniques
-__all__.extend([
-    'BottleneckFusion',
-    'PerceiverIO',
-    'CrossModalAttentionFusion',
-    'ImageBindFusion',
-    'PerceiverResampler',
-    'FlamingoFusion',
-    'VisionLanguageModel',
-    'VLMLayer',
-])
+__all__.extend(
+    [
+        "BottleneckFusion",
+        "PerceiverIO",
+        "CrossModalAttentionFusion",
+        "ImageBindFusion",
+        "PerceiverResampler",
+        "FlamingoFusion",
+        "VisionLanguageModel",
+        "VLMLayer",
+    ]
+)
 
 # LoRA (Low-Rank Adaptation) for efficient fine-tuning
 from .lora import (
@@ -470,12 +460,14 @@ from .lora import (
     calculate_lora_params,
 )
 
-__all__.extend([
-    'LoRAConfig',
-    'LoRALinear',
-    'LoRAEmbedding',
-    'LoRAAttention',
-    'LoRAModel',
-    'apply_lora_to_linear',
-    'calculate_lora_params',
-])
+__all__.extend(
+    [
+        "LoRAConfig",
+        "LoRALinear",
+        "LoRAEmbedding",
+        "LoRAAttention",
+        "LoRAModel",
+        "apply_lora_to_linear",
+        "calculate_lora_params",
+    ]
+)

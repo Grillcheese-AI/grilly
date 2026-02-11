@@ -6,7 +6,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 
 from benchmarks.utils import (
     print_header,
@@ -40,8 +40,10 @@ def main():
     gpu_vsa = None
     try:
         from grilly.backend.core import VulkanCore
+
         core = VulkanCore()
         from grilly.backend.experimental.vsa import VulkanVSA
+
         gpu_vsa = VulkanVSA(core)
     except Exception as e:
         print(f"GPU VSA unavailable: {e}")
@@ -60,9 +62,15 @@ def main():
         if gpu_vsa is not None:
             try:
                 gpu_res = time_fn(gpu_vsa.bind_bipolar, a, b, warmup=2, repeats=5)
-                print_row(f"bind d={dim}", gpu_res['mean'], cpu_res['mean'])
-                results.append({'label': f'bind d={dim}', 'gpu_ms': gpu_res['mean'],
-                                'cpu_ms': cpu_res['mean'], 'shape': f'd={dim}'})
+                print_row(f"bind d={dim}", gpu_res["mean"], cpu_res["mean"])
+                results.append(
+                    {
+                        "label": f"bind d={dim}",
+                        "gpu_ms": gpu_res["mean"],
+                        "cpu_ms": cpu_res["mean"],
+                        "shape": f"d={dim}",
+                    }
+                )
             except Exception as e:
                 print(f"  bind d={dim}: GPU failed: {e}")
         else:
@@ -72,8 +80,9 @@ def main():
     print_header("Bundle (majority vote)")
     for dim in dims:
         n_vectors = 5
-        vectors = [np.random.choice([-1.0, 1.0], size=dim).astype(np.float32)
-                    for _ in range(n_vectors)]
+        vectors = [
+            np.random.choice([-1.0, 1.0], size=dim).astype(np.float32) for _ in range(n_vectors)
+        ]
         vectors_stack = np.stack(vectors)
 
         cpu_res = time_cpu(cpu_bundle, vectors_stack, warmup=3, repeats=10)
@@ -81,9 +90,15 @@ def main():
         if gpu_vsa is not None:
             try:
                 gpu_res = time_fn(gpu_vsa.bundle, vectors, warmup=2, repeats=5)
-                print_row(f"bundle d={dim} n={n_vectors}", gpu_res['mean'], cpu_res['mean'])
-                results.append({'label': f'bundle d={dim}', 'gpu_ms': gpu_res['mean'],
-                                'cpu_ms': cpu_res['mean'], 'shape': f'd={dim}'})
+                print_row(f"bundle d={dim} n={n_vectors}", gpu_res["mean"], cpu_res["mean"])
+                results.append(
+                    {
+                        "label": f"bundle d={dim}",
+                        "gpu_ms": gpu_res["mean"],
+                        "cpu_ms": cpu_res["mean"],
+                        "shape": f"d={dim}",
+                    }
+                )
             except Exception as e:
                 print(f"  bundle d={dim}: GPU failed: {e}")
         else:
@@ -101,13 +116,17 @@ def main():
         if gpu_vsa is not None:
             try:
                 gpu_res = time_fn(
-                    gpu_vsa.similarity_batch, query, codebook, vocab_size, dim,
-                    warmup=2, repeats=5
+                    gpu_vsa.similarity_batch, query, codebook, vocab_size, dim, warmup=2, repeats=5
                 )
-                print_row(f"sim V={vocab_size} d={dim}", gpu_res['mean'], cpu_res['mean'])
-                results.append({'label': f'sim V={vocab_size} d={dim}',
-                                'gpu_ms': gpu_res['mean'], 'cpu_ms': cpu_res['mean'],
-                                'shape': f'V={vocab_size} d={dim}'})
+                print_row(f"sim V={vocab_size} d={dim}", gpu_res["mean"], cpu_res["mean"])
+                results.append(
+                    {
+                        "label": f"sim V={vocab_size} d={dim}",
+                        "gpu_ms": gpu_res["mean"],
+                        "cpu_ms": cpu_res["mean"],
+                        "shape": f"V={vocab_size} d={dim}",
+                    }
+                )
             except Exception as e:
                 print(f"  sim V={vocab_size} d={dim}: GPU failed: {e}")
         else:
@@ -118,5 +137,5 @@ def main():
         print_summary_table(results)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

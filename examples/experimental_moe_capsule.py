@@ -26,27 +26,21 @@ def main() -> None:
     encoder = CapsuleEncoder(input_dim=dim)
     query_capsule = encoder.encode_vector(query)
 
-    expert_capsules = {
-        "expert_a": query_capsule,
-        "expert_b": -query_capsule
-    }
+    expert_capsules = {"expert_a": query_capsule, "expert_b": -query_capsule}
 
     moe_capsule = ResonatorMoE(
         dim=dim,
         experts=experts,
         expert_capsules=expert_capsules,
         capsule_encoder=encoder,
-        capsule_weight=1.0
+        capsule_weight=1.0,
     )
 
     selected_capsule = moe_capsule.route(query, top_k=1)
     print("Capsule-weighted selection:", selected_capsule)
 
     moe_vsa = ResonatorMoE(
-        dim=dim,
-        experts=experts,
-        expert_vectors=moe_capsule.expert_vectors,
-        capsule_weight=0.0
+        dim=dim, experts=experts, expert_vectors=moe_capsule.expert_vectors, capsule_weight=0.0
     )
 
     selected_vsa = moe_vsa.route(query, top_k=1)

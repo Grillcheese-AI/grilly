@@ -1,7 +1,5 @@
 """Multimodal fusion modules for Grilly neural network workflows."""
 
-
-
 import numpy as np
 
 from .module import Module
@@ -11,6 +9,7 @@ from .modules import GELU, Dropout, LayerNorm, Linear, MultiheadAttention, Seque
 # 1. Multimodal Bottleneck Transformer (MBT)
 # =============================================================================
 
+
 class BottleneckFusion(Module):
     """Fuse modalities through a bottleneck-token attention mechanism."""
 
@@ -19,7 +18,7 @@ class BottleneckFusion(Module):
         d_model: int = 768,
         num_bottlenecks: int = 64,
         num_heads: int = 8,
-        dropout: float = 0.1
+        dropout: float = 0.1,
     ):
         """Initialize the instance."""
 
@@ -29,8 +28,10 @@ class BottleneckFusion(Module):
         self.num_heads = num_heads
 
         # Learnable bottleneck tokens
-        self.bottleneck_tokens = np.random.randn(1, num_bottlenecks, d_model).astype(np.float32) * 0.02
-        self.register_parameter('bottleneck_tokens', self.bottleneck_tokens)
+        self.bottleneck_tokens = (
+            np.random.randn(1, num_bottlenecks, d_model).astype(np.float32) * 0.02
+        )
+        self.register_parameter("bottleneck_tokens", self.bottleneck_tokens)
 
         # Cross-attention from bottleneck to modality 1
         self.cross_attn_1 = MultiheadAttention(d_model, num_heads, dropout=dropout)
@@ -47,19 +48,15 @@ class BottleneckFusion(Module):
         self.norm3 = LayerNorm(d_model)
 
         self._modules = {
-            'cross_attn_1': self.cross_attn_1,
-            'cross_attn_2': self.cross_attn_2,
-            'self_attn': self.self_attn,
-            'norm1': self.norm1,
-            'norm2': self.norm2,
-            'norm3': self.norm3,
+            "cross_attn_1": self.cross_attn_1,
+            "cross_attn_2": self.cross_attn_2,
+            "self_attn": self.self_attn,
+            "norm1": self.norm1,
+            "norm2": self.norm2,
+            "norm3": self.norm3,
         }
 
-    def forward(
-        self,
-        modality1: np.ndarray,
-        modality2: np.ndarray
-    ) -> np.ndarray:
+    def forward(self, modality1: np.ndarray, modality2: np.ndarray) -> np.ndarray:
         """
         Fuse two modalities through bottleneck attention.
 
@@ -76,27 +73,15 @@ class BottleneckFusion(Module):
         bottleneck = np.tile(self.bottleneck_tokens, (batch_size, 1, 1))
 
         # Cross-attend from bottleneck to modality 1
-        attn_out1, _ = self.cross_attn_1(
-            query=bottleneck,
-            key=modality1,
-            value=modality1
-        )
+        attn_out1, _ = self.cross_attn_1(query=bottleneck, key=modality1, value=modality1)
         bottleneck = self.norm1(bottleneck + attn_out1)
 
         # Cross-attend from bottleneck to modality 2
-        attn_out2, _ = self.cross_attn_2(
-            query=bottleneck,
-            key=modality2,
-            value=modality2
-        )
+        attn_out2, _ = self.cross_attn_2(query=bottleneck, key=modality2, value=modality2)
         bottleneck = self.norm2(bottleneck + attn_out2)
 
         # Self-attention on fused bottleneck
-        attn_out3, _ = self.self_attn(
-            query=bottleneck,
-            key=bottleneck,
-            value=bottleneck
-        )
+        attn_out3, _ = self.self_attn(query=bottleneck, key=bottleneck, value=bottleneck)
         fused = self.norm3(bottleneck + attn_out3)
 
         return fused
@@ -105,6 +90,7 @@ class BottleneckFusion(Module):
 # =============================================================================
 # 2. Perceiver IO - Modality-Agnostic Architecture
 # =============================================================================
+
 
 class PerceiverIO(Module):
     """
@@ -136,7 +122,7 @@ class PerceiverIO(Module):
         num_latents: int = 256,
         num_heads: int = 8,
         num_layers: int = 6,
-        dropout: float = 0.1
+        dropout: float = 0.1,
     ):
         """Initialize the instance."""
 
@@ -147,7 +133,7 @@ class PerceiverIO(Module):
 
         # Learnable latent array (bottleneck)
         self.latents = np.random.randn(1, num_latents, latent_dim).astype(np.float32) * 0.02
-        self.register_parameter('latents', self.latents)
+        self.register_parameter("latents", self.latents)
 
         # Input projection
         self.input_proj = Linear(input_dim, latent_dim)
@@ -160,15 +146,15 @@ class PerceiverIO(Module):
         self.latent_layers = []
         for i in range(num_layers):
             layer = {
-                'self_attn': MultiheadAttention(latent_dim, num_heads, dropout=dropout),
-                'norm1': LayerNorm(latent_dim),
-                'ffn': Sequential(
+                "self_attn": MultiheadAttention(latent_dim, num_heads, dropout=dropout),
+                "norm1": LayerNorm(latent_dim),
+                "ffn": Sequential(
                     Linear(latent_dim, latent_dim * 4),
                     GELU(),
                     Dropout(dropout),
                     Linear(latent_dim * 4, latent_dim),
                 ),
-                'norm2': LayerNorm(latent_dim),
+                "norm2": LayerNorm(latent_dim),
             }
             self.latent_layers.append(layer)
 
@@ -178,21 +164,17 @@ class PerceiverIO(Module):
 
         # Register submodules
         self._modules = {
-            'input_proj': self.input_proj,
-            'input_cross_attn': self.input_cross_attn,
-            'input_norm': self.input_norm,
-            'output_cross_attn': self.output_cross_attn,
-            'output_norm': self.output_norm,
+            "input_proj": self.input_proj,
+            "input_cross_attn": self.input_cross_attn,
+            "input_norm": self.input_norm,
+            "output_cross_attn": self.output_cross_attn,
+            "output_norm": self.output_norm,
         }
         for i, layer in enumerate(self.latent_layers):
             for name, module in layer.items():
-                self._modules[f'latent_{i}_{name}'] = module
+                self._modules[f"latent_{i}_{name}"] = module
 
-    def forward(
-        self,
-        inputs: np.ndarray,
-        output_queries: np.ndarray | None = None
-    ) -> np.ndarray:
+    def forward(self, inputs: np.ndarray, output_queries: np.ndarray | None = None) -> np.ndarray:
         """
         Process inputs through Perceiver IO.
 
@@ -213,36 +195,24 @@ class PerceiverIO(Module):
         latents = np.tile(self.latents, (batch_size, 1, 1))
 
         # Cross-attend from latents to inputs (encoding)
-        encoded, _ = self.input_cross_attn(
-            query=latents,
-            key=inputs_proj,
-            value=inputs_proj
-        )
+        encoded, _ = self.input_cross_attn(query=latents, key=inputs_proj, value=inputs_proj)
         latents = self.input_norm(latents + encoded)
 
         # Process latents with self-attention layers
         for layer in self.latent_layers:
             # Self-attention
-            attn_out, _ = layer['self_attn'](
-                query=latents,
-                key=latents,
-                value=latents
-            )
-            latents = layer['norm1'](latents + attn_out)
+            attn_out, _ = layer["self_attn"](query=latents, key=latents, value=latents)
+            latents = layer["norm1"](latents + attn_out)
 
             # Feed-forward
-            ffn_out = layer['ffn'](latents)
-            latents = layer['norm2'](latents + ffn_out)
+            ffn_out = layer["ffn"](latents)
+            latents = layer["norm2"](latents + ffn_out)
 
         # Decode: cross-attend from output queries to latents
         if output_queries is None:
             outputs = latents
         else:
-            decoded, _ = self.output_cross_attn(
-                query=output_queries,
-                key=latents,
-                value=latents
-            )
+            decoded, _ = self.output_cross_attn(query=output_queries, key=latents, value=latents)
             outputs = self.output_norm(output_queries + decoded)
 
         return outputs
@@ -251,6 +221,7 @@ class PerceiverIO(Module):
 # =============================================================================
 # 3. Cross-Attention Fusion with Modality-Specific Encoders
 # =============================================================================
+
 
 class CrossModalAttentionFusion(Module):
     """
@@ -275,7 +246,7 @@ class CrossModalAttentionFusion(Module):
         d_model: int = 768,
         num_heads: int = 8,
         num_encoder_layers: int = 3,
-        dropout: float = 0.1
+        dropout: float = 0.1,
     ):
         """Initialize the instance."""
 
@@ -289,29 +260,29 @@ class CrossModalAttentionFusion(Module):
         for i in range(num_encoder_layers):
             # Vision encoder layer
             vision_layer = {
-                'self_attn': MultiheadAttention(d_model, num_heads, dropout=dropout),
-                'norm1': LayerNorm(d_model),
-                'ffn': Sequential(
+                "self_attn": MultiheadAttention(d_model, num_heads, dropout=dropout),
+                "norm1": LayerNorm(d_model),
+                "ffn": Sequential(
                     Linear(d_model, d_model * 4),
                     GELU(),
                     Dropout(dropout),
                     Linear(d_model * 4, d_model),
                 ),
-                'norm2': LayerNorm(d_model),
+                "norm2": LayerNorm(d_model),
             }
             self.vision_encoder_layers.append(vision_layer)
 
             # Text encoder layer
             text_layer = {
-                'self_attn': MultiheadAttention(d_model, num_heads, dropout=dropout),
-                'norm1': LayerNorm(d_model),
-                'ffn': Sequential(
+                "self_attn": MultiheadAttention(d_model, num_heads, dropout=dropout),
+                "norm1": LayerNorm(d_model),
+                "ffn": Sequential(
                     Linear(d_model, d_model * 4),
                     GELU(),
                     Dropout(dropout),
                     Linear(d_model * 4, d_model),
                 ),
-                'norm2': LayerNorm(d_model),
+                "norm2": LayerNorm(d_model),
             }
             self.text_encoder_layers.append(text_layer)
 
@@ -333,30 +304,26 @@ class CrossModalAttentionFusion(Module):
 
         # Register modules
         self._modules = {
-            'cross_attn_t2v': self.cross_attn_t2v,
-            'cross_attn_v2t': self.cross_attn_v2t,
-            'norm_t2v': self.norm_t2v,
-            'norm_v2t': self.norm_v2t,
-            'fusion_ffn': self.fusion_ffn,
+            "cross_attn_t2v": self.cross_attn_t2v,
+            "cross_attn_v2t": self.cross_attn_v2t,
+            "norm_t2v": self.norm_t2v,
+            "norm_v2t": self.norm_v2t,
+            "fusion_ffn": self.fusion_ffn,
         }
 
     def _encode_modality(self, x: np.ndarray, layers: list[dict]) -> np.ndarray:
         """Encode through modality-specific layers."""
         for layer in layers:
             # Self-attention
-            attn_out, _ = layer['self_attn'](query=x, key=x, value=x)
-            x = layer['norm1'](x + attn_out)
+            attn_out, _ = layer["self_attn"](query=x, key=x, value=x)
+            x = layer["norm1"](x + attn_out)
 
             # Feed-forward
-            ffn_out = layer['ffn'](x)
-            x = layer['norm2'](x + ffn_out)
+            ffn_out = layer["ffn"](x)
+            x = layer["norm2"](x + ffn_out)
         return x
 
-    def forward(
-        self,
-        vision_input: np.ndarray,
-        text_input: np.ndarray
-    ) -> np.ndarray:
+    def forward(self, vision_input: np.ndarray, text_input: np.ndarray) -> np.ndarray:
         """
         Fuse vision and text modalities.
 
@@ -373,23 +340,19 @@ class CrossModalAttentionFusion(Module):
 
         # Cross-modal attention: text queries attend to vision
         text_cross, _ = self.cross_attn_t2v(
-            query=text_specific,
-            key=vision_specific,
-            value=vision_specific
+            query=text_specific, key=vision_specific, value=vision_specific
         )
         text_enriched = self.norm_t2v(text_specific + text_cross)
 
         # Cross-modal attention: vision queries attend to text
         vision_cross, _ = self.cross_attn_v2t(
-            query=vision_specific,
-            key=text_specific,
-            value=text_specific
+            query=vision_specific, key=text_specific, value=text_specific
         )
         vision_enriched = self.norm_v2t(vision_specific + vision_cross)
 
         # Pool modality-specific representations (mean pooling)
         vision_pooled = vision_enriched.mean(axis=1)  # (batch, d_model)
-        text_pooled = text_enriched.mean(axis=1)      # (batch, d_model)
+        text_pooled = text_enriched.mean(axis=1)  # (batch, d_model)
 
         # Concatenate and fuse
         concatenated = np.concatenate([vision_pooled, text_pooled], axis=-1)
@@ -401,6 +364,7 @@ class CrossModalAttentionFusion(Module):
 # =============================================================================
 # 4. ImageBind: Joint Embedding Across Multiple Modalities
 # =============================================================================
+
 
 class ImageBindFusion(Module):
     """
@@ -429,7 +393,7 @@ class ImageBindFusion(Module):
         image_input_dim: int = 2048,
         text_input_dim: int = 768,
         audio_input_dim: int = 512,
-        temperature: float = 0.07
+        temperature: float = 0.07,
     ):
         """Initialize the instance."""
 
@@ -457,9 +421,9 @@ class ImageBindFusion(Module):
         )
 
         self._modules = {
-            'image_encoder': self.image_encoder,
-            'text_encoder': self.text_encoder,
-            'audio_encoder': self.audio_encoder,
+            "image_encoder": self.image_encoder,
+            "text_encoder": self.text_encoder,
+            "audio_encoder": self.audio_encoder,
         }
 
     def encode(self, modality_type: str, features: np.ndarray) -> np.ndarray:
@@ -473,11 +437,11 @@ class ImageBindFusion(Module):
         Returns:
             L2-normalized embeddings (batch, embed_dim)
         """
-        if modality_type == 'image':
+        if modality_type == "image":
             embeddings = self.image_encoder(features)
-        elif modality_type == 'text':
+        elif modality_type == "text":
             embeddings = self.text_encoder(features)
-        elif modality_type == 'audio':
+        elif modality_type == "audio":
             embeddings = self.audio_encoder(features)
         else:
             raise ValueError(f"Unknown modality: {modality_type}")
@@ -488,11 +452,7 @@ class ImageBindFusion(Module):
 
         return embeddings
 
-    def contrastive_loss(
-        self,
-        embeddings1: np.ndarray,
-        embeddings2: np.ndarray
-    ) -> float:
+    def contrastive_loss(self, embeddings1: np.ndarray, embeddings2: np.ndarray) -> float:
         """
         Compute symmetric contrastive loss between two modality embeddings.
 
@@ -529,7 +489,7 @@ class ImageBindFusion(Module):
         self,
         image_features: np.ndarray,
         text_features: np.ndarray,
-        audio_features: np.ndarray | None = None
+        audio_features: np.ndarray | None = None,
     ) -> dict[str, np.ndarray]:
         """
         Joint training with image as binding modality.
@@ -543,22 +503,22 @@ class ImageBindFusion(Module):
             Dictionary with embeddings and losses
         """
         # Encode all modalities
-        image_emb = self.encode('image', image_features)
-        text_emb = self.encode('text', text_features)
+        image_emb = self.encode("image", image_features)
+        text_emb = self.encode("text", text_features)
 
         result = {
-            'image_embeddings': image_emb,
-            'text_embeddings': text_emb,
-            'loss_img_text': self.contrastive_loss(image_emb, text_emb),
+            "image_embeddings": image_emb,
+            "text_embeddings": text_emb,
+            "loss_img_text": self.contrastive_loss(image_emb, text_emb),
         }
 
         if audio_features is not None:
-            audio_emb = self.encode('audio', audio_features)
-            result['audio_embeddings'] = audio_emb
-            result['loss_img_audio'] = self.contrastive_loss(image_emb, audio_emb)
-            result['loss'] = result['loss_img_text'] + result['loss_img_audio']
+            audio_emb = self.encode("audio", audio_features)
+            result["audio_embeddings"] = audio_emb
+            result["loss_img_audio"] = self.contrastive_loss(image_emb, audio_emb)
+            result["loss"] = result["loss_img_text"] + result["loss_img_audio"]
         else:
-            result['loss'] = result['loss_img_text']
+            result["loss"] = result["loss_img_text"]
 
         return result
 
@@ -566,6 +526,7 @@ class ImageBindFusion(Module):
 # =============================================================================
 # 5. Perceiver Resampler (Flamingo Architecture)
 # =============================================================================
+
 
 class PerceiverResampler(Module):
     """
@@ -593,7 +554,7 @@ class PerceiverResampler(Module):
         depth: int = 6,
         num_latents: int = 64,
         num_heads: int = 8,
-        ff_mult: int = 4
+        ff_mult: int = 4,
     ):
         """Initialize the instance."""
 
@@ -603,25 +564,25 @@ class PerceiverResampler(Module):
 
         # Learned latent queries
         self.latents = np.random.randn(num_latents, dim).astype(np.float32) * 0.02
-        self.register_parameter('latents', self.latents)
+        self.register_parameter("latents", self.latents)
 
         # Perceiver layers
         self.layers = []
         for i in range(depth):
             layer = {
                 # Cross-attention: latents attend to visual features
-                'cross_attn': MultiheadAttention(dim, num_heads),
-                'cross_norm': LayerNorm(dim),
+                "cross_attn": MultiheadAttention(dim, num_heads),
+                "cross_norm": LayerNorm(dim),
                 # Self-attention: latents attend to each other
-                'self_attn': MultiheadAttention(dim, num_heads),
-                'self_norm': LayerNorm(dim),
+                "self_attn": MultiheadAttention(dim, num_heads),
+                "self_norm": LayerNorm(dim),
                 # Feed-forward
-                'ffn': Sequential(
+                "ffn": Sequential(
                     Linear(dim, dim * ff_mult),
                     GELU(),
                     Linear(dim * ff_mult, dim),
                 ),
-                'ff_norm': LayerNorm(dim),
+                "ff_norm": LayerNorm(dim),
             }
             self.layers.append(layer)
 
@@ -629,7 +590,7 @@ class PerceiverResampler(Module):
         self._modules = {}
         for i, layer in enumerate(self.layers):
             for name, module in layer.items():
-                self._modules[f'layer_{i}_{name}'] = module
+                self._modules[f"layer_{i}_{name}"] = module
 
     def forward(self, visual_features: np.ndarray) -> np.ndarray:
         """
@@ -651,24 +612,18 @@ class PerceiverResampler(Module):
         # Apply Perceiver layers
         for layer in self.layers:
             # Cross-attention: latents attend to visual features
-            cross_out, _ = layer['cross_attn'](
-                query=latents,
-                key=visual_features,
-                value=visual_features
+            cross_out, _ = layer["cross_attn"](
+                query=latents, key=visual_features, value=visual_features
             )
-            latents = layer['cross_norm'](latents + cross_out)
+            latents = layer["cross_norm"](latents + cross_out)
 
             # Self-attention: latents attend to each other
-            self_out, _ = layer['self_attn'](
-                query=latents,
-                key=latents,
-                value=latents
-            )
-            latents = layer['self_norm'](latents + self_out)
+            self_out, _ = layer["self_attn"](query=latents, key=latents, value=latents)
+            latents = layer["self_norm"](latents + self_out)
 
             # Feed-forward
-            ff_out = layer['ffn'](latents)
-            latents = layer['ff_norm'](latents + ff_out)
+            ff_out = layer["ffn"](latents)
+            latents = layer["ff_norm"](latents + ff_out)
 
         return latents
 
@@ -676,6 +631,7 @@ class PerceiverResampler(Module):
 # =============================================================================
 # 6. Flamingo-Style Vision-Language Fusion
 # =============================================================================
+
 
 class FlamingoFusion(Module):
     """
@@ -697,7 +653,7 @@ class FlamingoFusion(Module):
         vision_dim: int = 1024,
         text_dim: int = 2048,
         num_visual_tokens: int = 64,
-        num_heads: int = 16
+        num_heads: int = 16,
     ):
         """Initialize the instance."""
 
@@ -706,10 +662,7 @@ class FlamingoFusion(Module):
         self.text_dim = text_dim
 
         # Perceiver Resampler for vision
-        self.resampler = PerceiverResampler(
-            dim=vision_dim,
-            num_latents=num_visual_tokens
-        )
+        self.resampler = PerceiverResampler(dim=vision_dim, num_latents=num_visual_tokens)
 
         # Project visual tokens to text dimension
         self.vision_proj = Linear(vision_dim, text_dim)
@@ -724,18 +677,14 @@ class FlamingoFusion(Module):
         )
 
         self._modules = {
-            'resampler': self.resampler,
-            'vision_proj': self.vision_proj,
-            'cross_attn': self.cross_attn,
-            'cross_norm': self.cross_norm,
-            'gate': self.gate,
+            "resampler": self.resampler,
+            "vision_proj": self.vision_proj,
+            "cross_attn": self.cross_attn,
+            "cross_norm": self.cross_norm,
+            "gate": self.gate,
         }
 
-    def forward(
-        self,
-        visual_features: np.ndarray,
-        text_embeddings: np.ndarray
-    ) -> np.ndarray:
+    def forward(self, visual_features: np.ndarray, text_embeddings: np.ndarray) -> np.ndarray:
         """
         Fuse visual and text features.
 
@@ -753,11 +702,7 @@ class FlamingoFusion(Module):
         visual_tokens = self.vision_proj(visual_tokens)  # (batch, 64, text_dim)
 
         # Gated cross-attention: text attends to vision
-        attended, _ = self.cross_attn(
-            query=text_embeddings,
-            key=visual_tokens,
-            value=visual_tokens
-        )
+        attended, _ = self.cross_attn(query=text_embeddings, key=visual_tokens, value=visual_tokens)
 
         # Compute gate values (tanh for range [-1, 1])
         gate_values = np.tanh(self.gate(text_embeddings))
@@ -772,6 +717,7 @@ class FlamingoFusion(Module):
 # =============================================================================
 # 7. Complete Vision-Language Model
 # =============================================================================
+
 
 class VisionLanguageModel(Module):
     """
@@ -798,7 +744,7 @@ class VisionLanguageModel(Module):
         num_visual_tokens: int = 64,
         num_heads: int = 16,
         num_layers: int = 12,
-        vocab_size: int = 50257
+        vocab_size: int = 50257,
     ):
         """Initialize the instance."""
 
@@ -808,9 +754,7 @@ class VisionLanguageModel(Module):
 
         # Visual resampler
         self.visual_resampler = PerceiverResampler(
-            dim=vision_dim,
-            num_latents=num_visual_tokens,
-            depth=6
+            dim=vision_dim, num_latents=num_visual_tokens, depth=6
         )
 
         # Projections
@@ -819,7 +763,7 @@ class VisionLanguageModel(Module):
 
         # Text embedding (simplified - in practice use pretrained)
         self.text_embed_weight = np.random.randn(vocab_size, text_dim).astype(np.float32) * 0.02
-        self.register_parameter('text_embed_weight', self.text_embed_weight)
+        self.register_parameter("text_embed_weight", self.text_embed_weight)
 
         # VLM layers
         self.layers = []
@@ -832,19 +776,15 @@ class VisionLanguageModel(Module):
 
         # Register modules
         self._modules = {
-            'visual_resampler': self.visual_resampler,
-            'vision_proj': self.vision_proj,
-            'text_proj': self.text_proj,
-            'lm_head': self.lm_head,
+            "visual_resampler": self.visual_resampler,
+            "vision_proj": self.vision_proj,
+            "text_proj": self.text_proj,
+            "lm_head": self.lm_head,
         }
         for i, layer in enumerate(self.layers):
-            self._modules[f'layer_{i}'] = layer
+            self._modules[f"layer_{i}"] = layer
 
-    def forward(
-        self,
-        vision_features: np.ndarray,
-        input_ids: np.ndarray
-    ) -> np.ndarray:
+    def forward(self, vision_features: np.ndarray, input_ids: np.ndarray) -> np.ndarray:
         """
         Forward pass through VLM.
 
@@ -900,22 +840,18 @@ class VLMLayer(Module):
 
         # Gating for cross-attention
         self.gate = np.zeros((1,), dtype=np.float32)
-        self.register_parameter('gate', self.gate)
+        self.register_parameter("gate", self.gate)
 
         self._modules = {
-            'self_attn': self.self_attn,
-            'norm1': self.norm1,
-            'cross_attn': self.cross_attn,
-            'norm2': self.norm2,
-            'ffn': self.ffn,
-            'norm3': self.norm3,
+            "self_attn": self.self_attn,
+            "norm1": self.norm1,
+            "cross_attn": self.cross_attn,
+            "norm2": self.norm2,
+            "ffn": self.ffn,
+            "norm3": self.norm3,
         }
 
-    def forward(
-        self,
-        text_tokens: np.ndarray,
-        visual_tokens: np.ndarray
-    ) -> np.ndarray:
+    def forward(self, text_tokens: np.ndarray, visual_tokens: np.ndarray) -> np.ndarray:
         """
         Process text tokens with self-attention and vision cross-attention.
 
@@ -927,19 +863,11 @@ class VLMLayer(Module):
             Processed text tokens (batch, text_seq, dim)
         """
         # Self-attention
-        attn_out, _ = self.self_attn(
-            query=text_tokens,
-            key=text_tokens,
-            value=text_tokens
-        )
+        attn_out, _ = self.self_attn(query=text_tokens, key=text_tokens, value=text_tokens)
         text_tokens = self.norm1(text_tokens + attn_out)
 
         # Cross-attention with gating
-        cross_out, _ = self.cross_attn(
-            query=text_tokens,
-            key=visual_tokens,
-            value=visual_tokens
-        )
+        cross_out, _ = self.cross_attn(query=text_tokens, key=visual_tokens, value=visual_tokens)
         gate_value = np.tanh(self.gate)
         text_tokens = self.norm2(text_tokens + gate_value * cross_out)
 
@@ -956,22 +884,17 @@ class VLMLayer(Module):
 
 __all__ = [
     # 1. Multimodal Bottleneck Transformer
-    'BottleneckFusion',
-
+    "BottleneckFusion",
     # 2. Perceiver IO
-    'PerceiverIO',
-
+    "PerceiverIO",
     # 3. Cross-Attention Fusion
-    'CrossModalAttentionFusion',
-
+    "CrossModalAttentionFusion",
     # 4. ImageBind
-    'ImageBindFusion',
-
+    "ImageBindFusion",
     # 5. Perceiver Resampler (Flamingo)
-    'PerceiverResampler',
-    'FlamingoFusion',
-
+    "PerceiverResampler",
+    "FlamingoFusion",
     # 6. Complete VLM
-    'VisionLanguageModel',
-    'VLMLayer',
+    "VisionLanguageModel",
+    "VLMLayer",
 ]

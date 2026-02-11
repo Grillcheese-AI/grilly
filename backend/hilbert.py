@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 try:
     from .core import VulkanCore
     from .pipelines import VulkanPipelines
+
     VULKAN_AVAILABLE = True
 except ImportError:
     VULKAN_AVAILABLE = False
@@ -33,30 +34,26 @@ except ImportError:
 class VulkanHilbert:
     """
     GPU-accelerated Hilbert space operations.
-    
+
     Provides:
     - Complex similarity computation (hilbert_similarity.comp shader)
     - Batch Hilbert transform
     - Top-k selection with complex similarity
-    
+
     Usage:
         hilbert_gpu = VulkanHilbert()
-        
+
         # Convert to complex
         psi_queries = hilbert_gpu.hilbert_embed_batch(embeddings)
-        
+
         # Compute similarities
         sims = hilbert_gpu.similarity_matrix(psi_queries, psi_keys)
-        
+
         # Top-k search
         indices, scores = hilbert_gpu.topk(psi_query, psi_keys, k=5)
     """
 
-    def __init__(
-        self,
-        device_index: int = 0,
-        shader_dir: Path | None = None
-    ):
+    def __init__(self, device_index: int = 0, shader_dir: Path | None = None):
         """Initialize the instance."""
 
         self.device_index = device_index
@@ -64,6 +61,7 @@ class VulkanHilbert:
         if shader_dir is None:
             try:
                 import grilly
+
                 package_path = Path(grilly.__file__).parent
                 shader_dir = package_path / "shaders"
             except (ImportError, AttributeError):
@@ -93,10 +91,7 @@ class VulkanHilbert:
             # Compile shaders
             shader_path = self.shader_dir / "hilbert_similarity.comp"
             if shader_path.exists():
-                self.pipelines.create_pipeline(
-                    "hilbert_similarity",
-                    str(shader_path)
-                )
+                self.pipelines.create_pipeline("hilbert_similarity", str(shader_path))
                 logger.info("Hilbert similarity shader compiled")
 
             self.gpu_available = True
@@ -107,15 +102,11 @@ class VulkanHilbert:
             self.gpu_available = False
 
     def hilbert_embed(
-        self,
-        x: np.ndarray,
-        beta: float = 0.0,
-        phi: float = 0.0,
-        k: float = 10.0
+        self, x: np.ndarray, beta: float = 0.0, phi: float = 0.0, k: float = 10.0
     ) -> np.ndarray:
         """
         Convert real embedding to complex Hilbert space.
-        
+
         GPU acceleration via FFT for Hilbert transform.
         """
         if self.gpu_available:
@@ -123,13 +114,7 @@ class VulkanHilbert:
         else:
             return self._hilbert_embed_cpu(x, beta, phi, k)
 
-    def _hilbert_embed_cpu(
-        self,
-        x: np.ndarray,
-        beta: float,
-        phi: float,
-        k: float
-    ) -> np.ndarray:
+    def _hilbert_embed_cpu(self, x: np.ndarray, beta: float, phi: float, k: float) -> np.ndarray:
         """CPU Hilbert embedding."""
         from scipy.signal import hilbert
 
@@ -151,35 +136,19 @@ class VulkanHilbert:
 
         return psi.astype(np.complex64)
 
-    def _hilbert_embed_gpu(
-        self,
-        x: np.ndarray,
-        beta: float,
-        phi: float,
-        k: float
-    ) -> np.ndarray:
+    def _hilbert_embed_gpu(self, x: np.ndarray, beta: float, phi: float, k: float) -> np.ndarray:
         """GPU Hilbert embedding using FFT."""
         # For now, use CPU - FFT shader would be added later
         # GPU benefit is mainly in batch similarity computation
         return self._hilbert_embed_cpu(x, beta, phi, k)
 
     def hilbert_embed_batch(
-        self,
-        X: np.ndarray,
-        beta: float = 0.0,
-        phi: float = 0.0,
-        k: float = 10.0
+        self, X: np.ndarray, beta: float = 0.0, phi: float = 0.0, k: float = 10.0
     ) -> np.ndarray:
         """Batch Hilbert embedding."""
-        return np.array([
-            self.hilbert_embed(x, beta, phi, k) for x in X
-        ])
+        return np.array([self.hilbert_embed(x, beta, phi, k) for x in X])
 
-    def similarity(
-        self,
-        psi1: np.ndarray,
-        psi2: np.ndarray
-    ) -> float:
+    def similarity(self, psi1: np.ndarray, psi2: np.ndarray) -> float:
         """Compute complex similarity between two embeddings."""
         inner = np.vdot(psi1, psi2)
         norm1 = np.linalg.norm(psi1)
@@ -190,20 +159,16 @@ class VulkanHilbert:
 
         return float(np.abs(inner) / (norm1 * norm2))
 
-    def similarity_matrix(
-        self,
-        psi_queries: np.ndarray,
-        psi_keys: np.ndarray
-    ) -> np.ndarray:
+    def similarity_matrix(self, psi_queries: np.ndarray, psi_keys: np.ndarray) -> np.ndarray:
         """
         Compute pairwise similarities between queries and keys.
-        
+
         GPU-accelerated when available.
-        
+
         Args:
             psi_queries: [N, dim] complex
             psi_keys: [M, dim] complex
-            
+
         Returns:
             [N, M] similarity matrix
         """
@@ -212,11 +177,7 @@ class VulkanHilbert:
         else:
             return self._similarity_matrix_cpu(psi_queries, psi_keys)
 
-    def _similarity_matrix_cpu(
-        self,
-        psi_queries: np.ndarray,
-        psi_keys: np.ndarray
-    ) -> np.ndarray:
+    def _similarity_matrix_cpu(self, psi_queries: np.ndarray, psi_keys: np.ndarray) -> np.ndarray:
         """CPU similarity matrix computation."""
         t0 = time.perf_counter()
 
@@ -232,11 +193,7 @@ class VulkanHilbert:
         self.cpu_times.append(time.perf_counter() - t0)
         return sims
 
-    def _similarity_matrix_gpu(
-        self,
-        psi_queries: np.ndarray,
-        psi_keys: np.ndarray
-    ) -> np.ndarray:
+    def _similarity_matrix_gpu(self, psi_queries: np.ndarray, psi_keys: np.ndarray) -> np.ndarray:
         """GPU similarity matrix using Vulkan shader."""
         t0 = time.perf_counter()
 
@@ -261,17 +218,13 @@ class VulkanHilbert:
             self.pipelines.run_pipeline(
                 "hilbert_similarity",
                 push_constants={
-                    'num_queries': n_queries,
-                    'num_keys': n_keys,
-                    'dim': dim,
-                    'temperature': 1.0
+                    "num_queries": n_queries,
+                    "num_keys": n_keys,
+                    "dim": dim,
+                    "temperature": 1.0,
                 },
-                buffers=[
-                    queries_flat.flatten(),
-                    keys_flat.flatten(),
-                    output.flatten()
-                ],
-                workgroups=(n_queries * n_keys, 1, 1)
+                buffers=[queries_flat.flatten(), keys_flat.flatten(), output.flatten()],
+                workgroups=(n_queries * n_keys, 1, 1),
             )
 
             self.gpu_times.append(time.perf_counter() - t0)
@@ -282,27 +235,21 @@ class VulkanHilbert:
             return self._similarity_matrix_cpu(psi_queries, psi_keys)
 
     def topk(
-        self,
-        psi_query: np.ndarray,
-        psi_keys: np.ndarray,
-        k: int = 5
+        self, psi_query: np.ndarray, psi_keys: np.ndarray, k: int = 5
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Find top-k most similar keys to query.
-        
+
         Args:
             psi_query: [dim] complex query
             psi_keys: [N, dim] complex keys
             k: Number of results
-            
+
         Returns:
             (indices, scores) of top-k matches
         """
         # Compute similarities
-        sims = self.similarity_matrix(
-            psi_query.reshape(1, -1),
-            psi_keys
-        )[0]
+        sims = self.similarity_matrix(psi_query.reshape(1, -1), psi_keys)[0]
 
         # Top-k selection
         k = min(k, len(sims))
@@ -312,10 +259,7 @@ class VulkanHilbert:
         return indices, scores
 
     def topk_batch(
-        self,
-        psi_queries: np.ndarray,
-        psi_keys: np.ndarray,
-        k: int = 5
+        self, psi_queries: np.ndarray, psi_keys: np.ndarray, k: int = 5
     ) -> tuple[np.ndarray, np.ndarray]:
         """Batch top-k search."""
         sims = self.similarity_matrix(psi_queries, psi_keys)
@@ -330,21 +274,18 @@ class VulkanHilbert:
 
     def get_stats(self) -> dict:
         """Get performance statistics."""
-        stats = {
-            'gpu_available': self.gpu_available,
-            'device_index': self.device_index
-        }
+        stats = {"gpu_available": self.gpu_available, "device_index": self.device_index}
 
         if self.gpu_times:
-            stats['gpu_avg_ms'] = np.mean(self.gpu_times) * 1000
-            stats['gpu_p99_ms'] = np.percentile(self.gpu_times, 99) * 1000
+            stats["gpu_avg_ms"] = np.mean(self.gpu_times) * 1000
+            stats["gpu_p99_ms"] = np.percentile(self.gpu_times, 99) * 1000
 
         if self.cpu_times:
-            stats['cpu_avg_ms'] = np.mean(self.cpu_times) * 1000
-            stats['cpu_p99_ms'] = np.percentile(self.cpu_times, 99) * 1000
+            stats["cpu_avg_ms"] = np.mean(self.cpu_times) * 1000
+            stats["cpu_p99_ms"] = np.percentile(self.cpu_times, 99) * 1000
 
         if self.gpu_times and self.cpu_times:
-            stats['speedup'] = np.mean(self.cpu_times) / np.mean(self.gpu_times)
+            stats["speedup"] = np.mean(self.cpu_times) / np.mean(self.gpu_times)
 
         return stats
 
@@ -353,14 +294,15 @@ class VulkanHilbert:
 # INTEGRATION WITH EXISTING VULKAN_FAISS
 # =============================================================================
 
+
 def patch_vulkan_faiss(vulkan_faiss_module):
     """
     Patch existing vulkan_faiss.py to use Hilbert similarity.
-    
+
     Usage:
         from . import vulkan_faiss
         from .vulkan_hilbert import patch_vulkan_faiss
-        
+
         patch_vulkan_faiss(vulkan_faiss)
     """
     original_search = vulkan_faiss_module.search
@@ -371,7 +313,7 @@ def patch_vulkan_faiss(vulkan_faiss_module):
         key_embeddings: np.ndarray,
         k: int = 5,
         use_hilbert: bool = True,
-        **kwargs
+        **kwargs,
     ):
         """Run hilbert search."""
 
@@ -396,6 +338,7 @@ def patch_vulkan_faiss(vulkan_faiss_module):
 # =============================================================================
 # TESTS
 # =============================================================================
+
 
 def benchmark():
     """Benchmark GPU vs CPU performance."""
@@ -436,12 +379,12 @@ def benchmark():
             # Verify
             error = np.abs(sims_cpu - sims_gpu).max()
 
-            print(f"  CPU: {cpu_time*1000:.2f}ms")
-            print(f"  GPU: {gpu_time*1000:.2f}ms")
-            print(f"  Speedup: {cpu_time/gpu_time:.1f}x")
+            print(f"  CPU: {cpu_time * 1000:.2f}ms")
+            print(f"  GPU: {gpu_time * 1000:.2f}ms")
+            print(f"  Speedup: {cpu_time / gpu_time:.1f}x")
             print(f"  Max error: {error:.2e}")
         else:
-            print(f"  CPU: {cpu_time*1000:.2f}ms")
+            print(f"  CPU: {cpu_time * 1000:.2f}ms")
             print("  GPU: N/A")
 
 
@@ -485,6 +428,6 @@ def test_correctness():
     print(f"Top-5 scores:  {scores.round(3)}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     test_correctness()
     benchmark()

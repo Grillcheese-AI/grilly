@@ -156,7 +156,7 @@ def main():
     # ------------------------------------------------------------------
     print("\n3. Ingesting into CognitiveController...")
     controller = CognitiveController(dim=dim, confidence_threshold=0.0)
-    cog_result = controller.ingest_svc(entries, engine=engine)
+    controller.ingest_svc(entries, engine=engine)
 
     print(f"   World facts:    {len(controller.world.facts)}")
     print(f"   Causal links:   {len(controller.world.expectations)}")
@@ -191,7 +191,7 @@ def main():
     ]
 
     for query in queries:
-        print(f"\n   Query: \"{query}\"")
+        print(f'\n   Query: "{query}"')
 
         # Understand
         understanding = controller.understand(query)
@@ -211,7 +211,7 @@ def main():
 
     search_query = "health and exercise"
     similar = lang.find_similar_sentences(search_query, top_k=3)
-    print(f"   Query: \"{search_query}\"")
+    print(f'   Query: "{search_query}"')
     for words, sim in similar:
         print(f"   {sim:.4f}: {' '.join(words)}")
 
@@ -235,9 +235,7 @@ def main():
     # ------------------------------------------------------------------
     print("\n8. Engine-accelerated batch similarity search...")
     all_vecs = np.array([v for v, _ in lang.sentence_memory])
-    query_vec = lang.sentence_encoder.encode_sentence(
-        ["exercise", "improves", "health"]
-    )
+    query_vec = lang.sentence_encoder.encode_sentence(["exercise", "improves", "health"])
     top_results = engine.batch_similarity_search(query_vec, all_vecs, top_k=3)
     print("   Query: 'exercise improves health'")
     for idx, sim in top_results:

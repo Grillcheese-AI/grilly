@@ -6,11 +6,12 @@ Arrays are prefixed by hippocampal circuit stage:
   CA3 (Associative memory) – facts, expectations, constraints
   CA1 (Consolidated output) – episodic sentence memory
 """
+
 from __future__ import annotations
 
 import json
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -120,9 +121,7 @@ def save_hippocampal_checkpoint(
     fact_s = _as_obj_array([f.subject for f in facts])
     fact_r = _as_obj_array([f.relation for f in facts])
     fact_o = _as_obj_array([f.object for f in facts])
-    fact_conf = np.asarray(
-        [float(getattr(f, "confidence", 1.0)) for f in facts], dtype=np.float32
-    )
+    fact_conf = np.asarray([float(getattr(f, "confidence", 1.0)) for f in facts], dtype=np.float32)
     fact_src = _as_obj_array([getattr(f, "source", "observed") for f in facts])
 
     capsule_dim = int(getattr(world, "capsule_dim", 0) or 0)
@@ -217,14 +216,10 @@ def save_hippocampal_checkpoint(
         sent_vecs = sent_vecs.astype(vec_dtype, copy=False)
 
     # ---- manifest ----
-    n_sentences = (
-        sent_packed.shape[0]
-        if sent_pack_mode == "bitpack"
-        else sent_vecs.shape[0]
-    )
+    n_sentences = sent_packed.shape[0] if sent_pack_mode == "bitpack" else sent_vecs.shape[0]
     manifest = {
         "format": "grilly.hippocampal.v1",
-        "saved_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "saved_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "dim": dim,
         "capsule_dim": capsule_dim,
         "semantic_dims": semantic_dims,
@@ -244,19 +239,31 @@ def save_hippocampal_checkpoint(
         },
         "index": {
             "arrays": [
-                "ec_vocab_words", "ec_vocab_vecs",
-                "ec_relation_names", "ec_relation_vecs",
+                "ec_vocab_words",
+                "ec_vocab_vecs",
+                "ec_relation_names",
+                "ec_relation_vecs",
                 "ec_relation_memory_json",
-                "dg_realm_names", "dg_realm_vecs",
-                "dg_pattern_names", "dg_pattern_vecs",
+                "dg_realm_names",
+                "dg_realm_vecs",
+                "dg_pattern_names",
+                "dg_pattern_vecs",
                 "dg_templates_json",
-                "ca3_fact_s", "ca3_fact_r", "ca3_fact_o",
-                "ca3_fact_conf", "ca3_fact_src",
-                "ca3_fact_vecs", "ca3_fact_caps", "ca3_fact_has_caps",
+                "ca3_fact_s",
+                "ca3_fact_r",
+                "ca3_fact_o",
+                "ca3_fact_conf",
+                "ca3_fact_src",
+                "ca3_fact_vecs",
+                "ca3_fact_caps",
+                "ca3_fact_has_caps",
                 "ca3_expectations_json",
-                "ca3_constraint_a", "ca3_constraint_b",
-                "ca1_sent_vecs", "ca1_sent_packed",
-                "ca1_sent_token_vocab", "ca1_sent_token_ids",
+                "ca3_constraint_a",
+                "ca3_constraint_b",
+                "ca1_sent_vecs",
+                "ca1_sent_packed",
+                "ca1_sent_token_vocab",
+                "ca1_sent_token_ids",
                 "ca1_sent_offsets",
             ],
         },
@@ -273,9 +280,7 @@ def save_hippocampal_checkpoint(
         ec_vocab_vecs=vocab_vecs,
         ec_relation_names=_as_obj_array(rel_names),
         ec_relation_vecs=rel_vecs,
-        ec_relation_memory_json=np.asarray(
-            [json.dumps(relation_memory_dict)], dtype=object
-        ),
+        ec_relation_memory_json=np.asarray([json.dumps(relation_memory_dict)], dtype=object),
         # DG
         dg_realm_names=_as_obj_array(realm_names),
         dg_realm_vecs=realm_vecs,
@@ -392,9 +397,7 @@ def load_hippocampal_checkpoint(
     dim = int(manifest.get("dim", 0))
 
     if strict_dim and int(getattr(controller, "dim", dim)) != dim:
-        raise ValueError(
-            f"Checkpoint dim={dim} does not match controller dim={controller.dim}"
-        )
+        raise ValueError(f"Checkpoint dim={dim} does not match controller dim={controller.dim}")
 
     lang = controller.language
     world = controller.world

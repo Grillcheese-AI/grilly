@@ -181,14 +181,20 @@ def index_directory(
     files = sorted(dir_path.glob(patterns))
     # Skip common non-source directories
     skip_dirs = {
-        "__pycache__", ".git", ".venv", "venv", "node_modules",
-        ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
-        ".eggs", "*.egg-info",
+        "__pycache__",
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        "dist",
+        "build",
+        ".eggs",
+        "*.egg-info",
     }
-    files = [
-        f for f in files
-        if f.is_file() and not any(part in skip_dirs for part in f.parts)
-    ]
+    files = [f for f in files if f.is_file() and not any(part in skip_dirs for part in f.parts)]
     files = files[:max_files]
 
     t0 = time.time()
@@ -234,8 +240,16 @@ def explore_structure(path: str = ".", max_depth: int = 3) -> str:
         return f"Error: {path} is not a directory."
 
     skip_dirs = {
-        "__pycache__", ".git", ".venv", "venv", "node_modules",
-        ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
+        "__pycache__",
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        "dist",
+        "build",
         ".eggs",
     }
 

@@ -2,6 +2,7 @@
 Tests for GRU layer.
 Validates correctness against PyTorch.
 """
+
 import numpy as np
 import pytest
 
@@ -9,6 +10,7 @@ import pytest
 try:
     import torch
     import torch.nn as torch_nn
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -20,6 +22,7 @@ class TestGRUCellBasic:
     def test_grucell_import(self):
         """Test GRUCell can be imported"""
         from grilly.nn import GRUCell
+
         assert GRUCell is not None
 
     def test_grucell_init(self):
@@ -76,6 +79,7 @@ class TestGRUBasic:
     def test_gru_import(self):
         """Test GRU can be imported"""
         from grilly.nn import GRU
+
         assert GRU is not None
 
     def test_gru_init(self):
@@ -187,10 +191,18 @@ class TestGRUCellVsPyTorch:
         torch_cell = torch_nn.GRUCell(input_size, hidden_size)
 
         # Copy weights from Grilly to PyTorch
-        torch_cell.weight_ih.data = torch.from_numpy(np.asarray(grilly_cell.weight_ih.data, dtype=np.float32))
-        torch_cell.weight_hh.data = torch.from_numpy(np.asarray(grilly_cell.weight_hh.data, dtype=np.float32))
-        torch_cell.bias_ih.data = torch.from_numpy(np.asarray(grilly_cell.bias_ih.data, dtype=np.float32))
-        torch_cell.bias_hh.data = torch.from_numpy(np.asarray(grilly_cell.bias_hh.data, dtype=np.float32))
+        torch_cell.weight_ih.data = torch.from_numpy(
+            np.asarray(grilly_cell.weight_ih.data, dtype=np.float32)
+        )
+        torch_cell.weight_hh.data = torch.from_numpy(
+            np.asarray(grilly_cell.weight_hh.data, dtype=np.float32)
+        )
+        torch_cell.bias_ih.data = torch.from_numpy(
+            np.asarray(grilly_cell.bias_ih.data, dtype=np.float32)
+        )
+        torch_cell.bias_hh.data = torch.from_numpy(
+            np.asarray(grilly_cell.bias_hh.data, dtype=np.float32)
+        )
 
         # Create same input
         input = np.random.randn(batch_size, input_size).astype(np.float32)
@@ -205,8 +217,13 @@ class TestGRUCellVsPyTorch:
         h_torch = torch_cell(torch_input, torch_h_prev)
 
         # Compare outputs
-        np.testing.assert_allclose(h_grilly, h_torch.detach().numpy(), rtol=1e-4, atol=1e-5,
-                                  err_msg="Hidden states should match")
+        np.testing.assert_allclose(
+            h_grilly,
+            h_torch.detach().numpy(),
+            rtol=1e-4,
+            atol=1e-5,
+            err_msg="Hidden states should match",
+        )
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch not available")
@@ -233,10 +250,26 @@ class TestGRUVsPyTorch:
 
         # Copy weights from Grilly to PyTorch
         with torch.no_grad():
-            torch_gru.weight_ih_l0.copy_(torch.from_numpy(np.asarray(grilly_gru.cells_forward[0].weight_ih.data, dtype=np.float32)))
-            torch_gru.weight_hh_l0.copy_(torch.from_numpy(np.asarray(grilly_gru.cells_forward[0].weight_hh.data, dtype=np.float32)))
-            torch_gru.bias_ih_l0.copy_(torch.from_numpy(np.asarray(grilly_gru.cells_forward[0].bias_ih.data, dtype=np.float32)))
-            torch_gru.bias_hh_l0.copy_(torch.from_numpy(np.asarray(grilly_gru.cells_forward[0].bias_hh.data, dtype=np.float32)))
+            torch_gru.weight_ih_l0.copy_(
+                torch.from_numpy(
+                    np.asarray(grilly_gru.cells_forward[0].weight_ih.data, dtype=np.float32)
+                )
+            )
+            torch_gru.weight_hh_l0.copy_(
+                torch.from_numpy(
+                    np.asarray(grilly_gru.cells_forward[0].weight_hh.data, dtype=np.float32)
+                )
+            )
+            torch_gru.bias_ih_l0.copy_(
+                torch.from_numpy(
+                    np.asarray(grilly_gru.cells_forward[0].bias_ih.data, dtype=np.float32)
+                )
+            )
+            torch_gru.bias_hh_l0.copy_(
+                torch.from_numpy(
+                    np.asarray(grilly_gru.cells_forward[0].bias_hh.data, dtype=np.float32)
+                )
+            )
 
         # Create same input
         input = np.random.randn(seq_len, batch_size, input_size).astype(np.float32)
@@ -249,10 +282,20 @@ class TestGRUVsPyTorch:
         output_torch, h_n_torch = torch_gru(torch_input)
 
         # Compare outputs
-        np.testing.assert_allclose(output_grilly, output_torch.detach().numpy(),
-                                  rtol=1e-4, atol=1e-5, err_msg="Outputs should match")
-        np.testing.assert_allclose(h_n_grilly, h_n_torch.detach().numpy(),
-                                  rtol=1e-4, atol=1e-5, err_msg="Final hidden should match")
+        np.testing.assert_allclose(
+            output_grilly,
+            output_torch.detach().numpy(),
+            rtol=1e-4,
+            atol=1e-5,
+            err_msg="Outputs should match",
+        )
+        np.testing.assert_allclose(
+            h_n_grilly,
+            h_n_torch.detach().numpy(),
+            rtol=1e-4,
+            atol=1e-5,
+            err_msg="Final hidden should match",
+        )
 
 
 class TestGRUEdgeCases:

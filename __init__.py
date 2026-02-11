@@ -58,55 +58,58 @@ try:
         relu,
         softmax,
     )
+
     COMPAT_AVAILABLE = True
 except Exception:
     COMPAT_AVAILABLE = False
 
 __all__ = [
-    'VULKAN_AVAILABLE',
-    'VulkanCompute',
-    'Compute',
-    'SNNCompute',
-    'VulkanLearning',
-    'Learning',
-    'CapsuleMemory',
-    'CapsuleTransformerConfig',
-    'CognitiveFeatures',
-    'MemoryType',
+    "VULKAN_AVAILABLE",
+    "VulkanCompute",
+    "Compute",
+    "SNNCompute",
+    "VulkanLearning",
+    "Learning",
+    "CapsuleMemory",
+    "CapsuleTransformerConfig",
+    "CognitiveFeatures",
+    "MemoryType",
     # Submodules
-    'nn',
-    'functional',
-    'optim',
-    'utils',
+    "nn",
+    "functional",
+    "optim",
+    "utils",
 ]
 
 # Conditionally add compatibility exports
 if COMPAT_AVAILABLE:
-    __all__.extend([
-        'get_device_manager',
-        'get_vulkan_backend',
-        'get_cuda_backend',
-        'HuggingFaceBridge',
-        'get_huggingface_bridge',
-        'Tensor',
-        'tensor',
-        'zeros',
-        'ones',
-        'randn',
-        'add',
-        'mul',
-        'matmul',
-        'relu',
-        'gelu',
-        'softmax',
-        'layer_norm',
-        'dropout',
-        'conv2d',
-        'max_pool2d',
-        'avg_pool2d',
-        'mse_loss',
-        'cross_entropy_loss',
-    ])
+    __all__.extend(
+        [
+            "get_device_manager",
+            "get_vulkan_backend",
+            "get_cuda_backend",
+            "HuggingFaceBridge",
+            "get_huggingface_bridge",
+            "Tensor",
+            "tensor",
+            "zeros",
+            "ones",
+            "randn",
+            "add",
+            "mul",
+            "matmul",
+            "relu",
+            "gelu",
+            "softmax",
+            "layer_norm",
+            "dropout",
+            "conv2d",
+            "max_pool2d",
+            "avg_pool2d",
+            "mse_loss",
+            "cross_entropy_loss",
+        ]
+    )
 
 # Tensor conversion utilities
 try:
@@ -118,15 +121,18 @@ try:
         to_vulkan_batch,
         to_vulkan_gpu,
     )
-    if 'to_vulkan' not in __all__:
-        __all__.extend([
-            'to_vulkan',
-            'to_vulkan_batch',
-            'to_vulkan_gpu',
-            'from_vulkan',
-            'ensure_vulkan_compatible',
-            'VulkanTensor',
-        ])
+
+    if "to_vulkan" not in __all__:
+        __all__.extend(
+            [
+                "to_vulkan",
+                "to_vulkan_batch",
+                "to_vulkan_gpu",
+                "from_vulkan",
+                "ensure_vulkan_compatible",
+                "VulkanTensor",
+            ]
+        )
 except Exception:
     pass
 
@@ -135,17 +141,20 @@ try:
     from grilly.utils.onnx_exporter import OnnxExporter
     from grilly.utils.onnx_finetune import OnnxFineTuner
     from grilly.utils.onnx_loader import GrillyOnnxModel, OnnxModelLoader
+
     ONNX_AVAILABLE = True
 except Exception:
     ONNX_AVAILABLE = False
 
 if ONNX_AVAILABLE:
-    __all__.extend([
-        'OnnxModelLoader',
-        'OnnxExporter',
-        'GrillyOnnxModel',
-        'OnnxFineTuner',
-    ])
+    __all__.extend(
+        [
+            "OnnxModelLoader",
+            "OnnxExporter",
+            "GrillyOnnxModel",
+            "OnnxFineTuner",
+        ]
+    )
 
 try:
     from grilly._version import version as __version__

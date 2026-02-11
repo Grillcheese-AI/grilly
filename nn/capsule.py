@@ -14,18 +14,18 @@ from .module import Module
 class CapsuleProject(Module):
     """
     Capsule Projection layer - Project embeddings to capsule space.
-    
+
     Uses: capsule-project.glsl
-    
+
     Projects: 384D → 32D cognitive vectors
-    
+
     Reference: grilly/backend/capsule_transformer.py
     """
 
     def __init__(self, in_dim: int = 384, out_dim: int = 32):
         """
         Initialize CapsuleProject layer.
-        
+
         Args:
             in_dim: Input dimension (default: 384)
             out_dim: Output capsule dimension (default: 32)
@@ -40,20 +40,20 @@ class CapsuleProject(Module):
         bias_data = np.zeros(out_dim, dtype=np.float32)
 
         # Register as parameters (will be converted to Parameter if available)
-        self.register_parameter('weight', weight_data)
-        self.register_parameter('bias', bias_data)
+        self.register_parameter("weight", weight_data)
+        self.register_parameter("bias", bias_data)
 
         # Store direct references for backward compatibility
-        self.weight = self._parameters['weight']
-        self.bias = self._parameters['bias']
+        self.weight = self._parameters["weight"]
+        self.bias = self._parameters["bias"]
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - project to capsule space.
-        
+
         Args:
             x: Input embeddings (batch, in_dim) or (batch, seq_len, in_dim)
-        
+
         Returns:
             Capsule vectors (batch, out_dim) or (batch, seq_len, out_dim)
         """
@@ -63,7 +63,7 @@ class CapsuleProject(Module):
         self._cached_input = x
 
         # Try GPU shader if available
-        if hasattr(backend, 'shaders') and 'capsule-project' in backend.shaders:
+        if hasattr(backend, "shaders") and "capsule-project" in backend.shaders:
             try:
                 # Use linear backend for now (capsule-project is similar to linear)
                 # Full capsule-project shader would include cognitive features injection
@@ -77,33 +77,33 @@ class CapsuleProject(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for CapsuleProject.
-        
+
         Args:
             grad_output: Gradient w.r.t. output (batch, out_dim) or (batch, seq_len, out_dim)
             x: Input from forward pass (optional, uses cached if not provided)
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
         if x is None:
-            x = getattr(self, '_cached_input', None)
+            x = getattr(self, "_cached_input", None)
         if x is None:
             raise ValueError("Input x is required for backward pass")
 
         # Extract parameter data
-        if hasattr(self.weight, 'data'):
+        if hasattr(self.weight, "data"):
             weight_data = self.weight.data
         elif isinstance(self.weight, np.ndarray):
             weight_data = self.weight
         else:
             weight_data = np.asarray(self.weight, dtype=np.float32)
 
-        if hasattr(self.bias, 'data'):
-            bias_data = self.bias.data
+        if hasattr(self.bias, "data"):
+            pass
         elif isinstance(self.bias, np.ndarray):
-            bias_data = self.bias
+            pass
         else:
-            bias_data = np.asarray(self.bias, dtype=np.float32)
+            np.asarray(self.bias, dtype=np.float32)
 
         # Handle batched input
         if grad_output.ndim == 3:
@@ -127,18 +127,18 @@ class CapsuleProject(Module):
 
         # Accumulate gradients
         # Handle both Parameter objects and numpy arrays
-        if hasattr(self.weight, 'grad'):
+        if hasattr(self.weight, "grad"):
             if self.weight.grad is None:
                 self.weight.grad = grad_weight
             else:
                 self.weight.grad += grad_weight
         else:
             # Create grad attribute if it doesn't exist
-            if not hasattr(self.weight, '__dict__'):
+            if not hasattr(self.weight, "__dict__"):
                 # numpy array - need to use _parameters dict
-                if 'weight' in self._parameters:
-                    param = self._parameters['weight']
-                    if hasattr(param, 'grad'):
+                if "weight" in self._parameters:
+                    param = self._parameters["weight"]
+                    if hasattr(param, "grad"):
                         if param.grad is None:
                             param.grad = grad_weight
                         else:
@@ -148,18 +148,18 @@ class CapsuleProject(Module):
             else:
                 self.weight.grad = grad_weight
 
-        if hasattr(self.bias, 'grad'):
+        if hasattr(self.bias, "grad"):
             if self.bias.grad is None:
                 self.bias.grad = grad_bias
             else:
                 self.bias.grad += grad_bias
         else:
             # Create grad attribute if it doesn't exist
-            if not hasattr(self.bias, '__dict__'):
+            if not hasattr(self.bias, "__dict__"):
                 # numpy array - need to use _parameters dict
-                if 'bias' in self._parameters:
-                    param = self._parameters['bias']
-                    if hasattr(param, 'grad'):
+                if "bias" in self._parameters:
+                    param = self._parameters["bias"]
+                    if hasattr(param, "grad"):
                         if param.grad is None:
                             param.grad = grad_bias
                         else:
@@ -184,14 +184,14 @@ class CapsuleProject(Module):
 class SemanticEncoder(Module):
     """
     Semantic Encoder layer.
-    
+
     Uses: semantic-encoder.glsl
     """
 
     def __init__(self, in_dim: int, out_dim: int):
         """
         Initialize SemanticEncoder layer.
-        
+
         Args:
             in_dim: Input dimension
             out_dim: Output dimension
@@ -205,27 +205,27 @@ class SemanticEncoder(Module):
         bias_data = np.zeros(out_dim, dtype=np.float32)
 
         # Register as parameters
-        self.register_parameter('weight', weight_data)
-        self.register_parameter('bias', bias_data)
+        self.register_parameter("weight", weight_data)
+        self.register_parameter("bias", bias_data)
 
         # Store direct references
-        self.weight = self._parameters['weight']
-        self.bias = self._parameters['bias']
+        self.weight = self._parameters["weight"]
+        self.bias = self._parameters["bias"]
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - semantic encoding.
-        
+
         Args:
             x: Input (batch, in_dim) or (batch, seq_len, in_dim)
-        
+
         Returns:
             Encoded output (batch, out_dim) or (batch, seq_len, out_dim)
         """
         backend = self._get_backend()
 
         # Try GPU shader if available
-        if hasattr(backend, 'shaders') and 'semantic-encoder' in backend.shaders:
+        if hasattr(backend, "shaders") and "semantic-encoder" in backend.shaders:
             try:
                 # Use linear backend for now (semantic-encoder is similar to linear)
                 return backend.linear(x, self.weight, self.bias)
@@ -244,18 +244,18 @@ class SemanticEncoder(Module):
 class DentateGyrus(Module):
     """
     Dentate Gyrus layer - Pattern separation via sparse expansion.
-    
+
     Uses: dg-sparse-expand.glsl
-    
+
     Expands: 32D → 128D with 2% sparsity
-    
+
     Reference: grilly/backend/capsule_transformer.py DentateGyrus
     """
 
     def __init__(self, in_dim: int = 32, out_dim: int = 128, sparsity: float = 0.02):
         """
         Initialize DentateGyrus layer.
-        
+
         Args:
             in_dim: Input dimension (default: 32)
             out_dim: Output dimension (default: 128)
@@ -277,21 +277,23 @@ class DentateGyrus(Module):
         col_indices = indices % in_dim
 
         limit = np.sqrt(6.0 / (in_dim + out_dim))
-        weight_data[row_indices, col_indices] = np.random.uniform(-limit, limit, num_connections).astype(np.float32)
+        weight_data[row_indices, col_indices] = np.random.uniform(
+            -limit, limit, num_connections
+        ).astype(np.float32)
 
         # Register as parameter
-        self.register_parameter('weight', weight_data)
+        self.register_parameter("weight", weight_data)
 
         # Store direct reference for backward compatibility
-        self.weight = self._parameters['weight']
+        self.weight = self._parameters["weight"]
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - sparse expansion.
-        
+
         Args:
             x: Input capsule vectors (batch, in_dim) or (batch, seq_len, in_dim)
-        
+
         Returns:
             Sparse expanded vectors (batch, out_dim) or (batch, seq_len, out_dim)
         """
@@ -301,7 +303,7 @@ class DentateGyrus(Module):
         self._cached_input = x
 
         # Extract parameter data (convert to numpy array)
-        if hasattr(self.weight, 'data'):
+        if hasattr(self.weight, "data"):
             weight_data = np.asarray(self.weight.data, dtype=np.float32)
         elif isinstance(self.weight, np.ndarray):
             weight_data = np.asarray(self.weight, dtype=np.float32)
@@ -309,7 +311,7 @@ class DentateGyrus(Module):
             weight_data = np.asarray(self.weight, dtype=np.float32)
 
         # Try GPU shader if available
-        if hasattr(backend, 'shaders') and 'dg-sparse-expand' in backend.shaders:
+        if hasattr(backend, "shaders") and "dg-sparse-expand" in backend.shaders:
             try:
                 # For now, use linear projection (full DG shader would do top-k sparsification)
                 activations = backend.linear(x, weight_data.T, None)
@@ -378,33 +380,35 @@ class DentateGyrus(Module):
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for DentateGyrus.
-        
+
         Args:
             grad_output: Gradient w.r.t. output (batch, out_dim)
             x: Input from forward pass (optional, uses cached if not provided)
-        
+
         Returns:
             grad_input: Gradient w.r.t. input
         """
         if x is None:
-            x = getattr(self, '_cached_input', None)
+            x = getattr(self, "_cached_input", None)
         if x is None:
             raise ValueError("Input x is required for backward pass")
 
-        top_k_indices = getattr(self, '_cached_top_k', None)
-        activations = getattr(self, '_cached_activations', None)
+        top_k_indices = getattr(self, "_cached_top_k", None)
+        activations = getattr(self, "_cached_activations", None)
 
         if top_k_indices is None or activations is None:
             # Fallback: recompute
             activations = x @ self.weight.T
             k = max(1, int(self.out_dim * self.sparsity))
             if activations.ndim == 2:
-                top_k_indices = [np.argsort(np.abs(activations[i]))[-k:] for i in range(activations.shape[0])]
+                top_k_indices = [
+                    np.argsort(np.abs(activations[i]))[-k:] for i in range(activations.shape[0])
+                ]
             else:
                 top_k_indices = np.argsort(np.abs(activations))[-k:]
 
         # Extract parameter data (convert to numpy array)
-        if hasattr(self.weight, 'data'):
+        if hasattr(self.weight, "data"):
             weight_data = np.asarray(self.weight.data, dtype=np.float32)
         elif isinstance(self.weight, np.ndarray):
             weight_data = np.asarray(self.weight, dtype=np.float32)
@@ -439,18 +443,18 @@ class DentateGyrus(Module):
             grad_weight = np.outer(grad_sparse, x)
 
         # Accumulate gradients (same pattern as CapsuleProject)
-        if hasattr(self.weight, 'grad'):
+        if hasattr(self.weight, "grad"):
             if self.weight.grad is None:
                 self.weight.grad = grad_weight
             else:
                 self.weight.grad += grad_weight
         else:
             # Create grad attribute if it doesn't exist
-            if not hasattr(self.weight, '__dict__'):
+            if not hasattr(self.weight, "__dict__"):
                 # numpy array - need to use _parameters dict
-                if 'weight' in self._parameters:
-                    param = self._parameters['weight']
-                    if hasattr(param, 'grad'):
+                if "weight" in self._parameters:
+                    param = self._parameters["weight"]
+                    if hasattr(param, "grad"):
                         if param.grad is None:
                             param.grad = grad_weight
                         else:
@@ -465,4 +469,6 @@ class DentateGyrus(Module):
     def __repr__(self):
         """Return a debug representation."""
 
-        return f"DentateGyrus(in_dim={self.in_dim}, out_dim={self.out_dim}, sparsity={self.sparsity})"
+        return (
+            f"DentateGyrus(in_dim={self.in_dim}, out_dim={self.out_dim}, sparsity={self.sparsity})"
+        )

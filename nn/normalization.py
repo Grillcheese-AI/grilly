@@ -3,7 +3,6 @@ Normalization layers (PyTorch-like).
 GPU-accelerated batch normalization using Vulkan shaders.
 """
 
-
 import numpy as np
 
 from .module import Module
@@ -30,7 +29,7 @@ class BatchNorm2d(Module):
         eps: float = 1e-5,
         momentum: float = 0.1,
         affine: bool = True,
-        track_running_stats: bool = True
+        track_running_stats: bool = True,
     ):
         """
         Initialize Batch Normalization layer.
@@ -63,10 +62,14 @@ class BatchNorm2d(Module):
 
         # Learnable parameters (if affine=True)
         if self.affine:
-            self.weight = Parameter(np.ones(num_features, dtype=np.float32), requires_grad=True)  # gamma
-            self.bias = Parameter(np.zeros(num_features, dtype=np.float32), requires_grad=True)  # beta
-            self.register_parameter('weight', self.weight)
-            self.register_parameter('bias', self.bias)
+            self.weight = Parameter(
+                np.ones(num_features, dtype=np.float32), requires_grad=True
+            )  # gamma
+            self.bias = Parameter(
+                np.zeros(num_features, dtype=np.float32), requires_grad=True
+            )  # beta
+            self.register_parameter("weight", self.weight)
+            self.register_parameter("bias", self.bias)
         else:
             self.weight = None
             self.bias = None
@@ -111,12 +114,20 @@ class BatchNorm2d(Module):
         backend = self._get_backend()
 
         # Check if shader is available
-        if 'batchnorm2d-forward' not in backend.shaders:
+        if "batchnorm2d-forward" not in backend.shaders:
             return self._batchnorm2d_cpu(x)
 
         # Get parameters
-        gamma = np.asarray(self.weight, dtype=np.float32) if self.affine else np.ones(num_features, dtype=np.float32)
-        beta = np.asarray(self.bias, dtype=np.float32) if self.affine else np.zeros(num_features, dtype=np.float32)
+        gamma = (
+            np.asarray(self.weight, dtype=np.float32)
+            if self.affine
+            else np.ones(num_features, dtype=np.float32)
+        )
+        beta = (
+            np.asarray(self.bias, dtype=np.float32)
+            if self.affine
+            else np.zeros(num_features, dtype=np.float32)
+        )
 
         # Initialize buffers for batch statistics
         batch_mean = np.zeros(num_features, dtype=np.float32)
@@ -124,14 +135,17 @@ class BatchNorm2d(Module):
 
         # Call backend batchnorm2d
         output = backend.normalization.batchnorm2d_forward(
-            x, gamma, beta,
+            x,
+            gamma,
+            beta,
             self.running_mean if self.track_running_stats else None,
             self.running_var if self.track_running_stats else None,
-            batch_mean, batch_var,
+            batch_mean,
+            batch_var,
             eps=self.eps,
             momentum=self.momentum,
             training=self.training,
-            affine=self.affine
+            affine=self.affine,
         )
 
         # Cache batch statistics for backward
@@ -166,18 +180,24 @@ class BatchNorm2d(Module):
         backend = self._get_backend()
 
         # Check if shader is available
-        if 'batchnorm2d-backward' not in backend.shaders:
+        if "batchnorm2d-backward" not in backend.shaders:
             return self._batchnorm2d_backward_cpu(grad_output)
 
-        gamma = np.asarray(self.weight, dtype=np.float32) if self.affine else np.ones(self.num_features, dtype=np.float32)
+        gamma = (
+            np.asarray(self.weight, dtype=np.float32)
+            if self.affine
+            else np.ones(self.num_features, dtype=np.float32)
+        )
 
         # Compute gradients
         grad_input, grad_gamma, grad_beta = backend.normalization.batchnorm2d_backward(
-            grad_output, self._cache_input,
-            self._cache_batch_mean, self._cache_batch_var,
+            grad_output,
+            self._cache_input,
+            self._cache_batch_mean,
+            self._cache_batch_var,
             gamma,
             eps=self.eps,
-            affine=self.affine
+            affine=self.affine,
         )
 
         # Store gradients in parameters
@@ -270,8 +290,11 @@ class BatchNorm2d(Module):
         grad_output_dot = np.sum(grad_output * x_normalized, axis=(0, 2, 3), keepdims=True)
 
         gamma_expanded = gamma[np.newaxis, :, np.newaxis, np.newaxis]
-        grad_input = gamma_expanded * inv_std / n * (
-            n * grad_output - grad_output_sum - x_normalized * grad_output_dot
+        grad_input = (
+            gamma_expanded
+            * inv_std
+            / n
+            * (n * grad_output - grad_output_sum - x_normalized * grad_output_dot)
         )
 
         return grad_input.astype(np.float32)
@@ -299,7 +322,7 @@ class BatchNorm1d(Module):
         eps: float = 1e-5,
         momentum: float = 0.1,
         affine: bool = True,
-        track_running_stats: bool = True
+        track_running_stats: bool = True,
     ):
         """
         Initialize 1D Batch Normalization.

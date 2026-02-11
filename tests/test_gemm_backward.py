@@ -2,6 +2,7 @@
 Tests for GEMM-based backward passes.
 Validates correctness and performance of GEMM optimizations.
 """
+
 import numpy as np
 import pytest
 
@@ -22,7 +23,7 @@ class TestLinearGEMMBackward:
 
         # Forward pass
         x = np.random.randn(batch, in_features).astype(np.float32)
-        output = linear.forward(x)
+        linear.forward(x)
 
         # Backward pass
         grad_output = np.random.randn(batch, out_features).astype(np.float32)
@@ -53,7 +54,7 @@ class TestLinearGEMMBackward:
 
         # Forward pass
         x = np.random.randn(batch, in_features).astype(np.float32)
-        output = linear.forward(x)
+        linear.forward(x)
 
         # Backward pass
         grad_output = np.random.randn(batch, out_features).astype(np.float32)
@@ -65,7 +66,7 @@ class TestLinearGEMMBackward:
         assert linear.bias.grad.shape == (out_features,)
 
         # Compute reference gradients (CPU)
-        weight = linear.weight.data if hasattr(linear.weight, 'data') else np.asarray(linear.weight)
+        weight = linear.weight.data if hasattr(linear.weight, "data") else np.asarray(linear.weight)
         grad_input_ref = grad_output @ weight
         grad_weight_ref = grad_output.T @ x
         grad_bias_ref = np.sum(grad_output, axis=0)
@@ -88,7 +89,7 @@ class TestLinearGEMMBackward:
 
         # Forward pass
         x = np.random.randn(batch, in_features).astype(np.float32)
-        output = linear.forward(x)
+        linear.forward(x)
 
         # Backward pass
         grad_output = np.random.randn(batch, out_features).astype(np.float32)
@@ -100,7 +101,7 @@ class TestLinearGEMMBackward:
         assert linear.bias is None
 
         # Compute reference gradients
-        weight = linear.weight.data if hasattr(linear.weight, 'data') else np.asarray(linear.weight)
+        weight = linear.weight.data if hasattr(linear.weight, "data") else np.asarray(linear.weight)
         grad_input_ref = grad_output @ weight
         grad_weight_ref = grad_output.T @ x
 
@@ -123,7 +124,7 @@ class TestLinearGEMMBackward:
 
         # Forward pass with 3D input
         x = np.random.randn(batch, seq_len, in_features).astype(np.float32)
-        output = linear.forward(x)
+        linear.forward(x)
 
         # Zero gradients before backward
         linear.weight.grad = None
@@ -143,7 +144,7 @@ class TestLinearGEMMBackward:
         grad_output_flat = grad_output.reshape(-1, out_features)
 
         # Compute reference gradients
-        weight = linear.weight.data if hasattr(linear.weight, 'data') else np.asarray(linear.weight)
+        weight = linear.weight.data if hasattr(linear.weight, "data") else np.asarray(linear.weight)
         grad_input_ref = (grad_output_flat @ weight).reshape(batch, seq_len, in_features)
         grad_weight_ref = grad_output_flat.T @ x_flat
         grad_bias_ref = np.sum(grad_output_flat, axis=0)
@@ -166,7 +167,7 @@ class TestLinearGEMMBackward:
 
         # First forward and backward
         x1 = np.random.randn(batch, in_features).astype(np.float32)
-        output1 = linear.forward(x1)
+        linear.forward(x1)
         grad_output1 = np.random.randn(batch, out_features).astype(np.float32)
         linear.backward(grad_output1, x1)
 
@@ -176,12 +177,12 @@ class TestLinearGEMMBackward:
 
         # Second forward and backward (should accumulate)
         x2 = np.random.randn(batch, in_features).astype(np.float32)
-        output2 = linear.forward(x2)
+        linear.forward(x2)
         grad_output2 = np.random.randn(batch, out_features).astype(np.float32)
         linear.backward(grad_output2, x2)
 
         # Verify gradients accumulated
-        weight = linear.weight.data if hasattr(linear.weight, 'data') else np.asarray(linear.weight)
+        linear.weight.data if hasattr(linear.weight, "data") else np.asarray(linear.weight)
         grad_weight_ref = grad_weight1 + grad_output2.T @ x2
         grad_bias_ref = grad_bias1 + np.sum(grad_output2, axis=0)
 
@@ -251,7 +252,7 @@ class TestGEMMPerformance:
 
         # Warm-up
         x = np.random.randn(batch, in_features).astype(np.float32)
-        output = linear.forward(x)
+        linear.forward(x)
         grad_output = np.random.randn(batch, out_features).astype(np.float32)
         linear.backward(grad_output, x)
 
@@ -260,7 +261,7 @@ class TestGEMMPerformance:
         start = time.perf_counter()
         for _ in range(num_iterations):
             x = np.random.randn(batch, in_features).astype(np.float32)
-            output = linear.forward(x)
+            linear.forward(x)
             grad_output = np.random.randn(batch, out_features).astype(np.float32)
             linear.backward(grad_output, x)
         gpu_time = (time.perf_counter() - start) / num_iterations
@@ -269,17 +270,17 @@ class TestGEMMPerformance:
         start = time.perf_counter()
         for _ in range(num_iterations):
             x = np.random.randn(batch, in_features).astype(np.float32)
-            w = linear.weight.data if hasattr(linear.weight, 'data') else linear.weight
+            w = linear.weight.data if hasattr(linear.weight, "data") else linear.weight
             weight = np.asarray(w, dtype=np.float32).copy()
-            output = x @ weight.T
+            x @ weight.T
             grad_output = np.random.randn(batch, out_features).astype(np.float32)
-            grad_input = grad_output @ weight
-            grad_weight = grad_output.T @ x
+            grad_output @ weight
+            grad_output.T @ x
         cpu_time = (time.perf_counter() - start) / num_iterations
 
-        print(f"\nGEMM backward (GPU): {gpu_time*1000:.2f} ms")
-        print(f"CPU backward:        {cpu_time*1000:.2f} ms")
-        print(f"Speedup: {cpu_time/gpu_time:.2f}x")
+        print(f"\nGEMM backward (GPU): {gpu_time * 1000:.2f} ms")
+        print(f"CPU backward:        {cpu_time * 1000:.2f} ms")
+        print(f"Speedup: {cpu_time / gpu_time:.2f}x")
 
         # GEMM should be faster for large problems (but test may vary by hardware)
         # We don't assert here since it's hardware-dependent

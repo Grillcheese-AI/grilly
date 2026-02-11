@@ -17,9 +17,9 @@ class TestCognitiveControllerBasic:
         controller = CognitiveController()
 
         assert controller.dim > 0
-        assert hasattr(controller, 'language')
-        assert hasattr(controller, 'world')
-        assert hasattr(controller, 'wm')
+        assert hasattr(controller, "language")
+        assert hasattr(controller, "world")
+        assert hasattr(controller, "wm")
 
     def test_init_custom_dimension(self):
         """Should initialize with custom dimension."""
@@ -154,7 +154,7 @@ class TestTemporalValidation:
                 coherence_reason="test",
                 predicted_response=None,
                 social_appropriateness=score,
-                confidence=score
+                confidence=score,
             )
 
         controller.simulator.simulate_utterance = fake_sim

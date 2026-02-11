@@ -89,9 +89,7 @@ class OnnxExporter:
                     np.int32: TensorProto.INT32,
                     np.int64: TensorProto.INT64,
                 }
-                input_dtypes = {
-                    "input": np_to_onnx.get(dummy_input.dtype.type, TensorProto.FLOAT)
-                }
+                input_dtypes = {"input": np_to_onnx.get(dummy_input.dtype.type, TensorProto.FLOAT)}
 
         if input_shapes is None:
             input_shapes = {"input": (1, 128)}
@@ -145,9 +143,9 @@ class OnnxExporter:
         )
 
         # Build the model
-        onnx_model = helper.make_model(graph, opset_imports=[
-            helper.make_opsetid("", self.opset_version)
-        ])
+        onnx_model = helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", self.opset_version)]
+        )
         onnx_model.ir_version = 8
 
         # Validate
@@ -218,8 +216,7 @@ class OnnxExporter:
         # Add residual (Add node)
         output_name = self._unique_name(f"{prefix}res_out")
         add_node = helper.make_node(
-            "Add", [input_name, inner_output], [output_name],
-            name=f"{prefix}residual_add"
+            "Add", [input_name, inner_output], [output_name], name=f"{prefix}residual_add"
         )
         self._nodes.append(add_node)
         return output_name
@@ -242,7 +239,9 @@ class OnnxExporter:
             inputs.append(bias_name)
 
         node = helper.make_node(
-            "Gemm", inputs, [output_name],
+            "Gemm",
+            inputs,
+            [output_name],
             name=f"{prefix}gemm",
             **attrs,
         )
@@ -264,7 +263,9 @@ class OnnxExporter:
 
         output_name = self._unique_name(f"{prefix}ln_out")
         node = helper.make_node(
-            "LayerNormalization", inputs, [output_name],
+            "LayerNormalization",
+            inputs,
+            [output_name],
             name=f"{prefix}layernorm",
             epsilon=module.eps,
             axis=-1,
@@ -279,20 +280,19 @@ class OnnxExporter:
 
         output_name = self._unique_name(f"{prefix}emb_out")
         node = helper.make_node(
-            "Gather", [weight_name, input_name], [output_name],
+            "Gather",
+            [weight_name, input_name],
+            [output_name],
             name=f"{prefix}gather",
             axis=0,
         )
         self._nodes.append(node)
         return output_name
 
-    def _export_activation(
-        self, module: Module, input_name: str, prefix: str, onnx_op: str
-    ) -> str:
+    def _export_activation(self, module: Module, input_name: str, prefix: str, onnx_op: str) -> str:
         output_name = self._unique_name(f"{prefix}{onnx_op.lower()}_out")
         node = helper.make_node(
-            onnx_op, [input_name], [output_name],
-            name=f"{prefix}{onnx_op.lower()}"
+            onnx_op, [input_name], [output_name], name=f"{prefix}{onnx_op.lower()}"
         )
         self._nodes.append(node)
         return output_name
@@ -301,14 +301,18 @@ class OnnxExporter:
         # SiLU = x * sigmoid(x)
         sig_name = self._unique_name(f"{prefix}sigmoid_out")
         sig_node = helper.make_node(
-            "Sigmoid", [input_name], [sig_name],
+            "Sigmoid",
+            [input_name],
+            [sig_name],
             name=f"{prefix}sigmoid",
         )
         self._nodes.append(sig_node)
 
         output_name = self._unique_name(f"{prefix}silu_out")
         mul_node = helper.make_node(
-            "Mul", [input_name, sig_name], [output_name],
+            "Mul",
+            [input_name, sig_name],
+            [output_name],
             name=f"{prefix}silu_mul",
         )
         self._nodes.append(mul_node)
@@ -317,7 +321,9 @@ class OnnxExporter:
     def _export_softmax(self, module: Softmax, input_name: str, prefix: str) -> str:
         output_name = self._unique_name(f"{prefix}softmax_out")
         node = helper.make_node(
-            "Softmax", [input_name], [output_name],
+            "Softmax",
+            [input_name],
+            [output_name],
             name=f"{prefix}softmax",
             axis=module.dim,
         )
@@ -363,7 +369,9 @@ class OnnxExporter:
         # K transpose
         kt_name = self._unique_name(f"{prefix}kt")
         kt_node = helper.make_node(
-            "Transpose", [k_out], [kt_name],
+            "Transpose",
+            [k_out],
+            [kt_name],
             name=f"{prefix}k_transpose",
             perm=[0, 2, 1],  # Simplified — doesn't handle multi-head reshape
         )
@@ -372,7 +380,9 @@ class OnnxExporter:
         # Q @ K^T
         qk_name = self._unique_name(f"{prefix}qk")
         qk_node = helper.make_node(
-            "MatMul", [q_out, kt_name], [qk_name],
+            "MatMul",
+            [q_out, kt_name],
+            [qk_name],
             name=f"{prefix}qk_matmul",
         )
         self._nodes.append(qk_node)
@@ -383,7 +393,9 @@ class OnnxExporter:
         self._add_initializer(scale_name, scale_val)
         scaled_name = self._unique_name(f"{prefix}scaled")
         scale_node = helper.make_node(
-            "Mul", [qk_name, scale_name], [scaled_name],
+            "Mul",
+            [qk_name, scale_name],
+            [scaled_name],
             name=f"{prefix}scale_mul",
         )
         self._nodes.append(scale_node)
@@ -391,7 +403,9 @@ class OnnxExporter:
         # Softmax
         attn_name = self._unique_name(f"{prefix}attn")
         softmax_node = helper.make_node(
-            "Softmax", [scaled_name], [attn_name],
+            "Softmax",
+            [scaled_name],
+            [attn_name],
             name=f"{prefix}attn_softmax",
             axis=-1,
         )
@@ -400,7 +414,9 @@ class OnnxExporter:
         # attn @ V
         context_name = self._unique_name(f"{prefix}context")
         context_node = helper.make_node(
-            "MatMul", [attn_name, v_out], [context_name],
+            "MatMul",
+            [attn_name, v_out],
+            [context_name],
             name=f"{prefix}context_matmul",
         )
         self._nodes.append(context_node)
@@ -431,7 +447,11 @@ class OnnxExporter:
 
             if nd.kind == "module":
                 # Module nodes — export using the module exporter
-                inp_name = name_map.get(nd.input_names[0], nd.input_names[0]) if nd.input_names else input_name
+                inp_name = (
+                    name_map.get(nd.input_names[0], nd.input_names[0])
+                    if nd.input_names
+                    else input_name
+                )
                 out_name = self._export_module(nd.handler, inp_name, prefix)
                 if nd.output_names:
                     name_map[nd.output_names[0]] = out_name
@@ -446,7 +466,9 @@ class OnnxExporter:
 
                 # Create the ONNX node with original op_type
                 node = helper.make_node(
-                    nd.op_type, mapped_inputs, mapped_outputs,
+                    nd.op_type,
+                    mapped_inputs,
+                    mapped_outputs,
                     name=f"{prefix}{nd.op_type.lower()}",
                 )
                 self._nodes.append(node)

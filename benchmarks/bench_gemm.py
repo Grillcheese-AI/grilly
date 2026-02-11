@@ -103,14 +103,16 @@ def benchmark_gemm(backend, sizes=None, warmup=2, repeats=5):
         extra = f"GPU: {gpu_gflops:.1f} GFLOP/s  CPU: {cpu_gflops:.1f} GFLOP/s"
         print_row(label, gpu_ms, cpu_ms, extra=extra)
 
-        summary.append({
-            "label": label,
-            "gpu_ms": gpu_ms,
-            "cpu_ms": cpu_ms,
-            "shape": f"({n},{n})x({n},{n}) [{format_size(data_bytes)}]",
-            "gpu_gflops": gpu_gflops,
-            "cpu_gflops": cpu_gflops,
-        })
+        summary.append(
+            {
+                "label": label,
+                "gpu_ms": gpu_ms,
+                "cpu_ms": cpu_ms,
+                "shape": f"({n},{n})x({n},{n}) [{format_size(data_bytes)}]",
+                "gpu_gflops": gpu_gflops,
+                "cpu_gflops": cpu_gflops,
+            }
+        )
 
     return summary
 

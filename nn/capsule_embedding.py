@@ -17,11 +17,11 @@ class CapsuleEmbedding(Module):
         semantic_dims: int = 28,
         use_dg: bool = False,
         dg_dim: int = 128,
-        dg_sparsity: float = 0.02
+        dg_sparsity: float = 0.02,
     ):
         """
         Initialize CapsuleEmbedding.
-        
+
         Args:
             embedding_dim: Input embedding dimension (default: 384)
             capsule_dim: Capsule dimension (default: 32)
@@ -38,27 +38,29 @@ class CapsuleEmbedding(Module):
 
         # Capsule projection: embedding_dim → capsule_dim
         self.capsule_proj = CapsuleProject(embedding_dim, capsule_dim)
-        self._modules['capsule_proj'] = self.capsule_proj
+        self._modules["capsule_proj"] = self.capsule_proj
 
         # Optional DentateGyrus expansion
         if use_dg:
             self.dg = DentateGyrus(capsule_dim, dg_dim, dg_sparsity)
-            self._modules['dg'] = self.dg
+            self._modules["dg"] = self.dg
         else:
             self.dg = None
 
         # Layer normalization for stability
         self.norm = LayerNorm(capsule_dim)
-        self._modules['norm'] = self.norm
+        self._modules["norm"] = self.norm
 
-    def forward(self, embeddings: np.ndarray, cognitive_features: np.ndarray | None = None) -> np.ndarray:
+    def forward(
+        self, embeddings: np.ndarray, cognitive_features: np.ndarray | None = None
+    ) -> np.ndarray:
         """
         Forward pass - encode embeddings to capsule space.
-        
+
         Args:
             embeddings: Input embeddings (batch, embedding_dim) or (batch, seq_len, embedding_dim)
             cognitive_features: Optional cognitive features (batch, 4) for last 4 dims
-        
+
         Returns:
             Capsule vectors (batch, capsule_dim) or (batch, seq_len, capsule_dim)
             If use_dg=True: (batch, dg_dim) or (batch, seq_len, dg_dim)
@@ -68,21 +70,21 @@ class CapsuleEmbedding(Module):
 
         # Normalize semantic portion (first semantic_dims)
         if capsule.ndim == 2:
-            semantic = capsule[:, :self.semantic_dims]
+            semantic = capsule[:, : self.semantic_dims]
             norms = np.linalg.norm(semantic, axis=1, keepdims=True) + 1e-8
-            capsule[:, :self.semantic_dims] = semantic / norms
+            capsule[:, : self.semantic_dims] = semantic / norms
         else:
             # (batch, seq_len, capsule_dim)
-            semantic = capsule[:, :, :self.semantic_dims]
+            semantic = capsule[:, :, : self.semantic_dims]
             norms = np.linalg.norm(semantic, axis=2, keepdims=True) + 1e-8
-            capsule[:, :, :self.semantic_dims] = semantic / norms
+            capsule[:, :, : self.semantic_dims] = semantic / norms
 
         # Inject cognitive features if provided
         if cognitive_features is not None:
             if capsule.ndim == 2:
-                capsule[:, self.semantic_dims:] = cognitive_features
+                capsule[:, self.semantic_dims :] = cognitive_features
             else:
-                capsule[:, :, self.semantic_dims:] = cognitive_features[:, None, :]
+                capsule[:, :, self.semantic_dims :] = cognitive_features[:, None, :]
 
         # Normalize entire capsule
         capsule_normalized = self.norm(capsule)
@@ -97,11 +99,11 @@ class CapsuleEmbedding(Module):
     def backward(self, grad_output: np.ndarray, embeddings: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for CapsuleEmbedding.
-        
+
         Args:
             grad_output: Gradient w.r.t. output
             embeddings: Input embeddings (optional, uses cached if not provided)
-        
+
         Returns:
             grad_input: Gradient w.r.t. input embeddings
         """
@@ -113,8 +115,8 @@ class CapsuleEmbedding(Module):
 
         # Backprop through normalization
         # LayerNorm backward needs the normalized input
-        normalized_capsule = getattr(self, '_cached_normalized', None)
-        if hasattr(self.norm, 'backward') and normalized_capsule is not None:
+        normalized_capsule = getattr(self, "_cached_normalized", None)
+        if hasattr(self.norm, "backward") and normalized_capsule is not None:
             try:
                 grad_capsule = self.norm.backward(grad_capsule, normalized_capsule)
             except Exception:
@@ -136,15 +138,15 @@ class CapsuleEmbedding(Module):
 class ContrastiveLoss(Module):
     """
     Contrastive Loss for training capsule embeddings.
-    
+
     Uses triplet loss: max(0, margin + pos_distance - neg_distance)
     Or cosine similarity loss for positive/negative pairs.
     """
 
-    def __init__(self, margin: float = 0.5, distance_metric: str = 'cosine'):
+    def __init__(self, margin: float = 0.5, distance_metric: str = "cosine"):
         """
         Initialize ContrastiveLoss.
-        
+
         Args:
             margin: Margin for triplet loss (default: 0.5)
             distance_metric: 'cosine' or 'euclidean' (default: 'cosine')
@@ -157,19 +159,16 @@ class ContrastiveLoss(Module):
         self._cached_negative = None
 
     def forward(
-        self,
-        anchor: np.ndarray,
-        positive: np.ndarray,
-        negative: np.ndarray | None = None
+        self, anchor: np.ndarray, positive: np.ndarray, negative: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Compute contrastive loss.
-        
+
         Args:
             anchor: Anchor embeddings (batch, dim)
             positive: Positive embeddings (batch, dim) - should be similar to anchor
             negative: Optional negative embeddings (batch, dim) - should be dissimilar
-        
+
         Returns:
             Loss value (scalar)
         """
@@ -181,7 +180,7 @@ class ContrastiveLoss(Module):
         anchor_norm = anchor / (np.linalg.norm(anchor, axis=1, keepdims=True) + 1e-8)
         positive_norm = positive / (np.linalg.norm(positive, axis=1, keepdims=True) + 1e-8)
 
-        if self.distance_metric == 'cosine':
+        if self.distance_metric == "cosine":
             # Cosine distance = 1 - cosine similarity
             pos_sim = np.sum(anchor_norm * positive_norm, axis=1)  # (batch,)
             pos_dist = 1.0 - pos_sim
@@ -192,7 +191,7 @@ class ContrastiveLoss(Module):
         if negative is not None:
             negative_norm = negative / (np.linalg.norm(negative, axis=1, keepdims=True) + 1e-8)
 
-            if self.distance_metric == 'cosine':
+            if self.distance_metric == "cosine":
                 neg_sim = np.sum(anchor_norm * negative_norm, axis=1)  # (batch,)
                 neg_dist = 1.0 - neg_sim
             else:
@@ -202,7 +201,7 @@ class ContrastiveLoss(Module):
             loss = np.maximum(0.0, self.margin + pos_dist - neg_dist)
         else:
             # Positive loss only (pull similar pairs together)
-            loss = pos_dist ** 2
+            loss = pos_dist**2
 
         return np.mean(loss)
 
@@ -211,17 +210,17 @@ class ContrastiveLoss(Module):
         grad_output: np.ndarray = None,
         anchor: np.ndarray = None,
         positive: np.ndarray = None,
-        negative: np.ndarray = None
+        negative: np.ndarray = None,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
         """
         Backward pass for ContrastiveLoss.
-        
+
         Args:
             grad_output: Gradient w.r.t. loss (usually 1.0)
             anchor: Anchor embeddings (optional, uses cached)
             positive: Positive embeddings (optional, uses cached)
             negative: Negative embeddings (optional, uses cached)
-        
+
         Returns:
             (grad_anchor, grad_positive, grad_negative)
         """
@@ -244,7 +243,7 @@ class ContrastiveLoss(Module):
         anchor_norm = anchor / (np.linalg.norm(anchor, axis=1, keepdims=True) + 1e-8)
         positive_norm = positive / (np.linalg.norm(positive, axis=1, keepdims=True) + 1e-8)
 
-        if self.distance_metric == 'cosine':
+        if self.distance_metric == "cosine":
             pos_sim = np.sum(anchor_norm * positive_norm, axis=1, keepdims=True)  # (batch, 1)
 
             if negative is not None:
@@ -275,8 +274,14 @@ class ContrastiveLoss(Module):
                 loss_active = (self.margin + pos_dist - neg_dist > 0.0).astype(np.float32)
 
                 # Gradient w.r.t. anchor
-                grad_anchor = ((anchor - positive) / (pos_dist + 1e-8) -
-                              (anchor - negative) / (neg_dist + 1e-8)) * loss_active / batch_size
+                grad_anchor = (
+                    (
+                        (anchor - positive) / (pos_dist + 1e-8)
+                        - (anchor - negative) / (neg_dist + 1e-8)
+                    )
+                    * loss_active
+                    / batch_size
+                )
                 # Gradient w.r.t. positive
                 grad_positive = -(anchor - positive) / (pos_dist + 1e-8) * loss_active / batch_size
                 # Gradient w.r.t. negative
@@ -288,7 +293,11 @@ class ContrastiveLoss(Module):
                 grad_positive = -2.0 * diff / batch_size
                 grad_negative = None
 
-        return grad_anchor * grad_output, grad_positive * grad_output, grad_negative * grad_output if grad_negative is not None else None
+        return (
+            grad_anchor * grad_output,
+            grad_positive * grad_output,
+            grad_negative * grad_output if grad_negative is not None else None,
+        )
 
     def __repr__(self):
         """Return a debug representation."""

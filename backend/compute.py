@@ -39,7 +39,9 @@ class VulkanCompute:
         self.snn = VulkanSNN(self.core, self.pipelines)
         self.faiss = VulkanFAISS(self.core, self.pipelines)
         self.fnn = VulkanFNN(self.core, self.pipelines, self.core.shaders)
-        self.attention = VulkanAttention(self.core, self.pipelines, self.core.shaders, architecture=self.architecture)
+        self.attention = VulkanAttention(
+            self.core, self.pipelines, self.core.shaders, architecture=self.architecture
+        )
         self.memory = VulkanMemory(self.core, self.pipelines, self.core.shaders, self.fnn)
         self.cells = VulkanCells(self.core, self.pipelines, self.core.shaders)
         self.affect = VulkanAffect(self.core, self.pipelines, self.core.shaders)
@@ -59,31 +61,44 @@ class VulkanCompute:
     def cleanup(self):
         """Clean up Vulkan resources"""
         # Clear weight caches for all backend modules (before device is destroyed)
-        for attr in ('fnn', 'attention', 'snn', 'memory', 'cells', 'affect',
-                     'learning', 'fft', 'contrastive', 'pooling', 'conv',
-                     'normalization', 'lora', 'faiss'):
+        for attr in (
+            "fnn",
+            "attention",
+            "snn",
+            "memory",
+            "cells",
+            "affect",
+            "learning",
+            "fft",
+            "contrastive",
+            "pooling",
+            "conv",
+            "normalization",
+            "lora",
+            "faiss",
+        ):
             module = getattr(self, attr, None)
-            if module is not None and hasattr(module, 'clear_weight_cache'):
+            if module is not None and hasattr(module, "clear_weight_cache"):
                 try:
                     module.clear_weight_cache()
                 except Exception:
                     pass
         # Clear buffer pools (before device is destroyed)
-        if hasattr(self, 'fnn') and self.fnn._pool is not None:
+        if hasattr(self, "fnn") and self.fnn._pool is not None:
             try:
                 self.fnn._pool.clear()
                 self.fnn._pool = None
             except Exception:
                 pass
-        if hasattr(self, 'pipelines'):
+        if hasattr(self, "pipelines"):
             self.pipelines.cleanup()
-        if hasattr(self, 'core'):
+        if hasattr(self, "core"):
             self.core.cleanup()
 
     def set_architecture(self, architecture: str):
         """
         Set the model architecture for architecture-specific shader selection.
-        
+
         Args:
             architecture: Model architecture (e.g., 'bert', 'gpt', 't5', 'distilbert')
         """
@@ -259,14 +274,14 @@ class VulkanCompute:
         return self.cells.time_cell(*args, **kwargs)
 
     # Public buffer management methods
-    def create_buffer(self, data_or_size, usage='storage'):
+    def create_buffer(self, data_or_size, usage="storage"):
         """
         Create a Vulkan buffer (public API)
-        
+
         Args:
             data_or_size: Either numpy array data, bytes, or integer size in bytes
             usage: Buffer usage ('storage', 'uniform', etc.) or VK_BUFFER_USAGE flag
-            
+
         Returns:
             Tuple of (buffer, memory) handles
         """
@@ -274,7 +289,11 @@ class VulkanCompute:
 
         # Handle usage parameter
         if isinstance(usage, str):
-            usage_flag = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT if usage == 'storage' else VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+            usage_flag = (
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                if usage == "storage"
+                else VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+            )
         else:
             # Assume it's already a Vulkan flag
             usage_flag = usage
@@ -284,7 +303,7 @@ class VulkanCompute:
             size = int(data_or_size)
         elif isinstance(data_or_size, bytes):
             size = len(data_or_size)
-        elif hasattr(data_or_size, 'nbytes'):
+        elif hasattr(data_or_size, "nbytes"):
             # Numpy array
             size = data_or_size.nbytes
         elif isinstance(data_or_size, (list, tuple)):
@@ -374,7 +393,7 @@ class VulkanCompute:
 
     def __del__(self):
         """Cleanup Vulkan resources"""
-        if hasattr(self, 'pipelines'):
+        if hasattr(self, "pipelines"):
             self.pipelines.cleanup()
-        if hasattr(self, 'core'):
+        if hasattr(self, "core"):
             self.core.cleanup()

@@ -5,7 +5,6 @@ Tests simulation of candidate utterances and scoring.
 """
 
 
-
 class TestInternalSimulatorBasic:
     """Basic tests for InternalSimulator initialization."""
 
@@ -99,7 +98,7 @@ class TestSimulationScoring:
         language = InstantLanguage(dim=dim)
         world = WorldModel(dim=dim)
         wm = WorkingMemory(dim=dim)
-        simulator = InternalSimulator(language, world, wm)
+        InternalSimulator(language, world, wm)
 
         result = SimulationResult(
             candidate="test",
@@ -108,7 +107,7 @@ class TestSimulationScoring:
             coherence_reason="test",
             predicted_response=None,
             social_appropriateness=0.7,
-            confidence=0.9
+            confidence=0.9,
         )
 
         overall = result.overall_score

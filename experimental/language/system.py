@@ -38,8 +38,7 @@ class SVCIngestionResult:
         """Execute summary."""
 
         lines = [
-            f"SVC Ingestion: {self.sentences_learned} sentences, "
-            f"{self.words_encoded} unique words",
+            f"SVC Ingestion: {self.sentences_learned} sentences, {self.words_encoded} unique words",
             f"  Templates learned: {self.templates_learned}",
             f"  Realms: {dict(self.realm_counts)}",
             f"  Top verbs: {dict(sorted(self.verb_counts.items(), key=lambda x: -x[1])[:10])}",
@@ -51,14 +50,14 @@ class SVCIngestionResult:
 class InstantLanguage:
     """
     Complete instant language learning system.
-    
+
     Combines:
     - Word encoding (n-grams, no training)
     - Relation extraction (O(1))
     - Sentence encoding (composition)
     - Parsing (resonator factorization)
     - Generation (template filling)
-    
+
     Everything is instant - no gradient descent!
     """
 
@@ -90,7 +89,7 @@ class InstantLanguage:
     def learn_sentence(self, sentence: str) -> np.ndarray:
         """
         Learn a sentence instantly.
-        
+
         Encodes and stores in memory. No training loop!
         """
         words = self._tokenize(sentence)
@@ -121,7 +120,7 @@ class InstantLanguage:
     def query_relation(self, word: str, relation: str) -> list[tuple[str, float]]:
         """
         Query: "What is the [relation] of [word]?"
-        
+
         E.g., "What is the antonym of hot?" -> cold
         """
         if relation not in self.word_encoder.relations:
@@ -152,11 +151,7 @@ class InstantLanguage:
 
         return self.parser.parse(sent_vec, num_slots=len(words))
 
-    def find_similar_sentences(
-        self,
-        query: str,
-        top_k: int = 5
-    ) -> list[tuple[list[str], float]]:
+    def find_similar_sentences(self, query: str, top_k: int = 5) -> list[tuple[list[str], float]]:
         """
         Find similar sentences in memory.
         """
@@ -174,7 +169,7 @@ class InstantLanguage:
     def complete(self, partial: str, role: str = "OBJ") -> list[tuple[str, float]]:
         """
         Complete a partial sentence.
-        
+
         "The dog chased the ___" -> find best OBJ
         """
         words = self._tokenize(partial)
@@ -187,15 +182,10 @@ class InstantLanguage:
 
         return self.sentence_encoder.find_role_filler(sent_vec, role)
 
-    def analogy(
-        self,
-        word_a: str,
-        word_b: str,
-        word_c: str
-    ) -> list[tuple[str, float]]:
+    def analogy(self, word_a: str, word_b: str, word_c: str) -> list[tuple[str, float]]:
         """
         Solve analogy: A is to B as C is to ?
-        
+
         E.g., king:queen :: man:? -> woman
         """
         # Extract A:B relation
@@ -209,21 +199,22 @@ class InstantLanguage:
 
     def _get_engine(
         self,
-        engine: Optional['SVCIngestionEngine'] = None,
-    ) -> 'SVCIngestionEngine':
+        engine: Optional["SVCIngestionEngine"] = None,
+    ) -> "SVCIngestionEngine":
         """Return the provided engine or create a default one."""
         if engine is not None:
             return engine
         from grilly.experimental.language.svc_loader import SVCIngestionEngine
+
         return SVCIngestionEngine(dim=self.dim)
 
     def ingest_svc(
         self,
-        entries: list['SVCEntry'],
+        entries: list["SVCEntry"],
         learn_templates: bool = True,
         build_realm_vectors: bool = True,
         verbose: bool = False,
-        engine: Optional['SVCIngestionEngine'] = None,
+        engine: Optional["SVCIngestionEngine"] = None,
         progress_every: int = 10_000,
         max_templates: int = 512,
         template_examples_per_key: int = 32,
@@ -267,7 +258,9 @@ class InstantLanguage:
         if verbose:
             print(f"  Encoding {len(entries)} sentences...")
         sentence_vecs, word_lists = eng.batch_encode_sentences(
-            entries, self.word_encoder, self.sentence_encoder,
+            entries,
+            self.word_encoder,
+            self.sentence_encoder,
         )
         if verbose:
             print(f"  Encoded {len(sentence_vecs)} sentences")
@@ -321,9 +314,7 @@ class InstantLanguage:
         if build_realm_vectors:
             if verbose:
                 print(f"  Building {len(self._realm_accumulators)} realm vectors...")
-            self.realm_vectors.update(
-                eng.batch_build_realm_vectors(dict(self._realm_accumulators))
-            )
+            self.realm_vectors.update(eng.batch_build_realm_vectors(dict(self._realm_accumulators)))
             result.realm_vectors = dict(self.realm_vectors)
             if verbose:
                 print(f"  Built {len(result.realm_vectors)} realm vectors")
@@ -353,5 +344,5 @@ class InstantLanguage:
     def _tokenize(self, text: str) -> list[str]:
         """Simple tokenization."""
         # Remove punctuation, split on whitespace
-        text = re.sub(r'[^\w\s]', '', text.lower())
+        text = re.sub(r"[^\w\s]", "", text.lower())
         return text.split()

@@ -21,8 +21,9 @@ if TYPE_CHECKING:
 @dataclass
 class CognitiveState:
     """Current state of the cognitive system."""
+
     understanding: UnderstandingResult | None = None
-    candidates: list[tuple[str, 'SimulationResult']] = field(default_factory=list)
+    candidates: list[tuple[str, "SimulationResult"]] = field(default_factory=list)
     selected_response: str | None = None
     confidence: float = 0.0
     thinking_steps: list[str] = field(default_factory=list)
@@ -31,7 +32,7 @@ class CognitiveState:
 class CognitiveController:
     """
     Main controller implementing "think before you speak".
-    
+
     Process:
     1. RECEIVE: Get input
     2. UNDERSTAND: Deep comprehension
@@ -46,9 +47,7 @@ class CognitiveController:
     DEFAULT_CONFIDENCE_THRESHOLD = 0.6
 
     def __init__(
-        self,
-        dim: int = DEFAULT_DIM,
-        confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD
+        self, dim: int = DEFAULT_DIM, confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD
     ):
         """Initialize the instance."""
 
@@ -78,7 +77,7 @@ class CognitiveController:
 
     def ingest_svc(
         self,
-        entries: list['SVCEntry'],
+        entries: list["SVCEntry"],
         learn_templates: bool = True,
         build_realm_vectors: bool = True,
         verbose: bool = False,
@@ -120,9 +119,24 @@ class CognitiveController:
 
         # 2. World model facts
         causal_verbs = {
-            "cause", "causes", "prevent", "prevents", "improve", "improves",
-            "reduce", "reduces", "increase", "increases", "enable", "enables",
-            "lead", "leads", "result", "results", "produce", "produces",
+            "cause",
+            "causes",
+            "prevent",
+            "prevents",
+            "improve",
+            "improves",
+            "reduce",
+            "reduces",
+            "increase",
+            "increases",
+            "enable",
+            "enables",
+            "lead",
+            "leads",
+            "result",
+            "results",
+            "produce",
+            "produces",
         }
 
         for entry in entries:
@@ -158,7 +172,7 @@ class CognitiveController:
         world_model,
         validator,
         decision_extractor: Callable[[str], dict[str, object]] | None = None,
-        check_horizon: int = 5
+        check_horizon: int = 5,
     ) -> None:
         """
         Attach temporal validation for candidate filtering.
@@ -175,14 +189,11 @@ class CognitiveController:
         self.temporal_check_horizon = check_horizon
 
     def process(
-        self,
-        input_text: str,
-        verbose: bool = False,
-        decision_time: int | None = None
+        self, input_text: str, verbose: bool = False, decision_time: int | None = None
     ) -> str | None:
         """
         Process input and generate response.
-        
+
         Returns response if confidence is high enough, None otherwise.
         """
         self.thinking_trace = []
@@ -209,8 +220,7 @@ class CognitiveController:
         evaluated = []
         for candidate in candidates:
             result = self.simulator.simulate_utterance(
-                candidate,
-                context=understanding.deep_meaning
+                candidate, context=understanding.deep_meaning
             )
             evaluated.append((candidate, result))
 
@@ -226,9 +236,7 @@ class CognitiveController:
 
         # 3.5 TEMPORAL VALIDATION
         evaluated = self._apply_temporal_validation(
-            evaluated,
-            decision_time=decision_time,
-            verbose=verbose
+            evaluated, decision_time=decision_time, verbose=verbose
         )
         state.candidates = evaluated
 
@@ -275,10 +283,10 @@ class CognitiveController:
 
     def _apply_temporal_validation(
         self,
-        evaluated: list[tuple[str, 'SimulationResult']],
+        evaluated: list[tuple[str, "SimulationResult"]],
         decision_time: int | None,
-        verbose: bool
-    ) -> list[tuple[str, 'SimulationResult']]:
+        verbose: bool,
+    ) -> list[tuple[str, "SimulationResult"]]:
         """Execute apply temporal validation."""
 
         if self.temporal_validator is None or self.temporal_world is None:
@@ -297,7 +305,7 @@ class CognitiveController:
             validation = self.temporal_validator.validate_decision(
                 decision_time=decision_time,
                 decision=decision,
-                check_horizon=self.temporal_check_horizon
+                check_horizon=self.temporal_check_horizon,
             )
 
             if validation.is_valid:

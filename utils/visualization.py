@@ -10,6 +10,7 @@ import numpy as np
 try:
     import matplotlib
     import matplotlib.pyplot as plt
+
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
@@ -23,11 +24,11 @@ def plot_training_history(
     val_losses: list[float] | None = None,
     val_accuracies: list[float] | None = None,
     save_path: str | None = None,
-    show: bool = True
+    show: bool = True,
 ):
     """
     Plot training history (loss and accuracy curves).
-    
+
     Args:
         losses: List of training losses
         accuracies: Optional list of training accuracies
@@ -46,31 +47,31 @@ def plot_training_history(
 
     # Plot loss
     ax = axes[0]
-    ax.plot(losses, label='Train Loss', color='blue')
+    ax.plot(losses, label="Train Loss", color="blue")
     if val_losses:
-        ax.plot(val_losses, label='Val Loss', color='red')
-    ax.set_xlabel('Epoch')
-    ax.set_ylabel('Loss')
-    ax.set_title('Training Loss')
+        ax.plot(val_losses, label="Val Loss", color="red")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.set_title("Training Loss")
     ax.legend()
     ax.grid(True)
 
     # Plot accuracy if provided
     if accuracies is not None:
         ax = axes[1]
-        ax.plot(accuracies, label='Train Acc', color='blue')
+        ax.plot(accuracies, label="Train Acc", color="blue")
         if val_accuracies:
-            ax.plot(val_accuracies, label='Val Acc', color='red')
-        ax.set_xlabel('Epoch')
-        ax.set_ylabel('Accuracy')
-        ax.set_title('Training Accuracy')
+            ax.plot(val_accuracies, label="Val Acc", color="red")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Accuracy")
+        ax.set_title("Training Accuracy")
         ax.legend()
         ax.grid(True)
 
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"Plot saved to {save_path}")
 
     if show:
@@ -79,14 +80,10 @@ def plot_training_history(
         plt.close()
 
 
-def plot_gradient_flow(
-    model,
-    save_path: str | None = None,
-    show: bool = True
-):
+def plot_gradient_flow(model, save_path: str | None = None, show: bool = True):
     """
     Plot gradient flow through the model (useful for debugging).
-    
+
     Args:
         model: Module object with parameters
         save_path: Optional path to save the plot
@@ -100,18 +97,18 @@ def plot_gradient_flow(
     grad_norms = []
     param_names = []
 
-    def collect_grads(module, prefix=''):
+    def collect_grads(module, prefix=""):
         """Run collect grads."""
 
-        for name, param in getattr(module, '_parameters', {}).items():
-            if param is not None and hasattr(param, 'grad') and param.grad is not None:
+        for name, param in getattr(module, "_parameters", {}).items():
+            if param is not None and hasattr(param, "grad") and param.grad is not None:
                 grad = param.grad
-                grad_data = grad.data if hasattr(grad, 'data') else grad
+                grad_data = grad.data if hasattr(grad, "data") else grad
                 grad_norm = np.linalg.norm(grad_data)
                 grad_norms.append(grad_norm)
                 param_names.append(f"{prefix}.{name}" if prefix else name)
 
-        for name, submodule in getattr(module, '_modules', {}).items():
+        for name, submodule in getattr(module, "_modules", {}).items():
             collect_grads(submodule, f"{prefix}.{name}" if prefix else name)
 
     collect_grads(model)
@@ -124,12 +121,12 @@ def plot_gradient_flow(
     plt.figure(figsize=(12, 6))
     plt.barh(range(len(grad_norms)), grad_norms)
     plt.yticks(range(len(grad_norms)), param_names)
-    plt.xlabel('Gradient Norm')
-    plt.title('Gradient Flow Through Model')
+    plt.xlabel("Gradient Norm")
+    plt.title("Gradient Flow Through Model")
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"Plot saved to {save_path}")
 
     if show:
@@ -138,14 +135,10 @@ def plot_gradient_flow(
         plt.close()
 
 
-def plot_parameter_distribution(
-    model,
-    save_path: str | None = None,
-    show: bool = True
-):
+def plot_parameter_distribution(model, save_path: str | None = None, show: bool = True):
     """
     Plot distribution of model parameters.
-    
+
     Args:
         model: Module object with parameters
         save_path: Optional path to save the plot
@@ -161,12 +154,12 @@ def plot_parameter_distribution(
     def collect_params(module):
         """Run collect params."""
 
-        for param in getattr(module, '_parameters', {}).values():
+        for param in getattr(module, "_parameters", {}).values():
             if param is not None:
-                data = param.data if hasattr(param, 'data') else param
+                data = param.data if hasattr(param, "data") else param
                 all_params.extend(data.flatten())
 
-        for submodule in getattr(module, '_modules', {}).values():
+        for submodule in getattr(module, "_modules", {}).values():
             if submodule is not None:
                 collect_params(submodule)
 
@@ -180,22 +173,22 @@ def plot_parameter_distribution(
 
     # Plot
     plt.figure(figsize=(10, 6))
-    plt.hist(all_params, bins=50, edgecolor='black', alpha=0.7)
-    plt.xlabel('Parameter Value')
-    plt.ylabel('Frequency')
-    plt.title('Parameter Distribution')
+    plt.hist(all_params, bins=50, edgecolor="black", alpha=0.7)
+    plt.xlabel("Parameter Value")
+    plt.ylabel("Frequency")
+    plt.title("Parameter Distribution")
     plt.grid(True, alpha=0.3)
 
     # Add statistics
     mean = np.mean(all_params)
     std = np.std(all_params)
-    plt.axvline(mean, color='red', linestyle='--', label=f'Mean: {mean:.4f}')
-    plt.axvline(mean + std, color='orange', linestyle='--', label=f'±1 Std: {std:.4f}')
-    plt.axvline(mean - std, color='orange', linestyle='--')
+    plt.axvline(mean, color="red", linestyle="--", label=f"Mean: {mean:.4f}")
+    plt.axvline(mean + std, color="orange", linestyle="--", label=f"±1 Std: {std:.4f}")
+    plt.axvline(mean - std, color="orange", linestyle="--")
     plt.legend()
 
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"Plot saved to {save_path}")
 
     if show:
@@ -207,7 +200,7 @@ def plot_parameter_distribution(
 def print_model_summary(model, input_shape: tuple[int, ...] | None = None):
     """
     Print a summary of the model architecture.
-    
+
     Args:
         model: Module object
         input_shape: Optional input shape for computing output shapes
@@ -219,7 +212,7 @@ def print_model_summary(model, input_shape: tuple[int, ...] | None = None):
     total_params = 0
     trainable_params = 0
 
-    def count_params(module, prefix='', depth=0):
+    def count_params(module, prefix="", depth=0):
         """Run count params."""
 
         nonlocal total_params, trainable_params
@@ -229,17 +222,17 @@ def print_model_summary(model, input_shape: tuple[int, ...] | None = None):
         print(f"{indent}{prefix}{module_name}")
 
         # Count parameters
-        for name, param in getattr(module, '_parameters', {}).items():
+        for name, param in getattr(module, "_parameters", {}).items():
             if param is not None:
-                data = param.data if hasattr(param, 'data') else param
+                data = param.data if hasattr(param, "data") else param
                 param_count = np.prod(data.shape)
                 total_params += param_count
-                if hasattr(param, 'requires_grad') and param.requires_grad:
+                if hasattr(param, "requires_grad") and param.requires_grad:
                     trainable_params += param_count
                 print(f"{indent}  {name}: {data.shape} ({param_count:,} params)")
 
         # Recurse into submodules
-        for name, submodule in getattr(module, '_modules', {}).items():
+        for name, submodule in getattr(module, "_modules", {}).items():
             if submodule is not None:
                 count_params(submodule, f"{name}.", depth + 1)
 
@@ -256,11 +249,11 @@ def visualize_attention_weights(
     attention_weights: np.ndarray,
     tokens: list[str] | None = None,
     save_path: str | None = None,
-    show: bool = True
+    show: bool = True,
 ):
     """
     Visualize attention weights as a heatmap.
-    
+
     Args:
         attention_weights: Attention weights array (seq_len, seq_len) or (num_heads, seq_len, seq_len)
         tokens: Optional list of token strings for labels
@@ -279,21 +272,21 @@ def visualize_attention_weights(
 
     # Plot heatmap
     plt.figure(figsize=(10, 8))
-    plt.imshow(attention_weights, cmap='Blues', aspect='auto')
-    plt.colorbar(label='Attention Weight')
-    plt.xlabel('Key Position')
-    plt.ylabel('Query Position')
-    plt.title('Attention Weights Heatmap')
+    plt.imshow(attention_weights, cmap="Blues", aspect="auto")
+    plt.colorbar(label="Attention Weight")
+    plt.xlabel("Key Position")
+    plt.ylabel("Query Position")
+    plt.title("Attention Weights Heatmap")
 
     # Add token labels if provided
     if tokens and len(tokens) == attention_weights.shape[0]:
-        plt.xticks(range(len(tokens)), tokens, rotation=45, ha='right')
+        plt.xticks(range(len(tokens)), tokens, rotation=45, ha="right")
         plt.yticks(range(len(tokens)), tokens)
 
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"Plot saved to {save_path}")
 
     if show:

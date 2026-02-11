@@ -39,7 +39,7 @@ print("=" * 80)
 
 for t in range(5000):
     # Forward pass using operator overloading (just like PyTorch!)
-    y_pred = a + b * x + c * x ** 2 + d * x ** 3
+    y_pred = a + b * x + c * x**2 + d * x**3
 
     # Compute loss: sum((y_pred - y)^2)
     loss = ((y_pred - y) ** 2).sum()
@@ -50,9 +50,11 @@ for t in range(5000):
 
     if t % 100 == 99:
         rel_loss = loss.item() / initial_loss
-        print(f"t = {t+1:4d}  loss(t)/loss(0) = {rel_loss:10.6f}  "
-              f"a = {a.data.item():10.6f}  b = {b.data.item():10.6f}  "
-              f"c = {c.data.item():10.6f}  d = {d.data.item():10.6f}")
+        print(
+            f"t = {t + 1:4d}  loss(t)/loss(0) = {rel_loss:10.6f}  "
+            f"a = {a.data.item():10.6f}  b = {b.data.item():10.6f}  "
+            f"c = {c.data.item():10.6f}  d = {d.data.item():10.6f}"
+        )
 
     # Backward pass: autograd computes gradients automatically
     a.zero_grad()
@@ -69,8 +71,10 @@ for t in range(5000):
         d.data -= learning_rate * d.grad
 
 print("=" * 80)
-print(f"\nResult: y = {a.data.item():.4f} + {b.data.item():.4f}x + "
-      f"{c.data.item():.4f}x^2 + {d.data.item():.4f}x^3")
+print(
+    f"\nResult: y = {a.data.item():.4f} + {b.data.item():.4f}x + "
+    f"{c.data.item():.4f}x^2 + {d.data.item():.4f}x^3"
+)
 print("Expected (Taylor): y ≈ 1.0 + 1.0x + 0.5x^2 + 0.167x^3")
 
 # Final comparison

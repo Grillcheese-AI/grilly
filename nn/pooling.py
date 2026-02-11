@@ -12,6 +12,7 @@ def get_compute():
 
     pass
 
+
 class MaxPool2d(Module):
     """
     2D Max Pooling layer (matches torch.nn.MaxPool2d).
@@ -81,8 +82,10 @@ class MaxPool2d(Module):
 
     def extra_repr(self):
         """String representation."""
-        return (f'kernel_size={self.kernel_size}, stride={self.stride}, '
-                f'padding={self.padding}, dilation={self.dilation}')
+        return (
+            f"kernel_size={self.kernel_size}, stride={self.stride}, "
+            f"padding={self.padding}, dilation={self.dilation}"
+        )
 
 
 class AvgPool2d(Module):
@@ -140,16 +143,22 @@ class AvgPool2d(Module):
 
         compute = self._get_backend()
         grad_input = compute.pooling.avgpool2d_backward(
-            grad_output, self._cached_input_shape, self.kernel_size,
-            self.stride, self.padding, self.count_include_pad
+            grad_output,
+            self._cached_input_shape,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.count_include_pad,
         )
 
         return grad_input
 
     def extra_repr(self):
         """String representation."""
-        return (f'kernel_size={self.kernel_size}, stride={self.stride}, '
-                f'padding={self.padding}, count_include_pad={self.count_include_pad}')
+        return (
+            f"kernel_size={self.kernel_size}, stride={self.stride}, "
+            f"padding={self.padding}, count_include_pad={self.count_include_pad}"
+        )
 
 
 class AdaptiveMaxPool2d(Module):
@@ -178,7 +187,9 @@ class AdaptiveMaxPool2d(Module):
         """Initialize the instance."""
 
         super().__init__()
-        self.output_size = output_size if isinstance(output_size, tuple) else (output_size, output_size)
+        self.output_size = (
+            output_size if isinstance(output_size, tuple) else (output_size, output_size)
+        )
 
     def forward(self, x):
         """Forward pass."""
@@ -198,11 +209,13 @@ class AdaptiveMaxPool2d(Module):
 
     def backward(self, grad_output):
         """Backward pass (not implemented - use MaxPool2d directly for training)."""
-        raise NotImplementedError("AdaptiveMaxPool2d backward not implemented. Use MaxPool2d for training.")
+        raise NotImplementedError(
+            "AdaptiveMaxPool2d backward not implemented. Use MaxPool2d for training."
+        )
 
     def extra_repr(self):
         """String representation."""
-        return f'output_size={self.output_size}'
+        return f"output_size={self.output_size}"
 
 
 class AdaptiveAvgPool2d(Module):
@@ -231,7 +244,9 @@ class AdaptiveAvgPool2d(Module):
         """Initialize the instance."""
 
         super().__init__()
-        self.output_size = output_size if isinstance(output_size, tuple) else (output_size, output_size)
+        self.output_size = (
+            output_size if isinstance(output_size, tuple) else (output_size, output_size)
+        )
 
     def forward(self, x):
         """Forward pass."""
@@ -251,8 +266,10 @@ class AdaptiveAvgPool2d(Module):
 
     def backward(self, grad_output):
         """Backward pass (not implemented - use AvgPool2d directly for training)."""
-        raise NotImplementedError("AdaptiveAvgPool2d backward not implemented. Use AvgPool2d for training.")
+        raise NotImplementedError(
+            "AdaptiveAvgPool2d backward not implemented. Use AvgPool2d for training."
+        )
 
     def extra_repr(self):
         """String representation."""
-        return f'output_size={self.output_size}'
+        return f"output_size={self.output_size}"

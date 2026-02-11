@@ -21,14 +21,52 @@ INSTRUCT_FILE = DATA_DIR / "instruct_svc_semantic.jsonl"
 CONVERSATIONS_FILE = DATA_DIR / "conversations_svc_semantic.jsonl"
 
 # Expected schema fields per source
-INSTRUCT_FIELDS = {"id", "text", "svc", "pos", "lemmas", "deps", "root_verb", "realm", "source", "complexity"}
+INSTRUCT_FIELDS = {
+    "id",
+    "text",
+    "svc",
+    "pos",
+    "lemmas",
+    "deps",
+    "root_verb",
+    "realm",
+    "source",
+    "complexity",
+}
 CONVERSATION_FIELDS = INSTRUCT_FIELDS | {"role"}
 
-VALID_REALMS = {"technology", "science", "health", "history", "nature", "business", "arts", "social", "general", "conversation"}
+VALID_REALMS = {
+    "technology",
+    "science",
+    "health",
+    "history",
+    "nature",
+    "business",
+    "arts",
+    "social",
+    "general",
+    "conversation",
+}
 
 VALID_POS = {
-    "ADJ", "ADP", "ADV", "AUX", "CCONJ", "DET", "INTJ", "NOUN", "NUM",
-    "PART", "PRON", "PROPN", "PUNCT", "SCONJ", "SYM", "VERB", "X", "SPACE"
+    "ADJ",
+    "ADP",
+    "ADV",
+    "AUX",
+    "CCONJ",
+    "DET",
+    "INTJ",
+    "NOUN",
+    "NUM",
+    "PART",
+    "PRON",
+    "PROPN",
+    "PUNCT",
+    "SCONJ",
+    "SYM",
+    "VERB",
+    "X",
+    "SPACE",
 }
 
 SAMPLE_SIZE = 1000
@@ -177,9 +215,9 @@ def validate_source_consistency(entry: dict, expected_source: str) -> list[str]:
 
 def validate_file(filepath: Path, expected_source: str, expected_fields: set):
     """Validate a single JSONL file and print report."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Validating: {filepath.name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     if not filepath.exists():
         print(f"  FILE NOT FOUND: {filepath}")
@@ -242,10 +280,10 @@ def validate_file(filepath: Path, expected_source: str, expected_fields: set):
 
     # Report
     print(f"\n  --- Results ({n} samples) ---")
-    print(f"  Schema valid:  {n - schema_errors}/{n} ({(n - schema_errors)/n*100:.1f}%)")
-    print(f"  SVC valid:     {n - svc_errors}/{n} ({(n - svc_errors)/n*100:.1f}%)")
-    print(f"  Quality valid: {n - quality_errors}/{n} ({(n - quality_errors)/n*100:.1f}%)")
-    print(f"  Source match:  {n - source_errors}/{n} ({(n - source_errors)/n*100:.1f}%)")
+    print(f"  Schema valid:  {n - schema_errors}/{n} ({(n - schema_errors) / n * 100:.1f}%)")
+    print(f"  SVC valid:     {n - svc_errors}/{n} ({(n - svc_errors) / n * 100:.1f}%)")
+    print(f"  Quality valid: {n - quality_errors}/{n} ({(n - quality_errors) / n * 100:.1f}%)")
+    print(f"  Source match:  {n - source_errors}/{n} ({(n - source_errors) / n * 100:.1f}%)")
 
     if schema_examples:
         print("\n  Schema error examples:")
@@ -266,8 +304,10 @@ def validate_file(filepath: Path, expected_source: str, expected_fields: set):
     print("\n  --- Distributions ---")
     print(f"  Realms: {dict(realm_counter.most_common())}")
     if complexity_values:
-        print(f"  Complexity: min={min(complexity_values):.2f}, max={max(complexity_values):.2f}, "
-              f"mean={sum(complexity_values)/len(complexity_values):.2f}")
+        print(
+            f"  Complexity: min={min(complexity_values):.2f}, max={max(complexity_values):.2f}, "
+            f"mean={sum(complexity_values) / len(complexity_values):.2f}"
+        )
     print(f"  Top verbs: {dict(verb_counter.most_common(10))}")
     print(f"  Sources: {dict(source_counter)}")
 
@@ -283,7 +323,7 @@ def main():
     validate_file(INSTRUCT_FILE, "instruct", INSTRUCT_FIELDS)
     validate_file(CONVERSATIONS_FILE, "conversation", CONVERSATION_FIELDS)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("Validation complete.")
 
 

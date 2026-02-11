@@ -7,7 +7,7 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 
 from benchmarks.utils import (
     format_time,
@@ -24,9 +24,9 @@ def train_step_gpu(model, optimizer, x, y_true):
     y_pred = model(x)
     # Loss (MSE)
     diff = y_pred - y_true
-    loss = np.mean(diff ** 2)
+    loss = np.mean(diff**2)
     # Backward (manual gradient for linear: dL/dW = x.T @ dL/dy)
-    grad_out = 2.0 * diff / diff.size
+    2.0 * diff / diff.size
     model.backward(loss)
     # Optimizer step
     optimizer.step()
@@ -39,7 +39,7 @@ def train_step_cpu(W, b, x, y_true, lr=0.001):
     y_pred = x @ W.T + b
     # Loss
     diff = y_pred - y_true
-    loss = np.mean(diff ** 2)
+    loss = np.mean(diff**2)
     # Backward
     grad_out = 2.0 * diff / diff.size
     grad_W = grad_out.T @ x
@@ -106,9 +106,14 @@ def main():
 
         if gpu_per_step > 0:
             print_row(f"{label} /step", gpu_per_step, cpu_per_step)
-            results.append({'label': f'{label} /step', 'gpu_ms': gpu_per_step,
-                            'cpu_ms': cpu_per_step,
-                            'shape': f'({batch},{in_f})->({out_f})'})
+            results.append(
+                {
+                    "label": f"{label} /step",
+                    "gpu_ms": gpu_per_step,
+                    "cpu_ms": cpu_per_step,
+                    "shape": f"({batch},{in_f})->({out_f})",
+                }
+            )
         else:
             print(f"  {label}: CPU only: {format_time(cpu_per_step)} /step")
 
@@ -117,5 +122,5 @@ def main():
         print_summary_table(results)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

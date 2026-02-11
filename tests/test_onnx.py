@@ -38,7 +38,10 @@ def _make_linear_relu_onnx(in_features=8, out_features=4):
     relu_node = helper.make_node("Relu", ["gemm_out"], ["Y"])
 
     graph = helper.make_graph(
-        [gemm_node, relu_node], "linear_relu", [x_info], [y_info],
+        [gemm_node, relu_node],
+        "linear_relu",
+        [x_info],
+        [y_info],
         initializer=[w_init, b_init],
     )
     model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
@@ -110,8 +113,11 @@ def _make_transformer_block_onnx(dim=16):
 
     nodes = [
         helper.make_node(
-            "LayerNormalization", ["X", "ln_scale", "ln_bias"], ["ln_out"],
-            epsilon=1e-5, axis=-1,
+            "LayerNormalization",
+            ["X", "ln_scale", "ln_bias"],
+            ["ln_out"],
+            epsilon=1e-5,
+            axis=-1,
         ),
         helper.make_node("Gemm", ["ln_out", "W_q", "b_q"], ["q_proj_out"], transB=0),
         helper.make_node("Relu", ["q_proj_out"], ["relu_out"]),
@@ -127,7 +133,11 @@ def _make_transformer_block_onnx(dim=16):
         numpy_helper.from_array(b_o, name="b_o"),
     ]
     graph = helper.make_graph(
-        nodes, "transformer_block", [x_info], [y_info], initializer=inits,
+        nodes,
+        "transformer_block",
+        [x_info],
+        [y_info],
+        initializer=inits,
     )
     model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
     model.ir_version = 8
@@ -140,7 +150,6 @@ def _make_transformer_block_onnx(dim=16):
 
 
 class TestOnnxLoader:
-
     def test_load_simple_onnx(self):
         """Load a minimal ONNX model (Linear + ReLU), verify forward pass."""
         proto, _weight, _bias = _make_linear_relu_onnx(in_features=8, out_features=4)
@@ -178,6 +187,7 @@ class TestOnnxLoader:
                 found_linear = True
                 # Check weight shape
                 from grilly.nn.modules import _get_param_array
+
                 w = _get_param_array(mod.weight)
                 assert w.shape[0] == 4  # out_features
                 assert w.shape[1] == 8  # in_features
@@ -229,9 +239,9 @@ class TestOnnxLoader:
 
 
 class TestOnnxOpCoverage:
-
-    def _make_single_op_model(self, op_type, input_shapes, output_shape,
-                              attrs=None, initializers=None, extra_inputs=None):
+    def _make_single_op_model(
+        self, op_type, input_shapes, output_shape, attrs=None, initializers=None, extra_inputs=None
+    ):
         """Helper to build a single-op ONNX model."""
         inputs = []
         input_names = []
@@ -253,8 +263,9 @@ class TestOnnxOpCoverage:
             for name, arr in initializers.items():
                 init_list.append(numpy_helper.from_array(arr, name=name))
 
-        graph = helper.make_graph([node], f"test_{op_type.lower()}", inputs, [y_info],
-                                  initializer=init_list)
+        graph = helper.make_graph(
+            [node], f"test_{op_type.lower()}", inputs, [y_info], initializer=init_list
+        )
         model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
         model.ir_version = 8
         return model
@@ -368,7 +379,6 @@ class TestOnnxOpCoverage:
 
 
 class TestOnnxExporter:
-
     def test_export_linear(self):
         """Export a single Linear module to ONNX."""
         linear = Linear(8, 4, bias=True)
@@ -428,7 +438,6 @@ class TestOnnxExporter:
 
 
 class TestOnnxFineTuner:
-
     def test_apply_lora(self):
         """Load model, apply LoRA, verify LoRA layers exist."""
         proto, _ = _make_two_linear_onnx(d_in=8, d_hidden=16, d_out=4)
@@ -517,19 +526,46 @@ class TestOnnxFineTuner:
 
 
 class TestOnnxOpRegistry:
-
     def test_supported_ops(self):
         """Registry should have all documented ops."""
         registry = OnnxOpRegistry()
         expected_ops = [
-            "Gemm", "MatMul", "Add", "Mul", "Sub", "Div",
-            "Relu", "Gelu", "Sigmoid", "Tanh", "Softmax",
-            "LayerNormalization", "Reshape", "Transpose",
-            "Gather", "Unsqueeze", "Squeeze", "Concat",
-            "Split", "Slice", "Where", "Cast", "Shape",
-            "Pow", "Sqrt", "ReduceMean", "Erf", "Constant",
-            "ConstantOfShape", "Expand", "Equal", "Less",
-            "Greater", "Not", "Dropout", "Identity",
+            "Gemm",
+            "MatMul",
+            "Add",
+            "Mul",
+            "Sub",
+            "Div",
+            "Relu",
+            "Gelu",
+            "Sigmoid",
+            "Tanh",
+            "Softmax",
+            "LayerNormalization",
+            "Reshape",
+            "Transpose",
+            "Gather",
+            "Unsqueeze",
+            "Squeeze",
+            "Concat",
+            "Split",
+            "Slice",
+            "Where",
+            "Cast",
+            "Shape",
+            "Pow",
+            "Sqrt",
+            "ReduceMean",
+            "Erf",
+            "Constant",
+            "ConstantOfShape",
+            "Expand",
+            "Equal",
+            "Less",
+            "Greater",
+            "Not",
+            "Dropout",
+            "Identity",
         ]
         for op in expected_ops:
             assert registry.get(op) is not None, f"Missing handler for {op}"
@@ -541,6 +577,7 @@ class TestOnnxOpRegistry:
         def custom_handler(node, inputs, initializers, attrs):
             def fn(*args):
                 return args[0] * 42
+
             return "callable", fn
 
         registry.register("CustomOp", custom_handler)
@@ -553,7 +590,6 @@ class TestOnnxOpRegistry:
 
 
 class TestGrillyOnnxModel:
-
     def test_get_linear_layers(self):
         """Verify get_linear_layers returns Linear modules."""
         proto, _ = _make_two_linear_onnx()

@@ -38,9 +38,10 @@ pyvma_lib = None
 
 try:
     import pyvma
+
     # PyVMA exports: ffi, vma (which is the lib)
-    pyvma_lib = getattr(pyvma, 'vma', None) or getattr(pyvma, 'lib', None)
-    PYVMA_AVAILABLE = pyvma_lib is not None and hasattr(pyvma_lib, 'vmaCreateAllocator')
+    pyvma_lib = getattr(pyvma, "vma", None) or getattr(pyvma, "lib", None)
+    PYVMA_AVAILABLE = pyvma_lib is not None and hasattr(pyvma_lib, "vmaCreateAllocator")
     if PYVMA_AVAILABLE:
         logger.debug("PyVMA available - using VMA for buffer allocation")
 except ImportError:
@@ -63,12 +64,31 @@ class VMABuffer:
     Provides efficient sub-allocation and AMD-optimized memory selection.
     Uses VMA's mapping functions for CPU<->GPU transfers.
     """
-    __slots__ = ('handle', 'allocation', 'allocation_info', 'size', 'mapped_ptr',
-                 'in_use', 'last_used', 'usage_flags', '_weak_pool', 'bucket_size',
-                 '_vk_handle')
 
-    def __init__(self, handle, allocation, allocation_info, size: int,
-                 bucket_size: int, pool: 'VMABufferPool', usage_flags: int):
+    __slots__ = (
+        "handle",
+        "allocation",
+        "allocation_info",
+        "size",
+        "mapped_ptr",
+        "in_use",
+        "last_used",
+        "usage_flags",
+        "_weak_pool",
+        "bucket_size",
+        "_vk_handle",
+    )
+
+    def __init__(
+        self,
+        handle,
+        allocation,
+        allocation_info,
+        size: int,
+        bucket_size: int,
+        pool: "VMABufferPool",
+        usage_flags: int,
+    ):
         """Initialize the instance."""
 
         self.handle = handle  # VMA buffer handle (pyvma ffi)
@@ -98,9 +118,10 @@ class VMABuffer:
         """Get buffer handle compatible with vulkan package"""
         if self._vk_handle is None and self.handle is not None:
             import vulkan as vk
+
             # Convert pyvma handle to vulkan package handle
-            handle_int = int(pyvma.ffi.cast('uintptr_t', self.handle))
-            self._vk_handle = vk.ffi.cast('VkBuffer', handle_int)
+            handle_int = int(pyvma.ffi.cast("uintptr_t", self.handle))
+            self._vk_handle = vk.ffi.cast("VkBuffer", handle_int)
         return self._vk_handle
 
     def release(self):
@@ -114,7 +135,7 @@ class VMABuffer:
 
     def __del__(self):
         """Auto-release on garbage collection"""
-        if getattr(self, 'in_use', False):
+        if getattr(self, "in_use", False):
             self.release()
 
 
@@ -135,12 +156,12 @@ class VMABufferPool:
         >>> buf.release()  # Returns to pool for reuse
     """
 
-    MIN_BUCKET_POWER = 8   # 256 bytes
+    MIN_BUCKET_POWER = 8  # 256 bytes
     MAX_BUCKET_POWER = 28  # 256 MB
     MAX_BUFFERS_PER_BUCKET = 32
     MAX_POOL_MEMORY = 512 * 1024 * 1024  # 512MB
 
-    def __init__(self, core: 'VulkanCore', max_memory: int = None):
+    def __init__(self, core: "VulkanCore", max_memory: int = None):
         """
         Initialize VMA buffer pool.
 
@@ -155,12 +176,12 @@ class VMABufferPool:
         self._total_pooled_memory = 0
         self._lock = threading.Lock()
         self._stats = {
-            'hits': 0,
-            'misses': 0,
-            'allocations': 0,
-            'evictions': 0,
-            'total_acquired': 0,
-            'total_released': 0,
+            "hits": 0,
+            "misses": 0,
+            "allocations": 0,
+            "evictions": 0,
+            "total_acquired": 0,
+            "total_released": 0,
         }
 
         # Initialize VMA allocator
@@ -178,55 +199,56 @@ class VMABufferPool:
             # Create Vulkan functions struct manually (without KHR extensions)
             # This avoids the ProcedureNotFoundError for optional extensions
             core_functions = [
-                'vkGetPhysicalDeviceProperties',
-                'vkGetPhysicalDeviceMemoryProperties',
-                'vkAllocateMemory',
-                'vkFreeMemory',
-                'vkMapMemory',
-                'vkUnmapMemory',
-                'vkBindBufferMemory',
-                'vkBindImageMemory',
-                'vkGetBufferMemoryRequirements',
-                'vkGetImageMemoryRequirements',
-                'vkCreateBuffer',
-                'vkDestroyBuffer',
-                'vkCreateImage',
-                'vkDestroyImage'
+                "vkGetPhysicalDeviceProperties",
+                "vkGetPhysicalDeviceMemoryProperties",
+                "vkAllocateMemory",
+                "vkFreeMemory",
+                "vkMapMemory",
+                "vkUnmapMemory",
+                "vkBindBufferMemory",
+                "vkBindImageMemory",
+                "vkGetBufferMemoryRequirements",
+                "vkGetImageMemoryRequirements",
+                "vkCreateBuffer",
+                "vkDestroyBuffer",
+                "vkCreateImage",
+                "vkDestroyImage",
             ]
 
             init_functions = {
-                fn: pyvma.ffi.cast('PFN_' + fn, getattr(vk.lib, fn))
-                for fn in core_functions
+                fn: pyvma.ffi.cast("PFN_" + fn, getattr(vk.lib, fn)) for fn in core_functions
             }
 
             # Try to add KHR extension functions if available (optional)
             khr_functions = [
-                'vkGetBufferMemoryRequirements2KHR',
-                'vkGetImageMemoryRequirements2KHR'
+                "vkGetBufferMemoryRequirements2KHR",
+                "vkGetImageMemoryRequirements2KHR",
             ]
             for fn_name in khr_functions:
                 try:
                     fn_ptr = vk.lib.vkGetDeviceProcAddr(
-                        self.core.device,
-                        pyvma.ffi.new('char[]', fn_name.encode('ascii'))
+                        self.core.device, pyvma.ffi.new("char[]", fn_name.encode("ascii"))
                     )
                     if fn_ptr != pyvma.ffi.NULL:
-                        init_functions[fn_name] = pyvma.ffi.cast('PFN_' + fn_name, fn_ptr)
+                        init_functions[fn_name] = pyvma.ffi.cast("PFN_" + fn_name, fn_ptr)
                         logger.debug(f"KHR extension {fn_name} available")
                 except Exception:
                     logger.debug(f"KHR extension {fn_name} not available (optional)")
 
-            vulkan_functions = pyvma.ffi.new('VmaVulkanFunctions*', init_functions)
+            vulkan_functions = pyvma.ffi.new("VmaVulkanFunctions*", init_functions)
 
             # Create allocator with custom Vulkan functions
             # Note: older VMA versions don't have 'instance' field
-            create_info = pyvma.ffi.new('VmaAllocatorCreateInfo*', {
-                'physicalDevice': pyvma.ffi.cast('void*', self.core.physical_device),
-                'device': pyvma.ffi.cast('void*', self.core.device),
-                'pVulkanFunctions': vulkan_functions,
-            })
+            create_info = pyvma.ffi.new(
+                "VmaAllocatorCreateInfo*",
+                {
+                    "physicalDevice": pyvma.ffi.cast("void*", self.core.physical_device),
+                    "device": pyvma.ffi.cast("void*", self.core.device),
+                    "pVulkanFunctions": vulkan_functions,
+                },
+            )
 
-            pAllocator = pyvma.ffi.new('VmaAllocator*')
+            pAllocator = pyvma.ffi.new("VmaAllocator*")
             result = pyvma_lib.vmaCreateAllocator(create_info, pAllocator)
 
             if result != 0:  # VK_SUCCESS = 0
@@ -262,12 +284,14 @@ class VMABufferPool:
             usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
 
         if self._allocator is None:
-            raise RuntimeError("VMA allocator not initialized. Install pyvma: python -m grilly.scripts.install_pyvma")
+            raise RuntimeError(
+                "VMA allocator not initialized. Install pyvma: python -m grilly.scripts.install_pyvma"
+            )
 
         bucket_size = self._size_to_bucket(size)
 
         with self._lock:
-            self._stats['total_acquired'] += 1
+            self._stats["total_acquired"] += 1
 
             # Try to find existing buffer in bucket
             bucket = self._buckets[bucket_size]
@@ -278,38 +302,43 @@ class VMABufferPool:
                     buf.last_used = time.time()
                     bucket.pop(i)
                     self._total_pooled_memory -= bucket_size
-                    self._stats['hits'] += 1
+                    self._stats["hits"] += 1
                     return buf
 
             # No suitable buffer found, create new one via VMA
-            self._stats['misses'] += 1
-            self._stats['allocations'] += 1
+            self._stats["misses"] += 1
+            self._stats["allocations"] += 1
             self._evict_if_needed(bucket_size)
 
             # Create buffer via VMA using raw CFFI
-            buffer_info = pyvma.ffi.new('VkBufferCreateInfo*', {
-                'sType': VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                'size': bucket_size,
-                'usage': usage,
-                'sharingMode': VK_SHARING_MODE_EXCLUSIVE,
-            })
+            buffer_info = pyvma.ffi.new(
+                "VkBufferCreateInfo*",
+                {
+                    "sType": VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                    "size": bucket_size,
+                    "usage": usage,
+                    "sharingMode": VK_SHARING_MODE_EXCLUSIVE,
+                },
+            )
 
             # VMA constants
             VMA_MEMORY_USAGE_CPU_TO_GPU = 3
             VMA_ALLOCATION_CREATE_MAPPED_BIT = 0x00000004
 
-            alloc_info = pyvma.ffi.new('VmaAllocationCreateInfo*', {
-                'usage': VMA_MEMORY_USAGE_CPU_TO_GPU,
-                'flags': VMA_ALLOCATION_CREATE_MAPPED_BIT,
-            })
+            alloc_info = pyvma.ffi.new(
+                "VmaAllocationCreateInfo*",
+                {
+                    "usage": VMA_MEMORY_USAGE_CPU_TO_GPU,
+                    "flags": VMA_ALLOCATION_CREATE_MAPPED_BIT,
+                },
+            )
 
-            pBuffer = pyvma.ffi.new('VkBuffer*')
-            pAllocation = pyvma.ffi.new('VmaAllocation*')
-            pAllocationInfo = pyvma.ffi.new('VmaAllocationInfo*')
+            pBuffer = pyvma.ffi.new("VkBuffer*")
+            pAllocation = pyvma.ffi.new("VmaAllocation*")
+            pAllocationInfo = pyvma.ffi.new("VmaAllocationInfo*")
 
             result = pyvma_lib.vmaCreateBuffer(
-                self._allocator, buffer_info, alloc_info,
-                pBuffer, pAllocation, pAllocationInfo
+                self._allocator, buffer_info, alloc_info, pBuffer, pAllocation, pAllocationInfo
             )
 
             if result != 0:
@@ -322,7 +351,7 @@ class VMABufferPool:
                 size=size,
                 bucket_size=bucket_size,
                 pool=self,
-                usage_flags=usage
+                usage_flags=usage,
             )
 
     def _return_buffer(self, buffer: VMABuffer):
@@ -339,14 +368,14 @@ class VMABufferPool:
             pass  # vmaInvalidateAllocation may not exist in older VMA builds
 
         with self._lock:
-            self._stats['total_released'] += 1
+            self._stats["total_released"] += 1
             bucket = self._buckets[buffer.bucket_size]
 
             if len(bucket) >= self.MAX_BUFFERS_PER_BUCKET:
                 oldest = min(bucket, key=lambda b: b.last_used)
                 bucket.remove(oldest)
                 self._destroy_buffer(oldest)
-                self._stats['evictions'] += 1
+                self._stats["evictions"] += 1
 
             if self._total_pooled_memory + buffer.bucket_size > self.max_memory:
                 self._evict_lru(buffer.bucket_size)
@@ -364,7 +393,7 @@ class VMABufferPool:
         """Evict least recently used buffer."""
         oldest_buf = None
         oldest_bucket_size = None
-        oldest_time = float('inf')
+        oldest_time = float("inf")
 
         for bucket_size, bucket in self._buckets.items():
             for buf in bucket:
@@ -379,7 +408,7 @@ class VMABufferPool:
         self._buckets[oldest_bucket_size].remove(oldest_buf)
         self._total_pooled_memory -= oldest_bucket_size
         self._destroy_buffer(oldest_buf)
-        self._stats['evictions'] += 1
+        self._stats["evictions"] += 1
         return True
 
     def _destroy_buffer(self, buffer: VMABuffer):
@@ -396,7 +425,7 @@ class VMABufferPool:
             raise RuntimeError("VMA allocator not initialized")
 
         # Map memory
-        ppData = pyvma.ffi.new('void**')
+        ppData = pyvma.ffi.new("void**")
         result = pyvma_lib.vmaMapMemory(self._allocator, buffer.allocation, ppData)
         if result != 0:
             raise RuntimeError(f"vmaMapMemory failed with code {result}")
@@ -413,17 +442,14 @@ class VMABufferPool:
             raise RuntimeError("VMA allocator not initialized")
 
         # Map memory
-        ppData = pyvma.ffi.new('void**')
+        ppData = pyvma.ffi.new("void**")
         result = pyvma_lib.vmaMapMemory(self._allocator, buffer.allocation, ppData)
         if result != 0:
             raise RuntimeError(f"vmaMapMemory failed with code {result}")
 
         # Copy to numpy array
         mapped = ppData[0]
-        result_array = np.frombuffer(
-            pyvma.ffi.buffer(mapped, size),
-            dtype=dtype
-        ).copy()
+        result_array = np.frombuffer(pyvma.ffi.buffer(mapped, size), dtype=dtype).copy()
 
         # Unmap
         pyvma_lib.vmaUnmapMemory(self._allocator, buffer.allocation)
@@ -443,16 +469,12 @@ class VMABufferPool:
         """Get pool statistics"""
         with self._lock:
             stats = dict(self._stats)
-            stats['total_pooled_memory'] = self._total_pooled_memory
-            stats['buckets'] = {
-                size: len(bucket)
-                for size, bucket in self._buckets.items()
-                if bucket
+            stats["total_pooled_memory"] = self._total_pooled_memory
+            stats["buckets"] = {
+                size: len(bucket) for size, bucket in self._buckets.items() if bucket
             }
-            stats['hit_rate'] = (
-                stats['hits'] / max(1, stats['hits'] + stats['misses'])
-            )
-            stats['vma_enabled'] = self._allocator is not None
+            stats["hit_rate"] = stats["hits"] / max(1, stats["hits"] + stats["misses"])
+            stats["vma_enabled"] = self._allocator is not None
             return stats
 
     def __repr__(self):
@@ -460,7 +482,7 @@ class VMABufferPool:
 
         stats = self.get_stats()
         return (
-            f"VMABufferPool(pooled={stats['total_pooled_memory']//1024}KB, "
+            f"VMABufferPool(pooled={stats['total_pooled_memory'] // 1024}KB, "
             f"hit_rate={stats['hit_rate']:.1%}, "
             f"allocs={stats['allocations']}, vma={stats['vma_enabled']})"
         )
@@ -492,11 +514,21 @@ class PooledBuffer:
     A buffer using direct Vulkan allocation (legacy fallback).
     Used when PyVMA is not available.
     """
-    __slots__ = ('handle', 'memory', 'size', 'bucket_size', 'in_use',
-                 'last_used', 'usage_flags', '_weak_pool')
 
-    def __init__(self, handle, memory, size: int, bucket_size: int,
-                 pool: 'BufferPool', usage_flags: int):
+    __slots__ = (
+        "handle",
+        "memory",
+        "size",
+        "bucket_size",
+        "in_use",
+        "last_used",
+        "usage_flags",
+        "_weak_pool",
+    )
+
+    def __init__(
+        self, handle, memory, size: int, bucket_size: int, pool: "BufferPool", usage_flags: int
+    ):
         """Initialize the instance."""
 
         self.handle = handle
@@ -526,7 +558,7 @@ class PooledBuffer:
     def __del__(self):
         """Release resources during finalization."""
 
-        if getattr(self, 'in_use', False):
+        if getattr(self, "in_use", False):
             self.release()
 
 
@@ -543,7 +575,7 @@ class BufferPool:
     MAX_BUFFERS_PER_BUCKET = 32
     MAX_POOL_MEMORY = 512 * 1024 * 1024
 
-    def __init__(self, core: 'VulkanCore', max_memory: int = None):
+    def __init__(self, core: "VulkanCore", max_memory: int = None):
         """Initialize the instance."""
 
         self.core = core
@@ -552,8 +584,12 @@ class BufferPool:
         self._total_pooled_memory = 0
         self._lock = threading.Lock()
         self._stats = {
-            'hits': 0, 'misses': 0, 'allocations': 0,
-            'evictions': 0, 'total_acquired': 0, 'total_released': 0,
+            "hits": 0,
+            "misses": 0,
+            "allocations": 0,
+            "evictions": 0,
+            "total_acquired": 0,
+            "total_released": 0,
         }
 
     def _size_to_bucket(self, size: int) -> int:
@@ -574,7 +610,7 @@ class BufferPool:
         bucket_size = self._size_to_bucket(size)
 
         with self._lock:
-            self._stats['total_acquired'] += 1
+            self._stats["total_acquired"] += 1
             bucket = self._buckets[bucket_size]
 
             for i, buf in enumerate(bucket):
@@ -584,31 +620,35 @@ class BufferPool:
                     buf.last_used = time.time()
                     bucket.pop(i)
                     self._total_pooled_memory -= bucket_size
-                    self._stats['hits'] += 1
+                    self._stats["hits"] += 1
                     return buf
 
-            self._stats['misses'] += 1
-            self._stats['allocations'] += 1
+            self._stats["misses"] += 1
+            self._stats["allocations"] += 1
             self._evict_if_needed(bucket_size)
 
             handle, memory = self.core._create_buffer(bucket_size, usage)
             return PooledBuffer(
-                handle=handle, memory=memory, size=size,
-                bucket_size=bucket_size, pool=self, usage_flags=usage
+                handle=handle,
+                memory=memory,
+                size=size,
+                bucket_size=bucket_size,
+                pool=self,
+                usage_flags=usage,
             )
 
     def _return_buffer(self, buffer: PooledBuffer):
         """Execute return buffer."""
 
         with self._lock:
-            self._stats['total_released'] += 1
+            self._stats["total_released"] += 1
             bucket = self._buckets[buffer.bucket_size]
 
             if len(bucket) >= self.MAX_BUFFERS_PER_BUCKET:
                 oldest = min(bucket, key=lambda b: b.last_used)
                 bucket.remove(oldest)
                 self._destroy_buffer(oldest)
-                self._stats['evictions'] += 1
+                self._stats["evictions"] += 1
 
             if self._total_pooled_memory + buffer.bucket_size > self.max_memory:
                 self._evict_lru(buffer.bucket_size)
@@ -628,7 +668,7 @@ class BufferPool:
 
         oldest_buf = None
         oldest_bucket_size = None
-        oldest_time = float('inf')
+        oldest_time = float("inf")
 
         for bucket_size, bucket in self._buckets.items():
             for buf in bucket:
@@ -643,7 +683,7 @@ class BufferPool:
         self._buckets[oldest_bucket_size].remove(oldest_buf)
         self._total_pooled_memory -= oldest_bucket_size
         self._destroy_buffer(oldest_buf)
-        self._stats['evictions'] += 1
+        self._stats["evictions"] += 1
         return True
 
     def _destroy_buffer(self, buffer: PooledBuffer):
@@ -675,16 +715,12 @@ class BufferPool:
 
         with self._lock:
             stats = dict(self._stats)
-            stats['total_pooled_memory'] = self._total_pooled_memory
-            stats['buckets'] = {
-                size: len(bucket)
-                for size, bucket in self._buckets.items()
-                if bucket
+            stats["total_pooled_memory"] = self._total_pooled_memory
+            stats["buckets"] = {
+                size: len(bucket) for size, bucket in self._buckets.items() if bucket
             }
-            stats['hit_rate'] = (
-                stats['hits'] / max(1, stats['hits'] + stats['misses'])
-            )
-            stats['vma_enabled'] = False
+            stats["hit_rate"] = stats["hits"] / max(1, stats["hits"] + stats["misses"])
+            stats["vma_enabled"] = False
             return stats
 
     def __repr__(self):
@@ -692,7 +728,7 @@ class BufferPool:
 
         stats = self.get_stats()
         return (
-            f"BufferPool(pooled={stats['total_pooled_memory']//1024}KB, "
+            f"BufferPool(pooled={stats['total_pooled_memory'] // 1024}KB, "
             f"hit_rate={stats['hit_rate']:.1%}, "
             f"allocs={stats['allocations']})"
         )
@@ -735,7 +771,7 @@ import atexit
 atexit.register(_cleanup_global_pool)
 
 
-def get_buffer_pool(core: 'VulkanCore' = None, use_vma: bool = None):
+def get_buffer_pool(core: "VulkanCore" = None, use_vma: bool = None):
     """
     Get or create the global buffer pool.
 
@@ -776,7 +812,7 @@ def get_buffer_pool(core: 'VulkanCore' = None, use_vma: bool = None):
         return _global_pool
 
 
-def acquire_buffer(size: int, usage: int = None, core: 'VulkanCore' = None):
+def acquire_buffer(size: int, usage: int = None, core: "VulkanCore" = None):
     """
     Convenience function to acquire a buffer from the global pool.
 

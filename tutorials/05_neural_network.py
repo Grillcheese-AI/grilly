@@ -29,12 +29,14 @@ np.random.seed(42)
 x = np.linspace(-math.pi, math.pi, N).reshape(N, D_in).astype(np.float32)
 y = np.sin(x).astype(np.float32)
 
+
 # Initialize weights with Xavier/Glorot initialization
 def xavier_init(in_dim, out_dim):
     scale = np.sqrt(2.0 / (in_dim + out_dim))
     return (np.random.randn(out_dim, in_dim) * scale).astype(np.float32)
 
-w1 = xavier_init(D_in, H)   # (32, 1)
+
+w1 = xavier_init(D_in, H)  # (32, 1)
 b1 = np.zeros(H, dtype=np.float32)
 w2 = xavier_init(H, D_out)  # (1, 32)
 b2 = np.zeros(D_out, dtype=np.float32)
@@ -57,7 +59,7 @@ for epoch in range(epochs):
 
     # ============ Compute Loss ============
     diff = y_pred - y
-    loss = np.mean(diff ** 2)
+    loss = np.mean(diff**2)
 
     if epoch % 50 == 0:
         print(f"Epoch {epoch:3d}: loss = {loss:.6f}")
@@ -99,10 +101,10 @@ h_relu = compute.fnn.activation_relu(h)
 test_y_pred = compute.fnn.linear(h_relu, w2, b2)
 
 print("\nTest predictions:")
-print(f"  x = -2.0: pred = {test_y_pred[0,0]:.4f}, true = {test_y_true[0,0]:.4f}")
-print(f"  x =  0.0: pred = {test_y_pred[1,0]:.4f}, true = {test_y_true[1,0]:.4f}")
-print(f"  x =  1.57: pred = {test_y_pred[2,0]:.4f}, true = {test_y_true[2,0]:.4f}")
-print(f"  x =  3.14: pred = {test_y_pred[3,0]:.4f}, true = {test_y_true[3,0]:.4f}")
+print(f"  x = -2.0: pred = {test_y_pred[0, 0]:.4f}, true = {test_y_true[0, 0]:.4f}")
+print(f"  x =  0.0: pred = {test_y_pred[1, 0]:.4f}, true = {test_y_true[1, 0]:.4f}")
+print(f"  x =  1.57: pred = {test_y_pred[2, 0]:.4f}, true = {test_y_true[2, 0]:.4f}")
+print(f"  x =  3.14: pred = {test_y_pred[3, 0]:.4f}, true = {test_y_true[3, 0]:.4f}")
 
 # Show buffer pool stats
 pool = compute.fnn.buffer_pool

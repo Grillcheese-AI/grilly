@@ -144,15 +144,17 @@ def benchmark_standard_mode(warmup=2, repeats=5):
         extra = f"GPU: {gpu_gflops:.1f} GFLOP/s  CPU: {cpu_gflops:.1f} GFLOP/s"
         print_row(label, gpu_ms, cpu_ms, extra=extra)
 
-        summary.append({
-            "label": label,
-            "gpu_ms": gpu_ms,
-            "cpu_ms": cpu_ms,
-            "shape": f"({batch},{in_f})->({batch},{out_f}) [{format_size(data_bytes)}]",
-            "gpu_gflops": gpu_gflops,
-            "cpu_gflops": cpu_gflops,
-            "mode": "standard",
-        })
+        summary.append(
+            {
+                "label": label,
+                "gpu_ms": gpu_ms,
+                "cpu_ms": cpu_ms,
+                "shape": f"({batch},{in_f})->({batch},{out_f}) [{format_size(data_bytes)}]",
+                "gpu_gflops": gpu_gflops,
+                "cpu_gflops": cpu_gflops,
+                "mode": "standard",
+            }
+        )
 
     return summary
 
@@ -208,15 +210,17 @@ def benchmark_gpu_mode(warmup=2, repeats=5):
         extra = f"GPU: {gpu_gflops:.1f} GFLOP/s  CPU: {cpu_gflops:.1f} GFLOP/s"
         print_row(label, gpu_ms, cpu_ms, extra=extra)
 
-        summary.append({
-            "label": label,
-            "gpu_ms": gpu_ms,
-            "cpu_ms": cpu_ms,
-            "shape": f"({batch},{in_f})->({batch},{out_f}) [{format_size(data_bytes)}]",
-            "gpu_gflops": gpu_gflops,
-            "cpu_gflops": cpu_gflops,
-            "mode": "gpu_resident",
-        })
+        summary.append(
+            {
+                "label": label,
+                "gpu_ms": gpu_ms,
+                "cpu_ms": cpu_ms,
+                "shape": f"({batch},{in_f})->({batch},{out_f}) [{format_size(data_bytes)}]",
+                "gpu_gflops": gpu_gflops,
+                "cpu_gflops": cpu_gflops,
+                "mode": "gpu_resident",
+            }
+        )
 
     return summary
 
@@ -258,10 +262,7 @@ def main():
             speedup = f"{std_ms / gpur_ms:.2f}x"
         shape_label = std["label"]
         print(
-            f"  {shape_label:<28} "
-            f"{format_time(std_ms):>10} "
-            f"{format_time(gpur_ms):>10} "
-            f"{speedup:>8}"
+            f"  {shape_label:<28} {format_time(std_ms):>10} {format_time(gpur_ms):>10} {speedup:>8}"
         )
 
     # -- Peak throughput --

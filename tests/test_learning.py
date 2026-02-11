@@ -1,6 +1,7 @@
 """
 Tests for learning operations
 """
+
 import numpy as np
 import pytest
 
@@ -36,9 +37,7 @@ class TestLearningOperations:
         running_mean = np.zeros(n_features, dtype=np.float32)
         running_var = np.ones(n_features, dtype=np.float32)
 
-        whitened, new_mean, new_var = gpu.whitening_transform(
-            data, running_mean, running_var
-        )
+        whitened, new_mean, new_var = gpu.whitening_transform(data, running_mean, running_var)
 
         assert whitened.shape == data.shape
         assert np.all(np.isfinite(whitened))

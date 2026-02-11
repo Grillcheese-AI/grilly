@@ -3,6 +3,7 @@ Tests for PyTorch Operations
 
 Tests common PyTorch operations using Vulkan backend
 """
+
 import numpy as np
 import pytest
 
@@ -32,6 +33,7 @@ try:
         transpose,
         unsqueeze,
     )
+
     PYTORCH_OPS_AVAILABLE = True
 except ImportError:
     PYTORCH_OPS_AVAILABLE = False

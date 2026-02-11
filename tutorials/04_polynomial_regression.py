@@ -38,19 +38,19 @@ print("=" * 60)
 for t in range(2000):
     # Forward pass: compute predicted y
     # y_pred = a + b*x + c*x^2 + d*x^3
-    y_pred = a + b * x + c * x ** 2 + d * x ** 3
+    y_pred = a + b * x + c * x**2 + d * x**3
 
     # Compute and print loss (MSE * n)
     loss = np.sum((y_pred - y) ** 2)
     if t % 100 == 99:
-        print(f"Iteration {t+1:4d}: loss = {loss:.4f}")
+        print(f"Iteration {t + 1:4d}: loss = {loss:.4f}")
 
     # Backprop to compute gradients of a, b, c, d with respect to loss
     grad_y_pred = 2.0 * (y_pred - y)
     grad_a = grad_y_pred.sum()
     grad_b = (grad_y_pred * x).sum()
-    grad_c = (grad_y_pred * x ** 2).sum()
-    grad_d = (grad_y_pred * x ** 3).sum()
+    grad_c = (grad_y_pred * x**2).sum()
+    grad_d = (grad_y_pred * x**3).sum()
 
     # Update weights using gradient descent
     a -= learning_rate * grad_a
@@ -67,7 +67,7 @@ print("\nExpected (Taylor): y ≈ 0 + 1.0x + 0x^2 - 0.1667x^3")
 
 # Test GPU operations on the result
 print("\n--- GPU Acceleration Demo ---")
-y_final = a + b * x + c * x ** 2 + d * x ** 3
+y_final = a + b * x + c * x**2 + d * x**3
 y_final_2d = y_final.reshape(1, -1)
 
 # Apply activation functions via GPU
@@ -81,4 +81,6 @@ print(f"GELU on predictions: min={gelu_out.min():.4f}, max={gelu_out.max():.4f}"
 pool = compute.fnn.buffer_pool
 if pool:
     stats = pool.get_stats()
-    print(f"\nBuffer pool: {stats['hits']} hits, {stats['allocations']} allocs, {stats['hit_rate']:.1%} hit rate")
+    print(
+        f"\nBuffer pool: {stats['hits']} hits, {stats['allocations']} allocs, {stats['hit_rate']:.1%} hit rate"
+    )

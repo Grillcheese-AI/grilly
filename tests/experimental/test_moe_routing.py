@@ -22,10 +22,7 @@ class TestResonatorMoEBasic:
         def expert_b(x):
             return x + 1
 
-        moe = ResonatorMoE(
-            dim=dim,
-            experts={"expert_a": expert_a, "expert_b": expert_b}
-        )
+        moe = ResonatorMoE(dim=dim, experts={"expert_a": expert_a, "expert_b": expert_b})
 
         assert len(moe.experts) == 2
 
@@ -33,13 +30,13 @@ class TestResonatorMoEBasic:
         """Should create expert vectors for routing."""
         from grilly.experimental.moe.routing import ResonatorMoE
 
-        def expert_a(x): return x
-        def expert_b(x): return x
+        def expert_a(x):
+            return x
 
-        moe = ResonatorMoE(
-            dim=dim,
-            experts={"expert_a": expert_a, "expert_b": expert_b}
-        )
+        def expert_b(x):
+            return x
+
+        moe = ResonatorMoE(dim=dim, experts={"expert_a": expert_a, "expert_b": expert_b})
 
         assert "expert_a" in moe.expert_vectors
         assert "expert_b" in moe.expert_vectors
@@ -53,13 +50,13 @@ class TestResonatorMoERouting:
         """route should return selected expert names."""
         from grilly.experimental.moe.routing import ResonatorMoE
 
-        def expert_a(x): return x
-        def expert_b(x): return x
+        def expert_a(x):
+            return x
 
-        moe = ResonatorMoE(
-            dim=dim,
-            experts={"expert_a": expert_a, "expert_b": expert_b}
-        )
+        def expert_b(x):
+            return x
+
+        moe = ResonatorMoE(dim=dim, experts={"expert_a": expert_a, "expert_b": expert_b})
 
         # Create a query
         query = np.random.randn(dim).astype(np.float32)
@@ -89,13 +86,13 @@ class TestResonatorMoERouting:
         """Should only select experts above similarity threshold."""
         from grilly.experimental.moe.routing import ResonatorMoE
 
-        def expert_a(x): return x
-        def expert_b(x): return x
+        def expert_a(x):
+            return x
 
-        moe = ResonatorMoE(
-            dim=dim,
-            experts={"expert_a": expert_a, "expert_b": expert_b}
-        )
+        def expert_b(x):
+            return x
+
+        moe = ResonatorMoE(dim=dim, experts={"expert_a": expert_a, "expert_b": expert_b})
 
         # Create query similar to expert_a's vector
         query = moe.expert_vectors["expert_a"].copy()
@@ -114,13 +111,13 @@ class TestResonatorMoEForward:
         from grilly.experimental.moe.routing import ResonatorMoE
 
         # Experts that preserve shape
-        def expert_a(x): return x * 2
-        def expert_b(x): return x + 0.5
+        def expert_a(x):
+            return x * 2
 
-        moe = ResonatorMoE(
-            dim=dim,
-            experts={"expert_a": expert_a, "expert_b": expert_b}
-        )
+        def expert_b(x):
+            return x + 0.5
+
+        moe = ResonatorMoE(dim=dim, experts={"expert_a": expert_a, "expert_b": expert_b})
 
         x = np.random.randn(dim).astype(np.float32)
         query = x.copy()
@@ -134,13 +131,13 @@ class TestResonatorMoEForward:
         from grilly.experimental.moe.routing import ResonatorMoE
 
         # Distinguishable experts
-        def expert_double(x): return x * 2
-        def expert_zero(x): return np.zeros_like(x)
+        def expert_double(x):
+            return x * 2
 
-        moe = ResonatorMoE(
-            dim=dim,
-            experts={"double": expert_double, "zero": expert_zero}
-        )
+        def expert_zero(x):
+            return np.zeros_like(x)
+
+        moe = ResonatorMoE(dim=dim, experts={"double": expert_double, "zero": expert_zero})
 
         x = np.ones(dim, dtype=np.float32)
 
@@ -157,13 +154,13 @@ class TestResonatorMoEForward:
         """Forward with top_k > 1 should combine expert outputs."""
         from grilly.experimental.moe.routing import ResonatorMoE
 
-        def expert_a(x): return x * 2
-        def expert_b(x): return x * 3
+        def expert_a(x):
+            return x * 2
 
-        moe = ResonatorMoE(
-            dim=dim,
-            experts={"a": expert_a, "b": expert_b}
-        )
+        def expert_b(x):
+            return x * 3
+
+        moe = ResonatorMoE(dim=dim, experts={"a": expert_a, "b": expert_b})
 
         x = np.ones(dim, dtype=np.float32)
         query = np.random.randn(dim).astype(np.float32)
@@ -183,19 +180,16 @@ class TestResonatorMoECompositional:
         from grilly.experimental.moe.routing import ResonatorMoE
         from grilly.experimental.vsa.ops import BinaryOps
 
-        def expert_a(x): return x
-        def expert_b(x): return x
+        def expert_a(x):
+            return x
 
-        moe = ResonatorMoE(
-            dim=dim,
-            experts={"expert_a": expert_a, "expert_b": expert_b}
-        )
+        def expert_b(x):
+            return x
+
+        moe = ResonatorMoE(dim=dim, experts={"expert_a": expert_a, "expert_b": expert_b})
 
         # Bundle both expert vectors
-        query = BinaryOps.bundle([
-            moe.expert_vectors["expert_a"],
-            moe.expert_vectors["expert_b"]
-        ])
+        query = BinaryOps.bundle([moe.expert_vectors["expert_a"], moe.expert_vectors["expert_b"]])
 
         selected = moe.route(query, top_k=2)
 
@@ -211,13 +205,13 @@ class TestResonatorMoEWeights:
         """get_weights should return expert->weight mapping."""
         from grilly.experimental.moe.routing import ResonatorMoE
 
-        def expert_a(x): return x
-        def expert_b(x): return x
+        def expert_a(x):
+            return x
 
-        moe = ResonatorMoE(
-            dim=dim,
-            experts={"expert_a": expert_a, "expert_b": expert_b}
-        )
+        def expert_b(x):
+            return x
+
+        moe = ResonatorMoE(dim=dim, experts={"expert_a": expert_a, "expert_b": expert_b})
 
         query = np.random.randn(dim).astype(np.float32)
 
@@ -253,24 +247,24 @@ class TestResonatorMoECapsuleRouting:
         from grilly.experimental.cognitive.capsule import CapsuleEncoder
         from grilly.experimental.moe.routing import ResonatorMoE
 
-        def expert_a(x): return x
-        def expert_b(x): return x
+        def expert_a(x):
+            return x
+
+        def expert_b(x):
+            return x
 
         encoder = CapsuleEncoder(input_dim=dim)
         query = np.random.randn(dim).astype(np.float32)
         query_capsule = encoder.encode_vector(query)
 
-        expert_capsules = {
-            "expert_a": query_capsule,
-            "expert_b": -query_capsule
-        }
+        expert_capsules = {"expert_a": query_capsule, "expert_b": -query_capsule}
 
         moe = ResonatorMoE(
             dim=dim,
             experts={"expert_a": expert_a, "expert_b": expert_b},
             expert_capsules=expert_capsules,
             capsule_encoder=encoder,
-            capsule_weight=1.0
+            capsule_weight=1.0,
         )
 
         selected = moe.route(query, top_k=1)
@@ -284,13 +278,16 @@ class TestRelationalMoE:
         """Should initialize RelationalMoE with relational expert keys."""
         from grilly.experimental.moe.routing import RelationalMoE
 
-        def expert_add(x): return x + 1
-        def expert_mult(x): return x * 2
+        def expert_add(x):
+            return x + 1
+
+        def expert_mult(x):
+            return x * 2
 
         moe = RelationalMoE(
             dim=dim,
             experts={"add": expert_add, "mult": expert_mult},
-            expert_relations={"add": ("input", "sum"), "mult": ("input", "product")}
+            expert_relations={"add": ("input", "sum"), "mult": ("input", "product")},
         )
 
         assert len(moe.experts) == 2
@@ -300,13 +297,16 @@ class TestRelationalMoE:
         from grilly.experimental.moe.relational import RelationalEncoder
         from grilly.experimental.moe.routing import RelationalMoE
 
-        def expert_add(x): return x + 1
-        def expert_mult(x): return x * 2
+        def expert_add(x):
+            return x + 1
+
+        def expert_mult(x):
+            return x * 2
 
         moe = RelationalMoE(
             dim=dim,
             experts={"add": expert_add, "mult": expert_mult},
-            expert_relations={"add": ("input", "sum"), "mult": ("input", "product")}
+            expert_relations={"add": ("input", "sum"), "mult": ("input", "product")},
         )
 
         # Query for "product" concept

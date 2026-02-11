@@ -26,17 +26,11 @@ print("-" * 60)
 world = TemporalWorldModel(dim=dim)
 
 world.causal_chain.add_rule(
-    name="rain_wet",
-    conditions={"raining": True},
-    effects={"wet": True},
-    probability=1.0
+    name="rain_wet", conditions={"raining": True}, effects={"wet": True}, probability=1.0
 )
 
 world.causal_chain.add_rule(
-    name="wet_sick",
-    conditions={"wet": True, "cold": True},
-    effects={"sick": True},
-    probability=1.0
+    name="wet_sick", conditions={"wet": True, "cold": True}, effects={"sick": True}, probability=1.0
 )
 
 world.set_state(0, {"raining": True, "wet": True, "cold": True})
@@ -56,7 +50,7 @@ query = CounterfactualQuery(
     actual_value=True,
     counterfactual_value=False,
     query_time=2,
-    query_variable="wet"
+    query_variable="wet",
 )
 
 cf_result = reasoner.query_counterfactual(query)
@@ -72,11 +66,7 @@ print("-" * 60)
 validator = TemporalDecisionValidator(world, reasoner)
 
 decision = {"wet": False}
-validation = validator.validate_decision(
-    decision_time=1,
-    decision=decision,
-    check_horizon=3
-)
+validation = validator.validate_decision(decision_time=1, decision=decision, check_horizon=3)
 
 print(f"Decision at t=1: {decision}")
 print(f"Valid: {validation.is_valid}")

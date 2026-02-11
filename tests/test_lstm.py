@@ -2,6 +2,7 @@
 Tests for LSTM layer.
 Validates correctness against PyTorch and verifies BPTT.
 """
+
 import numpy as np
 import pytest
 
@@ -9,6 +10,7 @@ import pytest
 try:
     import torch
     import torch.nn as torch_nn
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -20,6 +22,7 @@ class TestLSTMCellBasic:
     def test_lstmcell_import(self):
         """Test LSTMCell can be imported"""
         from grilly.nn import LSTMCell
+
         assert LSTMCell is not None
 
     def test_lstmcell_init(self):
@@ -80,6 +83,7 @@ class TestLSTMBasic:
     def test_lstm_import(self):
         """Test LSTM can be imported"""
         from grilly.nn import LSTM
+
         assert LSTM is not None
 
     def test_lstm_init(self):
@@ -195,10 +199,18 @@ class TestLSTMCellVsPyTorch:
         torch_cell = torch_nn.LSTMCell(input_size, hidden_size)
 
         # Copy weights from Grilly to PyTorch
-        torch_cell.weight_ih.data = torch.from_numpy(np.asarray(grilly_cell.weight_ih.data, dtype=np.float32))
-        torch_cell.weight_hh.data = torch.from_numpy(np.asarray(grilly_cell.weight_hh.data, dtype=np.float32))
-        torch_cell.bias_ih.data = torch.from_numpy(np.asarray(grilly_cell.bias_ih.data, dtype=np.float32))
-        torch_cell.bias_hh.data = torch.from_numpy(np.asarray(grilly_cell.bias_hh.data, dtype=np.float32))
+        torch_cell.weight_ih.data = torch.from_numpy(
+            np.asarray(grilly_cell.weight_ih.data, dtype=np.float32)
+        )
+        torch_cell.weight_hh.data = torch.from_numpy(
+            np.asarray(grilly_cell.weight_hh.data, dtype=np.float32)
+        )
+        torch_cell.bias_ih.data = torch.from_numpy(
+            np.asarray(grilly_cell.bias_ih.data, dtype=np.float32)
+        )
+        torch_cell.bias_hh.data = torch.from_numpy(
+            np.asarray(grilly_cell.bias_hh.data, dtype=np.float32)
+        )
 
         # Create same input
         input = np.random.randn(batch_size, input_size).astype(np.float32)
@@ -215,10 +227,20 @@ class TestLSTMCellVsPyTorch:
         h_torch, c_torch = torch_cell(torch_input, (torch_h_prev, torch_c_prev))
 
         # Compare outputs
-        np.testing.assert_allclose(h_grilly, h_torch.detach().numpy(), rtol=1e-4, atol=1e-5,
-                                  err_msg="Hidden states should match")
-        np.testing.assert_allclose(c_grilly, c_torch.detach().numpy(), rtol=1e-4, atol=1e-5,
-                                  err_msg="Cell states should match")
+        np.testing.assert_allclose(
+            h_grilly,
+            h_torch.detach().numpy(),
+            rtol=1e-4,
+            atol=1e-5,
+            err_msg="Hidden states should match",
+        )
+        np.testing.assert_allclose(
+            c_grilly,
+            c_torch.detach().numpy(),
+            rtol=1e-4,
+            atol=1e-5,
+            err_msg="Cell states should match",
+        )
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch not available")
@@ -245,10 +267,26 @@ class TestLSTMVsPyTorch:
 
         # Copy weights from Grilly to PyTorch
         with torch.no_grad():
-            torch_lstm.weight_ih_l0.copy_(torch.from_numpy(np.asarray(grilly_lstm.cells_forward[0].weight_ih.data, dtype=np.float32)))
-            torch_lstm.weight_hh_l0.copy_(torch.from_numpy(np.asarray(grilly_lstm.cells_forward[0].weight_hh.data, dtype=np.float32)))
-            torch_lstm.bias_ih_l0.copy_(torch.from_numpy(np.asarray(grilly_lstm.cells_forward[0].bias_ih.data, dtype=np.float32)))
-            torch_lstm.bias_hh_l0.copy_(torch.from_numpy(np.asarray(grilly_lstm.cells_forward[0].bias_hh.data, dtype=np.float32)))
+            torch_lstm.weight_ih_l0.copy_(
+                torch.from_numpy(
+                    np.asarray(grilly_lstm.cells_forward[0].weight_ih.data, dtype=np.float32)
+                )
+            )
+            torch_lstm.weight_hh_l0.copy_(
+                torch.from_numpy(
+                    np.asarray(grilly_lstm.cells_forward[0].weight_hh.data, dtype=np.float32)
+                )
+            )
+            torch_lstm.bias_ih_l0.copy_(
+                torch.from_numpy(
+                    np.asarray(grilly_lstm.cells_forward[0].bias_ih.data, dtype=np.float32)
+                )
+            )
+            torch_lstm.bias_hh_l0.copy_(
+                torch.from_numpy(
+                    np.asarray(grilly_lstm.cells_forward[0].bias_hh.data, dtype=np.float32)
+                )
+            )
 
         # Create same input
         input = np.random.randn(seq_len, batch_size, input_size).astype(np.float32)
@@ -261,12 +299,27 @@ class TestLSTMVsPyTorch:
         output_torch, (h_n_torch, c_n_torch) = torch_lstm(torch_input)
 
         # Compare outputs
-        np.testing.assert_allclose(output_grilly, output_torch.detach().numpy(),
-                                  rtol=1e-4, atol=1e-5, err_msg="Outputs should match")
-        np.testing.assert_allclose(h_n_grilly, h_n_torch.detach().numpy(),
-                                  rtol=1e-4, atol=1e-5, err_msg="Final hidden should match")
-        np.testing.assert_allclose(c_n_grilly, c_n_torch.detach().numpy(),
-                                  rtol=1e-4, atol=1e-5, err_msg="Final cell should match")
+        np.testing.assert_allclose(
+            output_grilly,
+            output_torch.detach().numpy(),
+            rtol=1e-4,
+            atol=1e-5,
+            err_msg="Outputs should match",
+        )
+        np.testing.assert_allclose(
+            h_n_grilly,
+            h_n_torch.detach().numpy(),
+            rtol=1e-4,
+            atol=1e-5,
+            err_msg="Final hidden should match",
+        )
+        np.testing.assert_allclose(
+            c_n_grilly,
+            c_n_torch.detach().numpy(),
+            rtol=1e-4,
+            atol=1e-5,
+            err_msg="Final cell should match",
+        )
 
 
 class TestLSTMEdgeCases:

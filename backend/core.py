@@ -22,6 +22,7 @@ class VulkanCore:
         if not VULKAN_AVAILABLE:
             raise RuntimeError("Vulkan not available")
         import os
+
         # Disable Mesa device_select layer which can force CPU llvmpipe
         os.environ.setdefault("VK_LOADER_LAYERS_DISABLE", "VK_LAYER_MESA_device_select")
 
@@ -47,7 +48,7 @@ class VulkanCore:
 
         for spv_file in spv_dir.glob("*.spv"):
             name = spv_file.stem
-            with open(spv_file, 'rb') as f:
+            with open(spv_file, "rb") as f:
                 shaders[name] = f.read()
 
         # Also load from experimental/spv directory
@@ -57,15 +58,23 @@ class VulkanCore:
                 name = spv_file.stem
                 # Only add if not already loaded (main directory takes precedence)
                 if name not in shaders:
-                    with open(spv_file, 'rb') as f:
+                    with open(spv_file, "rb") as f:
                         shaders[name] = f.read()
 
         # Check for missing shaders and warn
-        required_shaders = ['fnn-xavier-init', 'convd_im2col', 'conv2d-backward-weight',
-                            'conv2d-backward-input', 'conv2d-forward', 'gemm_mnk']
+        required_shaders = [
+            "fnn-xavier-init",
+            "convd_im2col",
+            "conv2d-backward-weight",
+            "conv2d-backward-input",
+            "conv2d-forward",
+            "gemm_mnk",
+        ]
         for shader_name in required_shaders:
             if shader_name not in shaders:
-                print(f"[WARNING] Shader {shader_name}.spv not found - GPU Xavier init will use CPU fallback")
+                print(
+                    f"[WARNING] Shader {shader_name}.spv not found - GPU Xavier init will use CPU fallback"
+                )
                 print(f"  To compile: glslc {shader_name}.glsl -o spv/{shader_name}.spv")
 
         return shaders
@@ -79,14 +88,11 @@ class VulkanCore:
             applicationVersion=VK_MAKE_VERSION(1, 0, 0),
             pEngineName="SNN-Compute",
             engineVersion=VK_MAKE_VERSION(1, 0, 0),
-            apiVersion=VK_API_VERSION_1_0
+            apiVersion=VK_API_VERSION_1_0,
         )
 
-
-
         create_info = VkInstanceCreateInfo(
-            sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,
-            pApplicationInfo=app_info
+            sType=VK_STRUCTURE_TYPE_APPLICATION_INFO, pApplicationInfo=app_info
         )
 
         self.instance = vkCreateInstance(create_info, None)
@@ -126,16 +132,16 @@ class VulkanCore:
             sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
             queueFamilyIndex=compute_queue_family,
             queueCount=1,
-            pQueuePriorities=[1.0]
+            pQueuePriorities=[1.0],
         )
 
         # Request sparse features if available (for tiling support)
         device_features = VkPhysicalDeviceFeatures()
         try:
             # Try to enable sparse features for tiling
-            if hasattr(self.device_features, 'sparseBinding'):
+            if hasattr(self.device_features, "sparseBinding"):
                 device_features.sparseBinding = self.device_features.sparseBinding
-            if hasattr(self.device_features, 'sparseResidencyBuffer'):
+            if hasattr(self.device_features, "sparseResidencyBuffer"):
                 device_features.sparseResidencyBuffer = self.device_features.sparseResidencyBuffer
         except:
             pass
@@ -144,7 +150,7 @@ class VulkanCore:
             sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
             queueCreateInfoCount=1,
             pQueueCreateInfos=[queue_create_info],
-            pEnabledFeatures=device_features
+            pEnabledFeatures=device_features,
         )
 
         self.device = vkCreateDevice(self.physical_device, device_create_info, None)
@@ -155,7 +161,7 @@ class VulkanCore:
         pool_info = VkCommandPoolCreateInfo(
             sType=VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
             queueFamilyIndex=compute_queue_family,
-            flags=VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
+            flags=VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
         )
         self.command_pool = vkCreateCommandPool(self.device, pool_info, None)
 
@@ -164,16 +170,13 @@ class VulkanCore:
             sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
             commandPool=self.command_pool,
             level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            commandBufferCount=1
+            commandBufferCount=1,
         )
         self._cmd_buffer = vkAllocateCommandBuffers(self.device, cmd_alloc_info)[0]
 
         # Create descriptor pool (large enough for all shaders)
         pool_sizes = [
-            VkDescriptorPoolSize(
-                type=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                descriptorCount=1000
-            )
+            VkDescriptorPoolSize(type=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, descriptorCount=1000)
         ]
 
         pool_info = VkDescriptorPoolCreateInfo(
@@ -181,7 +184,7 @@ class VulkanCore:
             flags=VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
             maxSets=500,
             poolSizeCount=len(pool_sizes),
-            pPoolSizes=pool_sizes
+            pPoolSizes=pool_sizes,
         )
 
         self.descriptor_pool = vkCreateDescriptorPool(self.device, pool_info, None)
@@ -202,7 +205,11 @@ class VulkanCore:
             """Execute info."""
 
             props = vkGetPhysicalDeviceProperties(dev)
-            name = props.deviceName.decode('utf-8') if isinstance(props.deviceName, bytes) else props.deviceName
+            name = (
+                props.deviceName.decode("utf-8")
+                if isinstance(props.deviceName, bytes)
+                else props.deviceName
+            )
             return {
                 "idx": idx,
                 "device": dev,
@@ -215,7 +222,12 @@ class VulkanCore:
 
         # Log device inventory once to help diagnose CPU binding
         if not hasattr(VulkanCore, "_logged_devices"):
-            readable = ", ".join([f"{e['idx']}:{e['name']} (type {e['type']}, vendor 0x{e['vendor']:04X})" for e in entries])
+            readable = ", ".join(
+                [
+                    f"{e['idx']}:{e['name']} (type {e['type']}, vendor 0x{e['vendor']:04X})"
+                    for e in entries
+                ]
+            )
             print(f"[OK] Vulkan devices enumerated: {readable}")
             VulkanCore._logged_devices = True
 
@@ -230,7 +242,11 @@ class VulkanCore:
                 pass
 
         # Filter out CPU / llvmpipe soft devices
-        non_cpu = [e for e in entries if e["type"] != VK_PHYSICAL_DEVICE_TYPE_CPU and "llvmpipe" not in str(e["name"]).lower()]
+        non_cpu = [
+            e
+            for e in entries
+            if e["type"] != VK_PHYSICAL_DEVICE_TYPE_CPU and "llvmpipe" not in str(e["name"]).lower()
+        ]
         candidates = non_cpu or entries
 
         # Prefer discrete GPUs
@@ -245,7 +261,10 @@ class VulkanCore:
                     return e["device"]
 
         # If only CPU/llvmpipe remain, fail loudly unless overridden
-        if all(e["type"] == VK_PHYSICAL_DEVICE_TYPE_CPU or "llvmpipe" in str(e["name"]).lower() for e in candidates):
+        if all(
+            e["type"] == VK_PHYSICAL_DEVICE_TYPE_CPU or "llvmpipe" in str(e["name"]).lower()
+            for e in candidates
+        ):
             if os.getenv("ALLOW_CPU_VULKAN", "0").lower() not in ("1", "true", "yes"):
                 readable = ", ".join([e["name"] for e in entries])
                 raise RuntimeError(
@@ -259,7 +278,7 @@ class VulkanCore:
     def _check_tiling_support(self) -> dict:
         """
         Check for tiling-related GPU capabilities
-        
+
         Returns:
             Dictionary with tiling support information:
             - sparse_binding: Sparse buffer/image binding support
@@ -271,22 +290,26 @@ class VulkanCore:
             - vendor_id: Vendor ID (AMD=0x1002, NVIDIA=0x10DE, Intel=0x8086)
         """
         if not VULKAN_AVAILABLE:
-            return {'available': False}
+            return {"available": False}
 
         try:
             features = self.device_features
             props = self.device_properties
 
             tiling_info = {
-                'available': True,
-                'sparse_binding': getattr(features, 'sparseBinding', False),
-                'sparse_residency': getattr(features, 'sparseResidencyBuffer', False),
-                'sparse_residency_aliased': getattr(features, 'sparseResidencyAliased', False),
-                'shader_image_gather_extended': getattr(features, 'shaderImageGatherExtended', False),
-                'device_name': props.deviceName.decode('utf-8') if isinstance(props.deviceName, bytes) else props.deviceName,
-                'vendor_id': props.vendorID,
-                'device_type': props.deviceType,
-                'optimal_tiling': True,  # All modern GPUs support optimal tiling
+                "available": True,
+                "sparse_binding": getattr(features, "sparseBinding", False),
+                "sparse_residency": getattr(features, "sparseResidencyBuffer", False),
+                "sparse_residency_aliased": getattr(features, "sparseResidencyAliased", False),
+                "shader_image_gather_extended": getattr(
+                    features, "shaderImageGatherExtended", False
+                ),
+                "device_name": props.deviceName.decode("utf-8")
+                if isinstance(props.deviceName, bytes)
+                else props.deviceName,
+                "vendor_id": props.vendorID,
+                "device_type": props.deviceType,
+                "optimal_tiling": True,  # All modern GPUs support optimal tiling
             }
 
             # Check for vendor-specific tiling features
@@ -294,22 +317,22 @@ class VulkanCore:
             if props.vendorID == 0x1002:
                 vendor_name = "AMD"
                 # AMD GPUs typically have good tiling support
-                tiling_info['amd_optimized'] = True
+                tiling_info["amd_optimized"] = True
             elif props.vendorID == 0x10DE:
                 vendor_name = "NVIDIA"
                 # NVIDIA GPUs have excellent tiling support
-                tiling_info['nvidia_optimized'] = True
+                tiling_info["nvidia_optimized"] = True
             elif props.vendorID == 0x8086:
                 vendor_name = "Intel"
-                tiling_info['intel_optimized'] = True
+                tiling_info["intel_optimized"] = True
 
-            tiling_info['vendor'] = vendor_name
+            tiling_info["vendor"] = vendor_name
 
             # Log tiling capabilities
             if not hasattr(VulkanCore, "_logged_tiling"):
-                if tiling_info['sparse_binding']:
+                if tiling_info["sparse_binding"]:
                     print("[OK] Tiling support: Sparse binding enabled")
-                if tiling_info['sparse_residency']:
+                if tiling_info["sparse_residency"]:
                     print("[OK] Tiling support: Sparse residency enabled")
                 VulkanCore._logged_tiling = True
 
@@ -317,16 +340,16 @@ class VulkanCore:
 
         except Exception as e:
             print(f"[WARNING] Failed to check tiling support: {e}")
-            return {'available': False, 'error': str(e)}
+            return {"available": False, "error": str(e)}
 
     def get_tiling_info(self) -> dict:
         """
         Get tiling support information
-        
+
         Returns:
             Dictionary with tiling capabilities
         """
-        return getattr(self, 'tiling_support', {'available': False})
+        return getattr(self, "tiling_support", {"available": False})
 
     def _create_buffer(self, size: int, usage: int = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT):
         """Create Vulkan buffer and allocate memory.
@@ -339,7 +362,7 @@ class VulkanCore:
             sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             size=size,
             usage=usage,
-            sharingMode=VK_SHARING_MODE_EXCLUSIVE
+            sharingMode=VK_SHARING_MODE_EXCLUSIVE,
         )
 
         buffer = vkCreateBuffer(self.device, buffer_info, None)
@@ -352,13 +375,13 @@ class VulkanCore:
         mem_type_index = self._find_memory_type(
             mem_req.memoryTypeBits,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            mem_props
+            mem_props,
         )
 
         alloc_info = VkMemoryAllocateInfo(
             sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             allocationSize=mem_req.size,
-            memoryTypeIndex=mem_type_index
+            memoryTypeIndex=mem_type_index,
         )
 
         memory = vkAllocateMemory(self.device, alloc_info, None)
@@ -369,8 +392,9 @@ class VulkanCore:
     def _find_memory_type(self, type_filter, properties, mem_props):
         """Find suitable memory type"""
         for i in range(mem_props.memoryTypeCount):
-            if (type_filter & (1 << i)) and \
-               (mem_props.memoryTypes[i].propertyFlags & properties) == properties:
+            if (type_filter & (1 << i)) and (
+                mem_props.memoryTypes[i].propertyFlags & properties
+            ) == properties:
                 return i
         raise RuntimeError("Failed to find suitable memory type")
 
@@ -378,7 +402,7 @@ class VulkanCore:
         """Upload numpy array to GPU buffer"""
         data_ptr = vkMapMemory(self.device, memory, 0, data.nbytes, 0)
         memview = memoryview(data_ptr)
-        memview[:data.nbytes] = data.tobytes()
+        memview[: data.nbytes] = data.tobytes()
         vkUnmapMemory(self.device, memory)
 
     def _download_buffer(self, memory, size: int, dtype=np.float32) -> np.ndarray:
@@ -391,9 +415,16 @@ class VulkanCore:
         vkUnmapMemory(self.device, memory)
         return result
 
-    def _dispatch_compute(self, pipeline, pipeline_layout, descriptor_set,
-                         workgroup_x: int, push_constants: bytes = None,
-                         workgroup_y: int = 1, workgroup_z: int = 1):
+    def _dispatch_compute(
+        self,
+        pipeline,
+        pipeline_layout,
+        descriptor_set,
+        workgroup_x: int,
+        push_constants: bytes = None,
+        workgroup_y: int = 1,
+        workgroup_z: int = 1,
+    ):
         """Dispatch compute shader using pre-allocated command buffer."""
         command_buffer = self._cmd_buffer
 
@@ -403,7 +434,7 @@ class VulkanCore:
         # Begin command buffer
         begin_info = VkCommandBufferBeginInfo(
             sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+            flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         )
         vkBeginCommandBuffer(command_buffer, begin_info)
 
@@ -413,8 +444,11 @@ class VulkanCore:
             command_buffer,
             VK_PIPELINE_BIND_POINT_COMPUTE,
             pipeline_layout,
-            0, 1, [descriptor_set],
-            0, None
+            0,
+            1,
+            [descriptor_set],
+            0,
+            None,
         )
 
         # Push constants if provided
@@ -426,7 +460,7 @@ class VulkanCore:
                 VK_SHADER_STAGE_COMPUTE_BIT,
                 0,
                 len(push_constants),
-                ctypes.addressof(push_buf)
+                ctypes.addressof(push_buf),
             )
 
         # Dispatch
@@ -438,7 +472,7 @@ class VulkanCore:
         submit_info = VkSubmitInfo(
             sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,
             commandBufferCount=1,
-            pCommandBuffers=[command_buffer]
+            pCommandBuffers=[command_buffer],
         )
 
         vkQueueSubmit(self.queue, 1, [submit_info], None)
@@ -446,23 +480,22 @@ class VulkanCore:
 
     def cleanup(self):
         """Cleanup Vulkan resources"""
-        if hasattr(self, 'device') and self.device:
+        if hasattr(self, "device") and self.device:
             device = self.device
             self.device = None  # Prevent double cleanup
-            if hasattr(self, 'descriptor_pool') and self.descriptor_pool:
+            if hasattr(self, "descriptor_pool") and self.descriptor_pool:
                 vkDestroyDescriptorPool(device, self.descriptor_pool, None)
                 self.descriptor_pool = None
-            if hasattr(self, 'command_pool') and self.command_pool:
+            if hasattr(self, "command_pool") and self.command_pool:
                 # Free pre-allocated command buffer before destroying pool
-                if hasattr(self, '_cmd_buffer') and self._cmd_buffer is not None:
+                if hasattr(self, "_cmd_buffer") and self._cmd_buffer is not None:
                     vkFreeCommandBuffers(device, self.command_pool, 1, [self._cmd_buffer])
                     self._cmd_buffer = None
                 vkDestroyCommandPool(device, self.command_pool, None)
                 self.command_pool = None
             vkDestroyDevice(device, None)
 
-        if hasattr(self, 'instance') and self.instance:
+        if hasattr(self, "instance") and self.instance:
             instance = self.instance
             self.instance = None  # Prevent double cleanup
             vkDestroyInstance(instance, None)
-

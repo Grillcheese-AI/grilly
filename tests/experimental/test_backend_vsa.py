@@ -32,8 +32,9 @@ class TestVulkanVSABasic:
         # This will fail if Vulkan not available
         try:
             from grilly.backend.core import VulkanCore
+
             core = VulkanCore()
-            vsa = VulkanVSA(core)
+            VulkanVSA(core)
         except RuntimeError:
             pytest.skip("Vulkan not available")
 
@@ -199,7 +200,7 @@ class TestVulkanVSAResonator:
             core = VulkanCore()
             vsa = VulkanVSA(core)
 
-            if 'vsa-resonator-step' not in core.shaders:
+            if "vsa-resonator-step" not in core.shaders:
                 pytest.skip("Resonator step shader not available")
 
             # Simple two-factor composite
@@ -212,7 +213,9 @@ class TestVulkanVSAResonator:
             cpu_idx = int(np.argmax(cpu_scores))
             cpu_vec = codebook[cpu_idx].copy()
 
-            gpu_vec, gpu_idx = vsa.resonator_step(composite, codebook, other_estimates=[codebook[5]])
+            gpu_vec, gpu_idx = vsa.resonator_step(
+                composite, codebook, other_estimates=[codebook[5]]
+            )
 
             assert gpu_idx == cpu_idx
             np.testing.assert_array_almost_equal(cpu_vec, gpu_vec, decimal=5)

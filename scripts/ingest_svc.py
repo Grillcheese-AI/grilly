@@ -28,9 +28,9 @@ def _fmt_rate(n: int, dt: float) -> str:
         return "∞/s"
     rate = n / dt
     if rate >= 1e6:
-        return f"{rate/1e6:.2f}M/s"
+        return f"{rate / 1e6:.2f}M/s"
     if rate >= 1e3:
-        return f"{rate/1e3:.2f}k/s"
+        return f"{rate / 1e3:.2f}k/s"
     return f"{rate:.2f}/s"
 
 
@@ -145,7 +145,6 @@ def main() -> None:
             engine=engine,
         )
 
-
         total += len(chunk)
         total_templates += res.templates_learned
         total_sentences += res.sentences_learned
@@ -160,12 +159,21 @@ def main() -> None:
     print(f"  Facts:      {len(controller.world.facts)}")
     out = Path(args.file).with_suffix(".ingest_checkpoint")
     print(f"  Checkpoint: {out}")
-    save_ingest_checkpoint(str(out), controller, include_fact_vectors=True, include_sentence_memory=True, sentence_compress="auto", fp16=True)
+    save_ingest_checkpoint(
+        str(out),
+        controller,
+        include_fact_vectors=True,
+        include_sentence_memory=True,
+        sentence_compress="auto",
+        fp16=True,
+    )
 
     realms = getattr(controller.language, "realm_vectors", {}) or {}
     if realms and not args.no_realm_vectors:
         realm_names = sorted(realms.keys())
-        print(f"  Realms:     {len(realm_names)} ({', '.join(realm_names[:12])}{'...' if len(realm_names) > 12 else ''})")
+        print(
+            f"  Realms:     {len(realm_names)} ({', '.join(realm_names[:12])}{'...' if len(realm_names) > 12 else ''})"
+        )
 
         # Optional: build MoE router over realm indicators
         realm_fns = {r: (lambda x, _r=r: x) for r in realm_names}

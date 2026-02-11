@@ -16,7 +16,7 @@ from grilly.experimental.vsa.ops import BinaryOps
 class ResonatorMoE:
     """
     Mixture of Experts using resonator-based routing.
-    
+
     Routes queries to experts by computing similarity between
     query and expert vectors. Supports top-k expert selection
     and weighted combination.
@@ -30,11 +30,11 @@ class ResonatorMoE:
         expert_capsules: dict[str, np.ndarray] | None = None,
         capsule_encoder: CapsuleEncoder | None = None,
         capsule_weight: float = 0.3,
-        vsa_backend: Any | None = None
+        vsa_backend: Any | None = None,
     ):
         """
         Initialize ResonatorMoE.
-        
+
         Args:
             dim: Dimension of vectors
             experts: Dictionary mapping expert names to functions
@@ -65,7 +65,13 @@ class ResonatorMoE:
         self.capsule_weight = float(np.clip(capsule_weight, 0.0, 1.0))
         self.vsa_backend = vsa_backend
         self._expert_names = list(self.expert_vectors.keys())
-        self._expert_matrix = np.stack([self.expert_vectors[n] for n in self._expert_names], axis=0).astype(np.float32) if self._expert_names else None
+        self._expert_matrix = (
+            np.stack([self.expert_vectors[n] for n in self._expert_names], axis=0).astype(
+                np.float32
+            )
+            if self._expert_names
+            else None
+        )
 
     def _combined_similarity(self, query: np.ndarray, expert_name: str) -> float:
         """Combine VSA and capsule similarity for routing."""
@@ -83,28 +89,29 @@ class ResonatorMoE:
         cap_sim = cosine_similarity(query_capsule, expert_capsule)
         return (1.0 - self.capsule_weight) * vsa_sim + self.capsule_weight * cap_sim
 
-    def route(
-        self,
-        query: np.ndarray,
-        top_k: int = 1,
-        threshold: float | None = None
-    ) -> list[str]:
+    def route(self, query: np.ndarray, top_k: int = 1, threshold: float | None = None) -> list[str]:
         """
         Route query to top-k most similar experts.
-        
+
         Args:
             query: Query vector of shape (dim,)
             top_k: Number of experts to select
             threshold: Optional minimum similarity threshold
-            
+
         Returns:
             List of expert names, ordered by similarity (descending)
         """
         # Fast path: VSA-only routing on GPU (capsule_weight == 0)
-        if (self.vsa_backend is not None and hasattr(self.vsa_backend, 'similarity_topk')
-                and self.capsule_weight <= 0.0 and self._expert_matrix is not None):
+        if (
+            self.vsa_backend is not None
+            and hasattr(self.vsa_backend, "similarity_topk")
+            and self.capsule_weight <= 0.0
+            and self._expert_matrix is not None
+        ):
             k = int(min(top_k, len(self._expert_names)))
-            idx, sims = self.vsa_backend.similarity_topk(query.astype(np.float32), self._expert_matrix, top_k=k)
+            idx, sims = self.vsa_backend.similarity_topk(
+                query.astype(np.float32), self._expert_matrix, top_k=k
+            )
             idx = idx.reshape(-1).tolist()
             sims = sims.reshape(-1).tolist()
             similarities = [(self._expert_names[i], float(s)) for i, s in zip(idx, sims)]
@@ -125,18 +132,14 @@ class ResonatorMoE:
         # Return top-k expert names
         return [name for name, _ in similarities[:top_k]]
 
-    def get_weights(
-        self,
-        query: np.ndarray,
-        normalize: bool = True
-    ) -> dict[str, float]:
+    def get_weights(self, query: np.ndarray, normalize: bool = True) -> dict[str, float]:
         """
         Get expert weights based on query similarity.
-        
+
         Args:
             query: Query vector
             normalize: If True, apply softmax normalization
-            
+
         Returns:
             Dictionary mapping expert names to weights
         """
@@ -155,20 +158,15 @@ class ResonatorMoE:
 
         return weights
 
-    def forward(
-        self,
-        x: np.ndarray,
-        query: np.ndarray,
-        top_k: int = 1
-    ) -> np.ndarray:
+    def forward(self, x: np.ndarray, query: np.ndarray, top_k: int = 1) -> np.ndarray:
         """
         Forward pass through MoE: route query and apply selected experts.
-        
+
         Args:
             x: Input tensor
             query: Query vector for routing
             top_k: Number of experts to use
-            
+
         Returns:
             Combined expert outputs
         """
@@ -202,14 +200,13 @@ class ResonatorMoE:
 
         return result.astype(np.float32)
 
-
     @classmethod
     def from_realm_vectors(
         cls,
         dim: int,
         realm_expert_fns: dict[str, Callable],
         realm_vectors: dict[str, np.ndarray] | None = None,
-    ) -> 'ResonatorMoE':
+    ) -> "ResonatorMoE":
         """
         Build a ResonatorMoE from SVC realm expert vectors.
 
@@ -229,8 +226,7 @@ class ResonatorMoE:
         """
         if realm_vectors is None:
             realm_vectors = {
-                realm: BinaryOps.hash_to_bipolar(realm, dim)
-                for realm in realm_expert_fns
+                realm: BinaryOps.hash_to_bipolar(realm, dim) for realm in realm_expert_fns
             }
         return cls(dim=dim, experts=realm_expert_fns, expert_vectors=realm_vectors)
 
@@ -238,7 +234,7 @@ class ResonatorMoE:
 class RelationalMoE(ResonatorMoE):
     """
     RelationalMoE - MoE with relational expert codebook.
-    
+
     Extends ResonatorMoE to use RelationalEncoder for creating
     expert vectors from relational concepts.
     """
@@ -248,11 +244,11 @@ class RelationalMoE(ResonatorMoE):
         dim: int,
         experts: dict[str, Callable],
         expert_relations: dict[str, tuple[str, str]],
-        relational_encoder: Optional['RelationalEncoder'] = None
+        relational_encoder: Optional["RelationalEncoder"] = None,
     ):
         """
         Initialize RelationalMoE.
-        
+
         Args:
             dim: Dimension of vectors
             experts: Dictionary mapping expert names to functions

@@ -13,9 +13,11 @@ from .compute import VulkanCompute
 try:
     import sys
     from pathlib import Path
+
     # Try to import from parent project if available
     sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
     from core.config import LogConfig, SNNConfig
+
     _config_available = True
 except ImportError:
     _config_available = False
@@ -27,7 +29,7 @@ _snn_logger = logging.getLogger(__name__)
 class SNNCompute:
     """
     High-level SNN interface for spike computation
-    
+
     Provides a clean API for processing embeddings through a spiking neural network.
     Uses Vulkan GPU acceleration when available, with CPU fallback.
     """
@@ -43,7 +45,7 @@ class SNNCompute:
     def __init__(self, n_neurons: int = None, use_vulkan: bool = True):
         """
         Initialize SNN compute engine
-        
+
         Args:
             n_neurons: Number of neurons (default from config or 1000)
             use_vulkan: Whether to use GPU acceleration
@@ -88,19 +90,21 @@ class SNNCompute:
     def forward(self, input_current: np.ndarray) -> np.ndarray:
         """
         Run one timestep of LIF dynamics
-        
+
         Args:
             input_current: Input current for each neuron (n_neurons,)
-            
+
         Returns:
             Spike output array (n_neurons,) - 1.0 where spike occurred, 0.0 otherwise
         """
         if self.use_vulkan and self.backend is not None:
             self.membrane, self.refractory, spikes = self.backend.lif_step(
-                input_current, self.membrane, self.refractory,
+                input_current,
+                self.membrane,
+                self.refractory,
                 dt=self.dt,
                 tau_mem=self.tau_mem,
-                v_thresh=self.v_thresh
+                v_thresh=self.v_thresh,
             )
             return spikes
         else:
@@ -117,13 +121,13 @@ class SNNCompute:
     def process(self, embedding: np.ndarray) -> dict:
         """
         Process embedding through SNN pipeline
-        
+
         Converts embedding to input current, runs through LIF neurons for
         multiple timesteps, and returns spike metrics for visualization.
-        
+
         Args:
             embedding: Input embedding vector (any length, will be padded/truncated)
-        
+
         Returns:
             Dictionary with:
                 - 'spike_activity': Total spike count across all timesteps
@@ -139,16 +143,12 @@ class SNNCompute:
         # Compute firing rate
         firing_rate = total_spikes / (self.n_neurons * self.timesteps)
 
-        return {
-            'spike_activity': total_spikes,
-            'spikes': spike_pattern,
-            'firing_rate': firing_rate
-        }
+        return {"spike_activity": total_spikes, "spikes": spike_pattern, "firing_rate": firing_rate}
 
     def _prepare_input(self, embedding: np.ndarray) -> np.ndarray:
         """Prepare embedding as input current for neurons"""
         # Pad or truncate to n_neurons
-        input_current = embedding.astype(np.float32)[:self.n_neurons]
+        input_current = embedding.astype(np.float32)[: self.n_neurons]
         if len(input_current) < self.n_neurons:
             input_current = np.pad(input_current, (0, self.n_neurons - len(input_current)))
 
@@ -159,7 +159,7 @@ class SNNCompute:
     def _run_simulation(self, input_current: np.ndarray) -> tuple:
         """
         Run LIF simulation for multiple timesteps
-        
+
         Returns:
             Tuple of (total_spike_count, spike_pattern)
         """
@@ -184,4 +184,3 @@ class SNNCompute:
             spike_pattern = threshold_spikes
 
         return total_spikes, spike_pattern
-

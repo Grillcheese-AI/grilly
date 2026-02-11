@@ -7,7 +7,7 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 
 from benchmarks.utils import (
     format_size,
@@ -19,18 +19,18 @@ from benchmarks.utils import (
 
 def bench_pool_hit_rate(backend, num_ops=100):
     """Simulate a realistic workload and measure pool hit rate."""
-    if not hasattr(backend, 'fnn'):
+    if not hasattr(backend, "fnn"):
         return None
 
     fnn = backend.fnn
 
     # Simulate varying buffer sizes like a real model would use
     sizes = [
-        128 * 4,       # small activation
-        512 * 4,       # medium
-        1024 * 4,      # large
-        2048 * 4,      # XL
-        4096 * 4,      # common embedding dim
+        128 * 4,  # small activation
+        512 * 4,  # medium
+        1024 * 4,  # large
+        2048 * 4,  # XL
+        4096 * 4,  # common embedding dim
         512 * 512 * 4,  # weight matrix
     ]
 
@@ -54,7 +54,7 @@ def bench_pool_hit_rate(backend, num_ops=100):
 
 def bench_allocation_speed(backend, num_allocs=50):
     """Benchmark buffer allocation speed: pool vs direct."""
-    if not hasattr(backend, 'fnn'):
+    if not hasattr(backend, "fnn"):
         return None, None
 
     fnn = backend.fnn
@@ -82,8 +82,10 @@ def bench_allocation_speed(backend, num_allocs=50):
 
     # Time direct allocation (bypass pool)
     from grilly.backend.base import VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+
     try:
         from vulkan import vkDestroyBuffer, vkFreeMemory
+
         t0 = time.perf_counter()
         for _ in range(num_allocs):
             handle, memory = backend.core._create_buffer(size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
@@ -115,9 +117,9 @@ def main():
         print(f"  Evictions:   {stats.get('evictions', 0)}")
         print(f"  Pooled Mem:  {format_size(stats.get('total_pooled_memory', 0))}")
         print(f"  VMA Enabled: {stats.get('vma_enabled', False)}")
-        if stats.get('buckets'):
+        if stats.get("buckets"):
             print("  Buckets:")
-            for bsize, count in sorted(stats['buckets'].items()):
+            for bsize, count in sorted(stats["buckets"].items()):
                 print(f"    {format_size(bsize)}: {count} buffers")
     else:
         print("  Buffer pool not available")
@@ -128,12 +130,14 @@ def main():
     if pool_time is not None:
         print(f"  Pool:   {format_time(pool_time)} total, {format_time(pool_time / 50)} /alloc")
         if direct_time is not None:
-            print(f"  Direct: {format_time(direct_time)} total, {format_time(direct_time / 50)} /alloc")
+            print(
+                f"  Direct: {format_time(direct_time)} total, {format_time(direct_time / 50)} /alloc"
+            )
             speedup = direct_time / pool_time if pool_time > 0 else 0
             print(f"  Pool speedup: {speedup:.1f}x")
     else:
         print("  Buffer pool not available")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

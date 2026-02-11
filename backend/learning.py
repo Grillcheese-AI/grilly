@@ -37,7 +37,7 @@ class VulkanLearning(BufferMixin):
         fisher: np.ndarray,
         momentum: float = 0.9,
         use_ema: bool = True,
-        reset: bool = False
+        reset: bool = False,
     ) -> np.ndarray:
         """
         Update Fisher information estimate from gradients.
@@ -69,24 +69,28 @@ class VulkanLearning(BufferMixin):
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'fisher-info', 2, push_constant_size=16
+                "fisher-info", 2, push_constant_size=16
             )
 
             # Create descriptor set
             descriptor_set = self.pipelines._create_descriptor_set(
                 desc_layout,
-                [(self._get_buffer_handle(buf_grads), grads_flat.nbytes),
-                 (self._get_buffer_handle(buf_fisher), fisher_flat.nbytes)]
+                [
+                    (self._get_buffer_handle(buf_grads), grads_flat.nbytes),
+                    (self._get_buffer_handle(buf_fisher), fisher_flat.nbytes),
+                ],
             )
 
             # Pack push constants
             push_constants = struct.pack(
-                'IfII', num_params, momentum, 1 if use_ema else 0, 1 if reset else 0
+                "IfII", num_params, momentum, 1 if use_ema else 0, 1 if reset else 0
             )
 
             # Dispatch
             workgroups = (num_params + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Download
             result = self._download_buffer(buf_fisher, fisher_flat.nbytes, np.float32)
@@ -100,7 +104,7 @@ class VulkanLearning(BufferMixin):
         current_params: np.ndarray,
         optimal_params: np.ndarray,
         fisher: np.ndarray,
-        lambda_ewc: float = 1000.0
+        lambda_ewc: float = 1000.0,
     ) -> np.ndarray:
         """
         Compute EWC penalty for continual learning.
@@ -136,7 +140,7 @@ class VulkanLearning(BufferMixin):
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'fisher-ewc-penalty', 4, push_constant_size=8
+                "fisher-ewc-penalty", 4, push_constant_size=8
             )
 
             # Create descriptor set
@@ -146,16 +150,18 @@ class VulkanLearning(BufferMixin):
                     (self._get_buffer_handle(buf_current), current.nbytes),
                     (self._get_buffer_handle(buf_optimal), optimal.nbytes),
                     (self._get_buffer_handle(buf_fisher), fisher_flat.nbytes),
-                    (self._get_buffer_handle(buf_penalty), penalty.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_penalty), penalty.nbytes),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('If', num_params, lambda_ewc)
+            push_constants = struct.pack("If", num_params, lambda_ewc)
 
             # Dispatch
             workgroups = (num_params + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Download
             result = self._download_buffer(buf_penalty, penalty.nbytes, np.float32)
@@ -169,7 +175,7 @@ class VulkanLearning(BufferMixin):
         gradients: np.ndarray,
         fisher: np.ndarray,
         learning_rate: float = 0.001,
-        epsilon: float = 1e-8
+        epsilon: float = 1e-8,
     ) -> np.ndarray:
         """
         Apply natural gradient scaling using Fisher information.
@@ -202,7 +208,7 @@ class VulkanLearning(BufferMixin):
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'fisher-natural-gradient', 3, push_constant_size=12
+                "fisher-natural-gradient", 3, push_constant_size=12
             )
 
             # Create descriptor set
@@ -211,16 +217,18 @@ class VulkanLearning(BufferMixin):
                 [
                     (self._get_buffer_handle(buf_grads), grads.nbytes),
                     (self._get_buffer_handle(buf_fisher), fisher_flat.nbytes),
-                    (self._get_buffer_handle(buf_scaled), scaled.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_scaled), scaled.nbytes),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('Iff', num_params, learning_rate, epsilon)
+            push_constants = struct.pack("Iff", num_params, learning_rate, epsilon)
 
             # Dispatch
             workgroups = (num_params + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Download
             result = self._download_buffer(buf_scaled, scaled.nbytes, np.float32)
@@ -232,10 +240,7 @@ class VulkanLearning(BufferMixin):
     # ==================== NLMS Adaptive Filtering ====================
 
     def nlms_predict(
-        self,
-        features: np.ndarray,
-        weights: np.ndarray,
-        bias: float = 0.0
+        self, features: np.ndarray, weights: np.ndarray, bias: float = 0.0
     ) -> np.ndarray:
         """
         NLMS prediction: y = w . x + b
@@ -271,7 +276,7 @@ class VulkanLearning(BufferMixin):
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'nlms-predict', 4, push_constant_size=8
+                "nlms-predict", 4, push_constant_size=8
             )
 
             # Create descriptor set
@@ -281,16 +286,18 @@ class VulkanLearning(BufferMixin):
                     (self._get_buffer_handle(buf_x), x.nbytes),
                     (self._get_buffer_handle(buf_w), w.nbytes),
                     (self._get_buffer_handle(buf_b), b.nbytes),
-                    (self._get_buffer_handle(buf_pred), preds.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_pred), preds.nbytes),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('II', batch_size, n_features)
+            push_constants = struct.pack("II", batch_size, n_features)
 
             # Dispatch
             workgroups = (batch_size + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Download
             result = self._download_buffer(buf_pred, preds.nbytes, np.float32)
@@ -309,7 +316,7 @@ class VulkanLearning(BufferMixin):
         learning_rate: float = 0.5,
         mu_decay: float = 0.99995,
         mu_min: float = 0.1,
-        epsilon: float = 1e-6
+        epsilon: float = 1e-6,
     ) -> tuple:
         """
         NLMS weight update with learning rate decay.
@@ -359,7 +366,7 @@ class VulkanLearning(BufferMixin):
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'nlms-update', 7, push_constant_size=20
+                "nlms-update", 7, push_constant_size=20
             )
 
             # Create descriptor set
@@ -372,16 +379,18 @@ class VulkanLearning(BufferMixin):
                     (self._get_buffer_handle(buf_w), w.nbytes),
                     (self._get_buffer_handle(buf_b), b.nbytes),
                     (self._get_buffer_handle(buf_mu), mu.nbytes),
-                    (self._get_buffer_handle(buf_err), error_out.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_err), error_out.nbytes),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('Iffff', n_features, mu_decay, mu_min, 0.1, epsilon)
+            push_constants = struct.pack("Iffff", n_features, mu_decay, mu_min, 0.1, epsilon)
 
             # Dispatch
             workgroups = (n_features + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Download results
             w_out = self._download_buffer(buf_w, w.nbytes, np.float32)[:n_features]
@@ -401,7 +410,7 @@ class VulkanLearning(BufferMixin):
         running_mean: np.ndarray,
         running_var: np.ndarray,
         momentum: float = 0.01,
-        epsilon: float = 1e-6
+        epsilon: float = 1e-6,
     ) -> tuple:
         """
         Apply whitening transform with running statistics.
@@ -441,7 +450,7 @@ class VulkanLearning(BufferMixin):
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'whitening-transform', 4, push_constant_size=16
+                "whitening-transform", 4, push_constant_size=16
             )
 
             # Create descriptor set
@@ -451,16 +460,18 @@ class VulkanLearning(BufferMixin):
                     (self._get_buffer_handle(buf_x), x.nbytes),
                     (self._get_buffer_handle(buf_mu), mu.nbytes),
                     (self._get_buffer_handle(buf_var), var.nbytes),
-                    (self._get_buffer_handle(buf_out), output.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_out), output.nbytes),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('IIff', batch_size, dim, momentum, epsilon)
+            push_constants = struct.pack("IIff", batch_size, dim, momentum, epsilon)
 
             # Dispatch
             workgroups = (batch_size * dim + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Download
             result = self._download_buffer(buf_out, output.nbytes, np.float32)
@@ -481,7 +492,7 @@ class VulkanLearning(BufferMixin):
         encoding_type: int = 0,
         projection_weights: np.ndarray = None,
         projection_bias: np.ndarray = None,
-        random_seed: int = None
+        random_seed: int = None,
     ) -> np.ndarray:
         """
         Convert continuous features to spike trains.
@@ -518,7 +529,11 @@ class VulkanLearning(BufferMixin):
         # Prepare projection
         if use_projection:
             W = projection_weights.astype(np.float32).flatten()
-            b = projection_bias.astype(np.float32).flatten() if projection_bias is not None else np.zeros(spike_dim, dtype=np.float32)
+            b = (
+                projection_bias.astype(np.float32).flatten()
+                if projection_bias is not None
+                else np.zeros(spike_dim, dtype=np.float32)
+            )
         else:
             W = np.zeros(1, dtype=np.float32)
             b = np.zeros(1, dtype=np.float32)
@@ -543,7 +558,7 @@ class VulkanLearning(BufferMixin):
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'bridge-continuous-to-spike', 6, push_constant_size=28
+                "bridge-continuous-to-spike", 6, push_constant_size=28
             )
 
             # Create descriptor set
@@ -555,27 +570,41 @@ class VulkanLearning(BufferMixin):
                     (self._get_buffer_handle(buf_W), W.nbytes),
                     (self._get_buffer_handle(buf_b), b.nbytes),
                     (self._get_buffer_handle(buf_rand), random_nums.nbytes),
-                    (self._get_buffer_handle(buf_temp), temp.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_temp), temp.nbytes),
+                ],
             )
 
             # Pass 1: Project features
             push_constants = struct.pack(
-                'IIIIIII',
-                batch_size, num_timesteps, input_dim, spike_dim,
-                encoding_type, 1 if use_projection else 0, 0  # pass_type=0
+                "IIIIIII",
+                batch_size,
+                num_timesteps,
+                input_dim,
+                spike_dim,
+                encoding_type,
+                1 if use_projection else 0,
+                0,  # pass_type=0
             )
             workgroups = (batch_size * spike_dim + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Pass 2: Encode to spikes
             push_constants = struct.pack(
-                'IIIIIII',
-                batch_size, num_timesteps, input_dim, spike_dim,
-                encoding_type, 1 if use_projection else 0, 1  # pass_type=1
+                "IIIIIII",
+                batch_size,
+                num_timesteps,
+                input_dim,
+                spike_dim,
+                encoding_type,
+                1 if use_projection else 0,
+                1,  # pass_type=1
             )
             workgroups = (batch_size * num_timesteps * spike_dim + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Download
             result = self._download_buffer(buf_spikes, spikes.nbytes, np.float32)
@@ -591,7 +620,7 @@ class VulkanLearning(BufferMixin):
         time_window: int = 5,
         temporal_weights: np.ndarray = None,
         projection_weights: np.ndarray = None,
-        projection_bias: np.ndarray = None
+        projection_bias: np.ndarray = None,
     ) -> np.ndarray:
         """
         Convert spike trains to continuous features.
@@ -628,7 +657,11 @@ class VulkanLearning(BufferMixin):
         # Projection
         if use_projection:
             W = projection_weights.astype(np.float32).flatten()
-            b = projection_bias.astype(np.float32).flatten() if projection_bias is not None else np.zeros(output_dim, dtype=np.float32)
+            b = (
+                projection_bias.astype(np.float32).flatten()
+                if projection_bias is not None
+                else np.zeros(output_dim, dtype=np.float32)
+            )
         else:
             W = np.zeros(1, dtype=np.float32)
             b = np.zeros(1, dtype=np.float32)
@@ -653,7 +686,7 @@ class VulkanLearning(BufferMixin):
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'bridge-spike-to-continuous', 6, push_constant_size=32
+                "bridge-spike-to-continuous", 6, push_constant_size=32
             )
 
             # Create descriptor set
@@ -665,34 +698,50 @@ class VulkanLearning(BufferMixin):
                     (self._get_buffer_handle(buf_tw), tw.nbytes),
                     (self._get_buffer_handle(buf_W), W.nbytes),
                     (self._get_buffer_handle(buf_b), b.nbytes),
-                    (self._get_buffer_handle(buf_temp), temp.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_temp), temp.nbytes),
+                ],
             )
 
             # Pass 1: Encode
             push_constants = struct.pack(
-                'IIIIIIII',
-                batch_size, total_time, spike_dim, output_dim,
-                time_window, encoding_type, 1 if use_projection else 0, 0  # pass_type=0
+                "IIIIIIII",
+                batch_size,
+                total_time,
+                spike_dim,
+                output_dim,
+                time_window,
+                encoding_type,
+                1 if use_projection else 0,
+                0,  # pass_type=0
             )
             workgroups = (batch_size * spike_dim + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Pass 2: Project (if needed)
             if use_projection:
                 push_constants = struct.pack(
-                    'IIIIIIII',
-                    batch_size, total_time, spike_dim, output_dim,
-                    time_window, encoding_type, 1, 1  # pass_type=1
+                    "IIIIIIII",
+                    batch_size,
+                    total_time,
+                    spike_dim,
+                    output_dim,
+                    time_window,
+                    encoding_type,
+                    1,
+                    1,  # pass_type=1
                 )
                 workgroups = (batch_size * output_dim + 255) // 256
-                self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+                self.core._dispatch_compute(
+                    pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+                )
                 result = self._download_buffer(buf_out, output.nbytes, np.float32)
             else:
                 result = self._download_buffer(buf_temp, temp.nbytes, np.float32)
 
             output_dim_actual = output_dim if use_projection else spike_dim
-            return result[:batch_size * output_dim_actual].reshape(batch_size, output_dim_actual)
+            return result[: batch_size * output_dim_actual].reshape(batch_size, output_dim_actual)
         finally:
             self._release_buffers([buf_spikes, buf_out, buf_tw, buf_W, buf_b, buf_temp])
 
@@ -703,7 +752,7 @@ class VulkanLearning(BufferMixin):
         domain_probs: np.ndarray,
         expert_weights: np.ndarray,
         top_k: int = 2,
-        routing_mode: int = 1
+        routing_mode: int = 1,
     ) -> tuple:
         """
         Route inputs to experts based on domain probabilities.
@@ -741,7 +790,7 @@ class VulkanLearning(BufferMixin):
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'domain-router', 4, push_constant_size=20
+                "domain-router", 4, push_constant_size=20
             )
 
             # Create descriptor set
@@ -751,16 +800,20 @@ class VulkanLearning(BufferMixin):
                     (self._get_buffer_handle(buf_probs), probs.nbytes),
                     (self._get_buffer_handle(buf_weights), weights.nbytes),
                     (self._get_buffer_handle(buf_routing), routing.nbytes),
-                    (self._get_buffer_handle(buf_selected), selected.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_selected), selected.nbytes),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('IIIII', batch_size, num_domains, num_experts, top_k, routing_mode)
+            push_constants = struct.pack(
+                "IIIII", batch_size, num_domains, num_experts, top_k, routing_mode
+            )
 
             # Dispatch
             workgroups = (batch_size + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Download
             routing_out = self._download_buffer(buf_routing, routing.nbytes, np.float32)
@@ -768,18 +821,14 @@ class VulkanLearning(BufferMixin):
 
             return (
                 routing_out.reshape(batch_size, num_experts),
-                selected_out.reshape(batch_size, top_k)
+                selected_out.reshape(batch_size, top_k),
             )
         finally:
             self._release_buffers([buf_probs, buf_weights, buf_routing, buf_selected])
 
     # ==================== Embedding Operations ====================
 
-    def embedding_lookup(
-        self,
-        token_ids: np.ndarray,
-        embedding_table: np.ndarray
-    ) -> np.ndarray:
+    def embedding_lookup(self, token_ids: np.ndarray, embedding_table: np.ndarray) -> np.ndarray:
         """
         GPU-accelerated embedding lookup.
 
@@ -812,7 +861,7 @@ class VulkanLearning(BufferMixin):
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'embedding-lookup', 3, push_constant_size=16
+                "embedding-lookup", 3, push_constant_size=16
             )
 
             # Create descriptor set
@@ -821,16 +870,18 @@ class VulkanLearning(BufferMixin):
                 [
                     (self._get_buffer_handle(buf_tokens), tokens.nbytes),
                     (self._get_buffer_handle(buf_emb), embeddings.nbytes),
-                    (self._get_buffer_handle(buf_out), output.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_out), output.nbytes),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('IIII', batch_size, seq_len, vocab_size, embedding_dim)
+            push_constants = struct.pack("IIII", batch_size, seq_len, vocab_size, embedding_dim)
 
             # Dispatch
             workgroups = (batch_size * seq_len + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Download
             result = self._download_buffer(buf_out, output.nbytes, np.float32)
@@ -840,11 +891,7 @@ class VulkanLearning(BufferMixin):
             self._release_buffers([buf_tokens, buf_emb, buf_out])
 
     def embedding_backward(
-        self,
-        grad_output: np.ndarray,
-        token_ids: np.ndarray,
-        vocab_size: int,
-        embedding_dim: int
+        self, grad_output: np.ndarray, token_ids: np.ndarray, vocab_size: int, embedding_dim: int
     ) -> np.ndarray:
         """
         GPU-accelerated embedding backward pass.
@@ -871,13 +918,15 @@ class VulkanLearning(BufferMixin):
         grad_weight = np.zeros(vocab_size * embedding_dim, dtype=np.float32)
 
         # Check if shader is available
-        if 'embedding-backward' not in self.shaders:
+        if "embedding-backward" not in self.shaders:
             # CPU fallback: accumulate gradients
             for i, token_id in enumerate(tokens):
                 if 0 <= token_id < vocab_size:
                     start_idx = int(token_id) * embedding_dim
                     grad_start = i * embedding_dim
-                    grad_weight[start_idx:start_idx + embedding_dim] += grad_flat[grad_start:grad_start + embedding_dim]
+                    grad_weight[start_idx : start_idx + embedding_dim] += grad_flat[
+                        grad_start : grad_start + embedding_dim
+                    ]
             return grad_weight.reshape(vocab_size, embedding_dim)
 
         # GPU implementation using atomic operations
@@ -894,7 +943,7 @@ class VulkanLearning(BufferMixin):
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'embedding-backward', 3, push_constant_size=16
+                "embedding-backward", 3, push_constant_size=16
             )
 
             # Create descriptor set
@@ -903,16 +952,18 @@ class VulkanLearning(BufferMixin):
                 [
                     (self._get_buffer_handle(buf_tokens), tokens.nbytes),
                     (self._get_buffer_handle(buf_grad), grad_flat.nbytes),
-                    (self._get_buffer_handle(buf_grad_weight), grad_weight.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_grad_weight), grad_weight.nbytes),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('IIII', batch_size, seq_len, vocab_size, embedding_dim)
+            push_constants = struct.pack("IIII", batch_size, seq_len, vocab_size, embedding_dim)
 
             # Dispatch
             workgroups = (batch_size * seq_len + 255) // 256
-            self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
 
             # Download
             result = self._download_buffer(buf_grad_weight, grad_weight.nbytes, np.float32)
@@ -935,7 +986,7 @@ class VulkanLearning(BufferMixin):
         epsilon: float = 1e-8,
         beta1_t: float = 0.0,
         beta2_t: float = 0.0,
-        clear_grad: bool = False
+        clear_grad: bool = False,
     ) -> tuple:
         """
         GPU-accelerated Adam optimizer update.
@@ -959,7 +1010,7 @@ class VulkanLearning(BufferMixin):
             (updated_weights, updated_moment1, updated_moment2)
         """
         # Check if shader is available
-        if 'adam-update' not in self.shaders:
+        if "adam-update" not in self.shaders:
             # CPU fallback
             moment1_new = beta1 * moment1 + (1.0 - beta1) * gradients
             moment2_new = beta2 * moment2 + (1.0 - beta2) * gradients * gradients
@@ -998,24 +1049,25 @@ class VulkanLearning(BufferMixin):
             # epsilon(float), beta1_t(float), beta2_t(float), clear_grad(uint)
             # Total: 4 + 4*5 + 4 = 28 bytes
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'adam-update', 4, push_constant_size=28
+                "adam-update", 4, push_constant_size=28
             )
 
             # Get cached descriptor set
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'adam-update',
+                "adam-update",
                 [
                     (self._get_buffer_handle(buf_weights), weights_flat.nbytes),
                     (self._get_buffer_handle(buf_grad), grad_flat.nbytes),
                     (self._get_buffer_handle(buf_m1), m1_flat.nbytes),
-                    (self._get_buffer_handle(buf_m2), m2_flat.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_m2), m2_flat.nbytes),
+                ],
             )
 
             # Pack push constants
             # Order in shader: total_weights(uint), lr(float), beta1(float), beta2(float),
             # epsilon(float), beta1_t(float), beta2_t(float), clear_grad(uint)
-            push_constants = struct.pack('IfffffIf',
+            push_constants = struct.pack(
+                "IfffffIf",
                 total_weights,
                 learning_rate,
                 beta1,
@@ -1023,14 +1075,13 @@ class VulkanLearning(BufferMixin):
                 epsilon,
                 beta1_t,
                 beta2_t,
-                1 if clear_grad else 0
+                1 if clear_grad else 0,
             )
 
             # Dispatch
             workgroups = (total_weights + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             # Download results

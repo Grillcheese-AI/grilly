@@ -61,6 +61,7 @@ except ImportError:
     numba_roswish = None
     numba_swiglu = None
 
+
 class VulkanFNN(BufferMixin):
     """FNN operations: activations, layer normalization, linear layers, dropout"""
 
@@ -86,8 +87,8 @@ class VulkanFNN(BufferMixin):
         from ..utils.tensor_conversion import VulkanTensor
 
         # Select shader: prefer optimized tiled version
-        use_tiled = 'gemm_tiled' in self.shaders
-        use_basic = 'gemm_mnk' in self.shaders
+        use_tiled = "gemm_tiled" in self.shaders
+        use_basic = "gemm_mnk" in self.shaders
 
         if not use_tiled and not use_basic:
             A_np = A.numpy() if isinstance(A, VulkanTensor) else np.asarray(A, dtype=np.float32)
@@ -111,12 +112,12 @@ class VulkanFNN(BufferMixin):
 
         try:
             if use_tiled:
-                shader_name = 'gemm_tiled'
+                shader_name = "gemm_tiled"
                 # 64x64 output tile per workgroup (16x16 threads, 4x4 per thread)
                 group_x = (N + 63) // 64
                 group_y = (M + 63) // 64
             else:
-                shader_name = 'gemm_mnk'
+                shader_name = "gemm_mnk"
                 # 16x16 output tile per workgroup
                 group_x = (N + 15) // 16
                 group_y = (M + 15) // 16
@@ -135,15 +136,12 @@ class VulkanFNN(BufferMixin):
                     (A_handle, A_bytes),
                     (B_handle, B_bytes),
                     (C_handle, C_bytes),
-                ]
+                ],
             )
 
-            push = struct.pack('3I', M, K, N)
+            push = struct.pack("3I", M, K, N)
 
-            self.core._dispatch_compute(
-                pipeline, layout, desc,
-                group_x, push, group_y, 1
-            )
+            self.core._dispatch_compute(pipeline, layout, desc, group_x, push, group_y, 1)
 
             if return_gpu_tensor:
                 return self._wrap_output_tensor(buf_C, (M, N))
@@ -162,10 +160,11 @@ class VulkanFNN(BufferMixin):
     def activation_relu(self, input_data, return_gpu_tensor=False):
         """Apply ReLU activation: max(0, x)"""
         from ..utils.tensor_conversion import VulkanTensor
+
         is_vt = isinstance(input_data, VulkanTensor)
 
         # Check if shader is available
-        if 'activation-relu' not in self.shaders:
+        if "activation-relu" not in self.shaders:
             # CPU fallback (numba if available)
             data_np = input_data.numpy() if is_vt else np.asarray(input_data, dtype=np.float32)
             if NUMBA_AVAILABLE and numba_relu is not None:
@@ -181,7 +180,7 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-relu', 2, push_constant_size=4
+            "activation-relu", 2, push_constant_size=4
         )
 
         # Get buffer handles (converts VMA handles to vulkan-compatible handles)
@@ -190,18 +189,16 @@ class VulkanFNN(BufferMixin):
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-relu',
-            [(in_handle, data_nbytes), (out_handle, data_nbytes)]
+            "activation-relu", [(in_handle, data_nbytes), (out_handle, data_nbytes)]
         )
 
         # Pack push constants
-        push_constants = struct.pack('I', total_elements)
+        push_constants = struct.pack("I", total_elements)
 
         # Dispatch
         workgroups = (total_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         if return_gpu_tensor:
@@ -223,17 +220,18 @@ class VulkanFNN(BufferMixin):
     def activation_gelu(self, input_data, return_gpu_tensor=False):
         """Apply GELU activation"""
         from ..utils.tensor_conversion import VulkanTensor
+
         is_vt = isinstance(input_data, VulkanTensor)
 
         # Check if shader is available
-        if 'activation-gelu' not in self.shaders:
+        if "activation-gelu" not in self.shaders:
             # CPU fallback (numba if available)
             data_np = input_data.numpy() if is_vt else np.asarray(input_data, dtype=np.float32)
             if NUMBA_AVAILABLE and numba_gelu is not None:
                 return numba_gelu(data_np.astype(np.float32))
             sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
             coeff = 0.044715
-            return 0.5 * data_np * (1 + np.tanh(sqrt_2_over_pi * (data_np + coeff * data_np ** 3)))
+            return 0.5 * data_np * (1 + np.tanh(sqrt_2_over_pi * (data_np + coeff * data_np**3)))
 
         original_shape = input_data.shape
         total_elements = int(np.prod(original_shape))
@@ -244,23 +242,25 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-gelu', 2, push_constant_size=4
+            "activation-gelu", 2, push_constant_size=4
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-gelu',
-            [(self._get_buffer_handle(buf_in), data_nbytes), (self._get_buffer_handle(buf_out), data_nbytes)]
+            "activation-gelu",
+            [
+                (self._get_buffer_handle(buf_in), data_nbytes),
+                (self._get_buffer_handle(buf_out), data_nbytes),
+            ],
         )
 
         # Pack push constants
-        push_constants = struct.pack('I', total_elements)
+        push_constants = struct.pack("I", total_elements)
 
         # Dispatch
         workgroups = (total_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         if return_gpu_tensor:
@@ -278,7 +278,9 @@ class VulkanFNN(BufferMixin):
                 data_np = input_data.numpy() if is_vt else np.asarray(input_data, dtype=np.float32)
                 sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
                 coeff = 0.044715
-                result = 0.5 * data_np * (1 + np.tanh(sqrt_2_over_pi * (data_np + coeff * data_np ** 3)))
+                result = (
+                    0.5 * data_np * (1 + np.tanh(sqrt_2_over_pi * (data_np + coeff * data_np**3)))
+                )
                 result = result.astype(np.float32).flatten()
 
             # Release buffers back to pool
@@ -291,10 +293,11 @@ class VulkanFNN(BufferMixin):
     def activation_silu(self, input_data, return_gpu_tensor=False):
         """Apply SiLU (Swish) activation: x * sigmoid(x)"""
         from ..utils.tensor_conversion import VulkanTensor
+
         is_vt = isinstance(input_data, VulkanTensor)
 
         # Check if shader is available
-        if 'activation-silu' not in self.shaders:
+        if "activation-silu" not in self.shaders:
             # CPU fallback (numba if available)
             data_np = input_data.numpy() if is_vt else np.asarray(input_data, dtype=np.float32)
             if NUMBA_AVAILABLE and numba_silu is not None:
@@ -310,23 +313,25 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-silu', 2, push_constant_size=4
+            "activation-silu", 2, push_constant_size=4
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-silu',
-            [(self._get_buffer_handle(buf_in), data_nbytes), (self._get_buffer_handle(buf_out), data_nbytes)]
+            "activation-silu",
+            [
+                (self._get_buffer_handle(buf_in), data_nbytes),
+                (self._get_buffer_handle(buf_out), data_nbytes),
+            ],
         )
 
         # Pack push constants
-        push_constants = struct.pack('I', total_elements)
+        push_constants = struct.pack("I", total_elements)
 
         # Dispatch
         workgroups = (total_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         if return_gpu_tensor:
@@ -348,7 +353,7 @@ class VulkanFNN(BufferMixin):
     def activation_gcu(self, input_data):
         """Apply GCU (Growing Cosine Unit) activation: x * cos(x)"""
         # Check if shader is available
-        if 'activation-gcu' not in self.shaders:
+        if "activation-gcu" not in self.shaders:
             # CPU fallback (numba if available)
             if NUMBA_AVAILABLE and numba_gcu is not None:
                 return numba_gcu(input_data.astype(np.float32))
@@ -366,23 +371,25 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-gcu', 2, push_constant_size=4
+            "activation-gcu", 2, push_constant_size=4
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-gcu',
-            [(self._get_buffer_handle(buf_in), data.nbytes), (self._get_buffer_handle(buf_out), data.nbytes)]
+            "activation-gcu",
+            [
+                (self._get_buffer_handle(buf_in), data.nbytes),
+                (self._get_buffer_handle(buf_out), data.nbytes),
+            ],
         )
 
         # Pack push constants
-        push_constants = struct.pack('I', total_elements)
+        push_constants = struct.pack("I", total_elements)
 
         # Dispatch
         workgroups = (total_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
@@ -404,7 +411,7 @@ class VulkanFNN(BufferMixin):
             beta: Gating parameter (learnable, default 1.0)
         """
         # Check if shader is available
-        if 'activation-roswish' not in self.shaders:
+        if "activation-roswish" not in self.shaders:
             # CPU fallback (numba if available)
             if NUMBA_AVAILABLE and numba_roswish is not None:
                 return numba_roswish(input_data.astype(np.float32), alpha, beta)
@@ -423,23 +430,25 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline (12 bytes push constants: uint + 2 floats)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-roswish', 2, push_constant_size=12
+            "activation-roswish", 2, push_constant_size=12
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-roswish',
-            [(self._get_buffer_handle(buf_in), data.nbytes), (self._get_buffer_handle(buf_out), data.nbytes)]
+            "activation-roswish",
+            [
+                (self._get_buffer_handle(buf_in), data.nbytes),
+                (self._get_buffer_handle(buf_out), data.nbytes),
+            ],
         )
 
         # Pack push constants: total_elements (uint32), alpha (float32), beta (float32)
-        push_constants = struct.pack('Iff', total_elements, float(alpha), float(beta))
+        push_constants = struct.pack("Iff", total_elements, float(alpha), float(beta))
 
         # Dispatch
         workgroups = (total_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
@@ -465,7 +474,7 @@ class VulkanFNN(BufferMixin):
             Output array of shape (..., hidden_dim)
         """
         # Check if shader is available
-        if 'activation-swiglu' not in self.shaders:
+        if "activation-swiglu" not in self.shaders:
             # CPU fallback (numba if available)
             if NUMBA_AVAILABLE and numba_swiglu is not None:
                 return numba_swiglu(input_data.astype(np.float32))
@@ -495,24 +504,25 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline (8 bytes push constants: 2 uints)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-swiglu', 2, push_constant_size=8
+            "activation-swiglu", 2, push_constant_size=8
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-swiglu',
-            [(self._get_buffer_handle(buf_in), data_flat.nbytes),
-             (self._get_buffer_handle(buf_out), output_elements * 4)]
+            "activation-swiglu",
+            [
+                (self._get_buffer_handle(buf_in), data_flat.nbytes),
+                (self._get_buffer_handle(buf_out), output_elements * 4),
+            ],
         )
 
         # Pack push constants: output_elements (uint32), hidden_dim (uint32)
-        push_constants = struct.pack('II', output_elements, hidden_dim)
+        push_constants = struct.pack("II", output_elements, hidden_dim)
 
         # Dispatch
         workgroups = (output_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
@@ -538,7 +548,7 @@ class VulkanFNN(BufferMixin):
             Softmax probabilities
         """
         # Check if shader is available
-        if 'activation-softmax' not in self.shaders:
+        if "activation-softmax" not in self.shaders:
             # CPU fallback (numba if available)
             if NUMBA_AVAILABLE and numba_softmax is not None:
                 return numba_softmax(input_data.astype(np.float32))
@@ -571,46 +581,43 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline - 4 buffers, 24 bytes push constants (5 uints + padding)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-softmax', 4, push_constant_size=24
+            "activation-softmax", 4, push_constant_size=24
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-softmax',
+            "activation-softmax",
             [
                 (self._get_buffer_handle(buf_in), data_flat.nbytes),
                 (self._get_buffer_handle(buf_out), data_flat.nbytes),
                 (self._get_buffer_handle(buf_max), batch_size * seq_len * 4),
-                (self._get_buffer_handle(buf_sum), batch_size * seq_len * 4)
-            ]
+                (self._get_buffer_handle(buf_sum), batch_size * seq_len * 4),
+            ],
         )
 
         # Pass 1: Compute max for numerical stability
-        push_constants = struct.pack('IIIII', batch_size, seq_len, features, 0, features)
+        push_constants = struct.pack("IIIII", batch_size, seq_len, features, 0, features)
         workgroups = ((batch_size * seq_len) + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Pass 2: Compute sum of exponentials
-        push_constants = struct.pack('IIIII', batch_size, seq_len, features, 1, features)
+        push_constants = struct.pack("IIIII", batch_size, seq_len, features, 1, features)
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Pass 3: Normalize
-        push_constants = struct.pack('IIIII', batch_size, seq_len, features, 2, features)
+        push_constants = struct.pack("IIIII", batch_size, seq_len, features, 2, features)
         workgroups = (len(data_flat) + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
         result = self._download_buffer(buf_out, data_flat.nbytes, np.float32)
-        result = result[:len(data_flat)].reshape(original_shape)
+        result = result[: len(data_flat)].reshape(original_shape)
 
         # Release buffers back to pool
         self._release_buffers([buf_in, buf_out, buf_max, buf_sum])
@@ -633,10 +640,14 @@ class VulkanFNN(BufferMixin):
             Weight matrix (output_dim, input_dim) with Xavier initialization
         """
         # Check if shader is available
-        if 'fnn-xavier-init' not in self.shaders:
+        if "fnn-xavier-init" not in self.shaders:
             # CPU fallback
             scale = np.sqrt(2.0 / input_dim)
-            return np.random.default_rng(seed).normal(0, scale, (output_dim, input_dim)).astype(np.float32)
+            return (
+                np.random.default_rng(seed)
+                .normal(0, scale, (output_dim, input_dim))
+                .astype(np.float32)
+            )
 
         scale = np.sqrt(2.0 / input_dim)
         weights_flat = np.zeros(input_dim * output_dim, dtype=np.float32)
@@ -646,30 +657,28 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fnn-xavier-init', 1, push_constant_size=16
+            "fnn-xavier-init", 1, push_constant_size=16
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'fnn-xavier-init',
-            [(self._get_buffer_handle(buf_weights), weights_flat.nbytes)]
+            "fnn-xavier-init", [(self._get_buffer_handle(buf_weights), weights_flat.nbytes)]
         )
 
         # Pack push constants: input_dim, output_dim, scale, seed
-        push_constants = struct.pack('IIfI', input_dim, output_dim, scale, seed)
+        push_constants = struct.pack("IIfI", input_dim, output_dim, scale, seed)
 
         # Dispatch: 2D workgroups (one thread per weight)
         workgroups_x = (input_dim + 15) // 16
         workgroups_y = (output_dim + 15) // 16
 
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups_x, push_constants, workgroups_y, 1
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y, 1
         )
 
         # Download results
         result = self._download_buffer(buf_weights, weights_flat.nbytes, np.float32)
-        result = result[:input_dim * output_dim]
+        result = result[: input_dim * output_dim]
 
         # Release buffer back to pool
         self._release_buffers([buf_weights])
@@ -692,10 +701,12 @@ class VulkanFNN(BufferMixin):
         total_elements = len(input_flat)
 
         if len(grad_out) != total_elements:
-            raise ValueError(f"grad_output size {len(grad_out)} != input_data size {total_elements}")
+            raise ValueError(
+                f"grad_output size {len(grad_out)} != input_data size {total_elements}"
+            )
 
         # Check if shader is available
-        if 'activation-gelu-backward' not in self.shaders:
+        if "activation-gelu-backward" not in self.shaders:
             # CPU fallback (vectorized)
             sqrt_2_over_pi = 0.7978845608028654
             coeff = 0.044715
@@ -720,27 +731,26 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-gelu-backward', 3, push_constant_size=4
+            "activation-gelu-backward", 3, push_constant_size=4
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-gelu-backward',
+            "activation-gelu-backward",
             [
                 (self._get_buffer_handle(buf_grad_out), grad_out.nbytes),
                 (self._get_buffer_handle(buf_input), input_flat.nbytes),
-                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes)
-            ]
+                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes),
+            ],
         )
 
         # Pack push constants
-        push_constants = struct.pack('I', total_elements)
+        push_constants = struct.pack("I", total_elements)
 
         # Dispatch
         workgroups = (total_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
@@ -768,10 +778,12 @@ class VulkanFNN(BufferMixin):
         total_elements = len(input_flat)
 
         if len(grad_out) != total_elements:
-            raise ValueError(f"grad_output size {len(grad_out)} != input_data size {total_elements}")
+            raise ValueError(
+                f"grad_output size {len(grad_out)} != input_data size {total_elements}"
+            )
 
         # Check if shader is available
-        if 'activation-relu-backward' not in self.shaders:
+        if "activation-relu-backward" not in self.shaders:
             # CPU fallback
             relu_grad = (input_flat > 0.0).astype(np.float32)
             grad_in = grad_out * relu_grad
@@ -788,27 +800,26 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-relu-backward', 3, push_constant_size=4
+            "activation-relu-backward", 3, push_constant_size=4
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-relu-backward',
+            "activation-relu-backward",
             [
                 (self._get_buffer_handle(buf_grad_out), grad_out.nbytes),
                 (self._get_buffer_handle(buf_input), input_flat.nbytes),
-                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes)
-            ]
+                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes),
+            ],
         )
 
         # Pack push constants
-        push_constants = struct.pack('I', total_elements)
+        push_constants = struct.pack("I", total_elements)
 
         # Dispatch
         workgroups = (total_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
@@ -839,10 +850,12 @@ class VulkanFNN(BufferMixin):
         total_elements = len(input_flat)
 
         if len(grad_out) != total_elements:
-            raise ValueError(f"grad_output size {len(grad_out)} != input_data size {total_elements}")
+            raise ValueError(
+                f"grad_output size {len(grad_out)} != input_data size {total_elements}"
+            )
 
         # Check if shader is available
-        if 'activation-silu-backward' not in self.shaders:
+        if "activation-silu-backward" not in self.shaders:
             # CPU fallback
             x = input_flat
             sigmoid_x = 1.0 / (1.0 + np.exp(-x))
@@ -861,27 +874,26 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-silu-backward', 3, push_constant_size=4
+            "activation-silu-backward", 3, push_constant_size=4
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-silu-backward',
+            "activation-silu-backward",
             [
                 (self._get_buffer_handle(buf_grad_out), grad_out.nbytes),
                 (self._get_buffer_handle(buf_input), input_flat.nbytes),
-                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes)
-            ]
+                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes),
+            ],
         )
 
         # Pack push constants
-        push_constants = struct.pack('I', total_elements)
+        push_constants = struct.pack("I", total_elements)
 
         # Dispatch
         workgroups = (total_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
@@ -912,10 +924,12 @@ class VulkanFNN(BufferMixin):
         total_elements = len(input_flat)
 
         if len(grad_out) != total_elements:
-            raise ValueError(f"grad_output size {len(grad_out)} != input_data size {total_elements}")
+            raise ValueError(
+                f"grad_output size {len(grad_out)} != input_data size {total_elements}"
+            )
 
         # Check if shader is available
-        if 'activation-gcu-backward' not in self.shaders:
+        if "activation-gcu-backward" not in self.shaders:
             # CPU fallback
             x = input_flat
             gcu_grad = np.cos(x) - x * np.sin(x)
@@ -933,27 +947,26 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-gcu-backward', 3, push_constant_size=4
+            "activation-gcu-backward", 3, push_constant_size=4
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-gcu-backward',
+            "activation-gcu-backward",
             [
                 (self._get_buffer_handle(buf_grad_out), grad_out.nbytes),
                 (self._get_buffer_handle(buf_input), input_flat.nbytes),
-                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes)
-            ]
+                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes),
+            ],
         )
 
         # Pack push constants
-        push_constants = struct.pack('I', total_elements)
+        push_constants = struct.pack("I", total_elements)
 
         # Dispatch
         workgroups = (total_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
@@ -986,17 +999,19 @@ class VulkanFNN(BufferMixin):
         total_elements = len(input_flat)
 
         if len(grad_out) != total_elements:
-            raise ValueError(f"grad_output size {len(grad_out)} != input_data size {total_elements}")
+            raise ValueError(
+                f"grad_output size {len(grad_out)} != input_data size {total_elements}"
+            )
 
         # Check if shader is available
-        if 'activation-roswish-backward' not in self.shaders:
+        if "activation-roswish-backward" not in self.shaders:
             # CPU fallback
             x = input_flat
             beta_x = beta * x
             # Numerically stable sigmoid
-            sigmoid_bx = np.where(beta_x >= 0,
-                                  1.0 / (1.0 + np.exp(-beta_x)),
-                                  np.exp(beta_x) / (1.0 + np.exp(beta_x)))
+            sigmoid_bx = np.where(
+                beta_x >= 0, 1.0 / (1.0 + np.exp(-beta_x)), np.exp(beta_x) / (1.0 + np.exp(beta_x))
+            )
             roswish_grad = sigmoid_bx + beta * (x + alpha) * sigmoid_bx * (1.0 - sigmoid_bx)
             grad_in = grad_out * roswish_grad
             return grad_in.reshape(input_data.shape)
@@ -1012,27 +1027,26 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-roswish-backward', 3, push_constant_size=12
+            "activation-roswish-backward", 3, push_constant_size=12
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-roswish-backward',
+            "activation-roswish-backward",
             [
                 (self._get_buffer_handle(buf_grad_out), grad_out.nbytes),
                 (self._get_buffer_handle(buf_input), input_flat.nbytes),
-                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes)
-            ]
+                (self._get_buffer_handle(buf_grad_in), input_flat.nbytes),
+            ],
         )
 
         # Pack push constants
-        push_constants = struct.pack('Iff', total_elements, float(alpha), float(beta))
+        push_constants = struct.pack("Iff", total_elements, float(alpha), float(beta))
 
         # Dispatch
         workgroups = (total_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
@@ -1072,18 +1086,20 @@ class VulkanFNN(BufferMixin):
         output_elements = batch_size * hidden_dim
 
         if grad_out_flat.shape[0] != batch_size or grad_out_flat.shape[1] != hidden_dim:
-            raise ValueError(f"grad_output shape mismatch: expected ({batch_size}, {hidden_dim}), got {grad_out_flat.shape}")
+            raise ValueError(
+                f"grad_output shape mismatch: expected ({batch_size}, {hidden_dim}), got {grad_out_flat.shape}"
+            )
 
         # Check if shader is available
-        if 'activation-swiglu-backward' not in self.shaders:
+        if "activation-swiglu-backward" not in self.shaders:
             # CPU fallback
             x1 = input_flat[:, :hidden_dim]
             x2 = input_flat[:, hidden_dim:]
 
             # Compute sigmoid(x2) numerically stable
-            sigmoid_x2 = np.where(x2 >= 0,
-                                  1.0 / (1.0 + np.exp(-x2)),
-                                  np.exp(x2) / (1.0 + np.exp(x2)))
+            sigmoid_x2 = np.where(
+                x2 >= 0, 1.0 / (1.0 + np.exp(-x2)), np.exp(x2) / (1.0 + np.exp(x2))
+            )
             silu_x2 = x2 * sigmoid_x2
 
             # Gradients
@@ -1110,32 +1126,31 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-swiglu-backward', 3, push_constant_size=8
+            "activation-swiglu-backward", 3, push_constant_size=8
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-swiglu-backward',
+            "activation-swiglu-backward",
             [
                 (self._get_buffer_handle(buf_grad_out), grad_out_1d.nbytes),
                 (self._get_buffer_handle(buf_input), input_data_flat.nbytes),
-                (self._get_buffer_handle(buf_grad_in), input_data_flat.nbytes)
-            ]
+                (self._get_buffer_handle(buf_grad_in), input_data_flat.nbytes),
+            ],
         )
 
         # Pack push constants
-        push_constants = struct.pack('II', output_elements, hidden_dim)
+        push_constants = struct.pack("II", output_elements, hidden_dim)
 
         # Dispatch
         workgroups = (output_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
         result = self._download_buffer(buf_grad_in, input_data_flat.nbytes, np.float32)
-        result = result[:len(input_data_flat)].reshape(original_shape)
+        result = result[: len(input_data_flat)].reshape(original_shape)
 
         # Release buffers back to pool
         self._release_buffers([buf_grad_out, buf_input, buf_grad_in])
@@ -1171,7 +1186,7 @@ class VulkanFNN(BufferMixin):
         targets = np.asarray(targets).astype(np.float32).flatten()
 
         # Check if shader is available
-        if 'cross-entropy-backward' not in self.shaders:
+        if "cross-entropy-backward" not in self.shaders:
             # CPU fallback: softmax - one_hot
             logits_max = np.max(logits, axis=1, keepdims=True)
             exp_logits = np.exp(logits - logits_max)
@@ -1202,32 +1217,31 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline (3 buffers, push constants: 2 uints = 8 bytes)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'cross-entropy-backward', 3, push_constant_size=8
+            "cross-entropy-backward", 3, push_constant_size=8
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'cross-entropy-backward',
+            "cross-entropy-backward",
             [
                 (self._get_buffer_handle(buf_logits), logits_flat.nbytes),
                 (self._get_buffer_handle(buf_targets), targets.nbytes),
-                (self._get_buffer_handle(buf_grad), grad_size)
-            ]
+                (self._get_buffer_handle(buf_grad), grad_size),
+            ],
         )
 
         # Pack push constants: batch_size, num_classes
-        push_constants = struct.pack('II', batch_size, num_classes)
+        push_constants = struct.pack("II", batch_size, num_classes)
 
         # Dispatch: one workgroup per batch element
         workgroups = batch_size
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
         result = self._download_buffer(buf_grad, grad_size, np.float32)
-        result = result[:batch_size * num_classes].reshape(original_shape)
+        result = result[: batch_size * num_classes].reshape(original_shape)
 
         # Release buffers back to pool
         self._release_buffers([buf_logits, buf_targets, buf_grad])
@@ -1237,7 +1251,9 @@ class VulkanFNN(BufferMixin):
     # ------------------------------------------------------------------
     # Layer normalization (GPU accelerated with 3-pass shader)
     # ------------------------------------------------------------------
-    def layernorm(self, x: np.ndarray, gamma: np.ndarray = None, beta: np.ndarray = None, eps: float = 1e-5) -> np.ndarray:
+    def layernorm(
+        self, x: np.ndarray, gamma: np.ndarray = None, beta: np.ndarray = None, eps: float = 1e-5
+    ) -> np.ndarray:
         """
         GPU-accelerated LayerNorm using fnn-layernorm.glsl shader.
         Normalizes across the last dimension (features).
@@ -1257,7 +1273,7 @@ class VulkanFNN(BufferMixin):
             beta = np.zeros(features, dtype=np.float32)
 
         # Check if shader is available
-        if 'fnn-layernorm' not in self.shaders:
+        if "fnn-layernorm" not in self.shaders:
             # CPU fallback (numba-accelerated if available)
             if NUMBA_AVAILABLE and numba_layernorm is not None:
                 return numba_layernorm(x, gamma, beta, eps)
@@ -1301,12 +1317,12 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline (6 buffers, push constants: 4 uints + 1 float = 20 bytes)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fnn-layernorm', 6, push_constant_size=20
+            "fnn-layernorm", 6, push_constant_size=20
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'fnn-layernorm',
+            "fnn-layernorm",
             [
                 (self._get_buffer_handle(buf_input), x_flat.nbytes),
                 (self._get_buffer_handle(buf_output), x_flat.nbytes),
@@ -1314,13 +1330,13 @@ class VulkanFNN(BufferMixin):
                 (self._get_buffer_handle(buf_beta), beta_flat.nbytes),
                 (self._get_buffer_handle(buf_mean), total_positions * 4),
                 (self._get_buffer_handle(buf_var), total_positions * 4),
-            ]
+            ],
         )
 
         # Run 3 passes
         for pass_type in range(3):
             # Push constants: batch_size, seq_len, features, eps, pass_type
-            push_constants = struct.pack('IIIfI', batch_size, seq_len, features, eps, pass_type)
+            push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, pass_type)
 
             # Workgroups depend on pass type
             if pass_type < 2:
@@ -1331,8 +1347,7 @@ class VulkanFNN(BufferMixin):
                 workgroups = (total_elements + 255) // 256
 
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
         # Download result
@@ -1362,15 +1377,19 @@ class VulkanFNN(BufferMixin):
             Output tensor with same batch dimensions, last dim = output_dim
         """
         from ..utils.tensor_conversion import VulkanTensor
+
         is_vt = isinstance(x, VulkanTensor)
 
         # Check if shader is available
-        if 'fnn-linear' not in self.shaders:
+        if "fnn-linear" not in self.shaders:
             # CPU fallback (numba if available)
             x_np = x.numpy() if is_vt else np.asarray(x, dtype=np.float32)
             if NUMBA_AVAILABLE and numba_linear is not None:
-                return numba_linear(x_np.astype(np.float32), weights.astype(np.float32),
-                                   bias.astype(np.float32) if bias is not None else None)
+                return numba_linear(
+                    x_np.astype(np.float32),
+                    weights.astype(np.float32),
+                    bias.astype(np.float32) if bias is not None else None,
+                )
             out = np.matmul(x_np, weights.T)
             if bias is not None:
                 out = out + bias
@@ -1428,22 +1447,25 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline (4 buffers, push constants: 4 uints = 16 bytes)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fnn-linear', 4, push_constant_size=16
+            "fnn-linear", 4, push_constant_size=16
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'fnn-linear',
+            "fnn-linear",
             [
                 (self._get_buffer_handle(buf_input), input_nbytes),
                 (self._get_buffer_handle(buf_weights), w_nbytes),
-                (self._get_buffer_handle(buf_bias), bias_flat.nbytes if bias_flat is not None else 4),
+                (
+                    self._get_buffer_handle(buf_bias),
+                    bias_flat.nbytes if bias_flat is not None else 4,
+                ),
                 (self._get_buffer_handle(buf_output), output_size),
-            ]
+            ],
         )
 
         # Push constants: batch_seq, input_dim, output_dim, has_bias
-        push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, has_bias)
+        push_constants = struct.pack("IIII", batch_seq, input_dim, output_dim, has_bias)
 
         # 2D dispatch: rows = batch_seq, cols = output_dim
         # Shader uses 16x16 workgroups
@@ -1451,8 +1473,7 @@ class VulkanFNN(BufferMixin):
         workgroups_y = (batch_seq + 15) // 16
 
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups_x, push_constants, workgroups_y
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
         )
 
         # Compute output shape
@@ -1494,7 +1515,7 @@ class VulkanFNN(BufferMixin):
         grad_output: np.ndarray,
         x: np.ndarray,
         weights: np.ndarray,
-        bias: np.ndarray | None = None
+        bias: np.ndarray | None = None,
     ) -> tuple:
         """
         Backward pass for linear layer using GEMM.
@@ -1520,7 +1541,6 @@ class VulkanFNN(BufferMixin):
 
         # Handle both 2D and 3D inputs
         grad_output_shape = grad_output.shape
-        x_shape = x.shape
 
         # Flatten to 2D for GEMM
         if grad_output.ndim == 3:
@@ -1536,10 +1556,7 @@ class VulkanFNN(BufferMixin):
 
         # Decide whether to use GEMM or fallback shader/CPU
         # Use GEMM for larger problems (same heuristic as forward)
-        use_gemm = (
-            'gemm_mnk' in self.shaders and
-            batch * in_features >= 4096
-        )
+        use_gemm = "gemm_mnk" in self.shaders and batch * in_features >= 4096
 
         if use_gemm:
             # ============ GEMM-based backward ============
@@ -1553,7 +1570,9 @@ class VulkanFNN(BufferMixin):
             grad_weight = self.gemm(grad_output_2d.T.copy(), x_2d)
 
             # 3) grad_bias = sum over batch dimension
-            grad_bias = np.sum(grad_output_2d, axis=0, dtype=np.float32) if bias is not None else None
+            grad_bias = (
+                np.sum(grad_output_2d, axis=0, dtype=np.float32) if bias is not None else None
+            )
 
             # Reshape grad_input back to original shape
             if grad_output.ndim == 3:
@@ -1564,7 +1583,7 @@ class VulkanFNN(BufferMixin):
             return grad_input, grad_weight, grad_bias
 
         # ============ Fallback: use fnn-linear-backward shader or CPU ============
-        if 'fnn-linear-backward' not in self.shaders:
+        if "fnn-linear-backward" not in self.shaders:
             # CPU fallback (using 2D arrays)
             grad_input_2d = grad_output_2d @ weights  # (batch*seq, in_features)
             grad_weight = grad_output_2d.T @ x_2d  # (out_features, in_features)
@@ -1614,8 +1633,9 @@ class VulkanFNN(BufferMixin):
         else:
             buf_grad_b = self._acquire_buffer(4)  # dummy buffer for binding 5
         buffers_list.append(buf_grad_b)
-        buffers.append((self._get_buffer_handle(buf_grad_b),
-                        grad_bias_size if bias is not None else 4))
+        buffers.append(
+            (self._get_buffer_handle(buf_grad_b), grad_bias_size if bias is not None else 4)
+        )
 
         # Upload data
         self._upload_buffer(buf_grad_out, grad_out_flat)
@@ -1629,7 +1649,7 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline (always 6 bindings to match shader)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fnn-linear-backward', 6, push_constant_size=16
+            "fnn-linear-backward", 6, push_constant_size=16
         )
 
         # Create descriptor set
@@ -1637,30 +1657,37 @@ class VulkanFNN(BufferMixin):
 
         try:
             # Pass 0: Compute grad_input
-            push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, 0)
+            push_constants = struct.pack("IIII", batch_seq, input_dim, output_dim, 0)
             workgroups_x = (input_dim + 15) // 16
             workgroups_y = (batch_seq + 15) // 16
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups_x, push_constants, workgroups_y
+                pipeline,
+                pipeline_layout,
+                descriptor_set,
+                workgroups_x,
+                push_constants,
+                workgroups_y,
             )
 
             # Pass 1: Compute grad_weight
-            push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, 1)
+            push_constants = struct.pack("IIII", batch_seq, input_dim, output_dim, 1)
             workgroups_x = (input_dim + 15) // 16
             workgroups_y = (output_dim + 15) // 16
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups_x, push_constants, workgroups_y
+                pipeline,
+                pipeline_layout,
+                descriptor_set,
+                workgroups_x,
+                push_constants,
+                workgroups_y,
             )
 
             # Pass 2: Compute grad_bias (if bias exists)
             if bias is not None:
-                push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, 2)
+                push_constants = struct.pack("IIII", batch_seq, input_dim, output_dim, 2)
                 workgroups = (output_dim + 255) // 256
                 self.core._dispatch_compute(
-                    pipeline, pipeline_layout, descriptor_set,
-                    workgroups, push_constants
+                    pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
                 )
 
             # Download results
@@ -1672,8 +1699,8 @@ class VulkanFNN(BufferMixin):
                 grad_bias_flat = None
 
             # Reshape
-            grad_input_2d = grad_input_flat[:batch_seq * input_dim].reshape(batch_seq, input_dim)
-            grad_weight = grad_weight_flat[:output_dim * input_dim].reshape(output_dim, input_dim)
+            grad_input_2d = grad_input_flat[: batch_seq * input_dim].reshape(batch_seq, input_dim)
+            grad_weight = grad_weight_flat[: output_dim * input_dim].reshape(output_dim, input_dim)
             grad_bias = grad_bias_flat[:output_dim] if grad_bias_flat is not None else None
 
             # Reshape grad_input back to original shape
@@ -1697,7 +1724,7 @@ class VulkanFNN(BufferMixin):
         gamma: np.ndarray,
         mean: np.ndarray = None,
         var: np.ndarray = None,
-        eps: float = 1e-5
+        eps: float = 1e-5,
     ) -> tuple:
         """
         GPU-accelerated LayerNorm backward pass using fnn-layernorm-backward.glsl.
@@ -1723,7 +1750,7 @@ class VulkanFNN(BufferMixin):
             var = x.var(axis=-1, keepdims=True)
 
         # Check if shader is available
-        if 'fnn-layernorm-backward' not in self.shaders:
+        if "fnn-layernorm-backward" not in self.shaders:
             # CPU fallback
             std = np.sqrt(var + eps)
             x_norm = (x - mean) / std
@@ -1736,12 +1763,20 @@ class VulkanFNN(BufferMixin):
             N = features
             dx_norm = grad_output * gamma
 
-            dvar = np.sum(dx_norm * (x - mean) * (-0.5) * (var + eps) ** (-1.5), axis=-1, keepdims=True)
-            dmean = np.sum(dx_norm * (-1.0 / std), axis=-1, keepdims=True) + dvar * np.mean(-2.0 * (x - mean), axis=-1, keepdims=True)
+            dvar = np.sum(
+                dx_norm * (x - mean) * (-0.5) * (var + eps) ** (-1.5), axis=-1, keepdims=True
+            )
+            dmean = np.sum(dx_norm * (-1.0 / std), axis=-1, keepdims=True) + dvar * np.mean(
+                -2.0 * (x - mean), axis=-1, keepdims=True
+            )
 
             grad_input = dx_norm / std + dvar * 2.0 * (x - mean) / N + dmean / N
 
-            return grad_input.astype(np.float32), grad_gamma.astype(np.float32), grad_beta.astype(np.float32)
+            return (
+                grad_input.astype(np.float32),
+                grad_gamma.astype(np.float32),
+                grad_beta.astype(np.float32),
+            )
 
         # Handle different input shapes
         if len(original_shape) == 1:
@@ -1776,7 +1811,16 @@ class VulkanFNN(BufferMixin):
         buf_grad_gamma = self._acquire_buffer(gamma_flat.nbytes)
         buf_grad_beta = self._acquire_buffer(gamma_flat.nbytes)
 
-        buffers_list = [buf_grad_out, buf_input, buf_gamma, buf_mean, buf_var, buf_grad_in, buf_grad_gamma, buf_grad_beta]
+        buffers_list = [
+            buf_grad_out,
+            buf_input,
+            buf_gamma,
+            buf_mean,
+            buf_var,
+            buf_grad_in,
+            buf_grad_gamma,
+            buf_grad_beta,
+        ]
 
         # Upload data
         self._upload_buffer(buf_grad_out, grad_out_flat)
@@ -1792,7 +1836,7 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline (8 buffers, push constants: 4 uints + 1 float = 20 bytes)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fnn-layernorm-backward', 8, push_constant_size=20
+            "fnn-layernorm-backward", 8, push_constant_size=20
         )
 
         buffers = [
@@ -1810,19 +1854,25 @@ class VulkanFNN(BufferMixin):
         descriptor_set = self.pipelines._create_descriptor_set(desc_layout, buffers)
 
         # Pass 0: Compute intermediate sums
-        push_constants = struct.pack('IIIfI', batch_size, seq_len, features, eps, 0)
+        push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, 0)
         workgroups = (total_positions + 255) // 256
-        self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+        )
 
         # Pass 1: Compute grad_input
-        push_constants = struct.pack('IIIfI', batch_size, seq_len, features, eps, 1)
+        push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, 1)
         workgroups = (total_elements + 255) // 256
-        self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+        )
 
         # Pass 2: Compute grad_gamma and grad_beta
-        push_constants = struct.pack('IIIfI', batch_size, seq_len, features, eps, 2)
+        push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, 2)
         workgroups = (features + 255) // 256
-        self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+        )
 
         # Download results
         grad_input = self._download_buffer(buf_grad_in, x_flat.nbytes, np.float32)
@@ -1839,10 +1889,7 @@ class VulkanFNN(BufferMixin):
     # Softmax backward pass (GPU accelerated)
     # ------------------------------------------------------------------
     def softmax_backward(
-        self,
-        grad_output: np.ndarray,
-        softmax_output: np.ndarray,
-        dim: int = -1
+        self, grad_output: np.ndarray, softmax_output: np.ndarray, dim: int = -1
     ) -> np.ndarray:
         """
         GPU-accelerated softmax backward pass using activation-softmax-backward.glsl.
@@ -1858,7 +1905,7 @@ class VulkanFNN(BufferMixin):
         original_shape = grad_output.shape
 
         # Check if shader is available
-        if 'activation-softmax-backward' not in self.shaders:
+        if "activation-softmax-backward" not in self.shaders:
             # CPU fallback: grad_input = s * (grad_output - sum(grad_output * s, dim))
             sum_term = np.sum(grad_output * softmax_output, axis=dim, keepdims=True)
             grad_input = softmax_output * (grad_output - sum_term)
@@ -1893,25 +1940,27 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline (3 buffers, push constants: 3 uints = 12 bytes)
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'activation-softmax-backward', 3, push_constant_size=12
+            "activation-softmax-backward", 3, push_constant_size=12
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'activation-softmax-backward',
+            "activation-softmax-backward",
             [
                 (self._get_buffer_handle(buf_grad_out), grad_out_flat.nbytes),
                 (self._get_buffer_handle(buf_softmax), softmax_flat.nbytes),
                 (self._get_buffer_handle(buf_grad_in), grad_out_flat.nbytes),
-            ]
+            ],
         )
 
         # Push constants: batch_size, seq_len, num_classes
-        push_constants = struct.pack('III', batch_size, seq_len, num_classes)
+        push_constants = struct.pack("III", batch_size, seq_len, num_classes)
 
         # Dispatch: one thread per row
         workgroups = (total_rows + 255) // 256
-        self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups, push_constants)
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+        )
 
         # Download results
         grad_input = self._download_buffer(buf_grad_in, grad_out_flat.nbytes, np.float32)
@@ -1924,7 +1973,13 @@ class VulkanFNN(BufferMixin):
     # ------------------------------------------------------------------
     # Dropout (CPU fallback)
     # ------------------------------------------------------------------
-    def dropout(self, x: np.ndarray, dropout_prob: float = 0.1, is_training: bool = True, seed: int | None = None) -> np.ndarray:
+    def dropout(
+        self,
+        x: np.ndarray,
+        dropout_prob: float = 0.1,
+        is_training: bool = True,
+        seed: int | None = None,
+    ) -> np.ndarray:
         """
         Simple dropout implementation for test coverage. Scales activations to
         keep expected value consistent during training.
@@ -1953,7 +2008,7 @@ class VulkanFNN(BufferMixin):
             x + module_output
         """
         # Check if shader is available
-        if 'fnn-residual' not in self.shaders:
+        if "fnn-residual" not in self.shaders:
             # CPU fallback
             return (x + module_output).astype(np.float32)
 
@@ -1973,27 +2028,26 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fnn-residual', 3, push_constant_size=4
+            "fnn-residual", 3, push_constant_size=4
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'fnn-residual',
+            "fnn-residual",
             [
                 (self._get_buffer_handle(buf_x), x_flat.nbytes),
                 (self._get_buffer_handle(buf_module), module_flat.nbytes),
-                (self._get_buffer_handle(buf_out), x_flat.nbytes)
-            ]
+                (self._get_buffer_handle(buf_out), x_flat.nbytes),
+            ],
         )
 
         # Pack push constants
-        push_constants = struct.pack('I', total_elements)
+        push_constants = struct.pack("I", total_elements)
 
         # Dispatch
         workgroups = (total_elements + 255) // 256
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups, push_constants
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
         # Download results
@@ -2034,7 +2088,7 @@ class VulkanFNN(BufferMixin):
         Returns:
             GELU(Linear(x))
         """
-        if 'fused-linear-gelu' not in self.shaders:
+        if "fused-linear-gelu" not in self.shaders:
             # Fallback to separate operations
             linear_out = self.linear(x, weights, bias, return_gpu_tensor=return_gpu_tensor)
             return self.activation_gelu(linear_out, return_gpu_tensor=return_gpu_tensor)
@@ -2078,30 +2132,29 @@ class VulkanFNN(BufferMixin):
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fused-linear-gelu', 4, push_constant_size=16
+            "fused-linear-gelu", 4, push_constant_size=16
         )
 
         # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'fused-linear-gelu',
+            "fused-linear-gelu",
             [
                 (self._get_buffer_handle(buf_input), input_nbytes),
                 (self._get_buffer_handle(buf_weights), w_nbytes),
                 (self._get_buffer_handle(buf_bias), b_nbytes),
-                (self._get_buffer_handle(buf_output), output_size)
-            ]
+                (self._get_buffer_handle(buf_output), output_size),
+            ],
         )
 
         # Pack push constants: batch_seq, input_dim, output_dim, has_bias
-        push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, has_bias)
+        push_constants = struct.pack("IIII", batch_seq, input_dim, output_dim, has_bias)
 
         # Dispatch (2D: rows = batch_seq, cols = output_dim)
         workgroups_x = (output_dim + 15) // 16
         workgroups_y = (batch_seq + 15) // 16
 
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups_x, push_constants, workgroups_y
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
         )
 
         # Compute output shape
@@ -2151,7 +2204,7 @@ class VulkanFNN(BufferMixin):
         Returns:
             ReLU(Linear(x))
         """
-        if 'fused-linear-relu' not in self.shaders:
+        if "fused-linear-relu" not in self.shaders:
             linear_out = self.linear(x, weights, bias, return_gpu_tensor=return_gpu_tensor)
             return self.activation_relu(linear_out, return_gpu_tensor=return_gpu_tensor)
 
@@ -2189,27 +2242,26 @@ class VulkanFNN(BufferMixin):
         buf_output = self._acquire_buffer(output_size)
 
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fused-linear-relu', 4, push_constant_size=16
+            "fused-linear-relu", 4, push_constant_size=16
         )
 
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'fused-linear-relu',
+            "fused-linear-relu",
             [
                 (self._get_buffer_handle(buf_input), input_nbytes),
                 (self._get_buffer_handle(buf_weights), w_nbytes),
                 (self._get_buffer_handle(buf_bias), b_nbytes),
-                (self._get_buffer_handle(buf_output), output_size)
-            ]
+                (self._get_buffer_handle(buf_output), output_size),
+            ],
         )
 
-        push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, has_bias)
+        push_constants = struct.pack("IIII", batch_seq, input_dim, output_dim, has_bias)
 
         workgroups_x = (output_dim + 15) // 16
         workgroups_y = (batch_seq + 15) // 16
 
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups_x, push_constants, workgroups_y
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
         )
 
         if len(original_shape) > 2:
@@ -2260,7 +2312,7 @@ class VulkanFNN(BufferMixin):
         Returns:
             SiLU(Linear(x))
         """
-        if 'fused-linear-silu' not in self.shaders:
+        if "fused-linear-silu" not in self.shaders:
             linear_out = self.linear(x, weights, bias, return_gpu_tensor=return_gpu_tensor)
             return self.activation_silu(linear_out, return_gpu_tensor=return_gpu_tensor)
 
@@ -2298,27 +2350,26 @@ class VulkanFNN(BufferMixin):
         buf_output = self._acquire_buffer(output_size)
 
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fused-linear-silu', 4, push_constant_size=16
+            "fused-linear-silu", 4, push_constant_size=16
         )
 
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'fused-linear-silu',
+            "fused-linear-silu",
             [
                 (self._get_buffer_handle(buf_input), input_nbytes),
                 (self._get_buffer_handle(buf_weights), w_nbytes),
                 (self._get_buffer_handle(buf_bias), b_nbytes),
-                (self._get_buffer_handle(buf_output), output_size)
-            ]
+                (self._get_buffer_handle(buf_output), output_size),
+            ],
         )
 
-        push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, has_bias)
+        push_constants = struct.pack("IIII", batch_seq, input_dim, output_dim, has_bias)
 
         workgroups_x = (output_dim + 15) // 16
         workgroups_y = (batch_seq + 15) // 16
 
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups_x, push_constants, workgroups_y
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
         )
 
         if len(original_shape) > 2:
@@ -2346,19 +2397,14 @@ class VulkanFNN(BufferMixin):
             self._release_buffer(buf_output)
             return result.reshape(output_shape)
 
-
-
     def fused_linear_gcu(
-        self,
-        x: np.ndarray,
-        weights: np.ndarray,
-        bias: np.ndarray | None = None
+        self, x: np.ndarray, weights: np.ndarray, bias: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Fused Linear + GCU: GCU(x @ W.T + b)
         Uses: fused-linear-gcu.glsl
         """
-        if 'fused-linear-gcu' not in self.shaders:
+        if "fused-linear-gcu" not in self.shaders:
             linear_out = self.linear(x, weights, bias)
             return self.activation_gcu(linear_out)
 
@@ -2394,27 +2440,26 @@ class VulkanFNN(BufferMixin):
         self._upload_buffer(buf_bias, b_flat)
 
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fused-linear-gcu', 4, push_constant_size=16
+            "fused-linear-gcu", 4, push_constant_size=16
         )
 
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'fused-linear-gcu',
+            "fused-linear-gcu",
             [
                 (self._get_buffer_handle(buf_input), x_flat.nbytes),
                 (self._get_buffer_handle(buf_weights), w_flat.nbytes),
                 (self._get_buffer_handle(buf_bias), b_flat.nbytes),
-                (self._get_buffer_handle(buf_output), output_size)
-            ]
+                (self._get_buffer_handle(buf_output), output_size),
+            ],
         )
 
-        push_constants = struct.pack('IIII', batch_seq, input_dim, output_dim, has_bias)
+        push_constants = struct.pack("IIII", batch_seq, input_dim, output_dim, has_bias)
 
         workgroups_x = (output_dim + 15) // 16
         workgroups_y = (batch_seq + 15) // 16
 
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups_x, push_constants, workgroups_y
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
         )
 
         result = self._download_buffer(buf_output, output_size, np.float32)
@@ -2432,13 +2477,13 @@ class VulkanFNN(BufferMixin):
         weights: np.ndarray,
         bias: np.ndarray | None = None,
         alpha: float = 1.0,
-        beta: float = 1.0
+        beta: float = 1.0,
     ) -> np.ndarray:
         """
         Fused Linear + RoSwish: RoSwish(x @ W.T + b)
         Uses: fused-linear-roswish.glsl
         """
-        if 'fused-linear-roswish' not in self.shaders:
+        if "fused-linear-roswish" not in self.shaders:
             linear_out = self.linear(x, weights, bias)
             return self.activation_roswish(linear_out, alpha=alpha, beta=beta)
 
@@ -2474,27 +2519,28 @@ class VulkanFNN(BufferMixin):
         self._upload_buffer(buf_bias, b_flat)
 
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-            'fused-linear-roswish', 4, push_constant_size=24
+            "fused-linear-roswish", 4, push_constant_size=24
         )
 
         descriptor_set = self.pipelines.get_cached_descriptor_set(
-            'fused-linear-roswish',
+            "fused-linear-roswish",
             [
                 (self._get_buffer_handle(buf_input), x_flat.nbytes),
                 (self._get_buffer_handle(buf_weights), w_flat.nbytes),
                 (self._get_buffer_handle(buf_bias), b_flat.nbytes),
-                (self._get_buffer_handle(buf_output), output_size)
-            ]
+                (self._get_buffer_handle(buf_output), output_size),
+            ],
         )
 
-        push_constants = struct.pack('IIIIff', batch_seq, input_dim, output_dim, has_bias, alpha, beta)
+        push_constants = struct.pack(
+            "IIIIff", batch_seq, input_dim, output_dim, has_bias, alpha, beta
+        )
 
         workgroups_x = (output_dim + 15) // 16
         workgroups_y = (batch_seq + 15) // 16
 
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set,
-            workgroups_x, push_constants, workgroups_y
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
         )
 
         result = self._download_buffer(buf_output, output_size, np.float32)

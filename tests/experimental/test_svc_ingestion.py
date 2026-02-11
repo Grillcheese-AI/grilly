@@ -130,6 +130,7 @@ def _write_jsonl(entries, path):
 # 1. TestSVCLoader
 # =============================================================================
 
+
 class TestSVCLoader:
     """Test SVCEntry parsing, file loading, and batch loading."""
 
@@ -265,6 +266,7 @@ class TestSVCLoader:
 # =============================================================================
 # 2. TestInstantLanguageIngestSVC
 # =============================================================================
+
 
 class TestInstantLanguageIngestSVC:
     """Test InstantLanguage.ingest_svc."""
@@ -410,6 +412,7 @@ class TestInstantLanguageIngestSVC:
 # 3. TestSentenceGeneratorLearnSVCTemplates
 # =============================================================================
 
+
 class TestSentenceGeneratorLearnSVCTemplates:
     """Test SentenceGenerator.learn_svc_templates."""
 
@@ -499,6 +502,7 @@ class TestSentenceGeneratorLearnSVCTemplates:
 # 4. TestCognitiveControllerIngestSVC
 # =============================================================================
 
+
 class TestCognitiveControllerIngestSVC:
     """Test CognitiveController.ingest_svc."""
 
@@ -580,6 +584,7 @@ class TestCognitiveControllerIngestSVC:
 # 5. TestRealmMoEIntegration
 # =============================================================================
 
+
 class TestRealmMoEIntegration:
     """Test ResonatorMoE.from_realm_vectors with SVC data."""
 
@@ -606,8 +611,7 @@ class TestRealmMoEIntegration:
         """from_realm_vectors accepts custom pre-built vectors."""
         fns = {r: (lambda x, _r=r: x) for r in self.REALMS}
         custom_vecs = {
-            r: BinaryOps.random_bipolar(dim, seed=hash(r) % (2**31))
-            for r in self.REALMS
+            r: BinaryOps.random_bipolar(dim, seed=hash(r) % (2**31)) for r in self.REALMS
         }
         moe = ResonatorMoE.from_realm_vectors(
             dim=dim,
@@ -623,9 +627,7 @@ class TestRealmMoEIntegration:
         result = lang.ingest_svc(entries)
 
         fns = {r: (lambda x, _r=r: x) for r in result.realm_vectors}
-        moe = ResonatorMoE.from_realm_vectors(
-            dim=dim, realm_expert_fns=fns
-        )
+        moe = ResonatorMoE.from_realm_vectors(dim=dim, realm_expert_fns=fns)
 
         for realm in result.realm_vectors:
             indicator = BinaryOps.hash_to_bipolar(realm, dim)
@@ -656,6 +658,7 @@ class TestRealmMoEIntegration:
 # =============================================================================
 # 6. TestEndToEndIngestion
 # =============================================================================
+
 
 class TestEndToEndIngestion:
     """Full end-to-end ingestion pipeline test."""
@@ -720,6 +723,7 @@ class TestEndToEndIngestion:
 # 7. TestSVCIngestionEngine
 # =============================================================================
 
+
 class TestSVCIngestionEngine:
     """Test SVCIngestionEngine (CPU path, GPU auto-detect)."""
 
@@ -777,10 +781,7 @@ class TestSVCIngestionEngine:
     def test_engine_resonator_step(self, dim):
         """engine.resonator_step selects best codebook entry."""
         engine = SVCIngestionEngine(dim=dim, gpu=False)
-        codebook = np.array([
-            BinaryOps.random_bipolar(dim, seed=i)
-            for i in range(5)
-        ])
+        codebook = np.array([BinaryOps.random_bipolar(dim, seed=i) for i in range(5)])
         target = codebook[2].copy()
         best_vec, best_idx = engine.resonator_step(target, codebook)
         assert best_idx == 2
@@ -828,12 +829,8 @@ class TestSVCIngestionEngine:
         """batch_realm_route assigns each query to correct realm."""
         engine = SVCIngestionEngine(dim=dim, gpu=False)
         realms = ["health", "science", "general"]
-        codebook = np.array([
-            BinaryOps.hash_to_bipolar(r, dim) for r in realms
-        ])
-        queries = np.array([
-            BinaryOps.hash_to_bipolar(r, dim) for r in realms
-        ])
+        codebook = np.array([BinaryOps.hash_to_bipolar(r, dim) for r in realms])
+        queries = np.array([BinaryOps.hash_to_bipolar(r, dim) for r in realms])
         results = engine.batch_realm_route(queries, codebook, realms)
         assert results == realms
 

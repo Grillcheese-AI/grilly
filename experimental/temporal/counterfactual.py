@@ -13,6 +13,7 @@ from grilly.experimental.temporal.state import TemporalState, TemporalWorldModel
 @dataclass
 class CounterfactualQuery:
     """A counterfactual query: what if X had been different at time T?"""
+
     intervention_time: int
     variable: str
     actual_value: Any
@@ -24,6 +25,7 @@ class CounterfactualQuery:
 @dataclass
 class CounterfactualResult:
     """Result of counterfactual reasoning."""
+
     query: CounterfactualQuery
     actual_outcome: dict[str, Any]
     counterfactual_outcome: dict[str, Any]
@@ -34,7 +36,7 @@ class CounterfactualResult:
 class CounterfactualReasoner:
     """
     Performs counterfactual reasoning.
-    
+
     Process:
     1. Take actual timeline
     2. Intervene: change variable X at time T
@@ -48,15 +50,10 @@ class CounterfactualReasoner:
         self.world = world_model
         self.dim = world_model.dim
 
-    def intervene(
-        self,
-        time: int,
-        variable: str,
-        new_value: Any
-    ) -> str:
+    def intervene(self, time: int, variable: str, new_value: Any) -> str:
         """
         Create a counterfactual branch by intervening on a variable.
-        
+
         Returns branch_id for this counterfactual world.
         """
         branch_id = f"cf_{time}_{variable}_{new_value}"
@@ -70,7 +67,7 @@ class CounterfactualReasoner:
                     time=t,
                     variables=state.variables.copy(),
                     vector=state.vector.copy(),
-                    is_counterfactual=True
+                    is_counterfactual=True,
                 )
 
         # At intervention: apply the change
@@ -82,10 +79,7 @@ class CounterfactualReasoner:
             temporal_vec = self.world.temporal_encoder.bind_with_time(state_vec, time)
 
             cf_timeline[time] = TemporalState(
-                time=time,
-                variables=actual_vars,
-                vector=temporal_vec,
-                is_counterfactual=True
+                time=time, variables=actual_vars, vector=temporal_vec, is_counterfactual=True
             )
 
         # After intervention: propagate forward
@@ -100,10 +94,7 @@ class CounterfactualReasoner:
                 temporal_vec = self.world.temporal_encoder.bind_with_time(state_vec, t)
 
                 cf_timeline[t] = TemporalState(
-                    time=t,
-                    variables=future_vars,
-                    vector=temporal_vec,
-                    is_counterfactual=True
+                    time=t, variables=future_vars, vector=temporal_vec, is_counterfactual=True
                 )
 
                 current_vars = future_vars
@@ -111,18 +102,13 @@ class CounterfactualReasoner:
         self.world.counterfactual_branches[branch_id] = cf_timeline
         return branch_id
 
-    def query_counterfactual(
-        self,
-        query: CounterfactualQuery
-    ) -> CounterfactualResult:
+    def query_counterfactual(self, query: CounterfactualQuery) -> CounterfactualResult:
         """
         Answer a counterfactual query.
         """
         # Create intervention
         branch_id = self.intervene(
-            query.intervention_time,
-            query.variable,
-            query.counterfactual_value
+            query.intervention_time, query.variable, query.counterfactual_value
         )
 
         cf_timeline = self.world.counterfactual_branches[branch_id]
@@ -151,7 +137,7 @@ class CounterfactualReasoner:
             query.variable,
             query.query_time,
             query.query_variable,
-            cf_timeline
+            cf_timeline,
         )
 
         return CounterfactualResult(
@@ -159,7 +145,7 @@ class CounterfactualReasoner:
             actual_outcome=actual_outcome,
             counterfactual_outcome=cf_outcome,
             difference=differences,
-            causal_path=causal_path
+            causal_path=causal_path,
         )
 
     def _trace_causal_path(
@@ -168,7 +154,7 @@ class CounterfactualReasoner:
         start_var: str,
         end_time: int,
         end_var: str | None,
-        cf_timeline: dict[int, TemporalState]
+        cf_timeline: dict[int, TemporalState],
     ) -> list[str]:
         """Trace the causal chain from intervention to outcome."""
         path = [f"t={start_time}: intervene on {start_var}"]

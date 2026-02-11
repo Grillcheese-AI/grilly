@@ -1,6 +1,7 @@
 """
 Tests for GPU operations (requires Vulkan)
 """
+
 import numpy as np
 import pytest
 
@@ -29,8 +30,7 @@ class TestLIFOperations:
         refractory = np.array([0.0], dtype=np.float32)
 
         mem_out, ref_out, spikes = gpu.lif_step(
-            input_current, membrane, refractory,
-            dt=0.001, tau_mem=20.0, v_thresh=1.0
+            input_current, membrane, refractory, dt=0.001, tau_mem=20.0, v_thresh=1.0
         )
 
         # Should integrate but not spike with this input
@@ -44,14 +44,13 @@ class TestLIFOperations:
         refractory = np.array([0.0], dtype=np.float32)
 
         mem_out, ref_out, spikes = gpu.lif_step(
-            input_current, membrane, refractory,
-            dt=0.6, tau_mem=20.0, v_thresh=1.0
+            input_current, membrane, refractory, dt=0.6, tau_mem=20.0, v_thresh=1.0
         )
 
         # Should spike and reset
         assert spikes[0] == 1.0
         assert mem_out[0] == 0.0  # Reset
-        assert ref_out[0] > 0.0   # In refractory period
+        assert ref_out[0] > 0.0  # In refractory period
 
     def test_lif_batch(self, gpu):
         """Test batch of neurons"""
@@ -60,9 +59,7 @@ class TestLIFOperations:
         membrane = np.random.rand(n).astype(np.float32) * 0.5
         refractory = np.zeros(n, dtype=np.float32)
 
-        mem_out, ref_out, spikes = gpu.lif_step(
-            input_current, membrane, refractory
-        )
+        mem_out, ref_out, spikes = gpu.lif_step(input_current, membrane, refractory)
 
         spike_count = spikes.sum()
 
@@ -75,10 +72,7 @@ class TestLIFOperations:
         membrane = np.array([0.0], dtype=np.float32)
         refractory = np.array([2.0], dtype=np.float32)  # In refractory
 
-        mem_out, ref_out, spikes = gpu.lif_step(
-            input_current, membrane, refractory,
-            dt=0.001
-        )
+        mem_out, ref_out, spikes = gpu.lif_step(input_current, membrane, refractory, dt=0.001)
 
         # Should not spike
         assert spikes[0] == 0.0
@@ -119,7 +113,7 @@ class TestFNNOperations:
 
     def test_activation_gcu(self, gpu):
         """Test GCU (Growing Cosine Unit) activation: x * cos(x)"""
-        input_data = np.array([0.0, 1.0, -1.0, np.pi/2, -np.pi/2], dtype=np.float32)
+        input_data = np.array([0.0, 1.0, -1.0, np.pi / 2, -np.pi / 2], dtype=np.float32)
 
         output = gpu.activation_gcu(input_data)
 
@@ -135,11 +129,11 @@ class TestFNNOperations:
         np.testing.assert_allclose(output[2], expected_neg1, rtol=1e-5)
 
         # GCU(π/2) = π/2 * cos(π/2) ≈ π/2 * 0 = 0
-        expected_pi2 = (np.pi/2) * np.cos(np.pi/2)
+        expected_pi2 = (np.pi / 2) * np.cos(np.pi / 2)
         np.testing.assert_allclose(output[3], expected_pi2, rtol=1e-4, atol=1e-5)
 
         # GCU(-π/2) = -π/2 * cos(-π/2) ≈ -π/2 * 0 = 0
-        expected_neg_pi2 = (-np.pi/2) * np.cos(-np.pi/2)
+        expected_neg_pi2 = (-np.pi / 2) * np.cos(-np.pi / 2)
         np.testing.assert_allclose(output[4], expected_neg_pi2, rtol=1e-4, atol=1e-5)
 
     def test_activation_roswish(self, gpu):
@@ -221,7 +215,7 @@ class TestFAISSOperations:
         queries = np.random.randn(5, 128).astype(np.float32)
         database = np.random.randn(100, 128).astype(np.float32)
 
-        distances = gpu.faiss_compute_distances(queries, database, distance_type='l2')
+        distances = gpu.faiss_compute_distances(queries, database, distance_type="l2")
 
         assert distances.shape == (5, 100)
         assert np.all(distances >= 0)
@@ -235,7 +229,7 @@ class TestFAISSOperations:
         queries = np.random.randn(3, 64).astype(np.float32)
         database = np.random.randn(50, 64).astype(np.float32)
 
-        distances = gpu.faiss_compute_distances(queries, database, distance_type='cosine')
+        distances = gpu.faiss_compute_distances(queries, database, distance_type="cosine")
 
         assert distances.shape == (3, 50)
         assert np.all(distances >= 0)
@@ -254,9 +248,7 @@ class TestFAISSOperations:
         # Verify top-k correctness
         for i in range(10):
             sorted_dists = np.sort(distances[i])
-            np.testing.assert_allclose(
-                np.sort(topk_distances[i]), sorted_dists[:k], rtol=1e-4
-            )
+            np.testing.assert_allclose(np.sort(topk_distances[i]), sorted_dists[:k], rtol=1e-4)
 
     def test_faiss_end_to_end(self, gpu):
         """Test end-to-end FAISS pipeline"""
@@ -265,7 +257,7 @@ class TestFAISSOperations:
         database = np.random.randn(1000, 256).astype(np.float32)
         k = 10
 
-        distances = gpu.faiss_compute_distances(queries, database, distance_type='cosine')
+        distances = gpu.faiss_compute_distances(queries, database, distance_type="cosine")
         topk_indices, topk_distances = gpu.faiss_topk(distances, k)
 
         assert topk_indices.shape == (10, k)

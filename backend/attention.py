@@ -52,14 +52,14 @@ class VulkanAttention(BufferMixin):
     def attention_scores(self, queries, keys, num_heads, head_dim, scale=None):
         """
         Compute attention scores: Q @ K^T / sqrt(head_dim)
-        
+
         Args:
             queries: Query tensor (batch, seq_len, num_heads, head_dim) or (batch, seq_len, num_heads * head_dim)
             keys: Key tensor (batch, seq_len, num_heads, head_dim) or (batch, seq_len, num_heads * head_dim)
             num_heads: Number of attention heads
             head_dim: Dimension of each head
             scale: Optional scaling factor (default: 1/sqrt(head_dim))
-        
+
         Returns:
             Attention scores (batch, num_heads, seq_len, seq_len)
         """
@@ -96,34 +96,42 @@ class VulkanAttention(BufferMixin):
 
             # Get or create pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'attention-scores', 4, push_constant_size=24
+                "attention-scores", 4, push_constant_size=24
             )
 
             # Get cached descriptor set
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'attention-scores',
+                "attention-scores",
                 [
                     (self._get_buffer_handle(buf_q), q_flat.nbytes),
                     (self._get_buffer_handle(buf_k), k_flat.nbytes),
                     (self._get_buffer_handle(buf_v_dummy), q_flat.nbytes),
-                    (self._get_buffer_handle(buf_scores), scores_size)
-                ]
+                    (self._get_buffer_handle(buf_scores), scores_size),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('IIIIfI', batch_size, seq_len, num_heads, head_dim, scale, 0)
+            push_constants = struct.pack(
+                "IIIIfI", batch_size, seq_len, num_heads, head_dim, scale, 0
+            )
 
             # Dispatch
             workgroups_x = (seq_len + 15) // 16
             workgroups_y = ((batch_size * num_heads * seq_len) + 15) // 16
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups_x, push_constants, workgroups_y
+                pipeline,
+                pipeline_layout,
+                descriptor_set,
+                workgroups_x,
+                push_constants,
+                workgroups_y,
             )
 
             # Download results
             result = self._download_buffer(buf_scores, scores_size, np.float32)
-            result = result[:batch_size * num_heads * seq_len * seq_len].reshape(batch_size, num_heads, seq_len, seq_len)
+            result = result[: batch_size * num_heads * seq_len * seq_len].reshape(
+                batch_size, num_heads, seq_len, seq_len
+            )
 
             return result
         finally:
@@ -132,13 +140,13 @@ class VulkanAttention(BufferMixin):
     def attention_mask(self, attention_scores, use_causal=True, mask_value=-1e9, custom_mask=None):
         """
         Apply mask to attention scores
-        
+
         Args:
             attention_scores: Attention scores (batch, num_heads, seq_len, seq_len)
             use_causal: Whether to apply causal masking (if True, custom_mask is ignored)
             mask_value: Value to use for masked positions
             custom_mask: Optional custom mask (batch, seq_len) - 1.0 = keep, 0.0 = mask out
-        
+
         Returns:
             Masked attention scores
         """
@@ -173,31 +181,32 @@ class VulkanAttention(BufferMixin):
 
             # Get or create pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'attention-mask', 2, push_constant_size=20
+                "attention-mask", 2, push_constant_size=20
             )
 
             # Get cached descriptor set
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'attention-mask',
+                "attention-mask",
                 [
                     (self._get_buffer_handle(buf_scores), scores_flat.nbytes),
-                    (self._get_buffer_handle(buf_mask), mask_flat.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_mask), mask_flat.nbytes),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('IIIIf', batch_size, num_heads, seq_len, 1 if use_causal else 0, mask_value)
+            push_constants = struct.pack(
+                "IIIIf", batch_size, num_heads, seq_len, 1 if use_causal else 0, mask_value
+            )
 
             # Dispatch
             workgroups = (len(scores_flat) + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             # Download results
             result = self._download_buffer(buf_scores, scores_flat.nbytes, np.float32)
-            result = result[:len(scores_flat)].reshape(batch_size, num_heads, seq_len, seq_len)
+            result = result[: len(scores_flat)].reshape(batch_size, num_heads, seq_len, seq_len)
 
             return result
         finally:
@@ -206,13 +215,13 @@ class VulkanAttention(BufferMixin):
     def attention_output(self, attention_weights, values, num_heads, head_dim):
         """
         Compute attention output: weights @ values
-        
+
         Args:
             attention_weights: Attention weights (batch, num_heads, seq_len, seq_len)
             values: Value tensor (batch, seq_len, num_heads, head_dim)
             num_heads: Number of attention heads
             head_dim: Dimension of each head
-        
+
         Returns:
             Attention output (batch, seq_len, num_heads, head_dim)
         """
@@ -225,9 +234,9 @@ class VulkanAttention(BufferMixin):
             v = v.reshape(batch_size, seq_len, num_heads, head_dim)
 
         # Try to get architecture-specific shader, fall back to generic
-        shader_name = get_shader('attention-output', self.architecture)
+        shader_name = get_shader("attention-output", self.architecture)
         if shader_name is None:
-            shader_name = 'attention-output'  # Fall back to generic
+            shader_name = "attention-output"  # Fall back to generic
 
         # Check if shader is available
         if shader_name not in self.shaders:
@@ -241,7 +250,7 @@ class VulkanAttention(BufferMixin):
                 result = numba_attention_output(weights, v_transposed)
             else:
                 # Pure numpy fallback
-                result = np.einsum('bhqk,bhkd->bhqd', weights, v_transposed)
+                result = np.einsum("bhqk,bhkd->bhqd", weights, v_transposed)
 
             # Transpose back to (batch, seq_len, num_heads, head_dim)
             result = result.transpose(0, 2, 1, 3)
@@ -273,23 +282,24 @@ class VulkanAttention(BufferMixin):
                 [
                     (self._get_buffer_handle(buf_weights), weights_flat.nbytes),
                     (self._get_buffer_handle(buf_v), v_flat.nbytes),
-                    (self._get_buffer_handle(buf_out), output_size)
-                ]
+                    (self._get_buffer_handle(buf_out), output_size),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('IIII', batch_size, seq_len, num_heads, head_dim)
+            push_constants = struct.pack("IIII", batch_size, seq_len, num_heads, head_dim)
 
             # Dispatch
             workgroups = ((batch_size * seq_len * num_heads * head_dim) + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             # Download results
             result = self._download_buffer(buf_out, output_size, np.float32)
-            result = result[:batch_size * seq_len * num_heads * head_dim].reshape(batch_size, seq_len, num_heads, head_dim)
+            result = result[: batch_size * seq_len * num_heads * head_dim].reshape(
+                batch_size, seq_len, num_heads, head_dim
+            )
 
             return result
         finally:
@@ -298,10 +308,10 @@ class VulkanAttention(BufferMixin):
     def attention_concat_heads(self, attention_output):
         """
         Concatenate attention heads
-        
+
         Args:
             attention_output: Attention output (batch, seq_len, num_heads, head_dim)
-        
+
         Returns:
             Concatenated output (batch, seq_len, num_heads * head_dim)
         """
@@ -321,31 +331,32 @@ class VulkanAttention(BufferMixin):
 
             # Get or create pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'attention-concat-heads', 2, push_constant_size=16
+                "attention-concat-heads", 2, push_constant_size=16
             )
 
             # Get cached descriptor set
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'attention-concat-heads',
+                "attention-concat-heads",
                 [
                     (self._get_buffer_handle(buf_in), output_flat.nbytes),
-                    (self._get_buffer_handle(buf_out), concat_size)
-                ]
+                    (self._get_buffer_handle(buf_out), concat_size),
+                ],
             )
 
             # Pack push constants
-            push_constants = struct.pack('IIII', batch_size, seq_len, num_heads, head_dim)
+            push_constants = struct.pack("IIII", batch_size, seq_len, num_heads, head_dim)
 
             # Dispatch
             workgroups = ((batch_size * seq_len * num_heads * head_dim) + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             # Download results
             result = self._download_buffer(buf_out, concat_size, np.float32)
-            result = result[:batch_size * seq_len * num_heads * head_dim].reshape(batch_size, seq_len, num_heads * head_dim)
+            result = result[: batch_size * seq_len * num_heads * head_dim].reshape(
+                batch_size, seq_len, num_heads * head_dim
+            )
 
             return result
         finally:
@@ -362,15 +373,15 @@ class VulkanAttention(BufferMixin):
         tile_size_k=64,
         scale=None,
         mask=None,
-        causal=False
+        causal=False,
     ):
         """
         Flash Attention 2: Tiled attention with online softmax
-        
+
         Processes attention in blocks to reduce memory from O(N²) to O(N).
         Uses online softmax algorithm for numerical stability.
         Optimized for GPU tiling support.
-        
+
         Args:
             queries: Query tensor (batch, seq_len, num_heads, head_dim) or (batch, seq_len, num_heads * head_dim)
             keys: Key tensor (batch, seq_len, num_heads, head_dim) or (batch, seq_len, num_heads * head_dim)
@@ -382,7 +393,7 @@ class VulkanAttention(BufferMixin):
             scale: Optional scaling factor (default: 1/sqrt(head_dim))
             mask: Optional attention mask (batch, seq_len) - 0.0 = mask out, 1.0 = keep
             causal: Whether to apply causal masking (default: False)
-        
+
         Returns:
             Attention output (batch, seq_len, num_heads, head_dim)
         """
@@ -450,7 +461,7 @@ class VulkanAttention(BufferMixin):
                 self._upload_buffer(buf_mask, mask_flat)
 
             # Check if shader is available
-            if 'flash-attention2' not in self.shaders:
+            if "flash-attention2" not in self.shaders:
                 raise RuntimeError(
                     "flash-attention2 shader not compiled. "
                     "Run: glslc -fshader-stage=compute shaders/flash-attention2.glsl -o shaders/spv/flash-attention2.spv"
@@ -459,16 +470,22 @@ class VulkanAttention(BufferMixin):
             # Get or create pipeline
             num_bindings = 8  # Q, K, V, mask, output, running_max, running_sum, output_accum
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'flash-attention2', num_bindings, push_constant_size=44  # 11 uint/float values
+                "flash-attention2",
+                num_bindings,
+                push_constant_size=44,  # 11 uint/float values
             )
 
             # Helper for mask descriptor entry
-            mask_handle = self._get_buffer_handle(buf_mask) if buf_mask is not None else self._get_buffer_handle(buf_q)
+            mask_handle = (
+                self._get_buffer_handle(buf_mask)
+                if buf_mask is not None
+                else self._get_buffer_handle(buf_q)
+            )
             mask_size = mask_flat.nbytes if mask_flat is not None else q_flat.nbytes
 
             # Pass 0: Initialize running max, sum, and accumulator
             descriptor_set_init = self.pipelines.get_cached_descriptor_set(
-                'flash-attention2',
+                "flash-attention2",
                 [
                     (self._get_buffer_handle(buf_q), q_flat.nbytes),
                     (self._get_buffer_handle(buf_k), k_flat.nbytes),
@@ -477,33 +494,42 @@ class VulkanAttention(BufferMixin):
                     (self._get_buffer_handle(buf_output), output_accum_size),
                     (self._get_buffer_handle(buf_running_max), running_max_size),
                     (self._get_buffer_handle(buf_running_sum), running_sum_size),
-                    (self._get_buffer_handle(buf_output_accum), output_accum_size)
-                ]
+                    (self._get_buffer_handle(buf_output_accum), output_accum_size),
+                ],
             )
 
             push_constants_init = struct.pack(
-                'IIIIfIIIII',
-                batch_size, seq_len, num_heads, head_dim,
+                "IIIIfIIIII",
+                batch_size,
+                seq_len,
+                num_heads,
+                head_dim,
                 scale,
-                tile_size_q, tile_size_k,
+                tile_size_q,
+                tile_size_k,
                 0,  # pass_type = 0 (initialize)
                 1 if mask is not None else 0,  # has_mask
-                0, 0  # q_tile_idx, k_tile_idx (not used in init)
+                0,
+                0,  # q_tile_idx, k_tile_idx (not used in init)
             )
 
             # Dispatch initialization
             workgroups_init_x = 16
             workgroups_init_y = (num_q_positions + 15) // 16
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set_init,
-                workgroups_init_x, push_constants_init, workgroups_init_y
+                pipeline,
+                pipeline_layout,
+                descriptor_set_init,
+                workgroups_init_x,
+                push_constants_init,
+                workgroups_init_y,
             )
 
             # Pass 1: Process all tiles
             for q_tile in range(num_tiles_q):
                 for k_tile in range(num_tiles_k):
                     descriptor_set_tile = self.pipelines.get_cached_descriptor_set(
-                        'flash-attention2',
+                        "flash-attention2",
                         [
                             (self._get_buffer_handle(buf_q), q_flat.nbytes),
                             (self._get_buffer_handle(buf_k), k_flat.nbytes),
@@ -512,31 +538,40 @@ class VulkanAttention(BufferMixin):
                             (self._get_buffer_handle(buf_output), output_accum_size),
                             (self._get_buffer_handle(buf_running_max), running_max_size),
                             (self._get_buffer_handle(buf_running_sum), running_sum_size),
-                            (self._get_buffer_handle(buf_output_accum), output_accum_size)
-                        ]
+                            (self._get_buffer_handle(buf_output_accum), output_accum_size),
+                        ],
                     )
 
                     push_constants_tile = struct.pack(
-                        'IIIIfIIIII',
-                        batch_size, seq_len, num_heads, head_dim,
+                        "IIIIfIIIII",
+                        batch_size,
+                        seq_len,
+                        num_heads,
+                        head_dim,
                         scale,
-                        tile_size_q, tile_size_k,
+                        tile_size_q,
+                        tile_size_k,
                         1,  # pass_type = 1 (process tile)
                         1 if mask is not None else 0,  # has_mask
-                        q_tile, k_tile
+                        q_tile,
+                        k_tile,
                     )
 
                     # Dispatch tile processing
                     workgroups_tile_x = (tile_size_k + 15) // 16
                     workgroups_tile_y = (batch_size * num_heads * tile_size_q + 15) // 16
                     self.core._dispatch_compute(
-                        pipeline, pipeline_layout, descriptor_set_tile,
-                        workgroups_tile_x, push_constants_tile, workgroups_tile_y
+                        pipeline,
+                        pipeline_layout,
+                        descriptor_set_tile,
+                        workgroups_tile_x,
+                        push_constants_tile,
+                        workgroups_tile_y,
                     )
 
             # Pass 2: Finalize output
             descriptor_set_final = self.pipelines.get_cached_descriptor_set(
-                'flash-attention2',
+                "flash-attention2",
                 [
                     (self._get_buffer_handle(buf_q), q_flat.nbytes),
                     (self._get_buffer_handle(buf_k), k_flat.nbytes),
@@ -545,55 +580,78 @@ class VulkanAttention(BufferMixin):
                     (self._get_buffer_handle(buf_output), output_accum_size),
                     (self._get_buffer_handle(buf_running_max), running_max_size),
                     (self._get_buffer_handle(buf_running_sum), running_sum_size),
-                    (self._get_buffer_handle(buf_output_accum), output_accum_size)
-                ]
+                    (self._get_buffer_handle(buf_output_accum), output_accum_size),
+                ],
             )
 
             push_constants_final = struct.pack(
-                'IIIIfIIIII',
-                batch_size, seq_len, num_heads, head_dim,
+                "IIIIfIIIII",
+                batch_size,
+                seq_len,
+                num_heads,
+                head_dim,
                 scale,
-                tile_size_q, tile_size_k,
+                tile_size_q,
+                tile_size_k,
                 2,  # pass_type = 2 (finalize)
                 1 if mask is not None else 0,  # has_mask
-                0, 0  # q_tile_idx, k_tile_idx (not used in finalize)
+                0,
+                0,  # q_tile_idx, k_tile_idx (not used in finalize)
             )
 
             # Dispatch finalization
             workgroups_final_x = (head_dim + 15) // 16
             workgroups_final_y = (num_q_positions + 15) // 16
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set_final,
-                workgroups_final_x, push_constants_final, workgroups_final_y
+                pipeline,
+                pipeline_layout,
+                descriptor_set_final,
+                workgroups_final_x,
+                push_constants_final,
+                workgroups_final_y,
             )
 
             # Download results
             result = self._download_buffer(buf_output, output_accum_size, np.float32)
-            result = result[:batch_size * seq_len * num_heads * head_dim].reshape(
+            result = result[: batch_size * seq_len * num_heads * head_dim].reshape(
                 batch_size, seq_len, num_heads, head_dim
             )
 
             return result
         finally:
-            buffers = [buf_q, buf_k, buf_v, buf_running_max, buf_running_sum, buf_output_accum, buf_output]
+            buffers = [
+                buf_q,
+                buf_k,
+                buf_v,
+                buf_running_max,
+                buf_running_sum,
+                buf_output_accum,
+                buf_output,
+            ]
             if buf_mask is not None:
                 buffers.append(buf_mask)
             self._release_buffers(buffers)
 
-    def apply_rope(self, q_or_k: np.ndarray, position_ids: np.ndarray = None, rope_base: float = 10000.0, rope_scaling: float = 1.0) -> np.ndarray:
+    def apply_rope(
+        self,
+        q_or_k: np.ndarray,
+        position_ids: np.ndarray = None,
+        rope_base: float = 10000.0,
+        rope_scaling: float = 1.0,
+    ) -> np.ndarray:
         """
         Apply RoPE (Rotary Position Embeddings) to Q or K tensors.
-        
+
         Args:
             q_or_k: Query or Key tensor (batch, seq_len, num_heads, head_dim)
             position_ids: Position indices (batch, seq_len). If None, uses [0, 1, 2, ...]
             rope_base: Base frequency for RoPE (default: 10000.0)
             rope_scaling: Scaling factor for extended context (default: 1.0)
-        
+
         Returns:
             Rotated Q or K tensor (same shape)
         """
-        if 'rope' not in self.shaders:
+        if "rope" not in self.shaders:
             # CPU fallback for RoPE
             logger.debug("RoPE shader not available, using CPU fallback")
             return self._rope_cpu(q_or_k, position_ids, rope_base, rope_scaling)
@@ -622,30 +680,34 @@ class VulkanAttention(BufferMixin):
             # Push constants: batch_size(uint), seq_len(uint), num_heads(uint), head_dim(uint), rope_base(float), use_precomputed(uint), rope_scaling(float)
             # Total: 4*4 + 4 + 4 + 4 = 28 bytes
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'rope', 2, push_constant_size=28
+                "rope", 2, push_constant_size=28
             )
 
             # Get cached descriptor set
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'rope',
+                "rope",
                 [
                     (self._get_buffer_handle(buf_input), qk_flat.nbytes),
-                    (self._get_buffer_handle(buf_output), qk_flat.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_output), qk_flat.nbytes),
+                ],
             )
 
             # Pack push constants: batch_size, seq_len, num_heads, head_dim, rope_base, use_precomputed, rope_scaling
-            push_constants = struct.pack('IIIIfIf',
-                batch_size, seq_len, num_heads, head_dim,
-                rope_base, 0,  # use_precomputed = 0 (compute on-the-fly)
-                rope_scaling
+            push_constants = struct.pack(
+                "IIIIfIf",
+                batch_size,
+                seq_len,
+                num_heads,
+                head_dim,
+                rope_base,
+                0,  # use_precomputed = 0 (compute on-the-fly)
+                rope_scaling,
             )
 
             # Dispatch - shader now processes all elements (not just pairs)
             workgroups = (total_elements + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             # Download results
@@ -661,24 +723,26 @@ class VulkanAttention(BufferMixin):
         attention_scores: np.ndarray,
         prosody_features: np.ndarray,
         prosody_weights: np.ndarray,
-        prosody_strength: float = 0.3
+        prosody_strength: float = 0.3,
     ) -> np.ndarray:
         """
         Apply prosody modulation to attention scores.
-        
+
         Args:
             attention_scores: Attention scores (batch, num_heads, seq_len, seq_len)
             prosody_features: Prosody features (batch, seq_len, prosody_dim)
             prosody_weights: Prosody projection weights (num_heads, prosody_dim)
             prosody_strength: Modulation strength (default: 0.3)
-        
+
         Returns:
             Modulated attention scores (same shape)
         """
-        if 'attention-prosody-modulation' not in self.shaders:
+        if "attention-prosody-modulation" not in self.shaders:
             # CPU fallback
             logger.debug("Prosody modulation shader not available, using CPU fallback")
-            return self._prosody_modulation_cpu(attention_scores, prosody_features, prosody_weights, prosody_strength)
+            return self._prosody_modulation_cpu(
+                attention_scores, prosody_features, prosody_weights, prosody_strength
+            )
 
         scores = attention_scores.astype(np.float32)
         prosody = prosody_features.astype(np.float32)
@@ -704,30 +768,29 @@ class VulkanAttention(BufferMixin):
 
             # Get or create pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'attention-prosody-modulation', 3, push_constant_size=24
+                "attention-prosody-modulation", 3, push_constant_size=24
             )
 
             # Get cached descriptor set
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'attention-prosody-modulation',
+                "attention-prosody-modulation",
                 [
                     (self._get_buffer_handle(buf_scores), scores_flat.nbytes),
                     (self._get_buffer_handle(buf_prosody), prosody_flat.nbytes),
-                    (self._get_buffer_handle(buf_weights), weights_flat.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_weights), weights_flat.nbytes),
+                ],
             )
 
             # Pack push constants: batch_size, num_heads, seq_len, prosody_dim, prosody_strength
-            push_constants = struct.pack('IIIIf',
-                batch_size, num_heads, seq_len, prosody_dim, prosody_strength
+            push_constants = struct.pack(
+                "IIIIf", batch_size, num_heads, seq_len, prosody_dim, prosody_strength
             )
 
             # Dispatch
             total_scores = batch_size * num_heads * seq_len * seq_len
             workgroups = (total_scores + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             # Download results
@@ -743,7 +806,7 @@ class VulkanAttention(BufferMixin):
         attention_scores: np.ndarray,
         prosody_features: np.ndarray,
         prosody_weights: np.ndarray,
-        prosody_strength: float
+        prosody_strength: float,
     ) -> np.ndarray:
         """CPU fallback for prosody modulation (numba-accelerated if available)"""
         if NUMBA_AVAILABLE and numba_prosody_modulation is not None:
@@ -751,7 +814,7 @@ class VulkanAttention(BufferMixin):
                 attention_scores.astype(np.float32),
                 prosody_features.astype(np.float32),
                 prosody_weights.astype(np.float32),
-                prosody_strength
+                prosody_strength,
             )
 
         # Pure numpy fallback
@@ -760,7 +823,7 @@ class VulkanAttention(BufferMixin):
         # prosody_features: (batch, seq_len, prosody_dim)
         # prosody_weights: (num_heads, prosody_dim)
         # Compute: prosody_bias = prosody_features @ prosody_weights.T -> (batch, seq_len, num_heads)
-        prosody_bias = np.einsum('bsd,hd->bsh', prosody_features, prosody_weights)
+        prosody_bias = np.einsum("bsd,hd->bsh", prosody_features, prosody_weights)
 
         # Broadcast to attention shape: (batch, num_heads, seq_len, seq_len)
         prosody_bias = prosody_bias.transpose(0, 2, 1)  # (batch, num_heads, seq_len)
@@ -768,7 +831,13 @@ class VulkanAttention(BufferMixin):
 
         return attention_scores + prosody_strength * prosody_bias
 
-    def _rope_cpu(self, q_or_k: np.ndarray, position_ids: np.ndarray = None, rope_base: float = 10000.0, rope_scaling: float = 1.0) -> np.ndarray:
+    def _rope_cpu(
+        self,
+        q_or_k: np.ndarray,
+        position_ids: np.ndarray = None,
+        rope_base: float = 10000.0,
+        rope_scaling: float = 1.0,
+    ) -> np.ndarray:
         """
         CPU fallback for RoPE using PyTorch's rotate_half approach (numba-accelerated if available).
 
@@ -783,10 +852,7 @@ class VulkanAttention(BufferMixin):
 
         if NUMBA_AVAILABLE and numba_rope is not None:
             return numba_rope(
-                q_or_k.astype(np.float32),
-                position_ids.astype(np.int32),
-                rope_base,
-                rope_scaling
+                q_or_k.astype(np.float32), position_ids.astype(np.int32), rope_base, rope_scaling
             )
 
         # Pure numpy fallback
@@ -809,5 +875,3 @@ class VulkanAttention(BufferMixin):
                     result[b, s, h, half_dim:] = qk_second * cos_vals + qk_first * sin_vals
 
         return result
-
-

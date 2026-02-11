@@ -18,10 +18,14 @@ class LSTMCell(Module):
 
         # Weight matrices: [input, forget, gate, output] stacked
         # Input-to-hidden weights: (4 * hidden_size, input_size)
-        self.weight_ih = Parameter(np.random.randn(4 * hidden_size, input_size).astype(np.float32) * 0.01)
+        self.weight_ih = Parameter(
+            np.random.randn(4 * hidden_size, input_size).astype(np.float32) * 0.01
+        )
 
         # Hidden-to-hidden weights: (4 * hidden_size, hidden_size)
-        self.weight_hh = Parameter(np.random.randn(4 * hidden_size, hidden_size).astype(np.float32) * 0.01)
+        self.weight_hh = Parameter(
+            np.random.randn(4 * hidden_size, hidden_size).astype(np.float32) * 0.01
+        )
 
         if bias:
             # Bias terms: (4 * hidden_size)
@@ -31,8 +35,9 @@ class LSTMCell(Module):
             self.bias_ih = None
             self.bias_hh = None
 
-    def forward(self, input: np.ndarray,
-                hx: tuple[np.ndarray, np.ndarray] | None = None) -> tuple[np.ndarray, np.ndarray]:
+    def forward(
+        self, input: np.ndarray, hx: tuple[np.ndarray, np.ndarray] | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Compute one LSTM step and return ``(h_new, c_new)``."""
         batch_size = input.shape[0]
 
@@ -67,10 +72,10 @@ class LSTMCell(Module):
         # Split into 4 gates: input, forget, cell, output
         # Each gate has shape (batch, hidden_size)
         chunk_size = self.hidden_size
-        i_gate = self._sigmoid(gates[:, 0*chunk_size:1*chunk_size])
-        f_gate = self._sigmoid(gates[:, 1*chunk_size:2*chunk_size])
-        g_gate = np.tanh(gates[:, 2*chunk_size:3*chunk_size])
-        o_gate = self._sigmoid(gates[:, 3*chunk_size:4*chunk_size])
+        i_gate = self._sigmoid(gates[:, 0 * chunk_size : 1 * chunk_size])
+        f_gate = self._sigmoid(gates[:, 1 * chunk_size : 2 * chunk_size])
+        g_gate = np.tanh(gates[:, 2 * chunk_size : 3 * chunk_size])
+        o_gate = self._sigmoid(gates[:, 3 * chunk_size : 4 * chunk_size])
 
         # Update cell state: c_t = f_t * c_{t-1} + i_t * g_t
         c_new = f_gate * c_prev + i_gate * g_gate
@@ -102,7 +107,7 @@ class LSTM(Module):
         bias: bool = True,
         batch_first: bool = False,
         dropout: float = 0.0,
-        bidirectional: bool = False
+        bidirectional: bool = False,
     ):
         """
         Initialize LSTM.
@@ -143,9 +148,7 @@ class LSTM(Module):
                 self.cells_backward.append(LSTMCell(layer_input_size, hidden_size, bias))
 
     def forward(
-        self,
-        input: np.ndarray,
-        hx: tuple[np.ndarray, np.ndarray] | None = None
+        self, input: np.ndarray, hx: tuple[np.ndarray, np.ndarray] | None = None
     ) -> tuple[np.ndarray, tuple[np.ndarray, np.ndarray]]:
         """
         Forward pass through LSTM.
@@ -175,8 +178,14 @@ class LSTM(Module):
 
         # Initialize hidden and cell states if not provided
         if hx is None:
-            h_0 = np.zeros((self.num_layers * self.num_directions, batch_size, self.hidden_size), dtype=np.float32)
-            c_0 = np.zeros((self.num_layers * self.num_directions, batch_size, self.hidden_size), dtype=np.float32)
+            h_0 = np.zeros(
+                (self.num_layers * self.num_directions, batch_size, self.hidden_size),
+                dtype=np.float32,
+            )
+            c_0 = np.zeros(
+                (self.num_layers * self.num_directions, batch_size, self.hidden_size),
+                dtype=np.float32,
+            )
         else:
             h_0, c_0 = hx
 
@@ -214,7 +223,9 @@ class LSTM(Module):
                     h_t, c_t = self.cells_backward[layer](layer_output[t], (h_t, c_t))
                     backward_outputs.insert(0, h_t)
 
-                backward_outputs = np.stack(backward_outputs, axis=0)  # (seq_len, batch, hidden_size)
+                backward_outputs = np.stack(
+                    backward_outputs, axis=0
+                )  # (seq_len, batch, hidden_size)
                 final_hiddens.append(h_t)
                 final_cells.append(c_t)
 
@@ -269,10 +280,14 @@ class GRUCell(Module):
 
         # Weight matrices: [reset, update, new] stacked
         # Input-to-hidden weights: (3 * hidden_size, input_size)
-        self.weight_ih = Parameter(np.random.randn(3 * hidden_size, input_size).astype(np.float32) * 0.01)
+        self.weight_ih = Parameter(
+            np.random.randn(3 * hidden_size, input_size).astype(np.float32) * 0.01
+        )
 
         # Hidden-to-hidden weights: (3 * hidden_size, hidden_size)
-        self.weight_hh = Parameter(np.random.randn(3 * hidden_size, hidden_size).astype(np.float32) * 0.01)
+        self.weight_hh = Parameter(
+            np.random.randn(3 * hidden_size, hidden_size).astype(np.float32) * 0.01
+        )
 
         if bias:
             # Bias terms: (3 * hidden_size)
@@ -322,7 +337,6 @@ class GRUCell(Module):
             gh += bias_hh
 
         # Split into 3 gates: reset, update, new
-        chunk_size = self.hidden_size
         i_reset, i_update, i_new = np.split(gi, 3, axis=1)
         h_reset, h_update, h_new = np.split(gh, 3, axis=1)
 
@@ -362,7 +376,7 @@ class GRU(Module):
         bias: bool = True,
         batch_first: bool = False,
         dropout: float = 0.0,
-        bidirectional: bool = False
+        bidirectional: bool = False,
     ):
         """
         Initialize GRU.
@@ -402,9 +416,7 @@ class GRU(Module):
                 self.cells_backward.append(GRUCell(layer_input_size, hidden_size, bias))
 
     def forward(
-        self,
-        input: np.ndarray,
-        hx: np.ndarray | None = None
+        self, input: np.ndarray, hx: np.ndarray | None = None
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Forward pass through GRU.
@@ -431,7 +443,10 @@ class GRU(Module):
 
         # Initialize hidden state if not provided
         if hx is None:
-            h_0 = np.zeros((self.num_layers * self.num_directions, batch_size, self.hidden_size), dtype=np.float32)
+            h_0 = np.zeros(
+                (self.num_layers * self.num_directions, batch_size, self.hidden_size),
+                dtype=np.float32,
+            )
         else:
             h_0 = hx
 
@@ -465,7 +480,9 @@ class GRU(Module):
                     h_t = self.cells_backward[layer](layer_output[t], h_t)
                     backward_outputs.insert(0, h_t)
 
-                backward_outputs = np.stack(backward_outputs, axis=0)  # (seq_len, batch, hidden_size)
+                backward_outputs = np.stack(
+                    backward_outputs, axis=0
+                )  # (seq_len, batch, hidden_size)
                 final_hiddens.append(h_t)
 
                 # Concatenate forward and backward outputs

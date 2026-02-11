@@ -4,7 +4,6 @@ SentenceGenerator for instant sentence generation.
 Generates sentences from templates and relations.
 """
 
-
 import numpy as np
 
 from grilly.experimental.language.encoder import SentenceEncoder
@@ -17,7 +16,7 @@ class SentenceGenerator:
     1. Template filling (unbind template slots, bind with content)
     2. Relation chaining (A causes B, express as sentence)
     3. Role-based construction (given subject, verb, object -> sentence)
-    
+
     No training needed!
     """
 
@@ -73,17 +72,15 @@ class SentenceGenerator:
         }
 
     def generate_from_roles(
-        self,
-        role_fillers: dict[str, str],
-        template_name: str = "simple_transitive"
+        self, role_fillers: dict[str, str], template_name: str = "simple_transitive"
     ) -> list[str]:
         """
         Generate sentence by filling template roles.
-        
+
         Args:
             role_fillers: {"SUBJ": "The dog", "VERB": "chased", "OBJ": "the cat"}
             template_name: Which template to use
-            
+
         Returns:
             List of words forming the sentence
         """
@@ -108,15 +105,10 @@ class SentenceGenerator:
 
         return words
 
-    def generate_from_relation(
-        self,
-        subject: str,
-        relation: str,
-        object_: str
-    ) -> list[str]:
+    def generate_from_relation(self, subject: str, relation: str, object_: str) -> list[str]:
         """
         Generate sentence expressing a relation.
-        
+
         Given: subject="lightning", relation="causes", object="thunder"
         Output: ["Lightning", "causes", "thunder"]
         """
@@ -141,14 +133,10 @@ class SentenceGenerator:
             # Default: simple statement
             return [subject.capitalize(), relation, object_]
 
-    def learn_pattern(
-        self,
-        sentences: list[list[str]],
-        pattern_name: str
-    ):
+    def learn_pattern(self, sentences: list[list[str]], pattern_name: str):
         """
         Learn a sentence pattern from examples.
-        
+
         Extract the common structure from multiple sentences.
         """
         pattern_vecs = []
@@ -202,14 +190,11 @@ class SentenceGenerator:
         }
 
     def complete_sentence(
-        self,
-        partial: list[str],
-        partial_roles: list[str],
-        missing_role: str
+        self, partial: list[str], partial_roles: list[str], missing_role: str
     ) -> list[tuple[str, float]]:
         """
         Complete a partial sentence by finding what fits a missing role.
-        
+
         "The dog ___ the cat" -> find best VERB
         """
         # Encode partial sentence

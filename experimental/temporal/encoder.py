@@ -4,7 +4,6 @@ TemporalEncoder - Encodes time points as hypervectors.
 Supports discrete and continuous time, temporal binding/unbinding.
 """
 
-
 import numpy as np
 
 from grilly.experimental.vsa.ops import HolographicOps
@@ -13,7 +12,7 @@ from grilly.experimental.vsa.ops import HolographicOps
 class TemporalEncoder:
     """
     Encodes time points as hypervectors.
-    
+
     Key properties:
     - Adjacent times have similar vectors (enables temporal smoothing)
     - Can bind any state with a time marker
@@ -88,7 +87,7 @@ class TemporalEncoder:
     def encode_time_continuous(self, t: float) -> np.ndarray:
         """
         Encode continuous time via interpolation.
-        
+
         Uses fractional binding: T(2.5) ≈ interpolate(T(2), T(3))
         """
         t_floor = int(np.floor(t))
@@ -99,10 +98,7 @@ class TemporalEncoder:
         v_ceil = self.encode_time(t_ceil)
 
         # Linear interpolation in vector space
-        return HolographicOps.bundle([
-            v_floor * (1 - frac),
-            v_ceil * frac
-        ], normalize=True)
+        return HolographicOps.bundle([v_floor * (1 - frac), v_ceil * frac], normalize=True)
 
     def bind_with_time(self, state: np.ndarray, t: int) -> np.ndarray:
         """Bind a state vector with a time marker."""

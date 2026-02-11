@@ -20,6 +20,7 @@ from grilly.nn.autograd import Function, FunctionCtx, Variable, no_grad, randn, 
 # Example 1: Custom ReLU
 # ============================================================================
 
+
 class MyReLU(Function):
     """
     Custom ReLU implementation.
@@ -36,7 +37,7 @@ class MyReLU(Function):
 
     @staticmethod
     def backward(ctx: FunctionCtx, grad_output: np.ndarray):
-        x, = ctx.saved_tensors
+        (x,) = ctx.saved_tensors
         # Gradient is 1 where input was positive, 0 otherwise
         return grad_output * (x.data > 0).astype(np.float32)
 
@@ -44,6 +45,7 @@ class MyReLU(Function):
 # ============================================================================
 # Example 2: Custom Linear Layer
 # ============================================================================
+
 
 class MyLinear(Function):
     """
@@ -75,6 +77,7 @@ class MyLinear(Function):
 # Example 3: Custom Softplus (smooth ReLU)
 # ============================================================================
 
+
 class MySoftplus(Function):
     """
     Softplus activation: log(1 + exp(x))
@@ -88,16 +91,15 @@ class MySoftplus(Function):
         ctx.save_for_backward(x)
         # Use stable computation: softplus(x) = x + log(1 + exp(-x)) for x >= 0
         x_data = x.data * beta
-        result = np.where(
-            x_data >= 0,
-            x_data + np.log1p(np.exp(-x_data)),
-            np.log1p(np.exp(x_data))
-        ) / beta
+        result = (
+            np.where(x_data >= 0, x_data + np.log1p(np.exp(-x_data)), np.log1p(np.exp(x_data)))
+            / beta
+        )
         return result
 
     @staticmethod
     def backward(ctx: FunctionCtx, grad_output: np.ndarray):
-        x, = ctx.saved_tensors
+        (x,) = ctx.saved_tensors
         # d/dx softplus(x) = sigmoid(beta * x)
         sigmoid = 1.0 / (1.0 + np.exp(-ctx.beta * x.data))
         return grad_output * sigmoid
@@ -106,6 +108,7 @@ class MySoftplus(Function):
 # ============================================================================
 # Example 4: Custom Squared Hinge Loss
 # ============================================================================
+
 
 class SquaredHingeLoss(Function):
     """
@@ -122,7 +125,7 @@ class SquaredHingeLoss(Function):
         ctx.save_for_backward(pred, target)
         margin = 1 - target.data * pred.data
         hinge = np.maximum(0, margin)
-        return np.mean(hinge ** 2)
+        return np.mean(hinge**2)
 
     @staticmethod
     def backward(ctx: FunctionCtx, grad_output: np.ndarray):
@@ -138,6 +141,7 @@ class SquaredHingeLoss(Function):
 # ============================================================================
 # Demo: Training with Custom Functions
 # ============================================================================
+
 
 def main():
     print("Custom Autograd Functions Tutorial")
@@ -250,7 +254,7 @@ def main():
     print("\n   Training complete!")
     print(f"   Initial loss: {initial_loss:.6f}")
     print(f"   Final loss:   {final_loss:.6f}")
-    print(f"   Improvement:  {(1 - final_loss/initial_loss)*100:.1f}%")
+    print(f"   Improvement:  {(1 - final_loss / initial_loss) * 100:.1f}%")
 
     # Test 5: Squared Hinge Loss for binary classification
     print("\n5. Squared Hinge Loss for Binary Classification")

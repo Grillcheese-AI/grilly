@@ -43,7 +43,7 @@ print("Data Loading Tutorial")
 print("=" * 70)
 
 # Find datasets directory
-datasets_root = Path(__file__).parent.parent / 'datasets'
+datasets_root = Path(__file__).parent.parent / "datasets"
 print(f"Datasets directory: {datasets_root}")
 
 
@@ -53,6 +53,7 @@ print(f"Datasets directory: {datasets_root}")
 print("\n1. Loading Real MNIST Dataset")
 print("-" * 70)
 
+
 # Define transforms for MNIST
 # Images are uint8 [0-255], we normalize to float32 [-1, 1]
 def normalize_mnist(x):
@@ -61,6 +62,7 @@ def normalize_mnist(x):
     x = (x - 0.5) / 0.5  # Normalize to [-1, 1]
     x = x.reshape(-1)  # Flatten to 784
     return x
+
 
 # Load MNIST dataset
 training_data = MNIST(
@@ -139,6 +141,7 @@ for X, y in test_dataloader:
 print("\n4. Loading CIFAR-10 Dataset")
 print("-" * 70)
 
+
 def normalize_cifar(x):
     """Normalize CIFAR images."""
     x = x.astype(np.float32) / 255.0
@@ -147,6 +150,7 @@ def normalize_cifar(x):
     std = np.array([0.2470, 0.2435, 0.2616]).reshape(3, 1, 1)
     x = (x - mean) / std
     return x
+
 
 cifar_train = CIFAR10(root=str(datasets_root), train=True, transform=normalize_cifar)
 cifar_test = CIFAR10(root=str(datasets_root), train=False, transform=normalize_cifar)
@@ -167,8 +171,7 @@ print("-" * 70)
 
 # Create a dataset and split it
 full_dataset = TensorDataset(
-    np.random.randn(1000, 784).astype(np.float32),
-    np.random.randint(0, 10, 1000)
+    np.random.randn(1000, 784).astype(np.float32), np.random.randint(0, 10, 1000)
 )
 
 # Split into train/val/test (80/10/10)
@@ -202,7 +205,9 @@ class SimpleNN:
         scale2 = np.sqrt(2.0 / 128)
         scale3 = np.sqrt(2.0 / 64)
 
-        self.w1 = Variable(np.random.randn(784, 128).astype(np.float32) * scale1, requires_grad=True)
+        self.w1 = Variable(
+            np.random.randn(784, 128).astype(np.float32) * scale1, requires_grad=True
+        )
         self.b1 = Variable(np.zeros(128, dtype=np.float32), requires_grad=True)
 
         self.w2 = Variable(np.random.randn(128, 64).astype(np.float32) * scale2, requires_grad=True)
@@ -286,7 +291,9 @@ def train_epoch(dataloader, model, lr):
         n_batches += 1
 
         if batch_idx % 200 == 0:
-            print(f"  [{batch_idx * batch_size:>5d}/{len(dataloader.dataset):>5d}] loss: {loss.item():.4f}")
+            print(
+                f"  [{batch_idx * batch_size:>5d}/{len(dataloader.dataset):>5d}] loss: {loss.item():.4f}"
+            )
 
     return total_loss / n_batches
 
@@ -354,10 +361,12 @@ labels = np.random.randint(0, 10, 500)
 dataset = ArrayDataset(
     data=data,
     labels=labels,
-    transform=Compose([
-        lambda x: x.flatten(),  # Flatten
-        Normalize(mean=0.0, std=1.0),  # Normalize
-    ]),
+    transform=Compose(
+        [
+            lambda x: x.flatten(),  # Flatten
+            Normalize(mean=0.0, std=1.0),  # Normalize
+        ]
+    ),
     target_transform=OneHot(num_classes=10),  # One-hot encode labels
 )
 

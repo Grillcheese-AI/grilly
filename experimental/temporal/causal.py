@@ -26,21 +26,22 @@ from grilly.experimental.vsa.ops import HolographicOps
 class CausalRule:
     """
     A rule that transforms state at T to state at T+1.
-    
+
     Format: condition -> effect
     Example: "if raining AND no_umbrella -> wet"
     """
+
     name: str
     conditions: dict[str, Any]  # Variables that must match
-    effects: dict[str, Any]     # Variables that change
-    vector: np.ndarray          # Holographic encoding of the rule
-    probability: float = 1.0    # Deterministic by default
+    effects: dict[str, Any]  # Variables that change
+    vector: np.ndarray  # Holographic encoding of the rule
+    probability: float = 1.0  # Deterministic by default
 
 
 class CausalChain:
     """
     Manages causal relationships between temporal states.
-    
+
     Key operations:
     - propagate_forward: Given state at T, compute state at T+1
     - trace_backward: Given state at T, find causes at T-1
@@ -63,7 +64,12 @@ class CausalChain:
         """Get/create encoding for a variable name."""
         if name not in self.variable_vectors:
             self.variable_vectors[name] = HolographicOps.random_vector(
-                self.dim, seed=(stable_u32('name', name, domain='grilly.temporal') % (2**31) if stable_u32 else 0)
+                self.dim,
+                seed=(
+                    stable_u32("name", name, domain="grilly.temporal") % (2**31)
+                    if stable_u32
+                    else 0
+                ),
             )
         return self.variable_vectors[name]
 
@@ -71,7 +77,13 @@ class CausalChain:
         """Get/create encoding for a variable's value."""
         if value not in self.value_vectors[variable]:
             self.value_vectors[variable][value] = HolographicOps.random_vector(
-                self.dim, seed=(stable_u32('var', variable, 'val', str(value), domain='grilly.temporal') % (2**31) if stable_u32 else 0)
+                self.dim,
+                seed=(
+                    stable_u32("var", variable, "val", str(value), domain="grilly.temporal")
+                    % (2**31)
+                    if stable_u32
+                    else 0
+                ),
             )
         return self.value_vectors[variable][value]
 
@@ -97,7 +109,7 @@ class CausalChain:
         name: str,
         conditions: dict[str, Any],
         effects: dict[str, Any],
-        probability: float = 1.0
+        probability: float = 1.0,
     ):
         """Add a causal rule."""
         # Encode rule as: condition_encoding -> effect_encoding
@@ -110,29 +122,21 @@ class CausalChain:
             conditions=conditions,
             effects=effects,
             vector=rule_vec,
-            probability=probability
+            probability=probability,
         )
         self.rules.append(rule)
 
-    def check_condition(
-        self,
-        state: dict[str, Any],
-        condition: dict[str, Any]
-    ) -> bool:
+    def check_condition(self, state: dict[str, Any], condition: dict[str, Any]) -> bool:
         """Check if state satisfies condition."""
         for var, required_val in condition.items():
             if var not in state or state[var] != required_val:
                 return False
         return True
 
-    def propagate_forward(
-        self,
-        state: dict[str, Any],
-        steps: int = 1
-    ) -> dict[str, Any]:
+    def propagate_forward(self, state: dict[str, Any], steps: int = 1) -> dict[str, Any]:
         """
         Compute future state by applying causal rules.
-        
+
         This is deterministic forward simulation.
         """
         current = state.copy()
@@ -151,13 +155,11 @@ class CausalChain:
         return current
 
     def trace_causes(
-        self,
-        effect_state: dict[str, Any],
-        effect_var: str
+        self, effect_state: dict[str, Any], effect_var: str
     ) -> list[tuple[CausalRule, dict[str, Any]]]:
         """
         Find what rules could have caused a specific variable value.
-        
+
         Backward reasoning: given effect, find possible causes.
         """
         target_value = effect_state.get(effect_var)

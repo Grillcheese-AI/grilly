@@ -20,8 +20,7 @@ class VulkanSNN(BufferMixin):
         self.core = core
         self.pipelines = pipelines
 
-    def lif_step(self, input_current, membrane, refractory,
-                 dt=0.001, tau_mem=20.0, v_thresh=1.0):
+    def lif_step(self, input_current, membrane, refractory, dt=0.001, tau_mem=20.0, v_thresh=1.0):
         """Run LIF shader on GPU"""
         n = len(input_current)
 
@@ -36,7 +35,7 @@ class VulkanSNN(BufferMixin):
             self._upload_buffer(buf_ref, refractory.astype(np.float32))
 
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'lif-neuron', 4, push_constant_size=32
+                "lif-neuron", 4, push_constant_size=32
             )
 
             descriptor_set = self.pipelines._create_descriptor_set(
@@ -45,19 +44,15 @@ class VulkanSNN(BufferMixin):
                     (self._get_buffer_handle(buf_in), input_current.nbytes),
                     (self._get_buffer_handle(buf_mem), membrane.nbytes),
                     (self._get_buffer_handle(buf_ref), refractory.nbytes),
-                    (self._get_buffer_handle(buf_out), n * 4)
-                ]
+                    (self._get_buffer_handle(buf_out), n * 4),
+                ],
             )
 
-            push_constants = struct.pack(
-                'Ifffffff',
-                n, dt, tau_mem, 0.0, 0.0, v_thresh, 1.0, 2.0
-            )
+            push_constants = struct.pack("Ifffffff", n, dt, tau_mem, 0.0, 0.0, v_thresh, 1.0, 2.0)
 
             workgroups = (n + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             membrane_out = self._download_buffer(buf_mem, membrane.nbytes)
@@ -70,8 +65,9 @@ class VulkanSNN(BufferMixin):
         finally:
             self._release_buffers([buf_in, buf_mem, buf_ref, buf_out])
 
-    def hebbian_learning(self, pre_activations, post_activations, weights,
-                         learning_rate=0.01, weight_decay=0.0):
+    def hebbian_learning(
+        self, pre_activations, post_activations, weights, learning_rate=0.01, weight_decay=0.0
+    ):
         """
         Apply Hebbian learning rule: dW = eta * <pre * post> - lambda * W
         """
@@ -92,7 +88,7 @@ class VulkanSNN(BufferMixin):
             self._upload_buffer(buf_weights, weights_flat)
 
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'hebbian-learning', 3, push_constant_size=32
+                "hebbian-learning", 3, push_constant_size=32
             )
 
             descriptor_set = self.pipelines._create_descriptor_set(
@@ -100,23 +96,28 @@ class VulkanSNN(BufferMixin):
                 [
                     (self._get_buffer_handle(buf_pre), pre_flat.nbytes),
                     (self._get_buffer_handle(buf_post), post_flat.nbytes),
-                    (self._get_buffer_handle(buf_weights), weights_flat.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_weights), weights_flat.nbytes),
+                ],
             )
 
             push_constants = struct.pack(
-                'IIIIff', batch_size, time_steps, pre_dim, post_dim, learning_rate, weight_decay
+                "IIIIff", batch_size, time_steps, pre_dim, post_dim, learning_rate, weight_decay
             )
 
             workgroups_x = (pre_dim + 15) // 16
             workgroups_y = (post_dim + 15) // 16
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups_x, push_constants, workgroups_y, 1
+                pipeline,
+                pipeline_layout,
+                descriptor_set,
+                workgroups_x,
+                push_constants,
+                workgroups_y,
+                1,
             )
 
             weights_out = self._download_buffer(buf_weights, weights_flat.nbytes, np.float32)
-            weights_out = weights_out[:post_dim * pre_dim].reshape(post_dim, pre_dim)
+            weights_out = weights_out[: post_dim * pre_dim].reshape(post_dim, pre_dim)
 
             vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])
 
@@ -124,9 +125,17 @@ class VulkanSNN(BufferMixin):
         finally:
             self._release_buffers([buf_pre, buf_post, buf_weights])
 
-    def stdp_learning(self, pre_activations, post_activations, weights,
-                      pre_trace, post_trace,
-                      lr_potentiation=0.01, lr_depression=0.01, trace_decay=0.9):
+    def stdp_learning(
+        self,
+        pre_activations,
+        post_activations,
+        weights,
+        pre_trace,
+        post_trace,
+        lr_potentiation=0.01,
+        lr_depression=0.01,
+        trace_decay=0.9,
+    ):
         """
         Apply STDP learning rule with eligibility traces
         """
@@ -153,7 +162,7 @@ class VulkanSNN(BufferMixin):
             self._upload_buffer(buf_post_trace, post_trace_flat)
 
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'stdp-learning', 5, push_constant_size=32
+                "stdp-learning", 5, push_constant_size=32
             )
 
             descriptor_set = self.pipelines._create_descriptor_set(
@@ -163,48 +172,76 @@ class VulkanSNN(BufferMixin):
                     (self._get_buffer_handle(buf_post), post_flat.nbytes),
                     (self._get_buffer_handle(buf_weights), weights_flat.nbytes),
                     (self._get_buffer_handle(buf_pre_trace), pre_trace_flat.nbytes),
-                    (self._get_buffer_handle(buf_post_trace), post_trace_flat.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_post_trace), post_trace_flat.nbytes),
+                ],
             )
 
             # Pass 1: Update traces
             push_constants = struct.pack(
-                'IIIIfffI', batch_size, time_steps, pre_dim, post_dim,
-                lr_potentiation, lr_depression, trace_decay, 0
+                "IIIIfffI",
+                batch_size,
+                time_steps,
+                pre_dim,
+                post_dim,
+                lr_potentiation,
+                lr_depression,
+                trace_decay,
+                0,
             )
             workgroups_x = (max(pre_dim, post_dim) + 15) // 16
             workgroups_y = (batch_size + 15) // 16
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups_x, push_constants, workgroups_y, 1
+                pipeline,
+                pipeline_layout,
+                descriptor_set,
+                workgroups_x,
+                push_constants,
+                workgroups_y,
+                1,
             )
 
             pre_trace_out = self._download_buffer(buf_pre_trace, pre_trace_flat.nbytes, np.float32)
-            post_trace_out = self._download_buffer(buf_post_trace, post_trace_flat.nbytes, np.float32)
-            pre_trace_out = pre_trace_out[:batch_size * pre_dim].reshape(batch_size, pre_dim)
-            post_trace_out = post_trace_out[:batch_size * post_dim].reshape(batch_size, post_dim)
+            post_trace_out = self._download_buffer(
+                buf_post_trace, post_trace_flat.nbytes, np.float32
+            )
+            pre_trace_out = pre_trace_out[: batch_size * pre_dim].reshape(batch_size, pre_dim)
+            post_trace_out = post_trace_out[: batch_size * post_dim].reshape(batch_size, post_dim)
 
             self._upload_buffer(buf_pre_trace, pre_trace_out.flatten())
             self._upload_buffer(buf_post_trace, post_trace_out.flatten())
 
             # Pass 2: Update weights
             push_constants = struct.pack(
-                'IIIIfffI', batch_size, time_steps, pre_dim, post_dim,
-                lr_potentiation, lr_depression, trace_decay, 1
+                "IIIIfffI",
+                batch_size,
+                time_steps,
+                pre_dim,
+                post_dim,
+                lr_potentiation,
+                lr_depression,
+                trace_decay,
+                1,
             )
             workgroups_x = (pre_dim + 15) // 16
             workgroups_y = (post_dim + 15) // 16
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups_x, push_constants, workgroups_y, 1
+                pipeline,
+                pipeline_layout,
+                descriptor_set,
+                workgroups_x,
+                push_constants,
+                workgroups_y,
+                1,
             )
 
             weights_out = self._download_buffer(buf_weights, weights_flat.nbytes, np.float32)
-            weights_out = weights_out[:post_dim * pre_dim].reshape(post_dim, pre_dim)
+            weights_out = weights_out[: post_dim * pre_dim].reshape(post_dim, pre_dim)
             pre_trace_out = self._download_buffer(buf_pre_trace, pre_trace_flat.nbytes, np.float32)
-            post_trace_out = self._download_buffer(buf_post_trace, post_trace_flat.nbytes, np.float32)
-            pre_trace_out = pre_trace_out[:batch_size * pre_dim].reshape(batch_size, pre_dim)
-            post_trace_out = post_trace_out[:batch_size * post_dim].reshape(batch_size, post_dim)
+            post_trace_out = self._download_buffer(
+                buf_post_trace, post_trace_flat.nbytes, np.float32
+            )
+            pre_trace_out = pre_trace_out[: batch_size * pre_dim].reshape(batch_size, pre_dim)
+            post_trace_out = post_trace_out[: batch_size * post_dim].reshape(batch_size, post_dim)
 
             vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])
 
@@ -233,7 +270,7 @@ class VulkanSNN(BufferMixin):
         b_adapt: float = 0.02,
         tau_gate: float = 10.0,
         gate_strength: float = 1.0,
-        t_refrac_period: float = 2.0
+        t_refrac_period: float = 2.0,
     ) -> tuple:
         """
         GPU-accelerated GIF (Generalized Integrate-and-Fire) neuron step
@@ -295,7 +332,7 @@ class VulkanSNN(BufferMixin):
             self._upload_buffer(buf_tref, t_refrac)
             self._upload_buffer(buf_tlast, t_last)
 
-            if 'gif-neuron' not in self.shaders:
+            if "gif-neuron" not in self.shaders:
                 raise RuntimeError(
                     "gif-neuron shader not compiled. "
                     "Run: glslc -fshader-stage=compute shaders/gif-neuron.glsl -o shaders/spv/gif-neuron.spv"
@@ -303,11 +340,11 @@ class VulkanSNN(BufferMixin):
 
             num_bindings = 8
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'gif-neuron', num_bindings, push_constant_size=64
+                "gif-neuron", num_bindings, push_constant_size=64
             )
 
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'gif-neuron',
+                "gif-neuron",
                 [
                     (self._get_buffer_handle(buf_I), I_in.nbytes),
                     (self._get_buffer_handle(buf_V), V_mem.nbytes),
@@ -316,24 +353,31 @@ class VulkanSNN(BufferMixin):
                     (self._get_buffer_handle(buf_gf), g_forget.nbytes),
                     (self._get_buffer_handle(buf_tref), t_refrac.nbytes),
                     (self._get_buffer_handle(buf_spikes), spikes.nbytes),
-                    (self._get_buffer_handle(buf_tlast), t_last.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_tlast), t_last.nbytes),
+                ],
             )
 
             push_constants = struct.pack(
-                'Ifffffffffffff',
+                "Ifffffffffffff",
                 n_neurons,
-                dt, current_time,
-                tau_mem, v_rest, v_reset, v_thresh, r_mem,
-                tau_adapt, delta_adapt, b_adapt,
-                tau_gate, gate_strength,
-                t_refrac_period
+                dt,
+                current_time,
+                tau_mem,
+                v_rest,
+                v_reset,
+                v_thresh,
+                r_mem,
+                tau_adapt,
+                delta_adapt,
+                b_adapt,
+                tau_gate,
+                gate_strength,
+                t_refrac_period,
             )
 
             workgroups = (n_neurons + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             updated_V = self._download_buffer(buf_V, V_mem.nbytes, np.float32)
@@ -351,7 +395,9 @@ class VulkanSNN(BufferMixin):
                 updated_gi,
                 updated_gf,
                 updated_tref,
-                updated_tlast
+                updated_tlast,
             )
         finally:
-            self._release_buffers([buf_I, buf_V, buf_Ia, buf_gi, buf_gf, buf_tref, buf_spikes, buf_tlast])
+            self._release_buffers(
+                [buf_I, buf_V, buf_Ia, buf_gi, buf_gf, buf_tref, buf_spikes, buf_tlast]
+            )

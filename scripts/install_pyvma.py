@@ -35,9 +35,9 @@ PYVMA_REPO = "https://github.com/realitix/pyvma.git"
 
 def print_step(msg: str):
     """Print a step message"""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {msg}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 def print_error(msg: str):
@@ -54,10 +54,7 @@ def check_compiler() -> bool:
     """Check if a C++ compiler is available"""
     if platform.system() == "Windows":
         # Check for MSVC
-        result = subprocess.run(
-            ["where", "cl.exe"],
-            capture_output=True, text=True
-        )
+        result = subprocess.run(["where", "cl.exe"], capture_output=True, text=True)
         if result.returncode == 0:
             print("Found MSVC compiler: cl.exe")
             return True
@@ -161,13 +158,10 @@ lib.exe /OUT:"{lib_file}" "{obj_file}"
 '''
 
     script_file = build_dir / "compile_vma.bat"
-    with open(script_file, 'w') as f:
+    with open(script_file, "w") as f:
         f.write(compile_script)
 
-    result = subprocess.run(
-        ["cmd", "/c", str(script_file)],
-        capture_output=True, text=True
-    )
+    result = subprocess.run(["cmd", "/c", str(script_file)], capture_output=True, text=True)
 
     if result.returncode != 0:
         print_error(f"Compilation failed:\n{result.stderr}")
@@ -205,10 +199,18 @@ def build_vma_lib_linux(pyvma_dir: Path) -> bool:
 
     # Compile
     cmd1 = [
-        "g++", "-std=c++11", "-fPIC", "-x", "c++",
+        "g++",
+        "-std=c++11",
+        "-fPIC",
+        "-x",
+        "c++",
         f"-I{include_dir}",
-        "-DVMA_IMPLEMENTATION", "-DVMA_STATIC_VULKAN_FUNCTIONS=0",
-        "-c", str(header_file), "-o", str(obj_file)
+        "-DVMA_IMPLEMENTATION",
+        "-DVMA_STATIC_VULKAN_FUNCTIONS=0",
+        "-c",
+        str(header_file),
+        "-o",
+        str(obj_file),
     ]
 
     result = subprocess.run(cmd1, capture_output=True, text=True)
@@ -236,8 +238,7 @@ def clone_pyvma(target_dir: Path) -> bool:
 
     print("Cloning PyVMA repository...")
     result = subprocess.run(
-        ["git", "clone", PYVMA_REPO, str(target_dir)],
-        capture_output=True, text=True
+        ["git", "clone", PYVMA_REPO, str(target_dir)], capture_output=True, text=True
     )
 
     if result.returncode != 0:
@@ -259,7 +260,7 @@ def fix_pyvma_paths(pyvma_dir: Path):
         content = f.read()
 
     # Check if already fixed
-    if 'Quote paths' in content:
+    if "Quote paths" in content:
         print("PyVMA setup.py already has path fixes")
         return
 
@@ -335,7 +336,7 @@ def fix_pyvma_paths(pyvma_dir: Path):
 
     content = content.replace(old_build, new_build)
 
-    with open(setup_file, 'w') as f:
+    with open(setup_file, "w") as f:
         f.write(content)
 
     print("Fixed path handling in PyVMA setup.py")
@@ -346,8 +347,7 @@ def install_pyvma(pyvma_dir: Path) -> bool:
     print("Installing PyVMA...")
 
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", str(pyvma_dir)],
-        capture_output=True, text=True
+        [sys.executable, "-m", "pip", "install", str(pyvma_dir)], capture_output=True, text=True
     )
 
     if result.returncode != 0:
@@ -364,7 +364,8 @@ def verify_installation() -> bool:
 
     try:
         import pyvma
-        if hasattr(pyvma, 'vmaCreateAllocator'):
+
+        if hasattr(pyvma, "vmaCreateAllocator"):
             print_success("PyVMA is working correctly!")
             print(f"  Version: {getattr(pyvma, '__version__', 'unknown')}")
             print("  vmaCreateAllocator: available")

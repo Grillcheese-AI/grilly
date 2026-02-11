@@ -84,13 +84,16 @@ class VulkanLoRA(BufferMixin):
         rank = A.shape[0]
 
         # Check if GPU shader available
-        if not VULKAN_AVAILABLE or 'lora-forward' not in self.shaders:
+        if not VULKAN_AVAILABLE or "lora-forward" not in self.shaders:
             return self._forward_cpu(x, W, A, B, scale, bias)
 
         try:
-            return self._forward_gpu(x, W, A, B, scale, bias, batch_size, in_features, out_features, rank)
+            return self._forward_gpu(
+                x, W, A, B, scale, bias, batch_size, in_features, out_features, rank
+            )
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).debug(f"GPU LoRA forward failed: {e}, using CPU fallback")
             return self._forward_cpu(x, W, A, B, scale, bias)
 
@@ -133,7 +136,6 @@ class VulkanLoRA(BufferMixin):
         rank: int,
     ) -> np.ndarray:
         """GPU implementation of LoRA forward."""
-        device = self.core.device
 
         # Allocate buffers
         x_size = batch_size * in_features * 4
@@ -159,17 +161,22 @@ class VulkanLoRA(BufferMixin):
             self.core.upload_to_buffer(B_buf, B.tobytes())
 
             # Get or create pipeline
-            pipeline_key = 'lora-forward'
+            pipeline_key = "lora-forward"
             if pipeline_key not in self.pipelines:
                 self.pipelines[pipeline_key] = self.core.create_compute_pipeline(
-                    self.shaders['lora-forward']
+                    self.shaders["lora-forward"]
                 )
             pipeline = self.pipelines[pipeline_key]
 
             # Phase 0: Compute intermediate h = x @ A^T
             push_constants_0 = struct.pack(
-                'IIIIfi',
-                batch_size, in_features, out_features, rank, scale, 0  # phase=0
+                "IIIIfi",
+                batch_size,
+                in_features,
+                out_features,
+                rank,
+                scale,
+                0,  # phase=0
             )
 
             self.core.run_compute_shader(
@@ -178,13 +185,18 @@ class VulkanLoRA(BufferMixin):
                 push_constants_0,
                 (rank + 15) // 16,  # X workgroups
                 (batch_size + 15) // 16,  # Y workgroups
-                1  # Z workgroups
+                1,  # Z workgroups
             )
 
             # Phase 1: Compute output = x @ W^T + scale * h @ B^T
             push_constants_1 = struct.pack(
-                'IIIIfi',
-                batch_size, in_features, out_features, rank, scale, 1  # phase=1
+                "IIIIfi",
+                batch_size,
+                in_features,
+                out_features,
+                rank,
+                scale,
+                1,  # phase=1
             )
 
             self.core.run_compute_shader(
@@ -193,7 +205,7 @@ class VulkanLoRA(BufferMixin):
                 push_constants_1,
                 (out_features + 15) // 16,
                 (batch_size + 15) // 16,
-                1
+                1,
             )
 
             # Download result
@@ -258,16 +270,16 @@ class VulkanLoRA(BufferMixin):
         rank = A.shape[0]
 
         # Check if GPU shader available
-        if not VULKAN_AVAILABLE or 'lora-backward' not in self.shaders:
+        if not VULKAN_AVAILABLE or "lora-backward" not in self.shaders:
             return self._backward_cpu(grad_output, x, A, B, h, scale)
 
         try:
             return self._backward_gpu(
-                grad_output, x, A, B, h, scale,
-                batch_size, in_features, out_features, rank
+                grad_output, x, A, B, h, scale, batch_size, in_features, out_features, rank
             )
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).debug(f"GPU LoRA backward failed: {e}, using CPU fallback")
             return self._backward_cpu(grad_output, x, A, B, h, scale)
 
@@ -310,7 +322,6 @@ class VulkanLoRA(BufferMixin):
         rank: int,
     ) -> tuple[np.ndarray, np.ndarray]:
         """GPU implementation of LoRA backward."""
-        device = self.core.device
 
         # Allocate buffers
         grad_output_size = batch_size * out_features * 4
@@ -347,17 +358,16 @@ class VulkanLoRA(BufferMixin):
             self.core.upload_to_buffer(grad_B_buf, zeros_B.tobytes())
 
             # Get or create pipeline
-            pipeline_key = 'lora-backward'
+            pipeline_key = "lora-backward"
             if pipeline_key not in self.pipelines:
                 self.pipelines[pipeline_key] = self.core.create_compute_pipeline(
-                    self.shaders['lora-backward']
+                    self.shaders["lora-backward"]
                 )
             pipeline = self.pipelines[pipeline_key]
 
             # Phase 0: Compute grad_B
             push_constants_0 = struct.pack(
-                'IIIIfi',
-                batch_size, in_features, out_features, rank, scale, 0
+                "IIIIfi", batch_size, in_features, out_features, rank, scale, 0
             )
 
             self.core.run_compute_shader(
@@ -366,13 +376,12 @@ class VulkanLoRA(BufferMixin):
                 push_constants_0,
                 (rank + 15) // 16,
                 (out_features + 15) // 16,
-                1
+                1,
             )
 
             # Phase 1: Compute temp = grad_output @ B
             push_constants_1 = struct.pack(
-                'IIIIfi',
-                batch_size, in_features, out_features, rank, scale, 1
+                "IIIIfi", batch_size, in_features, out_features, rank, scale, 1
             )
 
             self.core.run_compute_shader(
@@ -381,13 +390,12 @@ class VulkanLoRA(BufferMixin):
                 push_constants_1,
                 (rank + 15) // 16,
                 (batch_size + 15) // 16,
-                1
+                1,
             )
 
             # Phase 2: Compute grad_A
             push_constants_2 = struct.pack(
-                'IIIIfi',
-                batch_size, in_features, out_features, rank, scale, 2
+                "IIIIfi", batch_size, in_features, out_features, rank, scale, 2
             )
 
             self.core.run_compute_shader(
@@ -396,7 +404,7 @@ class VulkanLoRA(BufferMixin):
                 push_constants_2,
                 (in_features + 15) // 16,
                 (rank + 15) // 16,
-                1
+                1,
             )
 
             # Download results

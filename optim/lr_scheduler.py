@@ -3,6 +3,7 @@ Learning Rate Schedulers
 
 Implements various learning rate scheduling strategies to match PyTorch's API.
 """
+
 import math
 
 
@@ -25,21 +26,22 @@ class LRScheduler:
 
         # Store initial learning rates
         if not isinstance(optimizer.param_groups, list):
-            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
+            raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
 
         self.base_lrs = []
         for i, group in enumerate(optimizer.param_groups):
-            if 'lr' not in group:
-                raise KeyError("param 'lr' is not specified in "
-                             f"param_groups[{i}] when resuming an optimizer")
-            self.base_lrs.append(group['lr'])
+            if "lr" not in group:
+                raise KeyError(
+                    f"param 'lr' is not specified in param_groups[{i}] when resuming an optimizer"
+                )
+            self.base_lrs.append(group["lr"])
 
         self.last_epoch = last_epoch
         self.step()
 
     def state_dict(self):
         """Returns the state of the scheduler as a dict."""
-        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
+        return {key: value for key, value in self.__dict__.items() if key != "optimizer"}
 
     def load_state_dict(self, state_dict):
         """Loads the scheduler state."""
@@ -74,9 +76,9 @@ class LRScheduler:
 
         # Update optimizer learning rates
         for param_group, lr in zip(self.optimizer.param_groups, lrs):
-            param_group['lr'] = lr
+            param_group["lr"] = lr
 
-        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+        self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
 
 
 class StepLR(LRScheduler):
@@ -103,8 +105,8 @@ class StepLR(LRScheduler):
     def get_lr(self):
         """Compute learning rate for current epoch."""
         if self.last_epoch == 0 or self.last_epoch % self.step_size != 0:
-            return [group['lr'] for group in self.optimizer.param_groups]
-        return [group['lr'] * self.gamma for group in self.optimizer.param_groups]
+            return [group["lr"] for group in self.optimizer.param_groups]
+        return [group["lr"] * self.gamma for group in self.optimizer.param_groups]
 
 
 class CosineAnnealingLR(LRScheduler):
@@ -133,14 +135,18 @@ class CosineAnnealingLR(LRScheduler):
         if self.last_epoch == 0:
             return self.base_lrs
         elif (self.last_epoch - 1 - self.T_max) % (2 * self.T_max) == 0:
-            return [group['lr'] + (base_lr - self.eta_min) *
-                   (1 - math.cos(math.pi / self.T_max)) / 2
-                   for base_lr, group in zip(self.base_lrs, self.optimizer.param_groups)]
+            return [
+                group["lr"] + (base_lr - self.eta_min) * (1 - math.cos(math.pi / self.T_max)) / 2
+                for base_lr, group in zip(self.base_lrs, self.optimizer.param_groups)
+            ]
 
-        return [(1 + math.cos(math.pi * self.last_epoch / self.T_max)) /
-               (1 + math.cos(math.pi * (self.last_epoch - 1) / self.T_max)) *
-               (group['lr'] - self.eta_min) + self.eta_min
-               for group in self.optimizer.param_groups]
+        return [
+            (1 + math.cos(math.pi * self.last_epoch / self.T_max))
+            / (1 + math.cos(math.pi * (self.last_epoch - 1) / self.T_max))
+            * (group["lr"] - self.eta_min)
+            + self.eta_min
+            for group in self.optimizer.param_groups
+        ]
 
 
 class ReduceLROnPlateau:
@@ -150,9 +156,18 @@ class ReduceLROnPlateau:
     Matches torch.optim.lr_scheduler.ReduceLROnPlateau
     """
 
-    def __init__(self, optimizer, mode='min', factor=0.1, patience=10,
-                 threshold=1e-4, threshold_mode='rel', cooldown=0,
-                 min_lr=0, eps=1e-8):
+    def __init__(
+        self,
+        optimizer,
+        mode="min",
+        factor=0.1,
+        patience=10,
+        threshold=1e-4,
+        threshold_mode="rel",
+        cooldown=0,
+        min_lr=0,
+        eps=1e-8,
+    ):
         """
         Initialize ReduceLROnPlateau scheduler.
 
@@ -171,16 +186,18 @@ class ReduceLROnPlateau:
             eps: Minimal decay applied to lr (default: 1e-8)
         """
         if factor >= 1.0:
-            raise ValueError('Factor should be < 1.0.')
+            raise ValueError("Factor should be < 1.0.")
         self.factor = factor
 
         if not isinstance(optimizer.param_groups, list):
-            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
+            raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
         self.optimizer = optimizer
 
         if isinstance(min_lr, (list, tuple)):
             if len(min_lr) != len(optimizer.param_groups):
-                raise ValueError(f"expected {len(optimizer.param_groups)} min_lrs, got {len(min_lr)}")
+                raise ValueError(
+                    f"expected {len(optimizer.param_groups)} min_lrs, got {len(min_lr)}"
+                )
             self.min_lrs = list(min_lr)
         else:
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
@@ -236,10 +253,10 @@ class ReduceLROnPlateau:
     def _reduce_lr(self, epoch):
         """Reduce learning rate."""
         for i, param_group in enumerate(self.optimizer.param_groups):
-            old_lr = float(param_group['lr'])
+            old_lr = float(param_group["lr"])
             new_lr = max(old_lr * self.factor, self.min_lrs[i])
             if old_lr - new_lr > self.eps:
-                param_group['lr'] = new_lr
+                param_group["lr"] = new_lr
 
     @property
     def in_cooldown(self):
@@ -248,38 +265,39 @@ class ReduceLROnPlateau:
 
     def is_better(self, a, best):
         """Check if metric 'a' is better than 'best'."""
-        if self.mode == 'min' and self.threshold_mode == 'rel':
-            rel_epsilon = 1. - self.threshold
+        if self.mode == "min" and self.threshold_mode == "rel":
+            rel_epsilon = 1.0 - self.threshold
             return a < best * rel_epsilon
-        elif self.mode == 'min' and self.threshold_mode == 'abs':
+        elif self.mode == "min" and self.threshold_mode == "abs":
             return a < best - self.threshold
-        elif self.mode == 'max' and self.threshold_mode == 'rel':
-            rel_epsilon = self.threshold + 1.
+        elif self.mode == "max" and self.threshold_mode == "rel":
+            rel_epsilon = self.threshold + 1.0
             return a > best * rel_epsilon
         else:  # mode == 'max' and threshold_mode == 'abs'
             return a > best + self.threshold
 
     def _init_is_better(self, mode, threshold, threshold_mode):
         """Initialize comparison function."""
-        if mode not in {'min', 'max'}:
-            raise ValueError('mode ' + mode + ' is unknown!')
-        if threshold_mode not in {'rel', 'abs'}:
-            raise ValueError('threshold mode ' + threshold_mode + ' is unknown!')
+        if mode not in {"min", "max"}:
+            raise ValueError("mode " + mode + " is unknown!")
+        if threshold_mode not in {"rel", "abs"}:
+            raise ValueError("threshold mode " + threshold_mode + " is unknown!")
 
-        if mode == 'min':
-            self.mode_worse = float('inf')
+        if mode == "min":
+            self.mode_worse = float("inf")
         else:  # mode == 'max'
-            self.mode_worse = -float('inf')
+            self.mode_worse = -float("inf")
 
     def state_dict(self):
         """Returns the state of the scheduler as a dict."""
-        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
+        return {key: value for key, value in self.__dict__.items() if key != "optimizer"}
 
     def load_state_dict(self, state_dict):
         """Loads the scheduler state."""
         self.__dict__.update(state_dict)
-        self._init_is_better(mode=self.mode, threshold=self.threshold,
-                            threshold_mode=self.threshold_mode)
+        self._init_is_better(
+            mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode
+        )
 
 
 class OneCycleLR(LRScheduler):
@@ -289,10 +307,22 @@ class OneCycleLR(LRScheduler):
     Matches torch.optim.lr_scheduler.OneCycleLR
     """
 
-    def __init__(self, optimizer, max_lr, total_steps=None, epochs=None,
-                 steps_per_epoch=None, pct_start=0.3, anneal_strategy='cos',
-                 cycle_momentum=True, base_momentum=0.85, max_momentum=0.95,
-                 div_factor=25., final_div_factor=1e4, last_epoch=-1):
+    def __init__(
+        self,
+        optimizer,
+        max_lr,
+        total_steps=None,
+        epochs=None,
+        steps_per_epoch=None,
+        pct_start=0.3,
+        anneal_strategy="cos",
+        cycle_momentum=True,
+        base_momentum=0.85,
+        max_momentum=0.95,
+        div_factor=25.0,
+        final_div_factor=1e4,
+        last_epoch=-1,
+    ):
         """
         Initialize OneCycleLR scheduler.
 
@@ -324,7 +354,9 @@ class OneCycleLR(LRScheduler):
             if epochs <= 0 or not isinstance(epochs, int):
                 raise ValueError(f"Expected positive integer epochs, but got {epochs}")
             if steps_per_epoch <= 0 or not isinstance(steps_per_epoch, int):
-                raise ValueError(f"Expected positive integer steps_per_epoch, but got {steps_per_epoch}")
+                raise ValueError(
+                    f"Expected positive integer steps_per_epoch, but got {steps_per_epoch}"
+                )
             self.total_steps = epochs * steps_per_epoch
 
         self.step_size_up = float(pct_start * self.total_steps) - 1
@@ -335,26 +367,30 @@ class OneCycleLR(LRScheduler):
             raise ValueError(f"Expected float between 0 and 1 pct_start, but got {pct_start}")
 
         # Validate anneal_strategy
-        if anneal_strategy not in ['cos', 'linear']:
-            raise ValueError(f"anneal_strategy must be one of 'cos' or 'linear', instead got {anneal_strategy}")
-        elif anneal_strategy == 'cos':
+        if anneal_strategy not in ["cos", "linear"]:
+            raise ValueError(
+                f"anneal_strategy must be one of 'cos' or 'linear', instead got {anneal_strategy}"
+            )
+        elif anneal_strategy == "cos":
             self.anneal_func = self._annealing_cos
-        elif anneal_strategy == 'linear':
+        elif anneal_strategy == "linear":
             self.anneal_func = self._annealing_linear
 
         # Initialize learning rate variables
-        self.max_lrs = self._format_param('max_lr', optimizer, max_lr)
+        self.max_lrs = self._format_param("max_lr", optimizer, max_lr)
         self.initial_lrs = [max_lr / div_factor for max_lr in self.max_lrs]
         self.min_lrs = [initial_lr / final_div_factor for initial_lr in self.initial_lrs]
 
         self.cycle_momentum = cycle_momentum
         if cycle_momentum:
-            if 'momentum' not in optimizer.defaults and 'betas' not in optimizer.defaults:
-                raise ValueError('optimizer must support momentum or betas with cycle_momentum option enabled')
+            if "momentum" not in optimizer.defaults and "betas" not in optimizer.defaults:
+                raise ValueError(
+                    "optimizer must support momentum or betas with cycle_momentum option enabled"
+                )
 
-            self.use_beta1 = 'betas' in optimizer.defaults
-            self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
-            self.base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
+            self.use_beta1 = "betas" in optimizer.defaults
+            self.max_momentums = self._format_param("max_momentum", optimizer, max_momentum)
+            self.base_momentums = self._format_param("base_momentum", optimizer, base_momentum)
 
         super().__init__(optimizer, last_epoch)
 
@@ -362,7 +398,9 @@ class OneCycleLR(LRScheduler):
         """Format parameter to be a list per parameter group."""
         if isinstance(param, (list, tuple)):
             if len(param) != len(optimizer.param_groups):
-                raise ValueError(f"expected {len(optimizer.param_groups)} values for {name}, got {len(param)}")
+                raise ValueError(
+                    f"expected {len(optimizer.param_groups)} values for {name}, got {len(param)}"
+                )
             return list(param)
         else:
             return [param] * len(optimizer.param_groups)
@@ -382,8 +420,9 @@ class OneCycleLR(LRScheduler):
         step_num = self.last_epoch
 
         if step_num > self.total_steps:
-            raise ValueError(f"Tried to step {step_num + 1} times. The specified number of total steps is {self.total_steps}"
-                           )
+            raise ValueError(
+                f"Tried to step {step_num + 1} times. The specified number of total steps is {self.total_steps}"
+            )
 
         for initial_lr, max_lr, min_lr in zip(self.initial_lrs, self.max_lrs, self.min_lrs):
             if step_num <= self.step_size_up:
@@ -413,10 +452,10 @@ class OneCycleLR(LRScheduler):
             for param_group, momentum in zip(self.optimizer.param_groups, momentums):
                 if self.use_beta1:
                     # For Adam-style optimizers, update beta1
-                    betas = param_group['betas']
-                    param_group['betas'] = (momentum, betas[1])
+                    betas = param_group["betas"]
+                    param_group["betas"] = (momentum, betas[1])
                 else:
                     # For SGD-style optimizers
-                    param_group['momentum'] = momentum
+                    param_group["momentum"] = momentum
 
         return lrs

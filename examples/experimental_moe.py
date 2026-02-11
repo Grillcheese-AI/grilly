@@ -34,25 +34,25 @@ print(f"Opposite relation: shape={opposite.shape}")
 print("\n2. Resonator MoE Routing")
 print("-" * 60)
 
+
 def expert_a(x):
     return x * 1.1
+
 
 def expert_b(x):
     return x * 0.9
 
+
 def expert_c(x):
     return x * 1.0
 
-experts = {
-    "expert_a": expert_a,
-    "expert_b": expert_b,
-    "expert_c": expert_c
-}
+
+experts = {"expert_a": expert_a, "expert_b": expert_b, "expert_c": expert_c}
 
 expert_vectors = {
     "expert_a": HolographicOps.random_vector(dim),
     "expert_b": HolographicOps.random_vector(dim),
-    "expert_c": HolographicOps.random_vector(dim)
+    "expert_c": HolographicOps.random_vector(dim),
 }
 
 moe = ResonatorMoE(dim=dim, experts=experts, expert_vectors=expert_vectors)
@@ -73,20 +73,20 @@ print("-" * 60)
 relational_experts = {
     "chase_expert": lambda x: x,
     "eat_expert": lambda x: x,
-    "sleep_expert": lambda x: x
+    "sleep_expert": lambda x: x,
 }
 
 expert_relations = {
     "chase_expert": ("cat", "mouse"),
     "eat_expert": ("cat", "fish"),
-    "sleep_expert": ("cat", "bed")
+    "sleep_expert": ("cat", "bed"),
 }
 
 rel_moe = RelationalMoE(
     dim=dim,
     experts=relational_experts,
     expert_relations=expert_relations,
-    relational_encoder=encoder
+    relational_encoder=encoder,
 )
 
 query_entity = encoder.encode("cat", modality="text")

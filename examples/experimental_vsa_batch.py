@@ -24,10 +24,7 @@ def main() -> None:
     print(f"CPU bind batch shape: {cpu_bind.shape}")
 
     vectors = np.array(
-        [
-            [BinaryOps.random_bipolar(dim) for _ in range(num_vectors)]
-            for _ in range(batch_size)
-        ],
+        [[BinaryOps.random_bipolar(dim) for _ in range(num_vectors)] for _ in range(batch_size)],
         dtype=np.float32,
     )
 

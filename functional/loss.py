@@ -9,26 +9,27 @@ import numpy as np
 def _get_backend():
     """Get compute backend"""
     from grilly import Compute
+
     return Compute()
 
 
-def cross_entropy(input: np.ndarray, target: np.ndarray,
-                  weight: np.ndarray | None = None,
-                  reduction: str = 'mean') -> np.ndarray:
+def cross_entropy(
+    input: np.ndarray, target: np.ndarray, weight: np.ndarray | None = None, reduction: str = "mean"
+) -> np.ndarray:
     """
     Cross-entropy loss
     Uses: loss-cross-entropy.glsl
-    
+
     Args:
         input: Logits tensor of shape (N, C) or (N, C, ...)
         target: Target class indices of shape (N,) or (N, ...)
         weight: Optional class weights
         reduction: 'none', 'mean', or 'sum'
-    
+
     Returns:
         Loss value(s)
     """
-    backend = _get_backend()
+    _get_backend()
     # Note: May need to implement in backend if not already exposed
     # CPU fallback for now
     input_softmax = np.exp(input - np.max(input, axis=-1, keepdims=True))
@@ -46,31 +47,31 @@ def cross_entropy(input: np.ndarray, target: np.ndarray,
     if weight is not None:
         loss = loss * weight[target]
 
-    if reduction == 'mean':
+    if reduction == "mean":
         return np.mean(loss)
-    elif reduction == 'sum':
+    elif reduction == "sum":
         return np.sum(loss)
     else:
         return loss
 
 
-def binary_cross_entropy(input: np.ndarray, target: np.ndarray,
-                         weight: np.ndarray | None = None,
-                         reduction: str = 'mean') -> np.ndarray:
+def binary_cross_entropy(
+    input: np.ndarray, target: np.ndarray, weight: np.ndarray | None = None, reduction: str = "mean"
+) -> np.ndarray:
     """
     Binary cross-entropy loss
     Uses: loss-fn-bce.glsl
-    
+
     Args:
         input: Predicted probabilities of shape (N, ...)
         target: Target probabilities of shape (N, ...)
         weight: Optional sample weights
         reduction: 'none', 'mean', or 'sum'
-    
+
     Returns:
         Loss value(s)
     """
-    backend = _get_backend()
+    _get_backend()
     # Note: May need to implement in backend if not already exposed
     # CPU fallback for now
     input_clamped = np.clip(input, 1e-8, 1 - 1e-8)
@@ -79,9 +80,9 @@ def binary_cross_entropy(input: np.ndarray, target: np.ndarray,
     if weight is not None:
         loss = loss * weight
 
-    if reduction == 'mean':
+    if reduction == "mean":
         return np.mean(loss)
-    elif reduction == 'sum':
+    elif reduction == "sum":
         return np.sum(loss)
     else:
         return loss

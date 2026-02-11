@@ -42,6 +42,7 @@ _VULKAN_FALLBACKS = {
 
 try:
     from vulkan import *
+
     VULKAN_AVAILABLE = True
     # After 'from vulkan import *', all Vulkan constants are in the namespace
     # and can be imported by other modules using 'from base import VK_...'
@@ -52,7 +53,11 @@ except ImportError:
 # Create dummy constants for type checking when Vulkan is not available
 # or when a mocked `vulkan` module does not define them (e.g. RTD autodoc).
 if "VK_MAKE_VERSION" not in globals():
-    VK_MAKE_VERSION = lambda a, b, c: 0
+
+    def VK_MAKE_VERSION(a, b, c):
+        return 0
+
+
 for _name, _default in _VULKAN_FALLBACKS.items():
     if _name not in globals():
         globals()[_name] = _default
@@ -64,6 +69,7 @@ _logger = logging.getLogger(__name__)
 # Import buffer pool components (lazy - may not be available)
 try:
     from .buffer_pool import PYVMA_AVAILABLE, BufferPool, PooledBuffer, VMABuffer, VMABufferPool
+
     BUFFER_POOL_AVAILABLE = True
 except ImportError:
     BUFFER_POOL_AVAILABLE = False
@@ -76,7 +82,8 @@ except ImportError:
 
 class _DirectBuffer:
     """Wrapper for direct buffer allocation when pool is unavailable."""
-    __slots__ = ('handle', 'memory', 'size')
+
+    __slots__ = ("handle", "memory", "size")
 
     def __init__(self, handle, memory, size):
         self.handle = handle
@@ -240,6 +247,7 @@ class BufferMixin:
         """
         # Avoid hard import at module level – VulkanTensor lives in utils
         from ..utils.tensor_conversion import VulkanTensor
+
         if isinstance(data, VulkanTensor) and data.on_gpu:
             buf = data._pooled_buffer if data._pooled_buffer is not None else None
             if buf is not None:
@@ -254,10 +262,11 @@ class BufferMixin:
     def _wrap_output_tensor(self, buf, shape):
         """Wrap a pooled output buffer in a VulkanTensor (no download)."""
         from ..utils.tensor_conversion import VulkanTensor
+
         vt = VulkanTensor.empty(shape)
         vt._pooled_buffer = buf
         vt._gpu_buffer = self._get_buffer_handle(buf)
-        vt._gpu_memory = getattr(buf, 'memory', None)
+        vt._gpu_memory = getattr(buf, "memory", None)
         vt._core = self.core  # Fast download path (avoids Compute() re-init)
         vt._gpu_valid = True
         vt._cpu_valid = False
@@ -268,4 +277,4 @@ class BufferMixin:
         return self._acquire_buffer(size)
 
 
-__all__ = ['VULKAN_AVAILABLE', 'BufferMixin', '_DirectBuffer', 'BUFFER_POOL_AVAILABLE']
+__all__ = ["VULKAN_AVAILABLE", "BufferMixin", "_DirectBuffer", "BUFFER_POOL_AVAILABLE"]

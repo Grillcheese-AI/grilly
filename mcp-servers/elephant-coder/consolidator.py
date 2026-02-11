@@ -69,9 +69,7 @@ def recompute_relevance(store: MemoryStore) -> int:
         new_score = compute_relevance(r["access_count"], r["freshness"], r["created"])
         updates.append((new_score, r["memory_id"]))
 
-    store._conn.executemany(
-        "UPDATE memories SET relevance_score = ? WHERE memory_id = ?", updates
-    )
+    store._conn.executemany("UPDATE memories SET relevance_score = ? WHERE memory_id = ?", updates)
     store._conn.commit()
     return len(updates)
 
@@ -95,7 +93,9 @@ def consolidate(store: MemoryStore) -> dict:
     if total > store.max_memories:
         to_evict = max(1, total - store.max_memories + store.max_memories // 10)
         stats["evicted"] = store.evict_lowest(to_evict)
-        logger.info("Evicted %d memories (was %d, max %d)", stats["evicted"], total, store.max_memories)
+        logger.info(
+            "Evicted %d memories (was %d, max %d)", stats["evicted"], total, store.max_memories
+        )
 
     return stats
 

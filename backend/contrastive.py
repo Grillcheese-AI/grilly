@@ -32,7 +32,7 @@ class VulkanContrastive(BufferMixin):
         anchor: np.ndarray,
         positive: np.ndarray,
         negative: np.ndarray,
-        temperature: float = 0.07
+        temperature: float = 0.07,
     ) -> float:
         """
         Compute contrastive loss.
@@ -48,7 +48,7 @@ class VulkanContrastive(BufferMixin):
         Returns:
             Contrastive loss value
         """
-        if 'contrastive-loss' in self.shaders:
+        if "contrastive-loss" in self.shaders:
             batch_size, dim = anchor.shape
             num_negatives = negative.shape[1] if negative.ndim == 3 else negative.shape[0]
 
@@ -75,7 +75,7 @@ class VulkanContrastive(BufferMixin):
                 self._upload_buffer(buf_negative, negative_flat)
 
                 pipeline, layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                    'contrastive-loss', 7, push_constant_size=16
+                    "contrastive-loss", 7, push_constant_size=16
                 )
                 desc_set = self.pipelines._create_descriptor_set(
                     desc_layout,
@@ -86,12 +86,12 @@ class VulkanContrastive(BufferMixin):
                         (self._get_buffer_handle(buf_losses), losses.nbytes),
                         (self._get_buffer_handle(buf_hardest), hardest_idx.nbytes),
                         (self._get_buffer_handle(buf_pos_dist), pos_dists.nbytes),
-                        (self._get_buffer_handle(buf_neg_dist), neg_dists.nbytes)
-                    ]
+                        (self._get_buffer_handle(buf_neg_dist), neg_dists.nbytes),
+                    ],
                 )
 
                 margin = 0.2
-                push_constants = struct.pack('IIIf', batch_size, dim, num_negatives, margin)
+                push_constants = struct.pack("IIIf", batch_size, dim, num_negatives, margin)
                 workgroups = (batch_size + 255) // 256
                 self.core._dispatch_compute(pipeline, layout, desc_set, workgroups, push_constants)
 
@@ -101,8 +101,17 @@ class VulkanContrastive(BufferMixin):
 
                 return float(np.mean(losses))
             finally:
-                self._release_buffers([buf_anchor, buf_positive, buf_negative, buf_losses,
-                                       buf_hardest, buf_pos_dist, buf_neg_dist])
+                self._release_buffers(
+                    [
+                        buf_anchor,
+                        buf_positive,
+                        buf_negative,
+                        buf_losses,
+                        buf_hardest,
+                        buf_pos_dist,
+                        buf_neg_dist,
+                    ]
+                )
         else:
             # CPU fallback - SimCLR-style contrastive loss
             anchor_norm = anchor / (np.linalg.norm(anchor, axis=1, keepdims=True) + 1e-8)
@@ -125,7 +134,7 @@ class VulkanContrastive(BufferMixin):
         positive: np.ndarray,
         negative: np.ndarray,
         loss: float,
-        temperature: float = 0.07
+        temperature: float = 0.07,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Compute contrastive loss gradients.
@@ -142,12 +151,12 @@ class VulkanContrastive(BufferMixin):
         Returns:
             (anchor_grad, positive_grad, negative_grad)
         """
-        if 'contrastive-gradient' in self.shaders:
+        if "contrastive-gradient" in self.shaders:
             pass
 
         # CPU fallback - compute gradients for contrastive loss
         batch_size, dim = anchor.shape
-        num_negatives = negative.shape[1] if negative.ndim == 3 else negative.shape[0]
+        negative.shape[1] if negative.ndim == 3 else negative.shape[0]
 
         anchor_norm = anchor / (np.linalg.norm(anchor, axis=1, keepdims=True) + 1e-8)
         positive_norm = positive / (np.linalg.norm(positive, axis=1, keepdims=True) + 1e-8)

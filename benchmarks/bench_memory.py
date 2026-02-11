@@ -6,7 +6,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 
 from benchmarks.utils import (
     get_gpu_backend,
@@ -30,15 +30,17 @@ def cpu_memory_read(memory_bank, keys, num_heads=1):
 
 def cpu_memory_write(memory_bank, keys, values, lr=0.1):
     """CPU reference for memory write."""
-    update = np.outer(keys.flatten()[:memory_bank.shape[0]], values.flatten()[:memory_bank.shape[1]])
-    return memory_bank + lr * update[:memory_bank.shape[0], :memory_bank.shape[1]]
+    update = np.outer(
+        keys.flatten()[: memory_bank.shape[0]], values.flatten()[: memory_bank.shape[1]]
+    )
+    return memory_bank + lr * update[: memory_bank.shape[0], : memory_bank.shape[1]]
 
 
 def main():
     print_header("Memory Operations Benchmark")
 
     backend = get_gpu_backend()
-    has_memory = backend is not None and hasattr(backend, 'memory')
+    has_memory = backend is not None and hasattr(backend, "memory")
 
     configs = [
         # (num_slots, dim)
@@ -62,14 +64,17 @@ def main():
         if has_memory:
             try:
                 gpu_res = time_fn(
-                    backend.memory.memory_read,
-                    memory_bank, keys, 1,
-                    warmup=2, repeats=3
+                    backend.memory.memory_read, memory_bank, keys, 1, warmup=2, repeats=3
                 )
-                print_row(label, gpu_res['mean'], cpu_res['mean'])
-                results.append({'label': label, 'gpu_ms': gpu_res['mean'],
-                                'cpu_ms': cpu_res['mean'],
-                                'shape': f'({num_slots},{dim})'})
+                print_row(label, gpu_res["mean"], cpu_res["mean"])
+                results.append(
+                    {
+                        "label": label,
+                        "gpu_ms": gpu_res["mean"],
+                        "cpu_ms": cpu_res["mean"],
+                        "shape": f"({num_slots},{dim})",
+                    }
+                )
             except Exception as e:
                 print(f"  {label}: GPU failed: {e}")
         else:
@@ -87,14 +92,17 @@ def main():
         if has_memory:
             try:
                 gpu_res = time_fn(
-                    backend.memory.memory_write,
-                    memory_bank, keys, values, 1,
-                    warmup=2, repeats=3
+                    backend.memory.memory_write, memory_bank, keys, values, 1, warmup=2, repeats=3
                 )
-                print_row(label, gpu_res['mean'], cpu_res['mean'])
-                results.append({'label': label, 'gpu_ms': gpu_res['mean'],
-                                'cpu_ms': cpu_res['mean'],
-                                'shape': f'({num_slots},{dim})'})
+                print_row(label, gpu_res["mean"], cpu_res["mean"])
+                results.append(
+                    {
+                        "label": label,
+                        "gpu_ms": gpu_res["mean"],
+                        "cpu_ms": cpu_res["mean"],
+                        "shape": f"({num_slots},{dim})",
+                    }
+                )
             except Exception as e:
                 print(f"  {label}: GPU failed: {e}")
         else:
@@ -105,5 +113,5 @@ def main():
         print_summary_table(results)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

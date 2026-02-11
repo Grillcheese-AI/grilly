@@ -17,7 +17,7 @@ class TestRelationalEncoderBasic:
         encoder = RelationalEncoder()
 
         assert encoder.dim > 0
-        assert hasattr(encoder, 'encode')
+        assert hasattr(encoder, "encode")
 
     def test_init_custom_dimension(self):
         """Should initialize with custom dimension."""
@@ -102,6 +102,7 @@ class TestRelationalOpposite:
         # Opposite of positive should be negative
         # They should have negative similarity
         from grilly.experimental.vsa.ops import BinaryOps
+
         sim = BinaryOps.similarity(v_original, v_opposite)
         assert sim < 0, f"Expected negative similarity, got {sim}"
 

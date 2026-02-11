@@ -135,9 +135,7 @@ class MemoryStore:
         cur = self._conn.cursor()
 
         # Delete old FTS row if exists
-        cur.execute(
-            "DELETE FROM memories_fts WHERE memory_id = ?", (entry.memory_id,)
-        )
+        cur.execute("DELETE FROM memories_fts WHERE memory_id = ?", (entry.memory_id,))
         # Upsert main table
         cur.execute(
             """
@@ -322,7 +320,9 @@ class MemoryStore:
         return {
             "total": total,
             "max_capacity": self.max_memories,
-            "utilization_pct": round(total / self.max_memories * 100, 1) if self.max_memories else 0,
+            "utilization_pct": round(total / self.max_memories * 100, 1)
+            if self.max_memories
+            else 0,
             "by_kind": kinds,
             "stale": stale_count,
             "top_accessed": [

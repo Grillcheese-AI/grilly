@@ -1,6 +1,7 @@
 """
 Tests for Spiking Neural Network (SNN) operations
 """
+
 import numpy as np
 import pytest
 
@@ -80,9 +81,9 @@ class TestSNNProcess:
 
         result = snn.process(embedding)
 
-        assert 'spike_activity' in result
-        assert 'spikes' in result
-        assert 'firing_rate' in result
+        assert "spike_activity" in result
+        assert "spikes" in result
+        assert "firing_rate" in result
 
     def test_process_spike_activity_is_numeric(self):
         """Spike activity should be a number"""
@@ -91,8 +92,8 @@ class TestSNNProcess:
 
         result = snn.process(embedding)
 
-        assert isinstance(result['spike_activity'], (int, float))
-        assert result['spike_activity'] >= 0
+        assert isinstance(result["spike_activity"], (int, float))
+        assert result["spike_activity"] >= 0
 
     def test_process_spikes_is_array(self):
         """Spikes should be an array"""
@@ -101,8 +102,8 @@ class TestSNNProcess:
 
         result = snn.process(embedding)
 
-        assert isinstance(result['spikes'], np.ndarray)
-        assert len(result['spikes']) == 100
+        assert isinstance(result["spikes"], np.ndarray)
+        assert len(result["spikes"]) == 100
 
     def test_process_firing_rate_in_valid_range(self):
         """Firing rate should be between 0 and 1"""
@@ -111,7 +112,7 @@ class TestSNNProcess:
 
         result = snn.process(embedding)
 
-        assert 0 <= result['firing_rate'] <= 1
+        assert 0 <= result["firing_rate"] <= 1
 
     def test_process_handles_small_embedding(self):
         """Process should handle embeddings smaller than n_neurons"""
@@ -120,8 +121,8 @@ class TestSNNProcess:
 
         result = snn.process(embedding)
 
-        assert result['spikes'] is not None
-        assert len(result['spikes']) == 1000
+        assert result["spikes"] is not None
+        assert len(result["spikes"]) == 1000
 
     def test_process_handles_large_embedding(self):
         """Process should handle embeddings larger than n_neurons"""
@@ -130,8 +131,8 @@ class TestSNNProcess:
 
         result = snn.process(embedding)
 
-        assert result['spikes'] is not None
-        assert len(result['spikes']) == 100
+        assert result["spikes"] is not None
+        assert len(result["spikes"]) == 100
 
 
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
@@ -154,7 +155,7 @@ class TestSNNGPU:
 
             result = snn.process(embedding)
 
-            assert 'spike_activity' in result
+            assert "spike_activity" in result
         except Exception as e:
             pytest.skip(f"GPU not available: {e}")
 
@@ -175,5 +176,5 @@ class TestSNNReproducibility:
         result2 = snn.process(embedding)
 
         # Should be the same
-        assert result1['spike_activity'] == result2['spike_activity']
-        np.testing.assert_array_equal(result1['spikes'], result2['spikes'])
+        assert result1["spike_activity"] == result2["spike_activity"]
+        np.testing.assert_array_equal(result1["spikes"], result2["spikes"])

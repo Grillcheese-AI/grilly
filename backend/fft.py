@@ -58,7 +58,7 @@ class VulkanFFT(BufferMixin):
         log2N = int(np.log2(N))
 
         # Check if shaders are available
-        if 'fft-bitrev' in self.shaders and 'fft-butterfly' in self.shaders:
+        if "fft-bitrev" in self.shaders and "fft-butterfly" in self.shaders:
             # GPU implementation
             data_flat = data.flatten()
             total_elements = batch_size * N
@@ -74,32 +74,46 @@ class VulkanFFT(BufferMixin):
 
                 # Pass 1: Bit-reversal permutation
                 pipeline_bitrev, layout_bitrev, desc_bitrev = self.pipelines.get_or_create_pipeline(
-                    'fft-bitrev', 3, push_constant_size=8
+                    "fft-bitrev", 3, push_constant_size=8
                 )
                 desc_set_bitrev = self.pipelines._create_descriptor_set(
                     desc_bitrev,
-                    [(self._get_buffer_handle(buf_real), data_flat.nbytes),
-                     (self._get_buffer_handle(buf_imag), data_flat.nbytes),
-                     (self._get_buffer_handle(buf_real), data_flat.nbytes)]
+                    [
+                        (self._get_buffer_handle(buf_real), data_flat.nbytes),
+                        (self._get_buffer_handle(buf_imag), data_flat.nbytes),
+                        (self._get_buffer_handle(buf_real), data_flat.nbytes),
+                    ],
                 )
-                push_constants = struct.pack('II', batch_size, N)
+                push_constants = struct.pack("II", batch_size, N)
                 workgroups = (total_elements + 255) // 256
-                self.core._dispatch_compute(pipeline_bitrev, layout_bitrev, desc_set_bitrev, workgroups, push_constants)
+                self.core._dispatch_compute(
+                    pipeline_bitrev, layout_bitrev, desc_set_bitrev, workgroups, push_constants
+                )
 
                 # Pass 2: Butterfly operations for each stage
-                pipeline_butterfly, layout_butterfly, desc_butterfly = self.pipelines.get_or_create_pipeline(
-                    'fft-butterfly', 2, push_constant_size=20
+                pipeline_butterfly, layout_butterfly, desc_butterfly = (
+                    self.pipelines.get_or_create_pipeline("fft-butterfly", 2, push_constant_size=20)
                 )
                 for stage in range(log2N):
                     desc_set_butterfly = self.pipelines._create_descriptor_set(
                         desc_butterfly,
-                        [(self._get_buffer_handle(buf_real), data_flat.nbytes),
-                         (self._get_buffer_handle(buf_imag), data_flat.nbytes)]
+                        [
+                            (self._get_buffer_handle(buf_real), data_flat.nbytes),
+                            (self._get_buffer_handle(buf_imag), data_flat.nbytes),
+                        ],
                     )
-                    push_constants = struct.pack('IIII', batch_size, N, stage, 1 if inverse else 0)
+                    push_constants = struct.pack("IIII", batch_size, N, stage, 1 if inverse else 0)
                     workgroups = (batch_size * N // 2 + 255) // 256
-                    self.core._dispatch_compute(pipeline_butterfly, layout_butterfly, desc_set_butterfly, workgroups, push_constants)
-                    vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [desc_set_butterfly])
+                    self.core._dispatch_compute(
+                        pipeline_butterfly,
+                        layout_butterfly,
+                        desc_set_butterfly,
+                        workgroups,
+                        push_constants,
+                    )
+                    vkFreeDescriptorSets(
+                        self.core.device, self.core.descriptor_pool, 1, [desc_set_butterfly]
+                    )
 
                 # Download results
                 real_part = self._download_buffer(buf_real, data_flat.nbytes, np.float32)
@@ -108,7 +122,9 @@ class VulkanFFT(BufferMixin):
                 imag_part = imag_part[:total_elements].reshape(batch_size, N)
 
                 # Cleanup descriptor set
-                vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [desc_set_bitrev])
+                vkFreeDescriptorSets(
+                    self.core.device, self.core.descriptor_pool, 1, [desc_set_bitrev]
+                )
 
                 return real_part, imag_part
             finally:
@@ -138,7 +154,7 @@ class VulkanFFT(BufferMixin):
         Returns:
             Magnitude (batch, N)
         """
-        if 'fft-magnitude' in self.shaders:
+        if "fft-magnitude" in self.shaders:
             # GPU implementation
             real_flat = real_part.astype(np.float32).flatten()
             imag_flat = imag_part.astype(np.float32).flatten()
@@ -156,18 +172,20 @@ class VulkanFFT(BufferMixin):
 
                 # Get pipeline
                 pipeline, layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                    'fft-magnitude', 4, push_constant_size=8
+                    "fft-magnitude", 4, push_constant_size=8
                 )
                 desc_set = self.pipelines._create_descriptor_set(
                     desc_layout,
-                    [(self._get_buffer_handle(buf_real), real_flat.nbytes),
-                     (self._get_buffer_handle(buf_imag), imag_flat.nbytes),
-                     (self._get_buffer_handle(buf_mag), real_flat.nbytes),
-                     (self._get_buffer_handle(buf_mag), real_flat.nbytes)]  # Phase buffer same as mag for now
+                    [
+                        (self._get_buffer_handle(buf_real), real_flat.nbytes),
+                        (self._get_buffer_handle(buf_imag), imag_flat.nbytes),
+                        (self._get_buffer_handle(buf_mag), real_flat.nbytes),
+                        (self._get_buffer_handle(buf_mag), real_flat.nbytes),
+                    ],  # Phase buffer same as mag for now
                 )
 
                 # Dispatch
-                push_constants = struct.pack('II', total_elements, 0)  # compute_phase = 0
+                push_constants = struct.pack("II", total_elements, 0)  # compute_phase = 0
                 workgroups = (total_elements + 255) // 256
                 self.core._dispatch_compute(pipeline, layout, desc_set, workgroups, push_constants)
 
@@ -183,7 +201,7 @@ class VulkanFFT(BufferMixin):
                 self._release_buffers([buf_real, buf_imag, buf_mag])
         else:
             # CPU fallback
-            return np.sqrt(real_part ** 2 + imag_part ** 2).astype(np.float32)
+            return np.sqrt(real_part**2 + imag_part**2).astype(np.float32)
 
     def fft_power_spectrum(self, real_part: np.ndarray, imag_part: np.ndarray) -> np.ndarray:
         """
@@ -198,7 +216,7 @@ class VulkanFFT(BufferMixin):
         Returns:
             Power spectrum (batch, N)
         """
-        if 'fft-power-spectrum' in self.shaders:
+        if "fft-power-spectrum" in self.shaders:
             # GPU implementation
             real_flat = real_part.astype(np.float32).flatten()
             imag_flat = imag_part.astype(np.float32).flatten()
@@ -217,17 +235,19 @@ class VulkanFFT(BufferMixin):
 
                 # Get pipeline
                 pipeline, layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                    'fft-power-spectrum', 3, push_constant_size=12
+                    "fft-power-spectrum", 3, push_constant_size=12
                 )
                 desc_set = self.pipelines._create_descriptor_set(
                     desc_layout,
-                    [(self._get_buffer_handle(buf_real), real_flat.nbytes),
-                     (self._get_buffer_handle(buf_imag), imag_flat.nbytes),
-                     (self._get_buffer_handle(buf_power), real_flat.nbytes)]
+                    [
+                        (self._get_buffer_handle(buf_real), real_flat.nbytes),
+                        (self._get_buffer_handle(buf_imag), imag_flat.nbytes),
+                        (self._get_buffer_handle(buf_power), real_flat.nbytes),
+                    ],
                 )
 
                 # Dispatch
-                push_constants = struct.pack('III', total_elements, 0, N)  # scale_by_n = 0
+                push_constants = struct.pack("III", total_elements, 0, N)  # scale_by_n = 0
                 workgroups = (total_elements + 255) // 256
                 self.core._dispatch_compute(pipeline, layout, desc_set, workgroups, push_constants)
 
@@ -244,9 +264,11 @@ class VulkanFFT(BufferMixin):
         else:
             # CPU fallback
             magnitude = self.fft_magnitude(real_part, imag_part)
-            return (magnitude ** 2).astype(np.float32)
+            return (magnitude**2).astype(np.float32)
 
-    def fft_normalize(self, real_part: np.ndarray, imag_part: np.ndarray, N: int) -> tuple[np.ndarray, np.ndarray]:
+    def fft_normalize(
+        self, real_part: np.ndarray, imag_part: np.ndarray, N: int
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Normalize FFT output.
 
@@ -260,7 +282,7 @@ class VulkanFFT(BufferMixin):
         Returns:
             (normalized_real, normalized_imag)
         """
-        if 'fft-normalize' in self.shaders:
+        if "fft-normalize" in self.shaders:
             # GPU implementation
             real_flat = real_part.astype(np.float32).flatten()
             imag_flat = imag_part.astype(np.float32).flatten()
@@ -277,16 +299,18 @@ class VulkanFFT(BufferMixin):
 
                 # Get pipeline
                 pipeline, layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                    'fft-normalize', 2, push_constant_size=8
+                    "fft-normalize", 2, push_constant_size=8
                 )
                 desc_set = self.pipelines._create_descriptor_set(
                     desc_layout,
-                    [(self._get_buffer_handle(buf_real), real_flat.nbytes),
-                     (self._get_buffer_handle(buf_imag), imag_flat.nbytes)]
+                    [
+                        (self._get_buffer_handle(buf_real), real_flat.nbytes),
+                        (self._get_buffer_handle(buf_imag), imag_flat.nbytes),
+                    ],
                 )
 
                 # Dispatch
-                push_constants = struct.pack('II', total_elements, N)
+                push_constants = struct.pack("II", total_elements, N)
                 workgroups = (total_elements + 255) // 256
                 self.core._dispatch_compute(pipeline, layout, desc_set, workgroups, push_constants)
 

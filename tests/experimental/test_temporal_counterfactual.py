@@ -5,7 +5,6 @@ Tests counterfactual intervention and reasoning.
 """
 
 
-
 class TestCounterfactualReasonerBasic:
     """Basic tests for CounterfactualReasoner initialization."""
 
@@ -99,7 +98,7 @@ class TestQueryCounterfactual:
             actual_value=False,
             counterfactual_value=True,
             query_time=1,
-            query_variable="has_umbrella"
+            query_variable="has_umbrella",
         )
 
         result = reasoner.query_counterfactual(query)
@@ -128,7 +127,7 @@ class TestQueryCounterfactual:
             actual_value=False,
             counterfactual_value=True,
             query_time=1,
-            query_variable="has_umbrella"
+            query_variable="has_umbrella",
         )
 
         result = reasoner.query_counterfactual(query)

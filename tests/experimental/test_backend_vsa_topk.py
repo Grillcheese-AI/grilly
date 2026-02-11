@@ -3,6 +3,7 @@ GPU Top-K tests (GEMM -> argmax rows -> mask).
 
 Validates that similarity_topk_gemm returns the same top-1 as CPU argmax.
 """
+
 import numpy as np
 import pytest
 
@@ -17,7 +18,7 @@ class TestVulkanVSATopK:
             core = VulkanCore()
             vsa = VulkanVSA(core)
 
-            needed = {'vsa-similarity-gemm', 'vsa-argmax-rows', 'vsa-mask-selected'}
+            needed = {"vsa-similarity-gemm", "vsa-argmax-rows", "vsa-mask-selected"}
             if not needed.issubset(set(core.shaders.keys())):
                 pytest.skip("Top-k shaders not available")
 
@@ -48,7 +49,7 @@ class TestVulkanVSATopK:
             core = VulkanCore()
             vsa = VulkanVSA(core)
 
-            needed = {'vsa-similarity-gemm', 'vsa-argmax-rows', 'vsa-mask-selected'}
+            needed = {"vsa-similarity-gemm", "vsa-argmax-rows", "vsa-mask-selected"}
             if not needed.issubset(set(core.shaders.keys())):
                 pytest.skip("Top-k shaders not available")
 

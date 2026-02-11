@@ -10,11 +10,11 @@ import numpy as np
 def xavier_uniform_(tensor: np.ndarray, gain: float = 1.0) -> np.ndarray:
     """
     Fill tensor with values from Xavier uniform distribution.
-    
+
     Args:
         tensor: Tensor to initialize
         gain: Scaling factor
-    
+
     Returns:
         Initialized tensor
     """
@@ -32,11 +32,11 @@ def xavier_uniform_(tensor: np.ndarray, gain: float = 1.0) -> np.ndarray:
 def xavier_normal_(tensor: np.ndarray, gain: float = 1.0) -> np.ndarray:
     """
     Fill tensor with values from Xavier normal distribution.
-    
+
     Args:
         tensor: Tensor to initialize
         gain: Scaling factor
-    
+
     Returns:
         Initialized tensor
     """
@@ -52,20 +52,17 @@ def xavier_normal_(tensor: np.ndarray, gain: float = 1.0) -> np.ndarray:
 
 
 def kaiming_uniform_(
-    tensor: np.ndarray,
-    a: float = 0,
-    mode: str = 'fan_in',
-    nonlinearity: str = 'leaky_relu'
+    tensor: np.ndarray, a: float = 0, mode: str = "fan_in", nonlinearity: str = "leaky_relu"
 ) -> np.ndarray:
     """
     Fill tensor with values from Kaiming uniform distribution.
-    
+
     Args:
         tensor: Tensor to initialize
         a: Negative slope of rectifier (for leaky ReLU)
         mode: 'fan_in' or 'fan_out'
         nonlinearity: 'relu' or 'leaky_relu'
-    
+
     Returns:
         Initialized tensor
     """
@@ -75,10 +72,10 @@ def kaiming_uniform_(
     fan_in = tensor.shape[-1]
     fan_out = tensor.shape[-2] if tensor.ndim > 1 else tensor.shape[0]
 
-    fan = fan_in if mode == 'fan_in' else fan_out
+    fan = fan_in if mode == "fan_in" else fan_out
 
-    if nonlinearity == 'leaky_relu':
-        gain = np.sqrt(2.0 / (1 + a ** 2))
+    if nonlinearity == "leaky_relu":
+        gain = np.sqrt(2.0 / (1 + a**2))
     else:  # relu
         gain = np.sqrt(2.0)
 
@@ -89,20 +86,17 @@ def kaiming_uniform_(
 
 
 def kaiming_normal_(
-    tensor: np.ndarray,
-    a: float = 0,
-    mode: str = 'fan_in',
-    nonlinearity: str = 'leaky_relu'
+    tensor: np.ndarray, a: float = 0, mode: str = "fan_in", nonlinearity: str = "leaky_relu"
 ) -> np.ndarray:
     """
     Fill tensor with values from Kaiming normal distribution.
-    
+
     Args:
         tensor: Tensor to initialize
         a: Negative slope of rectifier (for leaky ReLU)
         mode: 'fan_in' or 'fan_out'
         nonlinearity: 'relu' or 'leaky_relu'
-    
+
     Returns:
         Initialized tensor
     """
@@ -112,10 +106,10 @@ def kaiming_normal_(
     fan_in = tensor.shape[-1]
     fan_out = tensor.shape[-2] if tensor.ndim > 1 else tensor.shape[0]
 
-    fan = fan_in if mode == 'fan_in' else fan_out
+    fan = fan_in if mode == "fan_in" else fan_out
 
-    if nonlinearity == 'leaky_relu':
-        gain = np.sqrt(2.0 / (1 + a ** 2))
+    if nonlinearity == "leaky_relu":
+        gain = np.sqrt(2.0 / (1 + a**2))
     else:  # relu
         gain = np.sqrt(2.0)
 

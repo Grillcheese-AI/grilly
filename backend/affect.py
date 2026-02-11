@@ -33,7 +33,7 @@ class VulkanAffect(BufferMixin):
         b3: np.ndarray,
         leaky_slope: float = 0.01,
         apply_output_activation: bool = False,
-        dropout_rate: float = 0.0
+        dropout_rate: float = 0.0,
     ) -> tuple:
         """
         GPU-accelerated forward pass for 3-layer affect MLP
@@ -94,7 +94,7 @@ class VulkanAffect(BufferMixin):
             self._upload_buffer(buf_b3, b3_flat)
 
             # Check if shader is available
-            if 'affect-mlp-forward' not in self.shaders:
+            if "affect-mlp-forward" not in self.shaders:
                 raise RuntimeError(
                     "affect-mlp-forward shader not compiled. "
                     "Run: glslc -fshader-stage=compute shaders/affect-mlp-forward.glsl -o shaders/spv/affect-mlp-forward.spv"
@@ -103,12 +103,12 @@ class VulkanAffect(BufferMixin):
             # Get or create pipeline
             num_bindings = 10  # input, w1, b1, w2, b2, w3, b3, hidden1, hidden2, output
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'affect-mlp-forward', num_bindings, push_constant_size=32
+                "affect-mlp-forward", num_bindings, push_constant_size=32
             )
 
             # Create descriptor set
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'affect-mlp-forward',
+                "affect-mlp-forward",
                 [
                     (self._get_buffer_handle(buf_emb), emb_flat.nbytes),
                     (self._get_buffer_handle(buf_w1), w1_flat.nbytes),
@@ -119,26 +119,28 @@ class VulkanAffect(BufferMixin):
                     (self._get_buffer_handle(buf_b3), b3_flat.nbytes),
                     (self._get_buffer_handle(buf_h1), hidden1_size),
                     (self._get_buffer_handle(buf_h2), hidden2_size),
-                    (self._get_buffer_handle(buf_out), output_size)
-                ]
+                    (self._get_buffer_handle(buf_out), output_size),
+                ],
             )
 
             # Pack push constants
             seed = int(time.time() * 1000) % (2**31)
             push_constants = struct.pack(
-                'IIIIfIfI',
-                batch_size, embedding_dim, hidden1_dim, hidden2_dim,
+                "IIIIfIfI",
+                batch_size,
+                embedding_dim,
+                hidden1_dim,
+                hidden2_dim,
                 leaky_slope,
                 1 if apply_output_activation else 0,
                 dropout_rate,
-                seed
+                seed,
             )
 
             # Dispatch
             workgroups = (batch_size + 63) // 64
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             # Download results
@@ -146,14 +148,16 @@ class VulkanAffect(BufferMixin):
             hidden1 = self._download_buffer(buf_h1, hidden1_size, np.float32)
             hidden2 = self._download_buffer(buf_h2, hidden2_size, np.float32)
 
-            predictions = predictions[:batch_size * 2].reshape(batch_size, 2)
-            hidden1 = hidden1[:batch_size * hidden1_dim].reshape(batch_size, hidden1_dim)
-            hidden2 = hidden2[:batch_size * hidden2_dim].reshape(batch_size, hidden2_dim)
+            predictions = predictions[: batch_size * 2].reshape(batch_size, 2)
+            hidden1 = hidden1[: batch_size * hidden1_dim].reshape(batch_size, hidden1_dim)
+            hidden2 = hidden2[: batch_size * hidden2_dim].reshape(batch_size, hidden2_dim)
 
             return predictions, hidden1, hidden2
 
         finally:
-            self._release_buffers([buf_emb, buf_w1, buf_b1, buf_w2, buf_b2, buf_w3, buf_b3, buf_h1, buf_h2, buf_out])
+            self._release_buffers(
+                [buf_emb, buf_w1, buf_b1, buf_w2, buf_b2, buf_w3, buf_b3, buf_h1, buf_h2, buf_out]
+            )
 
     def affect_adam_update(
         self,
@@ -166,7 +170,7 @@ class VulkanAffect(BufferMixin):
         beta1: float = 0.9,
         beta2: float = 0.999,
         epsilon: float = 1e-8,
-        weight_decay: float = 0.0001
+        weight_decay: float = 0.0001,
     ) -> np.ndarray:
         """
         GPU-accelerated Adam optimizer update
@@ -211,7 +215,7 @@ class VulkanAffect(BufferMixin):
             self._upload_buffer(buf_m2, moment2)
 
             # Check if shader is available
-            if 'affect-adam' not in self.shaders:
+            if "affect-adam" not in self.shaders:
                 raise RuntimeError(
                     "affect-adam shader not compiled. "
                     "Run: glslc -fshader-stage=compute shaders/affect-adam.glsl -o shaders/spv/affect-adam.spv"
@@ -219,34 +223,36 @@ class VulkanAffect(BufferMixin):
 
             # Get or create pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                'affect-adam', 4, push_constant_size=32
+                "affect-adam", 4, push_constant_size=32
             )
 
             # Create descriptor set
             descriptor_set = self.pipelines.get_cached_descriptor_set(
-                'affect-adam',
+                "affect-adam",
                 [
                     (self._get_buffer_handle(buf_grad), gradients.nbytes),
                     (self._get_buffer_handle(buf_weights), weights.nbytes),
                     (self._get_buffer_handle(buf_m1), moment1.nbytes),
-                    (self._get_buffer_handle(buf_m2), moment2.nbytes)
-                ]
+                    (self._get_buffer_handle(buf_m2), moment2.nbytes),
+                ],
             )
 
             # Pack push constants
             push_constants = struct.pack(
-                'IfffffI',
+                "IfffffI",
                 total_weights,
                 learning_rate,
-                beta1, beta2, epsilon, weight_decay,
-                timestep
+                beta1,
+                beta2,
+                epsilon,
+                weight_decay,
+                timestep,
             )
 
             # Dispatch
             workgroups = (total_weights + 255) // 256
             self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set,
-                workgroups, push_constants
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
             # Download updated weights and moments

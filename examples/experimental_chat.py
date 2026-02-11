@@ -31,10 +31,7 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true", help="Show thinking trace")
     args = parser.parse_args()
 
-    controller = CognitiveController(
-        dim=args.dim,
-        confidence_threshold=args.confidence
-    )
+    controller = CognitiveController(dim=args.dim, confidence_threshold=args.confidence)
 
     print("Interactive chat. Type /exit to quit.")
     print("Commands:")

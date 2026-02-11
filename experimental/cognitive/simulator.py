@@ -18,6 +18,7 @@ from grilly.experimental.vsa.ops import HolographicOps
 @dataclass
 class SimulationResult:
     """Result of running an internal simulation."""
+
     candidate: str
     vector: np.ndarray
     coherence_score: float
@@ -36,14 +37,14 @@ class SimulationResult:
 class InternalSimulator:
     """
     Simulates "saying" something before actually outputting.
-    
+
     This implements "think before you speak":
     1. Generate candidate response
     2. Encode it
     3. Check coherence with world model
     4. Predict how it would be received
     5. Score and decide whether to output
-    
+
     Based on prediction-by-production models in neuroscience.
     """
 
@@ -51,7 +52,7 @@ class InternalSimulator:
         self,
         language_system: InstantLanguage,
         world_model: WorldModel,
-        working_memory: WorkingMemory
+        working_memory: WorkingMemory,
     ):
         """Initialize the instance."""
 
@@ -74,13 +75,11 @@ class InternalSimulator:
         self.simulation_history: list[SimulationResult] = []
 
     def simulate_utterance(
-        self,
-        candidate: str,
-        context: np.ndarray | None = None
+        self, candidate: str, context: np.ndarray | None = None
     ) -> SimulationResult:
         """
         Simulate saying something.
-        
+
         This is the core "think before you speak" operation.
         """
         # 1. Encode the candidate
@@ -106,16 +105,14 @@ class InternalSimulator:
             coherence_reason=reason,
             predicted_response=predicted_response,
             social_appropriateness=social_score,
-            confidence=confidence
+            confidence=confidence,
         )
 
         self.simulation_history.append(result)
         return result
 
     def _predict_response(
-        self,
-        utterance_vec: np.ndarray,
-        context: np.ndarray | None
+        self, utterance_vec: np.ndarray, context: np.ndarray | None
     ) -> str | None:
         """Predict how the listener might respond."""
         # Use causal expectations from world model
@@ -152,11 +149,7 @@ class InternalSimulator:
         # Normalize to [0, 1]
         return (score + 1) / 2
 
-    def _compute_confidence(
-        self,
-        utterance_vec: np.ndarray,
-        context: np.ndarray | None
-    ) -> float:
+    def _compute_confidence(self, utterance_vec: np.ndarray, context: np.ndarray | None) -> float:
         """Compute confidence in the utterance."""
         # Base confidence from working memory
         wm_context = self.wm.get_context_vector()
@@ -171,9 +164,7 @@ class InternalSimulator:
 
         capsule_conf = None
         if self.wm.capsule_encoder is not None:
-            has_capsule_context = any(
-                item.capsule_vector is not None for item in self.wm.items
-            )
+            has_capsule_context = any(item.capsule_vector is not None for item in self.wm.items)
             if has_capsule_context:
                 utterance_capsule = self.wm.capsule_encoder.encode_vector(utterance_vec)
                 context_capsule = self.wm.get_context_capsule()

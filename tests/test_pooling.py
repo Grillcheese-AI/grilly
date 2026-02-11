@@ -10,6 +10,7 @@ import pytest
 try:
     import torch
     import torch.nn as torch_nn
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -19,6 +20,7 @@ except ImportError:
 def backend():
     """Initialize Vulkan backend"""
     from grilly import Compute
+
     compute = Compute()
     yield compute
     compute.cleanup()
@@ -30,6 +32,7 @@ class TestMaxPool2dBasic:
     def test_maxpool2d_import(self):
         """Test MaxPool2d can be imported"""
         from grilly.nn import MaxPool2d
+
         assert MaxPool2d is not None
 
     def test_maxpool2d_init(self):
@@ -41,7 +44,7 @@ class TestMaxPool2dBasic:
         assert pool.stride == 2
         assert pool.padding == 0
         assert pool.dilation == 1
-        assert pool.return_indices == False
+        assert not pool.return_indices
 
     def test_maxpool2d_forward_shape(self, backend):
         """Test MaxPool2d forward pass output shape"""
@@ -93,6 +96,7 @@ class TestAvgPool2dBasic:
     def test_avgpool2d_import(self):
         """Test AvgPool2d can be imported"""
         from grilly.nn import AvgPool2d
+
         assert AvgPool2d is not None
 
     def test_avgpool2d_init(self):
@@ -103,7 +107,7 @@ class TestAvgPool2dBasic:
         assert pool.kernel_size == 2
         assert pool.stride == 2
         assert pool.padding == 0
-        assert pool.count_include_pad == True
+        assert pool.count_include_pad
 
     def test_avgpool2d_forward_shape(self, backend):
         """Test AvgPool2d forward pass output shape"""
@@ -224,11 +228,7 @@ class TestMaxPool2dVsPyTorch:
         grilly_grad_input = grilly_pool.backward(grad_output)
 
         # Compare input gradients
-        np.testing.assert_allclose(
-            grilly_grad_input,
-            x_torch.grad.numpy(),
-            rtol=1e-4, atol=1e-5
-        )
+        np.testing.assert_allclose(grilly_grad_input, x_torch.grad.numpy(), rtol=1e-4, atol=1e-5)
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch not available")
@@ -318,11 +318,7 @@ class TestAvgPool2dVsPyTorch:
         grilly_grad_input = grilly_pool.backward(grad_output)
 
         # Compare input gradients
-        np.testing.assert_allclose(
-            grilly_grad_input,
-            x_torch.grad.numpy(),
-            rtol=1e-4, atol=1e-5
-        )
+        np.testing.assert_allclose(grilly_grad_input, x_torch.grad.numpy(), rtol=1e-4, atol=1e-5)
 
 
 class TestAdaptivePooling:
@@ -331,11 +327,13 @@ class TestAdaptivePooling:
     def test_adaptive_maxpool2d_import(self):
         """Test AdaptiveMaxPool2d can be imported"""
         from grilly.nn import AdaptiveMaxPool2d
+
         assert AdaptiveMaxPool2d is not None
 
     def test_adaptive_avgpool2d_import(self):
         """Test AdaptiveAvgPool2d can be imported"""
         from grilly.nn import AdaptiveAvgPool2d
+
         assert AdaptiveAvgPool2d is not None
 
     def test_adaptive_maxpool2d_forward(self, backend):
@@ -482,7 +480,7 @@ class TestPoolingPerformance:
 
         speedup = torch_time / grilly_time
         print(f"\nSpeedup vs PyTorch CPU: {speedup:.2f}x")
-        print(f"Grilly: {grilly_time*1000:.2f}ms, PyTorch CPU: {torch_time*1000:.2f}ms")
+        print(f"Grilly: {grilly_time * 1000:.2f}ms, PyTorch CPU: {torch_time * 1000:.2f}ms")
 
         assert speedup > 0  # Just verify it runs
 

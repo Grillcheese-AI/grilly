@@ -16,16 +16,18 @@ from grilly.experimental.vsa.ops import HolographicOps
 
 class WorkingMemorySlot(Enum):
     """Types of working memory slots."""
-    FOCUS = "focus"           # Current attention target
-    CONTEXT = "context"       # Conversation/situational context
-    CANDIDATE = "candidate"   # Potential response being evaluated
-    RETRIEVED = "retrieved"   # Just retrieved from long-term memory
-    GOAL = "goal"            # Current communicative goal
+
+    FOCUS = "focus"  # Current attention target
+    CONTEXT = "context"  # Conversation/situational context
+    CANDIDATE = "candidate"  # Potential response being evaluated
+    RETRIEVED = "retrieved"  # Just retrieved from long-term memory
+    GOAL = "goal"  # Current communicative goal
 
 
 @dataclass
 class WorkingMemoryItem:
     """Item in working memory with activation and metadata."""
+
     vector: np.ndarray
     content: str  # Human-readable
     slot: WorkingMemorySlot
@@ -39,13 +41,13 @@ class WorkingMemoryItem:
 class WorkingMemory:
     """
     Working memory as internal attention.
-    
+
     Key properties:
     - Limited capacity (7±2 items)
     - Activation decay over time
     - Competition between items
     - Binding of items into chunks
-    
+
     This is where "thinking" happens - composing and testing
     before committing to output.
     """
@@ -62,7 +64,7 @@ class WorkingMemory:
         capacity: int = DEFAULT_CAPACITY,
         decay_rate: float = DEFAULT_DECAY_RATE,
         capsule_dim: int = DEFAULT_CAPSULE_DIM,
-        semantic_dims: int = DEFAULT_SEMANTIC_DIMS
+        semantic_dims: int = DEFAULT_SEMANTIC_DIMS,
     ):
         """Initialize the instance."""
 
@@ -75,9 +77,7 @@ class WorkingMemory:
 
         if capsule_dim > 0:
             self.capsule_encoder = CapsuleEncoder(
-                input_dim=dim,
-                capsule_dim=capsule_dim,
-                semantic_dims=semantic_dims
+                input_dim=dim, capsule_dim=capsule_dim, semantic_dims=semantic_dims
             )
 
         # The slots
@@ -97,7 +97,7 @@ class WorkingMemory:
         confidence: float = 1.0,
         source: str = "unknown",
         capsule_vector: np.ndarray | None = None,
-        cognitive_features: np.ndarray | None = None
+        cognitive_features: np.ndarray | None = None,
     ) -> int:
         """Add item to working memory."""
         if capsule_vector is None and self.capsule_encoder is not None:
@@ -110,14 +110,13 @@ class WorkingMemory:
             slot=slot,
             activation=1.0,
             confidence=confidence,
-            source=source
+            source=source,
         )
 
         # Check capacity
         if len(self.items) >= self.capacity:
             # Remove least activated item
-            min_idx = min(range(len(self.items)),
-                         key=lambda i: self.items[i].activation)
+            min_idx = min(range(len(self.items)), key=lambda i: self.items[i].activation)
             self.items.pop(min_idx)
             if self.focus_idx is not None:
                 if min_idx == self.focus_idx:
@@ -137,7 +136,7 @@ class WorkingMemory:
     def decay(self):
         """Apply activation decay to all items."""
         for item in self.items:
-            item.activation *= (1 - self.decay_rate)
+            item.activation *= 1 - self.decay_rate
 
         # Boost focused item
         if self.focus_idx is not None:
@@ -152,7 +151,7 @@ class WorkingMemory:
     def get_context_vector(self) -> np.ndarray:
         """
         Get weighted sum of all items as context.
-        
+
         This is what feeds into comprehension/production.
         """
         if not self.items:
@@ -190,7 +189,7 @@ class WorkingMemory:
     def bind_focused(self) -> np.ndarray:
         """
         Bind all items in binding buffer with focus.
-        
+
         This creates chunks - bound representations of multiple items.
         """
         if self.focus_idx is None or not self.binding_buffer:
@@ -205,7 +204,4 @@ class WorkingMemory:
 
     def clear_candidates(self):
         """Clear all candidate responses."""
-        self.items = [
-            item for item in self.items
-            if item.slot != WorkingMemorySlot.CANDIDATE
-        ]
+        self.items = [item for item in self.items if item.slot != WorkingMemorySlot.CANDIDATE]

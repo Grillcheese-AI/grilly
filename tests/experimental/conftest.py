@@ -2,7 +2,6 @@
 Shared fixtures for experimental tests.
 """
 
-
 import numpy as np
 import pytest
 
@@ -19,6 +18,7 @@ SMALL_DIM = 256
 # Random State Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def random_seed() -> int:
     """Fixed random seed for reproducibility."""
@@ -34,6 +34,7 @@ def rng(random_seed: int) -> np.random.Generator:
 # =============================================================================
 # Dimension Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def dim() -> int:
@@ -56,6 +57,7 @@ def small_dim() -> int:
 # =============================================================================
 # Vector Generation Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def random_bipolar_vector(dim: int, rng: np.random.Generator) -> np.ndarray:
@@ -85,6 +87,7 @@ def ones_vector(dim: int) -> np.ndarray:
 # =============================================================================
 # Vector Set Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def bipolar_vector_pair(dim: int, rng: np.random.Generator) -> tuple:
@@ -129,6 +132,7 @@ def unit_vector_triple(dim: int, rng: np.random.Generator) -> tuple:
 # Codebook Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def small_codebook(small_dim: int, rng: np.random.Generator) -> np.ndarray:
     """Generate a small codebook of bipolar vectors."""
@@ -148,6 +152,7 @@ def medium_codebook(dim: int, rng: np.random.Generator) -> np.ndarray:
 # =============================================================================
 # Tolerance Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def similarity_tolerance() -> float:
@@ -171,11 +176,13 @@ def orthogonality_threshold() -> float:
 # GPU Availability
 # =============================================================================
 
+
 @pytest.fixture
 def gpu_available() -> bool:
     """Check if GPU is available for testing."""
     try:
         from grilly.backend.experimental.vsa import VulkanVSA
+
         return True
     except ImportError:
         return False
@@ -184,6 +191,7 @@ def gpu_available() -> bool:
 # =============================================================================
 # Markers
 # =============================================================================
+
 
 def pytest_configure(config):
     """Configure custom markers."""

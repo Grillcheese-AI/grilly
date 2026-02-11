@@ -7,22 +7,30 @@ Tests T5 tokenizer integration with Grilly, including:
 - Tensor conversion to Vulkan
 - Full pipeline integration
 """
+
 import numpy as np
 import pytest
 
 try:
     from transformers import T5Tokenizer
     from transformers.testing_utils import require_sentencepiece, require_tokenizers
+
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
-    require_sentencepiece = lambda x: x
-    require_tokenizers = lambda x: x
+
+    def require_sentencepiece(x):
+        return x
+
+    def require_tokenizers(x):
+        return x
+
 
 try:
     from grilly import nn
     from grilly.utils.huggingface_bridge import HuggingFaceBridge, get_huggingface_bridge
     from grilly.utils.tensor_conversion import from_vulkan, to_vulkan, to_vulkan_gpu
+
     GRILLY_AVAILABLE = True
 except ImportError:
     GRILLY_AVAILABLE = False
@@ -48,31 +56,31 @@ class TestT5TokenizerIntegration:
     def test_tokenizer_loading(self):
         """Test loading T5 tokenizer"""
         assert self.tokenizer is not None
-        assert hasattr(self.tokenizer, 'encode')
-        assert hasattr(self.tokenizer, 'decode')
+        assert hasattr(self.tokenizer, "encode")
+        assert hasattr(self.tokenizer, "decode")
 
     def test_basic_tokenization(self):
         """Test basic tokenization"""
         text = "This is a test"
-        tokens = self.tokenizer.encode(text, return_tensors='np')
+        tokens = self.tokenizer.encode(text, return_tensors="np")
 
         assert tokens is not None
-        assert isinstance(tokens, np.ndarray) or hasattr(tokens, 'shape')
+        assert isinstance(tokens, np.ndarray) or hasattr(tokens, "shape")
 
     def test_tokenization_with_special_tokens(self):
         """Test tokenization with special tokens"""
         text = "This is a test 😊 I was born in 92000, and this is falsé."
-        tokens = self.tokenizer.encode(text, return_tensors='np')
+        tokens = self.tokenizer.encode(text, return_tensors="np")
 
         assert tokens is not None
         # Should handle emoji and special characters
-        decoded = self.tokenizer.decode(tokens[0] if hasattr(tokens, '__getitem__') else tokens)
+        decoded = self.tokenizer.decode(tokens[0] if hasattr(tokens, "__getitem__") else tokens)
         assert isinstance(decoded, str)
 
     def test_tokenization_to_vulkan(self):
         """Test converting tokenized output to Vulkan"""
         text = "This is a test"
-        tokens = self.tokenizer.encode(text, return_tensors='np')
+        tokens = self.tokenizer.encode(text, return_tensors="np")
 
         # Convert to Vulkan
         if isinstance(tokens, np.ndarray):
@@ -89,12 +97,12 @@ class TestT5TokenizerIntegration:
         text = "This is a test"
 
         # Tokenize
-        encoded = self.bridge.tokenize(text, self.tokenizer, return_tensors='np')
+        encoded = self.bridge.tokenize(text, self.tokenizer, return_tensors="np")
 
         # Get token IDs
         if isinstance(encoded, dict):
-            input_ids = encoded.get('input_ids', encoded.get('input_ids'))
-            if hasattr(input_ids, 'numpy'):
+            input_ids = encoded.get("input_ids", encoded.get("input_ids"))
+            if hasattr(input_ids, "numpy"):
                 input_ids = input_ids.numpy()
         else:
             input_ids = encoded
@@ -115,19 +123,15 @@ class TestT5TokenizerIntegration:
 
     def test_batch_tokenization(self):
         """Test batch tokenization"""
-        texts = [
-            "This is a test",
-            "Hello world",
-            "How are you?"
-        ]
+        texts = ["This is a test", "Hello world", "How are you?"]
 
         # Tokenize batch
-        encoded = self.bridge.tokenize(texts, self.tokenizer, return_tensors='np')
+        encoded = self.bridge.tokenize(texts, self.tokenizer, return_tensors="np")
 
         # Get input_ids
         if isinstance(encoded, dict):
-            input_ids = encoded.get('input_ids')
-            if hasattr(input_ids, 'numpy'):
+            input_ids = encoded.get("input_ids")
+            if hasattr(input_ids, "numpy"):
                 input_ids = input_ids.numpy()
         else:
             input_ids = encoded
@@ -142,12 +146,12 @@ class TestT5TokenizerIntegration:
         text = "This is a test for GPU optimization"
 
         # Tokenize
-        encoded = self.bridge.tokenize(text, self.tokenizer, return_tensors='np')
+        encoded = self.bridge.tokenize(text, self.tokenizer, return_tensors="np")
 
         # Get input_ids
         if isinstance(encoded, dict):
-            input_ids = encoded.get('input_ids')
-            if hasattr(input_ids, 'numpy'):
+            input_ids = encoded.get("input_ids")
+            if hasattr(input_ids, "numpy"):
                 input_ids = input_ids.numpy()
         else:
             input_ids = encoded
@@ -155,7 +159,7 @@ class TestT5TokenizerIntegration:
         # Convert to GPU (if available)
         try:
             gpu_tokens = to_vulkan_gpu(input_ids)
-            assert hasattr(gpu_tokens, 'shape') or hasattr(gpu_tokens, 'numpy')
+            assert hasattr(gpu_tokens, "shape") or hasattr(gpu_tokens, "numpy")
         except Exception:
             # GPU conversion may not be available, that's okay
             pass
@@ -165,10 +169,10 @@ class TestT5TokenizerIntegration:
         original_text = "This is a test"
 
         # Encode
-        encoded = self.tokenizer.encode(original_text, return_tensors='np')
+        encoded = self.tokenizer.encode(original_text, return_tensors="np")
 
         # Get token IDs
-        if hasattr(encoded, 'numpy'):
+        if hasattr(encoded, "numpy"):
             token_ids = encoded.numpy()
         elif isinstance(encoded, np.ndarray):
             token_ids = encoded
@@ -187,15 +191,10 @@ class TestT5TokenizerIntegration:
 
     def test_special_characters_tokenization(self):
         """Test tokenization of special characters"""
-        texts = [
-            "Hello 😊",
-            "Test é character",
-            "ปี (Thai)",
-            "生活的真谛是 (Chinese)"
-        ]
+        texts = ["Hello 😊", "Test é character", "ปี (Thai)", "生活的真谛是 (Chinese)"]
 
         for text in texts:
-            encoded = self.tokenizer.encode(text, return_tensors='np')
+            encoded = self.tokenizer.encode(text, return_tensors="np")
             assert encoded is not None
 
             # Convert to Vulkan
@@ -218,19 +217,19 @@ class TestT5TokenizerIntegration:
                 embeddings = self.bridge.encode(
                     text,
                     model_name=model_name,
-                    tokenizer_name=None  # Use model's default tokenizer
+                    tokenizer_name=None,  # Use model's default tokenizer
                 )
             except Exception:
                 # If that fails, try with T5 tokenizer (may not work, but worth trying)
                 try:
                     embeddings = self.bridge.encode(
-                        text,
-                        model_name=model_name,
-                        tokenizer_name=self.tokenizer_id
+                        text, model_name=model_name, tokenizer_name=self.tokenizer_id
                     )
                 except Exception as e2:
                     # Model encoding requires CUDA or specific setup, skip if not available
-                    pytest.skip(f"Model encoding not available (may require CUDA or model download): {e2}")
+                    pytest.skip(
+                        f"Model encoding not available (may require CUDA or model download): {e2}"
+                    )
 
             # If model encoding works, embeddings should be numpy
             if embeddings is not None:
@@ -279,7 +278,7 @@ class TestT5TokenizerExpectedOutputs:
         tokens = self.tokenizer.encode(test_text, add_special_tokens=True)
 
         # Should produce valid token IDs
-        assert isinstance(tokens, list) or hasattr(tokens, '__len__')
+        assert isinstance(tokens, list) or hasattr(tokens, "__len__")
         assert len(tokens) > 0
 
         # Decode back
@@ -309,10 +308,10 @@ class TestT5TokenizerExpectedOutputs:
         test_text = "This is a test"
 
         # Get token IDs
-        token_ids = self.tokenizer.encode(test_text, return_tensors='np')
+        token_ids = self.tokenizer.encode(test_text, return_tensors="np")
 
         # Convert to numpy if needed
-        if hasattr(token_ids, 'numpy'):
+        if hasattr(token_ids, "numpy"):
             token_ids = token_ids.numpy()
         elif not isinstance(token_ids, np.ndarray):
             token_ids = np.array(token_ids)
@@ -354,15 +353,15 @@ class TestT5TokenizerVulkanIntegration:
         text = "This is a test sentence for the pipeline"
 
         # Step 1: Tokenize
-        encoded = self.bridge.tokenize(text, self.tokenizer, return_tensors='np')
+        encoded = self.bridge.tokenize(text, self.tokenizer, return_tensors="np")
 
         # Step 2: Extract input_ids
         if isinstance(encoded, dict):
-            input_ids = encoded.get('input_ids')
+            input_ids = encoded.get("input_ids")
         else:
             input_ids = encoded
 
-        if hasattr(input_ids, 'numpy'):
+        if hasattr(input_ids, "numpy"):
             input_ids = input_ids.numpy()
         elif not isinstance(input_ids, np.ndarray):
             input_ids = np.array(input_ids)
@@ -379,7 +378,7 @@ class TestT5TokenizerVulkanIntegration:
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(128, 64)
+            nn.Linear(128, 64),
         )
 
         vulkan_output = model(vulkan_input)
@@ -391,22 +390,18 @@ class TestT5TokenizerVulkanIntegration:
 
     def test_batch_processing_pipeline(self):
         """Test batch processing pipeline"""
-        texts = [
-            "First sentence",
-            "Second sentence",
-            "Third sentence"
-        ]
+        texts = ["First sentence", "Second sentence", "Third sentence"]
 
         # Tokenize batch
-        encoded = self.bridge.tokenize(texts, self.tokenizer, return_tensors='np')
+        encoded = self.bridge.tokenize(texts, self.tokenizer, return_tensors="np")
 
         # Extract input_ids
         if isinstance(encoded, dict):
-            input_ids = encoded.get('input_ids')
+            input_ids = encoded.get("input_ids")
         else:
             input_ids = encoded
 
-        if hasattr(input_ids, 'numpy'):
+        if hasattr(input_ids, "numpy"):
             input_ids = input_ids.numpy()
         elif not isinstance(input_ids, np.ndarray):
             input_ids = np.array(input_ids)

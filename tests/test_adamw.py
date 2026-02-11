@@ -10,6 +10,7 @@ import pytest
 try:
     import torch
     import torch.optim as torch_optim
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -21,6 +22,7 @@ class TestAdamWBasic:
     def test_adamw_import(self):
         """Test AdamW can be imported"""
         from grilly.optim import AdamW
+
         assert AdamW is not None
 
     def test_adamw_init(self):
@@ -31,11 +33,11 @@ class TestAdamWBasic:
         param = Parameter(np.random.randn(10, 10).astype(np.float32))
         optimizer = AdamW([param], lr=0.001, weight_decay=0.01)
 
-        assert optimizer.defaults['lr'] == 0.001
-        assert optimizer.defaults['betas'] == (0.9, 0.999)
-        assert optimizer.defaults['eps'] == 1e-8
-        assert optimizer.defaults['weight_decay'] == 0.01
-        assert optimizer.defaults['amsgrad'] == False
+        assert optimizer.defaults["lr"] == 0.001
+        assert optimizer.defaults["betas"] == (0.9, 0.999)
+        assert optimizer.defaults["eps"] == 1e-8
+        assert optimizer.defaults["weight_decay"] == 0.01
+        assert not optimizer.defaults["amsgrad"]
 
     def test_adamw_step(self):
         """Test AdamW performs update step"""
@@ -70,12 +72,12 @@ class TestAdamWBasic:
         param_id = id(param)
         state = optimizer.state[param_id]
 
-        assert 'step' in state
-        assert 'exp_avg' in state
-        assert 'exp_avg_sq' in state
-        assert state['step'] == 1
-        assert state['exp_avg'].shape == param.shape
-        assert state['exp_avg_sq'].shape == param.shape
+        assert "step" in state
+        assert "exp_avg" in state
+        assert "exp_avg_sq" in state
+        assert state["step"] == 1
+        assert state["exp_avg"].shape == param.shape
+        assert state["exp_avg_sq"].shape == param.shape
 
     def test_adamw_amsgrad(self):
         """Test AdamW with AMSGrad variant"""
@@ -91,7 +93,7 @@ class TestAdamWBasic:
         param_id = id(param)
         state = optimizer.state[param_id]
 
-        assert 'max_exp_avg_sq' in state
+        assert "max_exp_avg_sq" in state
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch not available")
@@ -113,8 +115,12 @@ class TestAdamWVsPyTorch:
         torch_param = torch.nn.Parameter(torch.from_numpy(init_param.copy()))
 
         # Create optimizers with weight decay
-        grilly_opt = GrillyAdamW([grilly_param], lr=0.1, weight_decay=0.1, betas=(0.9, 0.999), eps=1e-8)
-        torch_opt = torch_optim.AdamW([torch_param], lr=0.1, weight_decay=0.1, betas=(0.9, 0.999), eps=1e-8)
+        grilly_opt = GrillyAdamW(
+            [grilly_param], lr=0.1, weight_decay=0.1, betas=(0.9, 0.999), eps=1e-8
+        )
+        torch_opt = torch_optim.AdamW(
+            [torch_param], lr=0.1, weight_decay=0.1, betas=(0.9, 0.999), eps=1e-8
+        )
 
         # Same gradient
         grad = np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32)
@@ -129,8 +135,9 @@ class TestAdamWVsPyTorch:
         np.testing.assert_allclose(
             grilly_param.data,
             torch_param.data.numpy(),
-            rtol=1e-4, atol=1e-5,
-            err_msg="AdamW parameters should match PyTorch after one step"
+            rtol=1e-4,
+            atol=1e-5,
+            err_msg="AdamW parameters should match PyTorch after one step",
         )
 
     def test_adamw_multiple_steps(self):
@@ -165,8 +172,9 @@ class TestAdamWVsPyTorch:
             np.testing.assert_allclose(
                 grilly_param.data,
                 torch_param.data.numpy(),
-                rtol=1e-4, atol=1e-5,
-                err_msg=f"AdamW mismatch at step {i+1}"
+                rtol=1e-4,
+                atol=1e-5,
+                err_msg=f"AdamW mismatch at step {i + 1}",
             )
 
     def test_adamw_vs_adam_weight_decay(self):
@@ -229,8 +237,9 @@ class TestAdamWVsPyTorch:
         np.testing.assert_allclose(
             adamw_param.data,
             adam_param.data,
-            rtol=1e-4, atol=1e-5,
-            err_msg="AdamW with weight_decay=0 should match Adam"
+            rtol=1e-4,
+            atol=1e-5,
+            err_msg="AdamW with weight_decay=0 should match Adam",
         )
 
     def test_adamw_bias_correction(self):
@@ -259,9 +268,7 @@ class TestAdamWVsPyTorch:
         torch_opt.step()
 
         np.testing.assert_allclose(
-            grilly_param.data,
-            torch_param.data.numpy(),
-            rtol=1e-4, atol=1e-5
+            grilly_param.data, torch_param.data.numpy(), rtol=1e-4, atol=1e-5
         )
 
 

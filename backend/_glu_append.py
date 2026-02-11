@@ -7,6 +7,7 @@
 # Modern LLM activation patterns: SwiGLU, ReGLU, GeGLU
 # Formula: output = (x @ W_gate + b_gate) * Activation(x @ W_up + b_up)
 
+
 def fused_swiglu(
     self,
     x: np.ndarray,
@@ -14,7 +15,7 @@ def fused_swiglu(
     W_up: np.ndarray,
     b_gate: Optional[np.ndarray] = None,
     b_up: Optional[np.ndarray] = None,
-    return_cache: bool = False
+    return_cache: bool = False,
 ):
     """
     Fused SwiGLU (SiLU-Gated Linear Unit).
@@ -47,7 +48,7 @@ def fused_swiglu(
         x_2d = x.reshape(batch_seq, -1)
 
     # CPU fallback
-    if 'fused-swiglu' not in self.shaders:
+    if "fused-swiglu" not in self.shaders:
         gate = x_2d @ W_gate.T
         up = x_2d @ W_up.T
         if b_gate is not None:
@@ -89,35 +90,34 @@ def fused_swiglu(
     self._upload_buffer(buf_b_up, b_up_flat)
 
     pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-        'fused-swiglu', 6, push_constant_size=16
+        "fused-swiglu", 6, push_constant_size=16
     )
 
     descriptor_set = self.pipelines.get_cached_descriptor_set(
-        'fused-swiglu',
+        "fused-swiglu",
         [
             (self._get_buffer_handle(buf_input), x_flat.nbytes),
             (self._get_buffer_handle(buf_w_gate), w_gate_flat.nbytes),
             (self._get_buffer_handle(buf_w_up), w_up_flat.nbytes),
             (self._get_buffer_handle(buf_b_gate), b_gate_flat.nbytes),
             (self._get_buffer_handle(buf_b_up), b_up_flat.nbytes),
-            (self._get_buffer_handle(buf_output), output_size)
-        ]
+            (self._get_buffer_handle(buf_output), output_size),
+        ],
     )
 
-    push_constants = struct.pack('IIII', batch_seq, input_dim, hidden_dim, has_bias)
+    push_constants = struct.pack("IIII", batch_seq, input_dim, hidden_dim, has_bias)
 
     workgroups_x = (hidden_dim + 15) // 16
     workgroups_y = (batch_seq + 15) // 16
 
     self.core._dispatch_compute(
-        pipeline, pipeline_layout, descriptor_set,
-        workgroups_x, push_constants, workgroups_y
+        pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
     )
 
     result = self._download_buffer(buf_output, output_size, np.float32)
     self._release_buffers([buf_input, buf_w_gate, buf_w_up, buf_b_gate, buf_b_up, buf_output])
 
-    output = result[:batch_seq * hidden_dim].reshape(batch_seq, hidden_dim)
+    output = result[: batch_seq * hidden_dim].reshape(batch_seq, hidden_dim)
 
     if return_cache:
         gate = x_2d @ W_gate.T
@@ -130,6 +130,7 @@ def fused_swiglu(
 
     return output
 
+
 def fused_reglu(
     self,
     x: np.ndarray,
@@ -137,7 +138,7 @@ def fused_reglu(
     W_up: np.ndarray,
     b_gate: Optional[np.ndarray] = None,
     b_up: Optional[np.ndarray] = None,
-    return_cache: bool = False
+    return_cache: bool = False,
 ):
     """
     Fused ReGLU (ReLU-Gated Linear Unit).
@@ -157,7 +158,7 @@ def fused_reglu(
         batch_seq = x.shape[0] if x.ndim == 2 else 1
         x_2d = x.reshape(batch_seq, -1)
 
-    if 'fused-reglu' not in self.shaders:
+    if "fused-reglu" not in self.shaders:
         gate = x_2d @ W_gate.T
         up = x_2d @ W_up.T
         if b_gate is not None:
@@ -175,8 +176,12 @@ def fused_reglu(
     output_size = batch_seq * hidden_dim * 4
 
     has_bias = 1 if (b_gate is not None and b_up is not None) else 0
-    b_gate_flat = b_gate.astype(np.float32).flatten() if has_bias else np.zeros(hidden_dim, dtype=np.float32)
-    b_up_flat = b_up.astype(np.float32).flatten() if has_bias else np.zeros(hidden_dim, dtype=np.float32)
+    b_gate_flat = (
+        b_gate.astype(np.float32).flatten() if has_bias else np.zeros(hidden_dim, dtype=np.float32)
+    )
+    b_up_flat = (
+        b_up.astype(np.float32).flatten() if has_bias else np.zeros(hidden_dim, dtype=np.float32)
+    )
 
     buf_input = self._acquire_buffer(x_flat.nbytes)
     buf_w_gate = self._acquire_buffer(w_gate_flat.nbytes)
@@ -192,36 +197,39 @@ def fused_reglu(
     self._upload_buffer(buf_b_up, b_up_flat)
 
     pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-        'fused-reglu', 6, push_constant_size=16
+        "fused-reglu", 6, push_constant_size=16
     )
 
     descriptor_set = self.pipelines.get_cached_descriptor_set(
-        'fused-reglu',
+        "fused-reglu",
         [
             (self._get_buffer_handle(buf_input), x_flat.nbytes),
             (self._get_buffer_handle(buf_w_gate), w_gate_flat.nbytes),
             (self._get_buffer_handle(buf_w_up), w_up_flat.nbytes),
             (self._get_buffer_handle(buf_b_gate), b_gate_flat.nbytes),
             (self._get_buffer_handle(buf_b_up), b_up_flat.nbytes),
-            (self._get_buffer_handle(buf_output), output_size)
-        ]
+            (self._get_buffer_handle(buf_output), output_size),
+        ],
     )
 
-    push_constants = struct.pack('IIII', batch_seq, input_dim, hidden_dim, has_bias)
+    push_constants = struct.pack("IIII", batch_seq, input_dim, hidden_dim, has_bias)
     workgroups_x = (hidden_dim + 15) // 16
     workgroups_y = (batch_seq + 15) // 16
 
-    self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y)
+    self.core._dispatch_compute(
+        pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
+    )
 
     result = self._download_buffer(buf_output, output_size, np.float32)
     self._release_buffers([buf_input, buf_w_gate, buf_w_up, buf_b_gate, buf_b_up, buf_output])
 
-    output = result[:batch_seq * hidden_dim].reshape(batch_seq, hidden_dim)
+    output = result[: batch_seq * hidden_dim].reshape(batch_seq, hidden_dim)
     if return_cache:
         gate = x_2d @ W_gate.T + (b_gate if b_gate is not None else 0)
         up = x_2d @ W_up.T + (b_up if b_up is not None else 0)
         return output, gate.astype(np.float32), up.astype(np.float32)
     return output
+
 
 def fused_geglu(
     self,
@@ -230,7 +238,7 @@ def fused_geglu(
     W_up: np.ndarray,
     b_gate: Optional[np.ndarray] = None,
     b_up: Optional[np.ndarray] = None,
-    return_cache: bool = False
+    return_cache: bool = False,
 ):
     """
     Fused GeGLU (GELU-Gated Linear Unit).
@@ -239,12 +247,13 @@ def fused_geglu(
 
     Formula: output = (x @ W_gate.T + b_gate) * GELU(x @ W_up.T + b_up)
     """
+
     def gelu(x):
         """Run gelu."""
 
         sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
         coeff = 0.044715
-        return 0.5 * x * (1 + np.tanh(sqrt_2_over_pi * (x + coeff * x ** 3)))
+        return 0.5 * x * (1 + np.tanh(sqrt_2_over_pi * (x + coeff * x**3)))
 
     x = x.astype(np.float32)
     input_dim = x.shape[-1]
@@ -257,7 +266,7 @@ def fused_geglu(
         batch_seq = x.shape[0] if x.ndim == 2 else 1
         x_2d = x.reshape(batch_seq, -1)
 
-    if 'fused-geglu' not in self.shaders:
+    if "fused-geglu" not in self.shaders:
         gate = x_2d @ W_gate.T
         up = x_2d @ W_up.T
         if b_gate is not None:
@@ -275,8 +284,12 @@ def fused_geglu(
     output_size = batch_seq * hidden_dim * 4
 
     has_bias = 1 if (b_gate is not None and b_up is not None) else 0
-    b_gate_flat = b_gate.astype(np.float32).flatten() if has_bias else np.zeros(hidden_dim, dtype=np.float32)
-    b_up_flat = b_up.astype(np.float32).flatten() if has_bias else np.zeros(hidden_dim, dtype=np.float32)
+    b_gate_flat = (
+        b_gate.astype(np.float32).flatten() if has_bias else np.zeros(hidden_dim, dtype=np.float32)
+    )
+    b_up_flat = (
+        b_up.astype(np.float32).flatten() if has_bias else np.zeros(hidden_dim, dtype=np.float32)
+    )
 
     buf_input = self._acquire_buffer(x_flat.nbytes)
     buf_w_gate = self._acquire_buffer(w_gate_flat.nbytes)
@@ -292,31 +305,33 @@ def fused_geglu(
     self._upload_buffer(buf_b_up, b_up_flat)
 
     pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-        'fused-geglu', 6, push_constant_size=16
+        "fused-geglu", 6, push_constant_size=16
     )
 
     descriptor_set = self.pipelines.get_cached_descriptor_set(
-        'fused-geglu',
+        "fused-geglu",
         [
             (self._get_buffer_handle(buf_input), x_flat.nbytes),
             (self._get_buffer_handle(buf_w_gate), w_gate_flat.nbytes),
             (self._get_buffer_handle(buf_w_up), w_up_flat.nbytes),
             (self._get_buffer_handle(buf_b_gate), b_gate_flat.nbytes),
             (self._get_buffer_handle(buf_b_up), b_up_flat.nbytes),
-            (self._get_buffer_handle(buf_output), output_size)
-        ]
+            (self._get_buffer_handle(buf_output), output_size),
+        ],
     )
 
-    push_constants = struct.pack('IIII', batch_seq, input_dim, hidden_dim, has_bias)
+    push_constants = struct.pack("IIII", batch_seq, input_dim, hidden_dim, has_bias)
     workgroups_x = (hidden_dim + 15) // 16
     workgroups_y = (batch_seq + 15) // 16
 
-    self.core._dispatch_compute(pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y)
+    self.core._dispatch_compute(
+        pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
+    )
 
     result = self._download_buffer(buf_output, output_size, np.float32)
     self._release_buffers([buf_input, buf_w_gate, buf_w_up, buf_b_gate, buf_b_up, buf_output])
 
-    output = result[:batch_seq * hidden_dim].reshape(batch_seq, hidden_dim)
+    output = result[: batch_seq * hidden_dim].reshape(batch_seq, hidden_dim)
     if return_cache:
         gate = x_2d @ W_gate.T + (b_gate if b_gate is not None else 0)
         up = x_2d @ W_up.T + (b_up if b_up is not None else 0)

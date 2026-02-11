@@ -16,6 +16,7 @@ print("Loading spaCy model...")
 nlp = spacy.load("en_core_web_sm")
 nlp.max_length = 2000000
 
+
 @dataclass
 class SVCResult:
     """Represent svcresult behavior."""
@@ -24,6 +25,7 @@ class SVCResult:
     verb: str
     complement: str
     valid: bool
+
 
 def extract_svc(doc) -> SVCResult:
     """Extract Subject-Verb-Complement from spaCy Doc."""
@@ -65,11 +67,21 @@ def extract_svc(doc) -> SVCResult:
 
     return SVCResult(subject, verb, complement, bool(verb and len(doc) >= 3))
 
+
 def classify_realm(text: str) -> str:
     """Simple keyword-based realm classification."""
     text_lower = text.lower()
     realms = {
-        "technology": ["computer", "software", "code", "algorithm", "data", "ai", "machine", "digital"],
+        "technology": [
+            "computer",
+            "software",
+            "code",
+            "algorithm",
+            "data",
+            "ai",
+            "machine",
+            "digital",
+        ],
         "science": ["atom", "molecule", "cell", "energy", "physics", "chemistry", "biology"],
         "health": ["health", "medical", "disease", "exercise", "diet", "body", "sleep"],
         "history": ["war", "century", "king", "empire", "ancient", "historical"],
@@ -82,6 +94,7 @@ def classify_realm(text: str) -> str:
             return realm
     return "general"
 
+
 def compute_complexity(doc) -> float:
     """Syntactic complexity 0-1."""
     if len(doc) == 0:
@@ -90,6 +103,7 @@ def compute_complexity(doc) -> float:
     sub_clauses = sum(1 for t in doc if t.dep_ in ("advcl", "relcl", "ccomp", "xcomp", "acl"))
     clause_score = min(sub_clauses / 3, 1.0)
     return round((length_score + clause_score) / 2, 2)
+
 
 def process_sentence(doc, sent_id: str) -> dict[str, Any] | None:
     """Process single sentence to lean SVC format."""
@@ -119,17 +133,19 @@ def process_sentence(doc, sent_id: str) -> dict[str, Any] | None:
         "deps": deps,
         "root_verb": root_verb,
         "realm": classify_realm(doc.text),
-        "complexity": compute_complexity(doc)
+        "complexity": compute_complexity(doc),
     }
+
 
 def process_instruct_file(input_path: Path, output_path: Path, max_entries: int = None):
     """Process instruct JSONL to lean SVC format."""
     stats = Counter()
     entry_count = 0
 
-    with open(input_path, encoding='utf-8') as fin, \
-         open(output_path, 'w', encoding='utf-8') as fout:
-
+    with (
+        open(input_path, encoding="utf-8") as fin,
+        open(output_path, "w", encoding="utf-8") as fout,
+    ):
         for line_num, line in enumerate(fin):
             if max_entries and entry_count >= max_entries:
                 break
@@ -137,14 +153,14 @@ def process_instruct_file(input_path: Path, output_path: Path, max_entries: int 
             try:
                 data = json.loads(line)
             except json.JSONDecodeError:
-                stats['json_errors'] += 1
+                stats["json_errors"] += 1
                 continue
 
             texts = []
-            if 'prompt' in data:
-                texts.append(('p', data['prompt']))
-            if 'response' in data:
-                texts.append(('r', data['response']))
+            if "prompt" in data:
+                texts.append(("p", data["prompt"]))
+            if "response" in data:
+                texts.append(("r", data["response"]))
 
             for text_type, text in texts:
                 doc = nlp(text)
@@ -156,18 +172,19 @@ def process_instruct_file(input_path: Path, output_path: Path, max_entries: int 
                     try:
                         result = process_sentence(sent.as_doc(), sent_id)
                         if result:
-                            fout.write(json.dumps(result) + '\n')
-                            stats['success'] += 1
+                            fout.write(json.dumps(result) + "\n")
+                            stats["success"] += 1
                             entry_count += 1
                         else:
-                            stats['filtered'] += 1
+                            stats["filtered"] += 1
                     except Exception:
-                        stats['errors'] += 1
+                        stats["errors"] += 1
 
             if (line_num + 1) % 1000 == 0:
                 print(f"Processed {line_num + 1} entries, {stats['success']} sentences...")
 
     return stats
+
 
 def main():
     """Run main."""
@@ -185,6 +202,7 @@ def main():
     print(f"Success: {stats['success']}")
     print(f"Filtered: {stats['filtered']}")
     print(f"Errors: {stats['errors']}")
+
 
 if __name__ == "__main__":
     main()

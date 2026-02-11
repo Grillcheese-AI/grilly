@@ -1,4 +1,3 @@
-
 def test_checkpoint_sentence_token_compression(tmp_path):
     try:
         from grilly.experimental.cognitive.controller import CognitiveController
@@ -29,9 +28,9 @@ def test_checkpoint_sentence_token_compression(tmp_path):
             svc_s="we",
             svc_v="modify",
             svc_c="your code",
-            pos=["PRON","VERB","PRON","NOUN"],
-            lemmas=["we","modify","your","code"],
-            deps=["nsubj","ROOT","poss","dobj"],
+            pos=["PRON", "VERB", "PRON", "NOUN"],
+            lemmas=["we", "modify", "your", "code"],
+            deps=["nsubj", "ROOT", "poss", "dobj"],
             root_verb="modify",
             realm="technology",
             source="conversation",
@@ -43,9 +42,9 @@ def test_checkpoint_sentence_token_compression(tmp_path):
             svc_s="we",
             svc_v="modify",
             svc_c="the pipeline",
-            pos=["PRON","VERB","DET","NOUN"],
-            lemmas=["we","modify","the","pipeline"],
-            deps=["nsubj","ROOT","det","dobj"],
+            pos=["PRON", "VERB", "DET", "NOUN"],
+            lemmas=["we", "modify", "the", "pipeline"],
+            deps=["nsubj", "ROOT", "det", "dobj"],
             root_verb="modify",
             realm="technology",
             source="conversation",
@@ -53,10 +52,14 @@ def test_checkpoint_sentence_token_compression(tmp_path):
         ),
     ]
 
-    c.ingest_svc(entries, learn_templates=False, build_realm_vectors=False, verbose=False, engine=None)
+    c.ingest_svc(
+        entries, learn_templates=False, build_realm_vectors=False, verbose=False, engine=None
+    )
 
     out = tmp_path / "ckpt.npz"
-    save_ingest_checkpoint(str(out), c, include_sentence_memory=True, sentence_compress="auto", fp16=True)
+    save_ingest_checkpoint(
+        str(out), c, include_sentence_memory=True, sentence_compress="auto", fp16=True
+    )
 
     view = CheckpointView(str(out))
     assert view.sentence_count() >= 0

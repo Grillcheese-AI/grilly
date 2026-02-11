@@ -210,6 +210,7 @@ class TestWorkingMemoryContext:
 
         # Context should be more similar to high activation item
         from grilly.experimental.vsa.ops import HolographicOps
+
         sim1 = HolographicOps.similarity(context, vec1)
         sim2 = HolographicOps.similarity(context, vec2)
 

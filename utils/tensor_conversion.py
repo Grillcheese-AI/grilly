@@ -4,12 +4,14 @@ Tensor Conversion Utilities
 Seamless conversion between PyTorch tensors and Vulkan (numpy arrays).
 Provides automatic conversion for seamless integration with GPU acceleration on AMD.
 """
+
 from typing import Any, Union
 
 import numpy as np
 
 try:
     import torch
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -18,20 +20,22 @@ except ImportError:
 from .device_manager import get_device_manager
 
 
-def to_vulkan(tensor: np.ndarray | Any, keep_on_gpu: bool = False) -> Union[np.ndarray, 'VulkanTensor']:
+def to_vulkan(
+    tensor: np.ndarray | Any, keep_on_gpu: bool = False
+) -> Union[np.ndarray, "VulkanTensor"]:
     """
     Convert PyTorch tensor (or any tensor-like object) to numpy array for Vulkan.
-    
+
     This is the main function to use for converting PyTorch tensors to Vulkan-compatible arrays.
     On AMD GPUs, can optionally keep data on GPU to avoid CPU round-trips.
-    
+
     Args:
         tensor: PyTorch tensor, numpy array, or other array-like object
         keep_on_gpu: If True, creates a GPU buffer directly (faster for AMD, avoids CPU round-trip)
-    
+
     Returns:
         numpy array (float32) ready for Vulkan operations, or VulkanTensor if keep_on_gpu=True
-    
+
     Examples:
         >>> import torch
         >>> x = torch.randn(10, 128).cuda()
@@ -39,7 +43,7 @@ def to_vulkan(tensor: np.ndarray | Any, keep_on_gpu: bool = False) -> Union[np.n
         >>> from grilly import nn
         >>> linear = nn.Linear(128, 64)
         >>> result = linear(x_vulkan)  # Process with Vulkan
-        
+
         # For AMD GPU optimization:
         >>> x_gpu = to_vulkan(x, keep_on_gpu=True)  # Stays on GPU
         >>> result = linear(x_gpu)  # Faster, no CPU transfer
@@ -57,18 +61,18 @@ def to_vulkan(tensor: np.ndarray | Any, keep_on_gpu: bool = False) -> Union[np.n
     return device_manager.to_vulkan(tensor)
 
 
-def to_vulkan_gpu(tensor: np.ndarray | Any) -> 'VulkanTensor':
+def to_vulkan_gpu(tensor: np.ndarray | Any) -> "VulkanTensor":
     """
     Convert tensor directly to Vulkan GPU buffer (stays on GPU, no CPU round-trip).
-    
+
     Optimized for AMD GPUs - creates device-local buffer directly on GPU.
-    
+
     Args:
         tensor: PyTorch tensor, numpy array, or other array-like object
-    
+
     Returns:
         VulkanTensor wrapper that keeps data on GPU
-    
+
     Examples:
         >>> import torch
         >>> x = torch.randn(10, 128)
@@ -126,16 +130,16 @@ class VulkanTensor:
         self._dtype = self._cpu_data.dtype
 
         # State tracking
-        self._gpu_valid = False   # GPU has valid copy
-        self._cpu_valid = True    # CPU has valid copy
-        self._uploaded = False    # Backwards compatibility
+        self._gpu_valid = False  # GPU has valid copy
+        self._cpu_valid = True  # CPU has valid copy
+        self._uploaded = False  # Backwards compatibility
 
         # Lazy upload
         if not lazy:
             self._ensure_uploaded()
 
     @classmethod
-    def from_torch(cls, tensor, lazy: bool = True) -> 'VulkanTensor':
+    def from_torch(cls, tensor, lazy: bool = True) -> "VulkanTensor":
         """
         Create VulkanTensor from PyTorch tensor.
 
@@ -156,7 +160,7 @@ class VulkanTensor:
             else:
                 # CPU tensor - try to avoid copy
                 arr = tensor.detach().numpy()
-                if not arr.flags['C_CONTIGUOUS']:
+                if not arr.flags["C_CONTIGUOUS"]:
                     arr = np.ascontiguousarray(arr)
         else:
             arr = np.asarray(tensor)
@@ -164,7 +168,7 @@ class VulkanTensor:
         return cls(arr, lazy=lazy)
 
     @classmethod
-    def empty(cls, shape: tuple, dtype=np.float32) -> 'VulkanTensor':
+    def empty(cls, shape: tuple, dtype=np.float32) -> "VulkanTensor":
         """
         Create uninitialized VulkanTensor.
 
@@ -183,12 +187,12 @@ class VulkanTensor:
         return tensor
 
     @classmethod
-    def zeros(cls, shape: tuple, dtype=np.float32) -> 'VulkanTensor':
+    def zeros(cls, shape: tuple, dtype=np.float32) -> "VulkanTensor":
         """Create zero-initialized VulkanTensor"""
         return cls(np.zeros(shape, dtype=dtype), lazy=True)
 
     @classmethod
-    def ones(cls, shape: tuple, dtype=np.float32) -> 'VulkanTensor':
+    def ones(cls, shape: tuple, dtype=np.float32) -> "VulkanTensor":
         """Create ones-initialized VulkanTensor"""
         return cls(np.ones(shape, dtype=dtype), lazy=True)
 
@@ -202,6 +206,7 @@ class VulkanTensor:
 
         try:
             from grilly import Compute
+
             backend = Compute()
 
             size = self._cpu_data.nbytes
@@ -209,14 +214,13 @@ class VulkanTensor:
             # Try to use buffer pool if available
             try:
                 from grilly.backend.buffer_pool import acquire_buffer
+
                 self._pooled_buffer = acquire_buffer(size, core=backend.core)
                 self._gpu_buffer = self._pooled_buffer.handle
                 self._gpu_memory = self._pooled_buffer.memory
             except (ImportError, Exception):
                 # Fallback to direct allocation
-                self._gpu_buffer, self._gpu_memory = backend.create_buffer(
-                    size, usage='storage'
-                )
+                self._gpu_buffer, self._gpu_memory = backend.create_buffer(size, usage="storage")
 
             # Upload to GPU
             backend.upload_buffer(self._gpu_buffer, self._gpu_memory, self._cpu_data)
@@ -240,15 +244,14 @@ class VulkanTensor:
             core = self._core
             if core is None:
                 from grilly import Compute
+
                 backend = Compute()
                 core = backend.core
                 self._core = core
 
             # Download from GPU
             self._cpu_data = core._download_buffer(
-                self._gpu_memory,
-                self._cpu_data.nbytes,
-                dtype=self._dtype
+                self._gpu_memory, self._cpu_data.nbytes, dtype=self._dtype
             ).reshape(self._shape)
             self._cpu_valid = True
 
@@ -318,7 +321,7 @@ class VulkanTensor:
         """Get CPU copy (alias for numpy())"""
         return self.numpy()
 
-    def to_torch(self, device: str = 'cpu'):
+    def to_torch(self, device: str = "cpu"):
         """
         Convert to PyTorch tensor.
 
@@ -334,7 +337,7 @@ class VulkanTensor:
         self._ensure_downloaded()
         tensor = torch.from_numpy(self._cpu_data)
 
-        if device != 'cpu':
+        if device != "cpu":
             tensor = tensor.to(device)
 
         return tensor
@@ -378,7 +381,7 @@ class VulkanTensor:
         self._cpu_data[key] = value
         self.mark_cpu_modified()
 
-    def reshape(self, *shape) -> 'VulkanTensor':
+    def reshape(self, *shape) -> "VulkanTensor":
         """Reshape tensor (returns new VulkanTensor)"""
         self._ensure_downloaded()
         new_shape = shape[0] if len(shape) == 1 and isinstance(shape[0], tuple) else shape
@@ -402,13 +405,15 @@ class VulkanTensor:
             pass  # Ignore cleanup errors
 
 
-def to_vulkan_batch(tensors: list | tuple | Any) -> np.ndarray | list[np.ndarray] | tuple[np.ndarray, ...]:
+def to_vulkan_batch(
+    tensors: list | tuple | Any,
+) -> np.ndarray | list[np.ndarray] | tuple[np.ndarray, ...]:
     """
     Convert a batch of PyTorch tensors to numpy arrays for Vulkan.
-    
+
     Args:
         tensors: Single tensor, list of tensors, or tuple of tensors
-    
+
     Returns:
         Converted numpy array(s) with same structure
     """
@@ -418,17 +423,17 @@ def to_vulkan_batch(tensors: list | tuple | Any) -> np.ndarray | list[np.ndarray
         return to_vulkan(tensors)
 
 
-def from_vulkan(array: np.ndarray, device: str = 'cuda') -> Any:
+def from_vulkan(array: np.ndarray, device: str = "cuda") -> Any:
     """
     Convert numpy array (from Vulkan) to PyTorch tensor.
-    
+
     Args:
         array: numpy array from Vulkan operations
         device: Target device ('cuda', 'cpu', or PyTorch device)
-    
+
     Returns:
         PyTorch tensor on specified device
-    
+
     Examples:
         >>> from grilly import nn
         >>> linear = nn.Linear(128, 64)
@@ -438,7 +443,7 @@ def from_vulkan(array: np.ndarray, device: str = 'cuda') -> Any:
     """
     device_manager = get_device_manager()
 
-    if device == 'cuda':
+    if device == "cuda":
         try:
             return device_manager.to_cuda(array)
         except (RuntimeError, AssertionError):
@@ -446,7 +451,7 @@ def from_vulkan(array: np.ndarray, device: str = 'cuda') -> Any:
             if TORCH_AVAILABLE:
                 return torch.from_numpy(array).cpu()
             return array
-    elif device == 'cpu':
+    elif device == "cpu":
         if TORCH_AVAILABLE:
             return torch.from_numpy(array).cpu()
         return array
@@ -459,11 +464,13 @@ def from_vulkan(array: np.ndarray, device: str = 'cuda') -> Any:
 
 def auto_convert_to_vulkan(func):
     """Decorate a function to auto-convert the first tensor argument."""
+
     def wrapper(*args, **kwargs):
         # Convert first argument if it is a PyTorch tensor.
         if args and TORCH_AVAILABLE and isinstance(args[0], torch.Tensor):
             args = (to_vulkan(args[0]),) + args[1:]
         return func(*args, **kwargs)
+
     return wrapper
 
 
@@ -498,14 +505,14 @@ def ensure_vulkan_compatible(data: np.ndarray | Any) -> np.ndarray:
 def convert_module_inputs(*args, **kwargs):
     """
     Convert all PyTorch tensor inputs to numpy arrays for Vulkan operations.
-    
+
     Args:
         *args: Positional arguments (tensors will be converted)
         **kwargs: Keyword arguments (tensors will be converted)
-    
+
     Returns:
         Tuple of (converted_args, converted_kwargs)
-    
+
     Example:
         >>> import torch
         >>> x = torch.randn(10, 128)
@@ -524,8 +531,8 @@ def _is_tensor_like(obj: Any) -> bool:
         return False  # Already numpy
     if TORCH_AVAILABLE and isinstance(obj, torch.Tensor):
         return True
-    if hasattr(obj, 'cpu') and hasattr(obj, 'numpy'):
+    if hasattr(obj, "cpu") and hasattr(obj, "numpy"):
         return True  # PyTorch-like
-    if hasattr(obj, 'numpy') and not isinstance(obj, np.ndarray):
+    if hasattr(obj, "numpy") and not isinstance(obj, np.ndarray):
         return True  # TensorFlow-like
     return False

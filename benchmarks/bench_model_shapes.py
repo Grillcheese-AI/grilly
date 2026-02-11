@@ -12,7 +12,7 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 
 from benchmarks.utils import (
     format_time,
@@ -52,9 +52,9 @@ def bench_stacked_linear(backend, label, batch, dims, repeats=5):
         times.append((t1 - t0) * 1000)
 
     return {
-        'label': label,
-        'gpu_ms': np.mean(times),
-        'shape': f"B={batch} {' -> '.join(str(d) for d in dims)}",
+        "label": label,
+        "gpu_ms": np.mean(times),
+        "shape": f"B={batch} {' -> '.join(str(d) for d in dims)}",
     }
 
 
@@ -97,9 +97,9 @@ def bench_stacked_linear_gpu_resident(backend, label, batch, dims, repeats=5):
         times.append((t1 - t0) * 1000)
 
     return {
-        'label': label + " (GPU-res)",
-        'gpu_ms': np.mean(times),
-        'shape': f"B={batch} {' -> '.join(str(d) for d in dims)}",
+        "label": label + " (GPU-res)",
+        "gpu_ms": np.mean(times),
+        "shape": f"B={batch} {' -> '.join(str(d) for d in dims)}",
     }
 
 
@@ -165,23 +165,26 @@ def main():
             # GPU standard mode
             try:
                 r = bench_stacked_linear(backend, label, batch, dims, repeats=5)
-                r['cpu_ms'] = cpu_ms
+                r["cpu_ms"] = cpu_ms
                 std_results.append(r)
-                speedup = cpu_ms / r['gpu_ms'] if r['gpu_ms'] > 0 else 0
-                print(f"    Standard  GPU: {format_time(r['gpu_ms'])}  "
-                      f"CPU: {format_time(cpu_ms)}  Speedup: {speedup:.2f}x")
+                speedup = cpu_ms / r["gpu_ms"] if r["gpu_ms"] > 0 else 0
+                print(
+                    f"    Standard  GPU: {format_time(r['gpu_ms'])}  "
+                    f"CPU: {format_time(cpu_ms)}  Speedup: {speedup:.2f}x"
+                )
             except Exception as e:
                 print(f"    Standard GPU failed: {e}")
 
             # GPU-resident mode
             try:
-                r2 = bench_stacked_linear_gpu_resident(
-                    backend, label, batch, dims, repeats=5)
-                r2['cpu_ms'] = cpu_ms
+                r2 = bench_stacked_linear_gpu_resident(backend, label, batch, dims, repeats=5)
+                r2["cpu_ms"] = cpu_ms
                 gpu_results.append(r2)
-                speedup2 = cpu_ms / r2['gpu_ms'] if r2['gpu_ms'] > 0 else 0
-                print(f"    GPU-res   GPU: {format_time(r2['gpu_ms'])}  "
-                      f"CPU: {format_time(cpu_ms)}  Speedup: {speedup2:.2f}x")
+                speedup2 = cpu_ms / r2["gpu_ms"] if r2["gpu_ms"] > 0 else 0
+                print(
+                    f"    GPU-res   GPU: {format_time(r2['gpu_ms'])}  "
+                    f"CPU: {format_time(cpu_ms)}  Speedup: {speedup2:.2f}x"
+                )
             except Exception as e:
                 print(f"    GPU-resident failed: {e}")
         else:
@@ -199,26 +202,27 @@ def main():
     # Side-by-side comparison
     if std_results and gpu_results and len(std_results) == len(gpu_results):
         print_header("Standard vs GPU-Resident Comparison")
-        print(f"  {'Model':<28} {'Standard':>10} {'GPU-res':>10} "
-              f"{'Transfer':>10} {'vs CPU':>8}")
+        print(f"  {'Model':<28} {'Standard':>10} {'GPU-res':>10} {'Transfer':>10} {'vs CPU':>8}")
         print("  " + "-" * 70)
         for std, gpur in zip(std_results, gpu_results):
-            std_ms = std['gpu_ms']
-            gpur_ms = gpur['gpu_ms']
-            cpu_ms = std['cpu_ms']
+            std_ms = std["gpu_ms"]
+            gpur_ms = gpur["gpu_ms"]
+            cpu_ms = std["cpu_ms"]
             transfer_elim = ""
             vs_cpu = ""
             if std_ms > 0 and gpur_ms > 0:
                 transfer_elim = f"{std_ms / gpur_ms:.2f}x"
             if cpu_ms > 0 and gpur_ms > 0:
                 vs_cpu = f"{cpu_ms / gpur_ms:.2f}x"
-            print(f"  {std['label']:<28} "
-                  f"{format_time(std_ms):>10} "
-                  f"{format_time(gpur_ms):>10} "
-                  f"{transfer_elim:>10} "
-                  f"{vs_cpu:>8}")
+            print(
+                f"  {std['label']:<28} "
+                f"{format_time(std_ms):>10} "
+                f"{format_time(gpur_ms):>10} "
+                f"{transfer_elim:>10} "
+                f"{vs_cpu:>8}"
+            )
     print()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

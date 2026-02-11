@@ -5,7 +5,6 @@ Provides a lightweight capsule encoder and similarity helpers
 without requiring the full capsule transformer stack.
 """
 
-
 import numpy as np
 
 
@@ -18,11 +17,7 @@ class CapsuleEncoder:
     """
 
     def __init__(
-        self,
-        input_dim: int,
-        capsule_dim: int = 32,
-        semantic_dims: int = 28,
-        seed: int = 9101
+        self, input_dim: int, capsule_dim: int = 32, semantic_dims: int = 28, seed: int = 9101
     ) -> None:
         """Initialize the instance."""
 
@@ -40,9 +35,7 @@ class CapsuleEncoder:
         self._proj = proj / norms
 
     def encode_vector(
-        self,
-        vec: np.ndarray,
-        cognitive_features: np.ndarray | None = None
+        self, vec: np.ndarray, cognitive_features: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Encode a vector into capsule space.
@@ -64,12 +57,12 @@ class CapsuleEncoder:
                 feats = np.asarray(cognitive_features, dtype=np.float32)
             if feats.shape != (self.cognitive_dims,):
                 raise ValueError("cognitive_features has incorrect shape")
-            capsule[self.semantic_dims:] = feats
+            capsule[self.semantic_dims :] = feats
 
-        semantic = capsule[:self.semantic_dims]
+        semantic = capsule[: self.semantic_dims]
         norm_semantic = np.linalg.norm(semantic)
         if norm_semantic > 0:
-            capsule[:self.semantic_dims] = semantic / norm_semantic
+            capsule[: self.semantic_dims] = semantic / norm_semantic
 
         norm_full = np.linalg.norm(capsule)
         if norm_full > 0:

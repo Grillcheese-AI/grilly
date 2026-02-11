@@ -1,4 +1,5 @@
 """Deterministic hashing helpers used for reproducible vector seeding."""
+
 from __future__ import annotations
 
 import hashlib
@@ -11,6 +12,7 @@ Part = Union[str, int, float, bytes]
 
 try:
     from blake3 import blake3 as _blake3  # type: ignore
+
     _USING_BLAKE3 = True
 except Exception:
     _blake3 = None
@@ -28,10 +30,12 @@ except Exception:
             )
             _warned = True
 
+
 def using_blake3() -> bool:
     """Run using blake3."""
 
     return _USING_BLAKE3
+
 
 def _to_bytes(x: Part) -> bytes:
     """Run to bytes."""
@@ -43,11 +47,13 @@ def _to_bytes(x: Part) -> bytes:
     # ints/floats: stable textual form
     return str(x).encode("utf-8", errors="surrogatepass")
 
+
 def _join_parts(parts: Iterable[Part]) -> bytes:
     # \x1f = ASCII unit separator (rare in text)
     """Run join parts."""
 
     return b"\x1f".join(_to_bytes(p) for p in parts)
+
 
 def digest(parts: Iterable[Part], *, domain: str = "grilly", out_len: int = 32) -> bytes:
     """Run digest."""
@@ -67,11 +73,13 @@ def digest(parts: Iterable[Part], *, domain: str = "grilly", out_len: int = 32) 
         ctr += 1
     return bytes(out[:out_len])
 
+
 def stable_u32(*parts: Part, domain: str = "grilly") -> int:
     """Run stable u32."""
 
     d = digest(parts, domain=domain, out_len=4)
     return int.from_bytes(d, "little", signed=False)
+
 
 def stable_u64(*parts: Part, domain: str = "grilly") -> int:
     """Run stable u64."""
@@ -79,10 +87,12 @@ def stable_u64(*parts: Part, domain: str = "grilly") -> int:
     d = digest(parts, domain=domain, out_len=8)
     return int.from_bytes(d, "little", signed=False)
 
+
 def stable_bytes(*parts: Part, domain: str = "grilly", out_len: int = 32) -> bytes:
     """Run stable bytes."""
 
     return digest(parts, domain=domain, out_len=out_len)
+
 
 def bipolar_from_key(key: str, dim: int, *, domain: str = "grilly.bipolar") -> np.ndarray:
     """

@@ -11,6 +11,7 @@ try:
     import torch
     import torch.nn as torch_nn
     import torch.nn.functional as F
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -20,6 +21,7 @@ except ImportError:
 def backend():
     """Initialize Vulkan backend"""
     from grilly import Compute
+
     compute = Compute()
     yield compute
     compute.cleanup()
@@ -38,6 +40,7 @@ class TestConv2dBasic:
     def test_conv2d_import(self):
         """Test Conv2d can be imported"""
         from grilly.nn import Conv2d
+
         assert Conv2d is not None
 
     def test_conv2d_init(self):
@@ -156,12 +159,12 @@ class TestConv2dVsPyTorch:
         # Create PyTorch conv with same weights
         torch_conv = torch_nn.Conv2d(3, 8, kernel_size=3, stride=1, padding=1, bias=True)
         weight_np = np.asarray(
-            grilly_conv.weight.data if hasattr(grilly_conv.weight, 'data') else grilly_conv.weight,
-            dtype=np.float32
+            grilly_conv.weight.data if hasattr(grilly_conv.weight, "data") else grilly_conv.weight,
+            dtype=np.float32,
         ).copy()
         bias_np = np.asarray(
-            grilly_conv.bias.data if hasattr(grilly_conv.bias, 'data') else grilly_conv.bias,
-            dtype=np.float32
+            grilly_conv.bias.data if hasattr(grilly_conv.bias, "data") else grilly_conv.bias,
+            dtype=np.float32,
         ).copy()
         torch_conv.weight.data = torch.from_numpy(weight_np)
         torch_conv.bias.data = torch.from_numpy(bias_np)
@@ -186,8 +189,10 @@ class TestConv2dVsPyTorch:
 
         grilly_conv = GrillyConv2d(3, 16, kernel_size=3, stride=2, padding=1)
         torch_conv = torch_nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1)
-        weight_np = grilly_conv.weight.data if hasattr(grilly_conv.weight, 'data') else grilly_conv.weight
-        bias_np = grilly_conv.bias.data if hasattr(grilly_conv.bias, 'data') else grilly_conv.bias
+        weight_np = (
+            grilly_conv.weight.data if hasattr(grilly_conv.weight, "data") else grilly_conv.weight
+        )
+        bias_np = grilly_conv.bias.data if hasattr(grilly_conv.bias, "data") else grilly_conv.bias
         torch_conv.weight.data = torch.from_numpy(np.asarray(weight_np, dtype=np.float32))
         torch_conv.bias.data = torch.from_numpy(np.asarray(bias_np, dtype=np.float32))
 
@@ -208,8 +213,14 @@ class TestConv2dVsPyTorch:
         try:
             grilly_conv = GrillyConv2d(4, 8, kernel_size=3, groups=2, padding=1)
             torch_conv = torch_nn.Conv2d(4, 8, kernel_size=3, groups=2, padding=1)
-            weight_np = grilly_conv.weight.data if hasattr(grilly_conv.weight, 'data') else grilly_conv.weight
-            bias_np = grilly_conv.bias.data if hasattr(grilly_conv.bias, 'data') else grilly_conv.bias
+            weight_np = (
+                grilly_conv.weight.data
+                if hasattr(grilly_conv.weight, "data")
+                else grilly_conv.weight
+            )
+            bias_np = (
+                grilly_conv.bias.data if hasattr(grilly_conv.bias, "data") else grilly_conv.bias
+            )
             torch_conv.weight.data = torch.from_numpy(np.asarray(weight_np, dtype=np.float32))
             torch_conv.bias.data = torch.from_numpy(np.asarray(bias_np, dtype=np.float32))
 
@@ -237,12 +248,12 @@ class TestConv2dVsPyTorch:
         grilly_conv = GrillyConv2d(3, 8, kernel_size=3, stride=1, padding=1)
         torch_conv = torch_nn.Conv2d(3, 8, kernel_size=3, stride=1, padding=1)
         weight_np = np.asarray(
-            grilly_conv.weight.data if hasattr(grilly_conv.weight, 'data') else grilly_conv.weight,
-            dtype=np.float32
+            grilly_conv.weight.data if hasattr(grilly_conv.weight, "data") else grilly_conv.weight,
+            dtype=np.float32,
         ).copy()
         bias_np = np.asarray(
-            grilly_conv.bias.data if hasattr(grilly_conv.bias, 'data') else grilly_conv.bias,
-            dtype=np.float32
+            grilly_conv.bias.data if hasattr(grilly_conv.bias, "data") else grilly_conv.bias,
+            dtype=np.float32,
         ).copy()
         torch_conv.weight.data = torch.from_numpy(weight_np)
         torch_conv.bias.data = torch.from_numpy(bias_np)
@@ -261,24 +272,16 @@ class TestConv2dVsPyTorch:
         grilly_grad_input = grilly_conv.backward(grad_output)
 
         # Compare input gradients
-        np.testing.assert_allclose(
-            grilly_grad_input,
-            x_torch.grad.numpy(),
-            rtol=1e-3, atol=1e-4
-        )
+        np.testing.assert_allclose(grilly_grad_input, x_torch.grad.numpy(), rtol=1e-3, atol=1e-4)
 
         # Compare weight gradients
         np.testing.assert_allclose(
-            grilly_conv.weight.grad,
-            torch_conv.weight.grad.numpy(),
-            rtol=1e-3, atol=1e-4
+            grilly_conv.weight.grad, torch_conv.weight.grad.numpy(), rtol=1e-3, atol=1e-4
         )
 
         # Compare bias gradients
         np.testing.assert_allclose(
-            grilly_conv.bias.grad,
-            torch_conv.bias.grad.numpy(),
-            rtol=1e-3, atol=1e-4
+            grilly_conv.bias.grad, torch_conv.bias.grad.numpy(), rtol=1e-3, atol=1e-4
         )
 
 
@@ -389,7 +392,7 @@ class TestConv2dPerformance:
 
         speedup = torch_time / grilly_time
         print(f"\nSpeedup vs PyTorch CPU: {speedup:.2f}x")
-        print(f"Grilly: {grilly_time*1000:.2f}ms, PyTorch CPU: {torch_time*1000:.2f}ms")
+        print(f"Grilly: {grilly_time * 1000:.2f}ms, PyTorch CPU: {torch_time * 1000:.2f}ms")
 
         # We expect at least some speedup on GPU (target is >50x, but depends on hardware)
         # For now, just verify it runs without error
@@ -402,6 +405,7 @@ class TestConv1d:
     def test_conv1d_import(self):
         """Test Conv1d can be imported"""
         from grilly.nn import Conv1d
+
         assert Conv1d is not None
 
     def test_conv1d_forward(self, backend):

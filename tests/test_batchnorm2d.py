@@ -10,6 +10,7 @@ import pytest
 try:
     import torch
     import torch.nn as torch_nn
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -19,6 +20,7 @@ except ImportError:
 def backend():
     """Initialize Vulkan backend"""
     from grilly import Compute
+
     compute = Compute()
     yield compute
     compute.cleanup()
@@ -30,6 +32,7 @@ class TestBatchNorm2dBasic:
     def test_batchnorm2d_import(self):
         """Test BatchNorm2d can be imported"""
         from grilly.nn import BatchNorm2d
+
         assert BatchNorm2d is not None
 
     def test_batchnorm2d_init(self):
@@ -68,7 +71,7 @@ class TestBatchNorm2dBasic:
         assert bn.training is True
 
         x = np.random.randn(8, 16, 32, 32).astype(np.float32)
-        output = bn(x)
+        bn(x)
 
         # Running stats should be updated
         assert not np.allclose(bn.running_mean, 0.0)
@@ -162,14 +165,10 @@ class TestBatchNorm2dVsPyTorch:
 
         # Compare running stats (slightly relaxed tolerance for EMA accumulation)
         np.testing.assert_allclose(
-            grilly_bn.running_mean,
-            torch_bn.running_mean.numpy(),
-            rtol=1e-3, atol=1e-4
+            grilly_bn.running_mean, torch_bn.running_mean.numpy(), rtol=1e-3, atol=1e-4
         )
         np.testing.assert_allclose(
-            grilly_bn.running_var,
-            torch_bn.running_var.numpy(),
-            rtol=1e-3, atol=1e-4
+            grilly_bn.running_var, torch_bn.running_var.numpy(), rtol=1e-3, atol=1e-4
         )
 
     def test_batchnorm2d_correctness_eval(self, backend):
@@ -238,24 +237,16 @@ class TestBatchNorm2dVsPyTorch:
         grilly_grad_input = grilly_bn.backward(grad_output)
 
         # Compare input gradients
-        np.testing.assert_allclose(
-            grilly_grad_input,
-            x_torch.grad.numpy(),
-            rtol=1e-3, atol=1e-4
-        )
+        np.testing.assert_allclose(grilly_grad_input, x_torch.grad.numpy(), rtol=1e-3, atol=1e-4)
 
         # Compare weight gradients
         np.testing.assert_allclose(
-            grilly_bn.weight.grad,
-            torch_bn.weight.grad.numpy(),
-            rtol=1e-3, atol=1e-4
+            grilly_bn.weight.grad, torch_bn.weight.grad.numpy(), rtol=1e-3, atol=1e-4
         )
 
         # Compare bias gradients
         np.testing.assert_allclose(
-            grilly_bn.bias.grad,
-            torch_bn.bias.grad.numpy(),
-            rtol=1e-3, atol=1e-4
+            grilly_bn.bias.grad, torch_bn.bias.grad.numpy(), rtol=1e-3, atol=1e-4
         )
 
 
@@ -305,6 +296,7 @@ class TestBatchNorm1d:
     def test_batchnorm1d_import(self):
         """Test BatchNorm1d can be imported"""
         from grilly.nn import BatchNorm1d
+
         assert BatchNorm1d is not None
 
     def test_batchnorm1d_2d_input(self, backend):
@@ -390,7 +382,7 @@ class TestBatchNorm2dPerformance:
 
         speedup = torch_time / grilly_time
         print(f"\nSpeedup vs PyTorch CPU: {speedup:.2f}x")
-        print(f"Grilly: {grilly_time*1000:.2f}ms, PyTorch CPU: {torch_time*1000:.2f}ms")
+        print(f"Grilly: {grilly_time * 1000:.2f}ms, PyTorch CPU: {torch_time * 1000:.2f}ms")
 
         assert speedup > 0  # Just verify it runs
 

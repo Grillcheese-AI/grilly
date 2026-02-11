@@ -28,14 +28,13 @@ except ModuleNotFoundError:
         bipolar_from_key = None  # type: ignore
 
 
-
 class BinaryOps:
     """
     Operations for bipolar (+1/-1) vectors.
-    
+
     Bipolar vectors are efficient for hardware implementation and have
     exact inverse properties: bind(a, a) = identity, unbind = bind.
-    
+
     All operations are O(d) and embarrassingly parallel.
     """
 
@@ -43,17 +42,17 @@ class BinaryOps:
     def bind(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """
         Bind two bipolar vectors via element-wise multiplication.
-        
+
         Properties:
             - Commutative: bind(a, b) == bind(b, a)
             - Associative: bind(bind(a, b), c) == bind(a, bind(b, c))
             - Self-inverse: bind(a, a) == identity (all ones)
             - Preserves bipolarity: output is +1/-1
-        
+
         Args:
             a: First bipolar vector
             b: Second bipolar vector
-            
+
         Returns:
             Bound bipolar vector
         """
@@ -85,14 +84,14 @@ class BinaryOps:
     def unbind(composite: np.ndarray, known: np.ndarray) -> np.ndarray:
         """
         Unbind a known vector from a composite.
-        
+
         For bipolar vectors, unbind is identical to bind since
         each element is its own inverse: x * x = 1.
-        
+
         Args:
             composite: The composite vector
             known: The known factor to remove
-            
+
         Returns:
             The recovered vector (approximately the original bound vector)
         """
@@ -102,14 +101,14 @@ class BinaryOps:
     def bundle(vectors: list[np.ndarray], normalize: bool = True) -> np.ndarray:
         """
         Bundle multiple vectors via majority voting.
-        
+
         The result preserves similarity to each component, allowing
         multiple items to be stored in superposition.
-        
+
         Args:
             vectors: List of vectors to bundle
             normalize: If True, apply sign function for bipolar output
-            
+
         Returns:
             Bundled vector (bipolar if normalize=True)
         """
@@ -152,13 +151,13 @@ class BinaryOps:
     def similarity(a: np.ndarray, b: np.ndarray) -> float:
         """
         Compute cosine similarity between two vectors.
-        
+
         For bipolar vectors, this is equivalent to normalized Hamming distance.
-        
+
         Args:
             a: First vector
             b: Second vector
-            
+
         Returns:
             Similarity in range [-1, 1]
         """
@@ -217,13 +216,15 @@ class BinaryOps:
         else:
             seed = stable_u32(s, domain="grilly.vsa.binaryops.seed")
         return BinaryOps.random_bipolar(dim, seed)
+
+
 class HolographicOps:
     """
     Operations for continuous vectors using Holographic Reduced Representations (HRR).
-    
+
     Uses circular convolution for binding and correlation for unbinding.
     Implemented via FFT for O(d log d) complexity.
-    
+
     HRR preserves more information than binary binding but unbinding
     is approximate rather than exact.
     """
@@ -232,16 +233,16 @@ class HolographicOps:
     def convolve(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """
         Circular convolution (binding) via frequency domain multiplication.
-        
+
         Properties:
             - Commutative: convolve(a, b) == convolve(b, a)
             - Associative: convolve(convolve(a, b), c) == convolve(a, convolve(b, c))
             - Approximate inverse via correlate
-        
+
         Args:
             a: First vector
             b: Second vector
-            
+
         Returns:
             Convolved vector
         """
@@ -275,13 +276,13 @@ class HolographicOps:
     def correlate(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """
         Circular correlation (unbinding) - approximate inverse of convolve.
-        
+
         Given composite = convolve(x, key), correlate(composite, key) ≈ x.
-        
+
         Args:
             a: The composite vector
             b: The known factor (key) to remove
-            
+
         Returns:
             Approximate recovered vector
         """
@@ -291,11 +292,11 @@ class HolographicOps:
     def bundle(vectors: list[np.ndarray], normalize: bool = True) -> np.ndarray:
         """
         Bundle multiple vectors via element-wise sum.
-        
+
         Args:
             vectors: List of vectors to bundle
             normalize: If True, normalize result to unit length
-            
+
         Returns:
             Bundled vector
         """
@@ -341,11 +342,11 @@ class HolographicOps:
     def similarity(a: np.ndarray, b: np.ndarray) -> float:
         """
         Compute cosine similarity between two vectors.
-        
+
         Args:
             a: First vector
             b: Second vector
-            
+
         Returns:
             Similarity in range [-1, 1] for unit vectors
         """

@@ -3,11 +3,13 @@ Tests for VulkanTensor (GPU-resident tensors)
 
 Tests GPU tensor operations on AMD/Vulkan systems.
 """
+
 import numpy as np
 import pytest
 
 try:
     from grilly.utils.tensor_conversion import VulkanTensor, to_vulkan_gpu
+
     VULKAN_TENSOR_AVAILABLE = True
 except ImportError:
     VULKAN_TENSOR_AVAILABLE = False
@@ -57,6 +59,7 @@ class TestVulkanTensor:
         """Test converting PyTorch tensor to GPU tensor"""
         try:
             import torch
+
             torch_tensor = torch.randn(10, 20)
             vulkan_tensor = to_vulkan_gpu(torch_tensor)
 
@@ -101,7 +104,8 @@ class TestVulkanTensorGPU:
         """Test that GPU buffer is created (if Vulkan available)"""
         try:
             from grilly import Compute
-            backend = Compute()
+
+            Compute()
 
             arr = np.random.randn(10, 20).astype(np.float32)
             tensor = VulkanTensor(arr)

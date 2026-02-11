@@ -18,7 +18,7 @@ class TestWordEncoderBasic:
         encoder = WordEncoder()
 
         assert encoder.dim > 0
-        assert hasattr(encoder, 'encode_word')
+        assert hasattr(encoder, "encode_word")
 
     def test_init_custom_dimension(self):
         """Should initialize with custom dimension."""
@@ -35,7 +35,7 @@ class TestWordEncoderBasic:
         encoder = WordEncoder()
 
         assert len(encoder.char_vectors) > 0
-        assert 'a' in encoder.char_vectors or '<UNK>' in encoder.char_vectors
+        assert "a" in encoder.char_vectors or "<UNK>" in encoder.char_vectors
 
 
 class TestWordEncode:
@@ -116,7 +116,7 @@ class TestWordRelations:
         relation = encoder.extract_relation("king", "queen")
 
         # Apply to source word should recover target word
-        king_vec = encoder.encode_word("king")
+        encoder.encode_word("king")
         queen_vec = encoder.encode_word("queen")
 
         # Apply relation

@@ -73,8 +73,13 @@ class GradFn:
     of intermediate variables before backward() is called.
     """
 
-    def __init__(self, name: str, backward_fn: Callable, inputs: list['Variable'],
-                 gpu_backward_fn: Callable | None = None):
+    def __init__(
+        self,
+        name: str,
+        backward_fn: Callable,
+        inputs: list["Variable"],
+        gpu_backward_fn: Callable | None = None,
+    ):
         """Initialize the instance."""
 
         self.name = name
@@ -92,7 +97,7 @@ class GradFn:
                 self._next_functions.append(None)
 
     @property
-    def inputs(self) -> list[Optional['Variable']]:
+    def inputs(self) -> list[Optional["Variable"]]:
         """Get input variables."""
         return self._inputs
 
@@ -170,7 +175,7 @@ class Variable:
         """Get numpy array (detached from graph)."""
         return self.data.copy()
 
-    def detach(self) -> 'Variable':
+    def detach(self) -> "Variable":
         """Return a new Variable detached from the computation graph."""
         return Variable(self.data.copy(), requires_grad=False)
 
@@ -178,8 +183,12 @@ class Variable:
         """Clear the gradient."""
         self.grad = None
 
-    def backward(self, grad_output: np.ndarray | None = None, retain_graph: bool = False,
-                 use_gpu: bool = True):
+    def backward(
+        self,
+        grad_output: np.ndarray | None = None,
+        retain_graph: bool = False,
+        use_gpu: bool = True,
+    ):
         """
         Compute gradients via reverse-mode automatic differentiation.
 
@@ -203,6 +212,7 @@ class Variable:
         if use_gpu:
             try:
                 from grilly.nn.gpu_backward import get_gpu_backward_ops
+
                 gpu_ops = get_gpu_backward_ops(use_gpu=True)
                 if not gpu_ops.is_available():
                     gpu_ops = None
@@ -257,6 +267,7 @@ class Variable:
                     except Exception as e:
                         # Fall back to CPU on error
                         import logging
+
                         logging.getLogger(__name__).debug(
                             f"GPU backward failed for {var.grad_fn.name}: {e}. Using CPU fallback."
                         )
@@ -581,6 +592,7 @@ class Variable:
 # Custom Function Base Class (PyTorch-like)
 # ============================================================================
 
+
 class FunctionMeta(type):
     """Metaclass that provides the apply() classmethod for Function subclasses."""
 
@@ -616,7 +628,7 @@ class Function(metaclass=FunctionMeta):
     """
 
     @staticmethod
-    def forward(ctx: 'FunctionCtx', *args, **kwargs) -> np.ndarray:
+    def forward(ctx: "FunctionCtx", *args, **kwargs) -> np.ndarray:
         """
         Compute the forward pass.
 
@@ -631,7 +643,7 @@ class Function(metaclass=FunctionMeta):
         raise NotImplementedError("Subclasses must implement forward()")
 
     @staticmethod
-    def backward(ctx: 'FunctionCtx', grad_output: np.ndarray) -> tuple:
+    def backward(ctx: "FunctionCtx", grad_output: np.ndarray) -> tuple:
         """
         Compute gradients for inputs.
 
@@ -738,8 +750,7 @@ class FunctionCtx:
             Tuple of bools indicating which saved tensors need gradients
         """
         return tuple(
-            t.requires_grad if isinstance(t, Variable) else False
-            for t in self.saved_tensors
+            t.requires_grad if isinstance(t, Variable) else False for t in self.saved_tensors
         )
 
 
@@ -777,8 +788,12 @@ def _ensure_variable(x, copy=False) -> Variable:
     return Variable(x, requires_grad=False)
 
 
-def _make_backward(name: str, inputs: list[Variable], backward_fn: Callable,
-                   gpu_backward_fn: Callable | None = None) -> GradFn | None:
+def _make_backward(
+    name: str,
+    inputs: list[Variable],
+    backward_fn: Callable,
+    gpu_backward_fn: Callable | None = None,
+) -> GradFn | None:
     """
     Create a GradFn if any input requires gradient.
 
@@ -801,6 +816,7 @@ def _make_backward(name: str, inputs: list[Variable], backward_fn: Callable,
 # ============================================================================
 # Arithmetic Operations
 # ============================================================================
+
 
 def add(a, b) -> Variable:
     """Element-wise addition: a + b"""
@@ -872,7 +888,7 @@ def div(a, b) -> Variable:
         """Run backward."""
 
         grad_a = grad / b_data
-        grad_b = -grad * a_data / (b_data ** 2)
+        grad_b = -grad * a_data / (b_data**2)
         return grad_a, grad_b
 
     grad_fn = _make_backward("Div", [a, b], backward)
@@ -963,10 +979,12 @@ def matmul(a, b) -> Variable:
             # Treat as: output = a @ b.T (linear layer convention)
             # grad_a = grad @ b, grad_b = grad.T @ a
             grad_a, grad_b, _ = gpu_ops.linear_backward(
-                grad, a_data, b_data.T,
+                grad,
+                a_data,
+                b_data.T,
                 compute_input_grad=True,
                 compute_weight_grad=True,
-                compute_bias_grad=False
+                compute_bias_grad=False,
             )
             # Transpose grad_b back
             if grad_b is not None:
@@ -985,6 +1003,7 @@ def matmul(a, b) -> Variable:
 # ============================================================================
 # Reduction Operations
 # ============================================================================
+
 
 def sum(a, dim=None, keepdims=False) -> Variable:
     """Sum over dimensions."""
@@ -1046,7 +1065,6 @@ def max(a, dim=None, keepdims=False) -> Variable:
         result_data = np.max(a.data, axis=dim, keepdims=keepdims)
         max_idx = np.argmax(a.data, axis=dim)
 
-    input_shape = a.data.shape
     a_data = a.data
 
     def backward(grad):
@@ -1081,7 +1099,6 @@ def min(a, dim=None, keepdims=False) -> Variable:
     else:
         result_data = np.min(a.data, axis=dim, keepdims=keepdims)
 
-    input_shape = a.data.shape
     a_data = a.data
 
     def backward(grad):
@@ -1107,6 +1124,7 @@ def min(a, dim=None, keepdims=False) -> Variable:
 # ============================================================================
 # Activation Functions
 # ============================================================================
+
 
 def relu(a) -> Variable:
     """ReLU activation: max(0, a) (with GPU backward support)"""
@@ -1163,7 +1181,7 @@ def tanh(a) -> Variable:
     def backward(grad):
         """Run backward."""
 
-        return (grad * (1 - result ** 2),)
+        return (grad * (1 - result**2),)
 
     grad_fn = _make_backward("Tanh", [a], backward)
 
@@ -1272,6 +1290,7 @@ def clamp(a, min_val=None, max_val=None) -> Variable:
 # ============================================================================
 # Shape Operations
 # ============================================================================
+
 
 def reshape(a, shape) -> Variable:
     """Reshape tensor."""
@@ -1421,6 +1440,7 @@ def stack(tensors, dim=0) -> Variable:
 # Special Operations
 # ============================================================================
 
+
 def where(condition, x, y) -> Variable:
     """Element-wise conditional: where(condition, x, y)"""
     x = _ensure_variable(x)
@@ -1518,7 +1538,7 @@ def mse_loss(pred, target) -> Variable:
     target = _ensure_variable(target)
 
     diff = pred.data - target.data
-    result_data = np.mean(diff ** 2)
+    result_data = np.mean(diff**2)
 
     n = pred.data.size
 
@@ -1538,6 +1558,7 @@ def mse_loss(pred, target) -> Variable:
 # ============================================================================
 # Convenience Functions for PyTorch Compatibility
 # ============================================================================
+
 
 def tensor(data, requires_grad=False) -> Variable:
     """Create a Variable (PyTorch-like alias)."""
@@ -1598,6 +1619,7 @@ def full(shape, fill_value, requires_grad=False) -> Variable:
 # ============================================================================
 # Additional Activation Functions
 # ============================================================================
+
 
 def gelu(a) -> Variable:
     """GELU activation: x * Phi(x) where Phi is the CDF of standard normal."""
@@ -1714,6 +1736,7 @@ def softplus(a, beta=1.0, threshold=20.0) -> Variable:
 # Trigonometric Functions
 # ============================================================================
 
+
 def sin(a) -> Variable:
     """Sine function."""
     a = _ensure_variable(a)
@@ -1750,8 +1773,6 @@ def tan(a) -> Variable:
     """Tangent function."""
     a = _ensure_variable(a)
     result_data = np.tan(a.data)
-
-    a_data = a.data
 
     def backward(grad):
         # d/dx tan(x) = sec^2(x) = 1 + tan^2(x)
@@ -1837,6 +1858,7 @@ def atan2(y, x) -> Variable:
 # Statistical Functions
 # ============================================================================
 
+
 def var(a, dim=None, keepdims=False, unbiased=True) -> Variable:
     """Variance over dimensions."""
     a = _ensure_variable(a)
@@ -1909,12 +1931,11 @@ def norm(a, p=2, dim=None, keepdims=False) -> Variable:
         result_data = np.sqrt(np.sum(a.data**2, axis=dim, keepdims=keepdims))
     elif p == 1:
         result_data = np.sum(np.abs(a.data), axis=dim, keepdims=keepdims)
-    elif p == float('inf'):
+    elif p == float("inf"):
         result_data = np.max(np.abs(a.data), axis=dim, keepdims=keepdims)
     else:
-        result_data = np.sum(np.abs(a.data)**p, axis=dim, keepdims=keepdims)**(1/p)
+        result_data = np.sum(np.abs(a.data) ** p, axis=dim, keepdims=keepdims) ** (1 / p)
 
-    input_shape = a.data.shape
     a_data = a.data
 
     def backward(grad):
@@ -1930,14 +1951,19 @@ def norm(a, p=2, dim=None, keepdims=False) -> Variable:
             grad_input = grad * a_data / (result_expanded + 1e-8)
         elif p == 1:
             grad_input = grad * np.sign(a_data)
-        elif p == float('inf'):
+        elif p == float("inf"):
             # Gradient only flows to max elements
             max_val = np.max(np.abs(a_data), axis=dim, keepdims=True)
             mask = (np.abs(a_data) == max_val).astype(np.float32)
             mask = mask / (mask.sum(axis=dim, keepdims=True) + 1e-8)
             grad_input = grad * np.sign(a_data) * mask
         else:
-            grad_input = grad * (np.abs(a_data)**(p-1)) * np.sign(a_data) / (result_expanded**(p-1) + 1e-8)
+            grad_input = (
+                grad
+                * (np.abs(a_data) ** (p - 1))
+                * np.sign(a_data)
+                / (result_expanded ** (p - 1) + 1e-8)
+            )
 
         return (grad_input,)
 
@@ -1949,6 +1975,7 @@ def norm(a, p=2, dim=None, keepdims=False) -> Variable:
 # Additional Shape Operations
 # ============================================================================
 
+
 def flatten(a, start_dim=0, end_dim=-1) -> Variable:
     """Flatten dimensions from start_dim to end_dim."""
     a = _ensure_variable(a)
@@ -1958,7 +1985,7 @@ def flatten(a, start_dim=0, end_dim=-1) -> Variable:
 
     new_shape = list(a.data.shape[:start_dim])
     new_shape.append(-1)
-    new_shape.extend(a.data.shape[end_dim+1:])
+    new_shape.extend(a.data.shape[end_dim + 1 :])
 
     result_data = a.data.reshape(new_shape)
     original_shape = a.data.shape
@@ -2016,10 +2043,12 @@ def repeat(a, *repeats) -> Variable:
 
         grad_input = np.zeros(original_shape, dtype=np.float32)
         # For each repeat, add the gradients
-        slices = [slice(0, s) for s in original_shape]
+        [slice(0, s) for s in original_shape]
         for idx in np.ndindex(*repeats):
             start_idx = [i * s for i, s in zip(idx, original_shape)]
-            src_slices = [slice(start, start + size) for start, size in zip(start_idx, original_shape)]
+            src_slices = [
+                slice(start, start + size) for start, size in zip(start_idx, original_shape)
+            ]
             grad_input += grad[tuple(src_slices)]
         return (grad_input,)
 
@@ -2065,6 +2094,7 @@ def clone(a) -> Variable:
 # ============================================================================
 # Binary Comparisons (with gradients through STE)
 # ============================================================================
+
 
 def eq(a, b) -> Variable:
     """Element-wise equality (no gradient)."""
@@ -2119,7 +2149,8 @@ def ge(a, b) -> Variable:
 # Additional Loss Functions
 # ============================================================================
 
-def l1_loss(pred, target, reduction='mean') -> Variable:
+
+def l1_loss(pred, target, reduction="mean") -> Variable:
     """L1 loss (mean absolute error)."""
     pred = _ensure_variable(pred)
     target = _ensure_variable(target)
@@ -2127,10 +2158,10 @@ def l1_loss(pred, target, reduction='mean') -> Variable:
     diff = pred.data - target.data
     abs_diff = np.abs(diff)
 
-    if reduction == 'mean':
+    if reduction == "mean":
         result_data = np.mean(abs_diff)
         n = pred.data.size
-    elif reduction == 'sum':
+    elif reduction == "sum":
         result_data = np.sum(abs_diff)
         n = 1
     else:  # none
@@ -2141,9 +2172,9 @@ def l1_loss(pred, target, reduction='mean') -> Variable:
         """Run backward."""
 
         sign = np.sign(diff)
-        if reduction == 'mean':
+        if reduction == "mean":
             grad_pred = grad * sign / n
-        elif reduction == 'sum':
+        elif reduction == "sum":
             grad_pred = grad * sign
         else:
             grad_pred = grad * sign
@@ -2154,7 +2185,7 @@ def l1_loss(pred, target, reduction='mean') -> Variable:
     return Variable(result_data, requires_grad=requires_grad, grad_fn=grad_fn)
 
 
-def smooth_l1_loss(pred, target, beta=1.0, reduction='mean') -> Variable:
+def smooth_l1_loss(pred, target, beta=1.0, reduction="mean") -> Variable:
     """Smooth L1 loss (Huber loss)."""
     pred = _ensure_variable(pred)
     target = _ensure_variable(target)
@@ -2165,10 +2196,10 @@ def smooth_l1_loss(pred, target, beta=1.0, reduction='mean') -> Variable:
     # Smooth L1: 0.5 * x^2 / beta if |x| < beta, else |x| - 0.5 * beta
     loss = np.where(abs_diff < beta, 0.5 * diff**2 / beta, abs_diff - 0.5 * beta)
 
-    if reduction == 'mean':
+    if reduction == "mean":
         result_data = np.mean(loss)
         n = pred.data.size
-    elif reduction == 'sum':
+    elif reduction == "sum":
         result_data = np.sum(loss)
         n = 1
     else:
@@ -2180,7 +2211,7 @@ def smooth_l1_loss(pred, target, beta=1.0, reduction='mean') -> Variable:
         """Run backward."""
 
         grad_diff = np.where(abs_diff < beta, diff / beta, np.sign(diff))
-        if reduction == 'mean':
+        if reduction == "mean":
             grad_pred = grad * grad_diff / n
         else:
             grad_pred = grad * grad_diff
@@ -2191,7 +2222,7 @@ def smooth_l1_loss(pred, target, beta=1.0, reduction='mean') -> Variable:
     return Variable(result_data, requires_grad=requires_grad, grad_fn=grad_fn)
 
 
-def bce_loss(pred, target, reduction='mean') -> Variable:
+def bce_loss(pred, target, reduction="mean") -> Variable:
     """Binary cross-entropy loss (pred should be probabilities)."""
     pred = _ensure_variable(pred)
     target = _ensure_variable(target)
@@ -2203,10 +2234,10 @@ def bce_loss(pred, target, reduction='mean') -> Variable:
 
     loss = -target_data * np.log(pred_clamped) - (1 - target_data) * np.log(1 - pred_clamped)
 
-    if reduction == 'mean':
+    if reduction == "mean":
         result_data = np.mean(loss)
         n = pred.data.size
-    elif reduction == 'sum':
+    elif reduction == "sum":
         result_data = np.sum(loss)
         n = 1
     else:
@@ -2216,8 +2247,8 @@ def bce_loss(pred, target, reduction='mean') -> Variable:
     def backward(grad):
         """Run backward."""
 
-        grad_pred = (-target_data / pred_clamped + (1 - target_data) / (1 - pred_clamped))
-        if reduction == 'mean':
+        grad_pred = -target_data / pred_clamped + (1 - target_data) / (1 - pred_clamped)
+        if reduction == "mean":
             grad_pred = grad * grad_pred / n
         else:
             grad_pred = grad * grad_pred
@@ -2227,7 +2258,7 @@ def bce_loss(pred, target, reduction='mean') -> Variable:
     return Variable(result_data, requires_grad=pred.requires_grad, grad_fn=grad_fn)
 
 
-def bce_with_logits_loss(logits, target, reduction='mean') -> Variable:
+def bce_with_logits_loss(logits, target, reduction="mean") -> Variable:
     """Binary cross-entropy with logits (numerically stable)."""
     logits = _ensure_variable(logits)
     target = _ensure_variable(target)
@@ -2237,10 +2268,10 @@ def bce_with_logits_loss(logits, target, reduction='mean') -> Variable:
     y = target.data
     loss = np.maximum(x, 0) - x * y + np.log1p(np.exp(-np.abs(x)))
 
-    if reduction == 'mean':
+    if reduction == "mean":
         result_data = np.mean(loss)
         n = logits.data.size
-    elif reduction == 'sum':
+    elif reduction == "sum":
         result_data = np.sum(loss)
         n = 1
     else:
@@ -2253,17 +2284,19 @@ def bce_with_logits_loss(logits, target, reduction='mean') -> Variable:
 
         sigmoid_x = 1.0 / (1.0 + np.exp(-x))
         grad_logits = sigmoid_x - y
-        if reduction == 'mean':
+        if reduction == "mean":
             grad_logits = grad * grad_logits / n
         else:
             grad_logits = grad * grad_logits
         return (grad_logits,)
 
-    grad_fn = _make_backward("BCEWithLogitsLoss", [logits], backward) if logits.requires_grad else None
+    grad_fn = (
+        _make_backward("BCEWithLogitsLoss", [logits], backward) if logits.requires_grad else None
+    )
     return Variable(result_data, requires_grad=logits.requires_grad, grad_fn=grad_fn)
 
 
-def nll_loss(log_probs, target, reduction='mean') -> Variable:
+def nll_loss(log_probs, target, reduction="mean") -> Variable:
     """Negative log-likelihood loss."""
     log_probs = _ensure_variable(log_probs)
 
@@ -2274,9 +2307,9 @@ def nll_loss(log_probs, target, reduction='mean') -> Variable:
     batch_size = log_probs.data.shape[0]
     loss = -log_probs.data[np.arange(batch_size), target_int]
 
-    if reduction == 'mean':
+    if reduction == "mean":
         result_data = np.mean(loss)
-    elif reduction == 'sum':
+    elif reduction == "sum":
         result_data = np.sum(loss)
     else:
         result_data = loss
@@ -2287,9 +2320,9 @@ def nll_loss(log_probs, target, reduction='mean') -> Variable:
         """Run backward."""
 
         grad_input = np.zeros_like(log_probs_data)
-        if reduction == 'mean':
+        if reduction == "mean":
             grad_input[np.arange(batch_size), target_int] = -grad / batch_size
-        elif reduction == 'sum':
+        elif reduction == "sum":
             grad_input[np.arange(batch_size), target_int] = -grad
         else:
             grad_input[np.arange(batch_size), target_int] = -grad
@@ -2299,7 +2332,7 @@ def nll_loss(log_probs, target, reduction='mean') -> Variable:
     return Variable(result_data, requires_grad=log_probs.requires_grad, grad_fn=grad_fn)
 
 
-def kl_div_loss(log_probs, target, reduction='mean') -> Variable:
+def kl_div_loss(log_probs, target, reduction="mean") -> Variable:
     """KL divergence loss: target * (log(target) - log_probs)."""
     log_probs = _ensure_variable(log_probs)
     target = _ensure_variable(target)
@@ -2308,13 +2341,13 @@ def kl_div_loss(log_probs, target, reduction='mean') -> Variable:
     # Since log(target) is constant w.r.t. log_probs, we only need: -target * log_probs
     loss = -target.data * log_probs.data
 
-    if reduction == 'mean':
+    if reduction == "mean":
         result_data = np.mean(loss)
         n = log_probs.data.size
-    elif reduction == 'sum':
+    elif reduction == "sum":
         result_data = np.sum(loss)
         n = 1
-    elif reduction == 'batchmean':
+    elif reduction == "batchmean":
         result_data = np.sum(loss) / log_probs.data.shape[0]
         n = log_probs.data.shape[0]
     else:
@@ -2326,13 +2359,15 @@ def kl_div_loss(log_probs, target, reduction='mean') -> Variable:
     def backward(grad):
         """Run backward."""
 
-        if reduction == 'mean':
+        if reduction == "mean":
             grad_input = -grad * target_data / n
-        elif reduction == 'batchmean':
+        elif reduction == "batchmean":
             grad_input = -grad * target_data / n
         else:
             grad_input = -grad * target_data
         return (grad_input,)
 
-    grad_fn = _make_backward("KLDivLoss", [log_probs], backward) if log_probs.requires_grad else None
+    grad_fn = (
+        _make_backward("KLDivLoss", [log_probs], backward) if log_probs.requires_grad else None
+    )
     return Variable(result_data, requires_grad=log_probs.requires_grad, grad_fn=grad_fn)

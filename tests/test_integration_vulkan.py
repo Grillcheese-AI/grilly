@@ -3,6 +3,7 @@ Integration Tests for Vulkan-Only Operations (AMD Compatible)
 
 Tests that verify core functionality works on AMD GPUs (Vulkan only, no CUDA)
 """
+
 import numpy as np
 import pytest
 
@@ -10,6 +11,7 @@ try:
     from grilly import functional, nn
     from grilly.backend.compute import VulkanCompute
     from grilly.utils.device_manager import get_device_manager
+
     GRILLY_AVAILABLE = True
 except ImportError:
     GRILLY_AVAILABLE = False
@@ -58,11 +60,7 @@ class TestVulkanCore:
         """Test sequential model works with Vulkan"""
         try:
             model = nn.Sequential(
-                nn.Linear(128, 64),
-                nn.ReLU(),
-                nn.Linear(64, 32),
-                nn.ReLU(),
-                nn.Linear(32, 10)
+                nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, 10)
             )
             x = np.random.randn(5, 128).astype(np.float32)
             result = model(x)
@@ -81,8 +79,8 @@ class TestDeviceManagerVulkan:
         """Test device manager works with Vulkan"""
         try:
             manager = get_device_manager()
-            manager.set_device('vulkan')
-            assert manager.get_device() == 'vulkan'
+            manager.set_device("vulkan")
+            assert manager.get_device() == "vulkan"
         except RuntimeError as e:
             if "Vulkan" in str(e) or "not available" in str(e).lower():
                 pytest.skip(f"Vulkan not available: {e}")
@@ -92,6 +90,7 @@ class TestDeviceManagerVulkan:
         """Test accessing Vulkan backend"""
         try:
             from grilly.utils.device_manager import get_vulkan_backend
+
             backend = get_vulkan_backend()
             assert backend is not None
         except RuntimeError as e:
@@ -136,7 +135,7 @@ class TestEndToEndVulkan:
                 nn.Dropout(0.1),
                 nn.Linear(128, 64),
                 nn.ReLU(),
-                nn.Linear(64, 10)
+                nn.Linear(64, 10),
             )
 
             # Create input

@@ -43,7 +43,7 @@ def main() -> None:
             coherence_reason="test",
             predicted_response=None,
             social_appropriateness=score,
-            confidence=score
+            confidence=score,
         )
 
     controller.simulator.simulate_utterance = fake_sim

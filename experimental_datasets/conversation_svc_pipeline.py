@@ -19,6 +19,7 @@ print("Loading spaCy model...")
 nlp = spacy.load("en_core_web_sm")
 nlp.max_length = 2000000
 
+
 @dataclass
 class SVCResult:
     """Represent svcresult behavior."""
@@ -28,60 +29,67 @@ class SVCResult:
     complement: str
     valid: bool
 
+
 # =============================================================================
 # CLEANING FUNCTIONS
 # =============================================================================
 
+
 def remove_code_blocks(text: str) -> str:
     """Remove markdown code blocks"""
     # Remove ``` ... ``` blocks
-    text = re.sub(r'```[\s\S]*?```', ' ', text)
+    text = re.sub(r"```[\s\S]*?```", " ", text)
     # Remove inline code `...`
-    text = re.sub(r'`[^`]+`', ' ', text)
+    text = re.sub(r"`[^`]+`", " ", text)
     return text
+
 
 def remove_paths_and_urls(text: str) -> str:
     """Remove file paths, URLs, and technical artifacts"""
     # URLs
-    text = re.sub(r'https?://\S+', ' ', text)
+    text = re.sub(r"https?://\S+", " ", text)
     # Windows paths
-    text = re.sub(r'[A-Z]:\\[\w\\/\-\.]+', ' ', text)
+    text = re.sub(r"[A-Z]:\\[\w\\/\-\.]+", " ", text)
     # Unix paths
-    text = re.sub(r'/[\w/\-\.]+\.\w+', ' ', text)
+    text = re.sub(r"/[\w/\-\.]+\.\w+", " ", text)
     # Remaining path-like patterns
-    text = re.sub(r'\b\w+\.\w+\.\w+\b', ' ', text)  # file.ext.ext
+    text = re.sub(r"\b\w+\.\w+\.\w+\b", " ", text)  # file.ext.ext
     return text
+
 
 def remove_technical_artifacts(text: str) -> str:
     """Remove code-like artifacts and technical noise"""
     # Remove lines that look like code output
-    text = re.sub(r'^[\s]*[\-\=\*]{3,}[\s]*$', '', text, flags=re.MULTILINE)
+    text = re.sub(r"^[\s]*[\-\=\*]{3,}[\s]*$", "", text, flags=re.MULTILINE)
     # Remove shell prompts
-    text = re.sub(r'\$\s*$', '', text, flags=re.MULTILINE)
+    text = re.sub(r"\$\s*$", "", text, flags=re.MULTILINE)
     # Remove hex/binary patterns
-    text = re.sub(r'\b0x[0-9a-fA-F]+\b', ' ', text)
+    text = re.sub(r"\b0x[0-9a-fA-F]+\b", " ", text)
     # Remove variable assignments
-    text = re.sub(r'\b\w+\s*=\s*[\d\.]+\b', ' ', text)
+    text = re.sub(r"\b\w+\s*=\s*[\d\.]+\b", " ", text)
     # Remove emoji unicode escapes
-    text = re.sub(r'\\x[0-9a-fA-F]{2}', '', text)
+    text = re.sub(r"\\x[0-9a-fA-F]{2}", "", text)
     # Remove markdown formatting remnants
-    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # **bold** -> bold
-    text = re.sub(r'\*([^*]+)\*', r'\1', text)      # *italic* -> italic
-    text = re.sub(r'#{1,6}\s*', '', text)           # headers
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)  # **bold** -> bold
+    text = re.sub(r"\*([^*]+)\*", r"\1", text)  # *italic* -> italic
+    text = re.sub(r"#{1,6}\s*", "", text)  # headers
     return text
+
 
 def remove_placeholder_artifacts(text: str) -> str:
     """Clean up placeholder formatting artifacts"""
     # Already has placeholders like [PROJECT_NAME], keep them but clean formatting
     # Remove numeric suffixes from placeholders for consistency
-    text = re.sub(r'\[([A-Z_]+)_\d+\]', r'[\1]', text)
+    text = re.sub(r"\[([A-Z_]+)_\d+\]", r"[\1]", text)
     return text
+
 
 def clean_whitespace(text: str) -> str:
     """Normalize whitespace"""
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'\n\s*\n', '\n', text)
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\n\s*\n", "\n", text)
     return text.strip()
+
 
 def clean_text(text: str) -> str:
     """Full cleaning pipeline"""
@@ -92,6 +100,7 @@ def clean_text(text: str) -> str:
     text = clean_whitespace(text)
     return text
 
+
 def is_valid_sentence(sent: str) -> bool:
     """Filter out non-sentence content"""
     sent = sent.strip()
@@ -100,21 +109,23 @@ def is_valid_sentence(sent: str) -> bool:
     if len(sent.split()) < 3:
         return False
     # Skip if mostly placeholders
-    placeholder_count = len(re.findall(r'\[[A-Z_]+\]', sent))
+    placeholder_count = len(re.findall(r"\[[A-Z_]+\]", sent))
     word_count = len(sent.split())
     if placeholder_count > word_count / 2:
         return False
     # Skip if starts with bullet/number only
-    if re.match(r'^[\d\.\-\*\•]+\s*$', sent):
+    if re.match(r"^[\d\.\-\*\•]+\s*$", sent):
         return False
     # Skip if looks like a file listing
-    if re.match(r'^[\w\-]+\.\w+\s*$', sent):
+    if re.match(r"^[\w\-]+\.\w+\s*$", sent):
         return False
     return True
+
 
 # =============================================================================
 # SVC EXTRACTION (Semantic)
 # =============================================================================
+
 
 def extract_svc(doc) -> SVCResult:
     """Extract SEMANTIC Subject-Verb-Complement"""
@@ -177,12 +188,33 @@ def extract_svc(doc) -> SVCResult:
     valid = bool(verb and len(doc) >= 3)
     return SVCResult(subject, verb, complement, valid)
 
+
 def classify_realm(text: str) -> str:
     """Classify into domain"""
     text_lower = text.lower()
     realms = {
-        "technology": ["code", "programming", "software", "algorithm", "data", "ai", "machine", "neural", "model", "training"],
-        "science": ["atom", "molecule", "cell", "energy", "physics", "chemistry", "biology", "experiment"],
+        "technology": [
+            "code",
+            "programming",
+            "software",
+            "algorithm",
+            "data",
+            "ai",
+            "machine",
+            "neural",
+            "model",
+            "training",
+        ],
+        "science": [
+            "atom",
+            "molecule",
+            "cell",
+            "energy",
+            "physics",
+            "chemistry",
+            "biology",
+            "experiment",
+        ],
         "health": ["health", "medical", "disease", "exercise", "diet", "body", "sleep"],
         "business": ["company", "market", "economy", "money", "trade", "business", "project"],
         "conversation": ["help", "please", "thanks", "question", "understand", "explain", "think"],
@@ -191,6 +223,7 @@ def classify_realm(text: str) -> str:
         if any(kw in text_lower for kw in keywords):
             return realm
     return "general"
+
 
 def compute_complexity(doc) -> float:
     """Syntactic complexity 0-1"""
@@ -203,6 +236,7 @@ def compute_complexity(doc) -> float:
     avg_depth = sum(depths) / len(depths) if depths else 0
     depth_score = min(avg_depth / 5, 1.0)
     return round((length_score + clause_score + depth_score) / 3, 2)
+
 
 def process_sentence(doc, sent_id: str, role: str) -> dict[str, Any] | None:
     """Process single sentence into SVC format"""
@@ -238,33 +272,36 @@ def process_sentence(doc, sent_id: str, role: str) -> dict[str, Any] | None:
         "realm": classify_realm(doc.text),
         "role": role,  # "user" or "assistant"
         "source": "conversation",
-        "complexity": compute_complexity(doc)
+        "complexity": compute_complexity(doc),
     }
+
 
 # =============================================================================
 # MAIN PIPELINE
 # =============================================================================
 
+
 def process_conversations(input_path: Path, output_path: Path):
     """Process conversation dataset"""
     stats = Counter()
 
-    with open(input_path, encoding='utf-8') as fin, \
-         open(output_path, 'w', encoding='utf-8') as fout:
-
+    with (
+        open(input_path, encoding="utf-8") as fin,
+        open(output_path, "w", encoding="utf-8") as fout,
+    ):
         for line_num, line in enumerate(fin):
             try:
                 data = json.loads(line)
             except json.JSONDecodeError:
-                stats['json_errors'] += 1
+                stats["json_errors"] += 1
                 continue
 
-            messages = data.get('messages', [])
-            conv_id = data.get('conversation_id', f'conv_{line_num}')
+            messages = data.get("messages", [])
+            conv_id = data.get("conversation_id", f"conv_{line_num}")
 
             for msg_idx, msg in enumerate(messages):
-                role = msg.get('role', 'unknown')
-                content = msg.get('content', '')
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
 
                 # Clean the content
                 cleaned = clean_text(content)
@@ -278,7 +315,7 @@ def process_conversations(input_path: Path, output_path: Path):
                         sent_text = sent.text.strip()
 
                         if not is_valid_sentence(sent_text):
-                            stats['filtered_invalid'] += 1
+                            stats["filtered_invalid"] += 1
                             continue
 
                         sent_id = f"{conv_id}_m{msg_idx}_s{sent_num}"
@@ -288,27 +325,32 @@ def process_conversations(input_path: Path, output_path: Path):
                             result = process_sentence(sent_doc, sent_id, role)
 
                             if result:
-                                fout.write(json.dumps(result) + '\n')
-                                stats['success'] += 1
-                                stats[f'role_{role}'] += 1
+                                fout.write(json.dumps(result) + "\n")
+                                stats["success"] += 1
+                                stats[f"role_{role}"] += 1
                             else:
-                                stats['filtered_no_svc'] += 1
+                                stats["filtered_no_svc"] += 1
                         except Exception:
-                            stats['process_errors'] += 1
+                            stats["process_errors"] += 1
 
                 except Exception:
-                    stats['nlp_errors'] += 1
+                    stats["nlp_errors"] += 1
 
             if (line_num + 1) % 100 == 0:
                 print(f"Processed {line_num + 1} conversations, {stats['success']} sentences...")
 
     return stats
 
+
 def main():
     """Run main."""
 
-    input_path = Path(r"E:\Grillcheese Inc\grilly\grilly\experimental_datasets\conversations_dataset_anonymized_cleaned.jsonl")
-    output_path = Path(r"C:\Users\grill\Desktop\GrillCheese\data_learning\conversations_svc_semantic.jsonl")
+    input_path = Path(
+        r"E:\Grillcheese Inc\grilly\grilly\experimental_datasets\conversations_dataset_anonymized_cleaned.jsonl"
+    )
+    output_path = Path(
+        r"C:\Users\grill\Desktop\GrillCheese\data_learning\conversations_svc_semantic.jsonl"
+    )
 
     print(f"Input: {input_path}")
     print(f"Output: {output_path}")
@@ -323,8 +365,11 @@ def main():
     print(f"  - From assistant: {stats.get('role_assistant', 0)}")
     print(f"Filtered (invalid): {stats.get('filtered_invalid', 0)}")
     print(f"Filtered (no SVC): {stats.get('filtered_no_svc', 0)}")
-    print(f"Errors: {stats.get('json_errors', 0) + stats.get('process_errors', 0) + stats.get('nlp_errors', 0)}")
+    print(
+        f"Errors: {stats.get('json_errors', 0) + stats.get('process_errors', 0) + stats.get('nlp_errors', 0)}"
+    )
     print(f"Output: {output_path}")
+
 
 if __name__ == "__main__":
     main()

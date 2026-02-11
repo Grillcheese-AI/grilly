@@ -3,6 +3,7 @@ Tests for Tensor Conversion Utilities
 
 Tests conversion between PyTorch tensors and Vulkan (numpy arrays)
 """
+
 import numpy as np
 import pytest
 
@@ -15,6 +16,7 @@ try:
         to_vulkan,
         to_vulkan_batch,
     )
+
     TENSOR_CONVERSION_AVAILABLE = True
 except ImportError:
     TENSOR_CONVERSION_AVAILABLE = False
@@ -35,6 +37,7 @@ class TestTensorConversion:
         """Test converting PyTorch tensor to Vulkan"""
         try:
             import torch
+
             tensor = torch.randn(10, 20)
             result = to_vulkan(tensor)
             assert isinstance(result, np.ndarray)
@@ -47,6 +50,7 @@ class TestTensorConversion:
         """Test converting PyTorch CUDA tensor to Vulkan"""
         try:
             import torch
+
             if not torch.cuda.is_available():
                 pytest.skip("CUDA not available")
             tensor = torch.randn(10, 20).cuda()
@@ -61,11 +65,8 @@ class TestTensorConversion:
         """Test batch conversion"""
         try:
             import torch
-            tensors = [
-                torch.randn(10, 20),
-                torch.randn(5, 30),
-                torch.randn(8, 15)
-            ]
+
+            tensors = [torch.randn(10, 20), torch.randn(5, 30), torch.randn(8, 15)]
             results = to_vulkan_batch(tensors)
             assert len(results) == 3
             assert all(isinstance(r, np.ndarray) for r in results)
@@ -76,10 +77,11 @@ class TestTensorConversion:
         """Test converting Vulkan array to PyTorch CPU tensor"""
         try:
             import torch
+
             arr = np.random.randn(10, 20).astype(np.float32)
-            result = from_vulkan(arr, device='cpu')
+            result = from_vulkan(arr, device="cpu")
             assert isinstance(result, torch.Tensor)
-            assert result.device.type == 'cpu'
+            assert result.device.type == "cpu"
             assert result.shape == (10, 20)
         except ImportError:
             pytest.skip("PyTorch not available")
@@ -88,12 +90,13 @@ class TestTensorConversion:
         """Test converting Vulkan array to PyTorch CUDA tensor"""
         try:
             import torch
+
             if not torch.cuda.is_available():
                 pytest.skip("CUDA not available")
             arr = np.random.randn(10, 20).astype(np.float32)
-            result = from_vulkan(arr, device='cuda')
+            result = from_vulkan(arr, device="cuda")
             assert isinstance(result, torch.Tensor)
-            assert result.device.type == 'cuda'
+            assert result.device.type == "cuda"
             assert result.shape == (10, 20)
         except (ImportError, AssertionError):
             pytest.skip("PyTorch/CUDA not available")
@@ -108,6 +111,7 @@ class TestTensorConversion:
         # Test with PyTorch
         try:
             import torch
+
             tensor = torch.randn(10, 20)
             result = ensure_vulkan_compatible(tensor)
             assert isinstance(result, np.ndarray)
@@ -119,14 +123,15 @@ class TestTensorConversion:
         """Test converting module inputs"""
         try:
             import torch
+
             x = torch.randn(10, 20)
             y = torch.randn(20, 30)
             args, kwargs = convert_module_inputs(x, y, param=torch.tensor([1, 2, 3]))
 
             assert len(args) == 2
             assert all(isinstance(a, np.ndarray) for a in args)
-            assert 'param' in kwargs
-            assert isinstance(kwargs['param'], np.ndarray)
+            assert "param" in kwargs
+            assert isinstance(kwargs["param"], np.ndarray)
         except ImportError:
             pytest.skip("PyTorch not available")
 
@@ -169,11 +174,7 @@ class TestAutomaticConversion:
             torch_tensor = torch.randn(5, 256, dtype=torch.float32)
 
             # Create sequential model
-            model = nn.Sequential(
-                nn.Linear(256, 128),
-                nn.ReLU(),
-                nn.Linear(128, 64)
-            )
+            model = nn.Sequential(nn.Linear(256, 128), nn.ReLU(), nn.Linear(128, 64))
 
             # Pass PyTorch tensor directly
             result = model(torch_tensor)

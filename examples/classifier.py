@@ -115,7 +115,7 @@ def main():
 
             # Zero gradients for next iteration
             for p in model.parameters():
-                if hasattr(p, 'grad') and p.grad is not None:
+                if hasattr(p, "grad") and p.grad is not None:
                     p.grad = None
 
             epoch_loss += float(loss)

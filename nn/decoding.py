@@ -3,6 +3,7 @@ Decoding Layers
 
 Uses: decode-greedy.glsl, decode-sample.glsl
 """
+
 import struct
 
 import numpy as np
@@ -14,36 +15,36 @@ from .modules import Softmax
 class GreedyDecoder(Module):
     """
     Greedy Decoder - Greedy decoding.
-    
+
     Uses: decode-greedy.glsl
     """
 
     def __init__(self, vocab_size: int):
         """
         Initialize GreedyDecoder.
-        
+
         Args:
             vocab_size: Vocabulary size
         """
         super().__init__()
         self.vocab_size = vocab_size
         self.softmax = Softmax(dim=-1)
-        self._modules['softmax'] = self.softmax
+        self._modules["softmax"] = self.softmax
 
     def forward(self, logits: np.ndarray) -> np.ndarray:
         """
         Forward pass - greedy decoding.
-        
+
         Args:
             logits: Logits (batch, seq_len, vocab_size) or (batch, vocab_size)
-        
+
         Returns:
             Decoded token indices (batch, seq_len) or (batch,)
         """
         backend = self._get_backend()
 
         # Try GPU shader if available
-        if hasattr(backend, 'shaders') and 'decode-greedy' in backend.shaders:
+        if hasattr(backend, "shaders") and "decode-greedy" in backend.shaders:
             try:
                 # Reshape for shader (expects batch, seq_len, vocab_size)
                 original_shape = logits.shape
@@ -56,39 +57,54 @@ class GreedyDecoder(Module):
                 predictions = np.zeros(batch_size * seq_len, dtype=np.uint32)
 
                 # Create buffers
-                buf_logits, mem_logits = backend.core._create_buffer(logits_flat.nbytes, backend.core.base.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-                buf_pred, mem_pred = backend.core._create_buffer(predictions.nbytes, backend.core.base.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+                buf_logits, mem_logits = backend.core._create_buffer(
+                    logits_flat.nbytes, backend.core.base.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                )
+                buf_pred, mem_pred = backend.core._create_buffer(
+                    predictions.nbytes, backend.core.base.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                )
 
                 # Upload
                 backend.core._upload_buffer(buf_logits, mem_logits, logits_flat)
 
                 # Get pipeline
                 pipeline, layout, desc_layout = backend.pipelines.get_or_create_pipeline(
-                    'decode-greedy', 3, push_constant_size=16
+                    "decode-greedy", 3, push_constant_size=16
                 )
                 desc_set = backend.pipelines._create_descriptor_set(
                     desc_layout,
-                    [(buf_logits, logits_flat.nbytes), (buf_pred, predictions.nbytes), (buf_pred, predictions.nbytes)]
+                    [
+                        (buf_logits, logits_flat.nbytes),
+                        (buf_pred, predictions.nbytes),
+                        (buf_pred, predictions.nbytes),
+                    ],
                 )
 
                 # Dispatch
-                push_constants = struct.pack('IIII', batch_size, seq_len, vocab_size, 0)
+                push_constants = struct.pack("IIII", batch_size, seq_len, vocab_size, 0)
                 workgroups = (batch_size * seq_len + 255) // 256
-                backend.core._dispatch_compute(pipeline, layout, desc_set, workgroups, push_constants)
+                backend.core._dispatch_compute(
+                    pipeline, layout, desc_set, workgroups, push_constants
+                )
 
                 # Download
-                predictions = backend.core._download_buffer(mem_pred, predictions.nbytes, dtype=np.uint32)
+                predictions = backend.core._download_buffer(
+                    mem_pred, predictions.nbytes, dtype=np.uint32
+                )
 
                 # Cleanup
                 from vulkan import vkDestroyBuffer, vkFreeDescriptorSets, vkFreeMemory
-                vkFreeDescriptorSets(backend.core.device, backend.core.descriptor_pool, 1, [desc_set])
+
+                vkFreeDescriptorSets(
+                    backend.core.device, backend.core.descriptor_pool, 1, [desc_set]
+                )
                 vkDestroyBuffer(backend.core.device, buf_logits, None)
                 vkDestroyBuffer(backend.core.device, buf_pred, None)
                 vkFreeMemory(backend.core.device, mem_logits, None)
                 vkFreeMemory(backend.core.device, mem_pred, None)
 
                 # Reshape back
-                predictions = predictions[:batch_size * seq_len].reshape(batch_size, seq_len)
+                predictions = predictions[: batch_size * seq_len].reshape(batch_size, seq_len)
                 if len(original_shape) == 2:
                     predictions = predictions[:, 0]  # Remove seq dimension
 
@@ -109,14 +125,14 @@ class GreedyDecoder(Module):
 class SampleDecoder(Module):
     """
     Sample Decoder - Sampling-based decoding.
-    
+
     Uses: decode-sample.glsl
     """
 
     def __init__(self, vocab_size: int, temperature: float = 1.0):
         """
         Initialize SampleDecoder.
-        
+
         Args:
             vocab_size: Vocabulary size
             temperature: Sampling temperature (default: 1.0)
@@ -125,15 +141,15 @@ class SampleDecoder(Module):
         self.vocab_size = vocab_size
         self.temperature = temperature
         self.softmax = Softmax(dim=-1)
-        self._modules['softmax'] = self.softmax
+        self._modules["softmax"] = self.softmax
 
     def forward(self, logits: np.ndarray) -> np.ndarray:
         """
         Forward pass - sampling-based decoding.
-        
+
         Args:
             logits: Logits (batch, seq_len, vocab_size) or (batch, vocab_size)
-        
+
         Returns:
             Sampled token indices (batch, seq_len) or (batch,)
         """
@@ -144,7 +160,7 @@ class SampleDecoder(Module):
         probs = self.softmax(scaled_logits)
 
         # Try GPU shader if available
-        if hasattr(backend, 'shaders') and 'decode-sample' in backend.shaders:
+        if hasattr(backend, "shaders") and "decode-sample" in backend.shaders:
             try:
                 # Reshape for shader
                 original_shape = probs.shape
@@ -157,9 +173,15 @@ class SampleDecoder(Module):
                 samples = np.zeros(batch_size * seq_len, dtype=np.uint32)
 
                 # Create buffers
-                buf_probs, mem_probs = backend.core._create_buffer(probs_flat.nbytes, backend.core.base.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-                buf_rand, mem_rand = backend.core._create_buffer(randoms.nbytes, backend.core.base.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-                buf_samples, mem_samples = backend.core._create_buffer(samples.nbytes, backend.core.base.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+                buf_probs, mem_probs = backend.core._create_buffer(
+                    probs_flat.nbytes, backend.core.base.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                )
+                buf_rand, mem_rand = backend.core._create_buffer(
+                    randoms.nbytes, backend.core.base.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                )
+                buf_samples, mem_samples = backend.core._create_buffer(
+                    samples.nbytes, backend.core.base.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                )
 
                 # Upload
                 backend.core._upload_buffer(buf_probs, mem_probs, probs_flat)
@@ -167,25 +189,37 @@ class SampleDecoder(Module):
 
                 # Get pipeline
                 pipeline, layout, desc_layout = backend.pipelines.get_or_create_pipeline(
-                    'decode-sample', 3, push_constant_size=12
+                    "decode-sample", 3, push_constant_size=12
                 )
                 desc_set = backend.pipelines._create_descriptor_set(
                     desc_layout,
-                    [(buf_probs, probs_flat.nbytes), (buf_rand, randoms.nbytes), (buf_samples, samples.nbytes)]
+                    [
+                        (buf_probs, probs_flat.nbytes),
+                        (buf_rand, randoms.nbytes),
+                        (buf_samples, samples.nbytes),
+                    ],
                 )
 
                 # Dispatch
                 import struct
-                push_constants = struct.pack('III', batch_size, seq_len, vocab_size)
+
+                push_constants = struct.pack("III", batch_size, seq_len, vocab_size)
                 workgroups = (batch_size * seq_len + 255) // 256
-                backend.core._dispatch_compute(pipeline, layout, desc_set, workgroups, push_constants)
+                backend.core._dispatch_compute(
+                    pipeline, layout, desc_set, workgroups, push_constants
+                )
 
                 # Download
-                samples = backend.core._download_buffer(mem_samples, samples.nbytes, dtype=np.uint32)
+                samples = backend.core._download_buffer(
+                    mem_samples, samples.nbytes, dtype=np.uint32
+                )
 
                 # Cleanup
                 from vulkan import vkDestroyBuffer, vkFreeDescriptorSets, vkFreeMemory
-                vkFreeDescriptorSets(backend.core.device, backend.core.descriptor_pool, 1, [desc_set])
+
+                vkFreeDescriptorSets(
+                    backend.core.device, backend.core.descriptor_pool, 1, [desc_set]
+                )
                 vkDestroyBuffer(backend.core.device, buf_probs, None)
                 vkDestroyBuffer(backend.core.device, buf_rand, None)
                 vkDestroyBuffer(backend.core.device, buf_samples, None)
@@ -194,7 +228,7 @@ class SampleDecoder(Module):
                 vkFreeMemory(backend.core.device, mem_samples, None)
 
                 # Reshape back
-                samples = samples[:batch_size * seq_len].reshape(batch_size, seq_len)
+                samples = samples[: batch_size * seq_len].reshape(batch_size, seq_len)
                 if len(original_shape) == 2:
                     samples = samples[:, 0]
 

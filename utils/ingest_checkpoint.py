@@ -1,4 +1,5 @@
 """Checkpoint helpers for SVC ingestion snapshots and restore flows."""
+
 from __future__ import annotations
 
 import json
@@ -202,7 +203,11 @@ def save_ingest_checkpoint(
             "patterns": int(len(pattern_names)),
             "facts": int(len(facts)),
             "constraints": int(len(constraints)),
-            "sentences_saved": int(0 if not include_sentence_memory else (sent_packed.shape[0] if sent_pack_mode=="bitpack" else sent_vecs.shape[0])),
+            "sentences_saved": int(
+                0
+                if not include_sentence_memory
+                else (sent_packed.shape[0] if sent_pack_mode == "bitpack" else sent_vecs.shape[0])
+            ),
             "sentence_token_vocab": int(len(sent_token_vocab)),
             "sentence_total_tokens": int(len(sent_token_ids)),
         },
@@ -213,32 +218,44 @@ def save_ingest_checkpoint(
     # Provide a quick "index" section for readability in downstream tools
     manifest["index"] = {
         "arrays": [
-            "vocab_words","vocab_vecs",
-            "relation_names","relation_vecs",
-            "realm_names","realm_vecs",
-            "pattern_names","pattern_vecs",
-            "fact_s","fact_r","fact_o","fact_conf","fact_src","fact_vecs","fact_caps","fact_has_caps",
-            "expectations_json","constraint_a","constraint_b",
-            "sent_vecs","sent_packed","sent_token_vocab","sent_token_ids","sent_offsets",
+            "vocab_words",
+            "vocab_vecs",
+            "relation_names",
+            "relation_vecs",
+            "realm_names",
+            "realm_vecs",
+            "pattern_names",
+            "pattern_vecs",
+            "fact_s",
+            "fact_r",
+            "fact_o",
+            "fact_conf",
+            "fact_src",
+            "fact_vecs",
+            "fact_caps",
+            "fact_has_caps",
+            "expectations_json",
+            "constraint_a",
+            "constraint_b",
+            "sent_vecs",
+            "sent_packed",
+            "sent_token_vocab",
+            "sent_token_ids",
+            "sent_offsets",
         ]
     }
 
     np.savez_compressed(
         str(out),
         manifest_json=np.asarray([json.dumps(manifest)], dtype=object),
-
         vocab_words=_as_obj_array(vocab_words),
         vocab_vecs=vocab_vecs,
-
         relation_names=_as_obj_array(rel_names),
         relation_vecs=rel_vecs,
-
         realm_names=_as_obj_array(realm_names),
         realm_vecs=realm_vecs,
-
         pattern_names=_as_obj_array(pattern_names),
         pattern_vecs=pattern_vecs,
-
         fact_s=fact_s,
         fact_r=fact_r,
         fact_o=fact_o,
@@ -247,11 +264,9 @@ def save_ingest_checkpoint(
         fact_vecs=fact_vecs,
         fact_caps=fact_caps,
         fact_has_caps=has_caps,
-
         expectations_json=np.asarray([expectations_json], dtype=object),
         constraint_a=c_a,
         constraint_b=c_b,
-
         sent_vecs=sent_vecs,
         sent_packed=sent_packed,
         sent_token_vocab=sent_token_vocab,
@@ -265,6 +280,7 @@ class CheckpointView:
     """
     Lightweight accessor that avoids expanding everything into python objects.
     """
+
     def __init__(self, path: str):
         """Initialize the instance."""
 
@@ -281,7 +297,12 @@ class CheckpointView:
     def facts(self):
         """Execute facts."""
 
-        return self._data["fact_s"], self._data["fact_r"], self._data["fact_o"], self._data["fact_conf"]
+        return (
+            self._data["fact_s"],
+            self._data["fact_r"],
+            self._data["fact_o"],
+            self._data["fact_conf"],
+        )
 
     def sentence_count(self) -> int:
         """Execute sentence count."""
@@ -300,7 +321,7 @@ class CheckpointView:
 
         mode = self.manifest.get("sentence_pack", "none")
         if mode == "bitpack":
-            packed = self._data["sent_packed"][i:i+1]
+            packed = self._data["sent_packed"][i : i + 1]
             return _unpack_bipolar(packed, self.dim, dtype=dtype)[0]
         return self._data["sent_vecs"][i].astype(dtype, copy=False)
 
@@ -308,13 +329,15 @@ class CheckpointView:
         """Execute get sentence tokens."""
 
         offsets = self._data["sent_offsets"].astype(int, copy=False)
-        a, b = int(offsets[i]), int(offsets[i+1])
+        a, b = int(offsets[i]), int(offsets[i + 1])
         ids = self._data["sent_token_ids"][a:b].astype(int, copy=False)
         vocab = self._data["sent_token_vocab"]
         return [str(vocab[j]) for j in ids]
 
 
-def load_ingest_checkpoint(path: str, controller: Any, *, strict_dim: bool = True) -> dict[str, Any]:
+def load_ingest_checkpoint(
+    path: str, controller: Any, *, strict_dim: bool = True
+) -> dict[str, Any]:
     """Run load ingest checkpoint."""
 
     p = Path(path)
@@ -368,7 +391,11 @@ def load_ingest_checkpoint(path: str, controller: Any, *, strict_dim: bool = Tru
     cap_i = 0
 
     for i in range(len(fact_s)):
-        vec = fact_vecs[i] if fact_vecs.shape[0] == len(fact_s) else np.zeros((dim,), dtype=np.float32)
+        vec = (
+            fact_vecs[i]
+            if fact_vecs.shape[0] == len(fact_s)
+            else np.zeros((dim,), dtype=np.float32)
+        )
         capsule_vec = None
         if has_caps[i]:
             capsule_vec = fact_caps[cap_i]

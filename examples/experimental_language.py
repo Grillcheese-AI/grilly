@@ -55,11 +55,7 @@ print("-" * 60)
 
 generator = SentenceGenerator(sentence_encoder)
 
-template = generator.generate_from_roles({
-    "SUBJ": "dog",
-    "VERB": "barked",
-    "OBJ": "loudly"
-})
+template = generator.generate_from_roles({"SUBJ": "dog", "VERB": "barked", "OBJ": "loudly"})
 print(f"Generated sentence: {' '.join(template)}")
 
 relation_sentence = generator.generate_from_relation("cat", "chases", "mouse")

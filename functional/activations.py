@@ -6,6 +6,7 @@ import numpy as np
 def _get_backend():
     """Get compute backend"""
     from grilly import Compute
+
     return Compute()
 
 
@@ -50,7 +51,7 @@ def softplus(x: np.ndarray) -> np.ndarray:
     Softplus activation: log(1 + exp(x))
     Uses: activation-softplus.glsl
     """
-    backend = _get_backend()
+    _get_backend()
     # Note: May need to implement in backend if not already exposed
     # CPU fallback for now
     return np.log(1 + np.exp(x))

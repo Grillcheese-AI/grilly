@@ -9,6 +9,7 @@ import numpy as np
 def _get_backend():
     """Get compute backend"""
     from grilly import Compute
+
     return Compute()
 
 
@@ -16,12 +17,12 @@ def dropout(input: np.ndarray, p: float = 0.5, training: bool = True) -> np.ndar
     """
     Dropout regularization
     Uses: fnn-dropout.glsl
-    
+
     Args:
         input: Input tensor
         p: Dropout probability (0.0 to 1.0)
         training: If False, returns input unchanged
-    
+
     Returns:
         Output tensor with dropout applied (if training)
     """

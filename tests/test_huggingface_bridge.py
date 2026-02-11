@@ -4,11 +4,13 @@ Tests for HuggingFace Bridge
 Tests HuggingFace integration with CUDA/PyTorch compatibility
 Note: These tests may skip if transformers/PyTorch not available
 """
+
 import numpy as np
 import pytest
 
 try:
     from grilly.utils.huggingface_bridge import HuggingFaceBridge, get_huggingface_bridge
+
     HUGGINGFACE_BRIDGE_AVAILABLE = True
 except ImportError:
     HUGGINGFACE_BRIDGE_AVAILABLE = False
@@ -45,9 +47,9 @@ class TestHuggingFaceBridge:
         try:
             bridge = HuggingFaceBridge()
             try:
-                encoded = bridge.tokenize("Hello, world!", "bert-base-uncased", return_tensors='np')
-                assert 'input_ids' in encoded
-                assert isinstance(encoded['input_ids'], np.ndarray)
+                encoded = bridge.tokenize("Hello, world!", "bert-base-uncased", return_tensors="np")
+                assert "input_ids" in encoded
+                assert isinstance(encoded["input_ids"], np.ndarray)
             except Exception as e:
                 if "not found" in str(e).lower():
                     pytest.skip(f"Model not available: {e}")
@@ -62,6 +64,7 @@ class TestHuggingFaceBridge:
         try:
             bridge = HuggingFaceBridge()
             import torch
+
             tensor = torch.randn(10, 20)
             result = bridge.to_vulkan(tensor)
             assert isinstance(result, np.ndarray)
@@ -73,13 +76,14 @@ class TestHuggingFaceBridge:
         """Test converting numpy to CUDA tensor"""
         try:
             import torch
+
             if not torch.cuda.is_available():
                 pytest.skip("CUDA not available")
             bridge = HuggingFaceBridge()
             arr = np.random.randn(10, 20).astype(np.float32)
             result = bridge.to_cuda(arr)
             assert isinstance(result, torch.Tensor)
-            assert result.device.type == 'cuda'
+            assert result.device.type == "cuda"
         except (RuntimeError, ImportError, AssertionError) as e:
             pytest.skip(f"CUDA/PyTorch not available: {e}")
 
@@ -121,7 +125,8 @@ class TestHuggingFaceBridgeVulkanOnly:
         """Test that numpy arrays work with Vulkan operations"""
         try:
             from grilly import nn
-            bridge = HuggingFaceBridge()
+
+            HuggingFaceBridge()
 
             # Create numpy array (Vulkan-compatible)
             arr = np.random.randn(5, 128).astype(np.float32)
@@ -147,12 +152,12 @@ class TestHuggingFaceBridgeLoRA:
 
     def test_lora_methods_exist(self):
         """Test that LoRA methods are available on the class"""
-        assert hasattr(HuggingFaceBridge, 'load_model_with_lora')
-        assert hasattr(HuggingFaceBridge, 'save_lora_adapters')
-        assert hasattr(HuggingFaceBridge, 'load_lora_adapters')
-        assert hasattr(HuggingFaceBridge, 'extract_model_weights')
-        assert hasattr(HuggingFaceBridge, 'create_lora_from_weights')
-        assert hasattr(HuggingFaceBridge, 'merge_lora_to_model')
+        assert hasattr(HuggingFaceBridge, "load_model_with_lora")
+        assert hasattr(HuggingFaceBridge, "save_lora_adapters")
+        assert hasattr(HuggingFaceBridge, "load_lora_adapters")
+        assert hasattr(HuggingFaceBridge, "extract_model_weights")
+        assert hasattr(HuggingFaceBridge, "create_lora_from_weights")
+        assert hasattr(HuggingFaceBridge, "merge_lora_to_model")
 
     def test_create_lora_from_weights(self):
         """Test creating LoRA from weights dict (no HF model needed)"""
@@ -160,25 +165,21 @@ class TestHuggingFaceBridgeLoRA:
 
         # Simulate extracted weights
         weights = {
-            'layer.0.attention.q_proj': np.random.randn(768, 768).astype(np.float32) * 0.01,
-            'layer.0.attention.v_proj': np.random.randn(768, 768).astype(np.float32) * 0.01,
-            'layer.0.attention.k_proj': np.random.randn(768, 768).astype(np.float32) * 0.01,
-            'layer.1.attention.q_proj': np.random.randn(768, 768).astype(np.float32) * 0.01,
-            'layer.1.attention.v_proj': np.random.randn(768, 768).astype(np.float32) * 0.01,
+            "layer.0.attention.q_proj": np.random.randn(768, 768).astype(np.float32) * 0.01,
+            "layer.0.attention.v_proj": np.random.randn(768, 768).astype(np.float32) * 0.01,
+            "layer.0.attention.k_proj": np.random.randn(768, 768).astype(np.float32) * 0.01,
+            "layer.1.attention.q_proj": np.random.randn(768, 768).astype(np.float32) * 0.01,
+            "layer.1.attention.v_proj": np.random.randn(768, 768).astype(np.float32) * 0.01,
         }
 
         # Create LoRA config
-        config = LoRAConfig(
-            rank=8,
-            alpha=16,
-            target_modules=['q_proj', 'v_proj']
-        )
+        config = LoRAConfig(rank=8, alpha=16, target_modules=["q_proj", "v_proj"])
 
         # Create LoRA model manually (same logic as bridge method)
         lora_model = LoRAModel(config)
 
         for name, weight in weights.items():
-            layer_name = name.split('.')[-1]
+            layer_name = name.split(".")[-1]
             if any(tm in layer_name for tm in config.target_modules):
                 if len(weight.shape) == 2:
                     out_features, in_features = weight.shape
@@ -194,7 +195,7 @@ class TestHuggingFaceBridgeLoRA:
 
         # Verify k_proj was not included
         for name in lora_model.lora_layers:
-            assert 'k_proj' not in name
+            assert "k_proj" not in name
 
     def test_lora_save_load_cycle(self):
         """Test saving and loading LoRA adapters"""
@@ -204,12 +205,12 @@ class TestHuggingFaceBridgeLoRA:
         from grilly.nn.lora import LoRAConfig, LoRAModel
 
         # Create LoRA model
-        config = LoRAConfig(rank=4, alpha=8, target_modules=['q_proj'])
+        config = LoRAConfig(rank=4, alpha=8, target_modules=["q_proj"])
         lora_model = LoRAModel(config)
 
         # Add some layers
-        lora_model.add_lora_layer('layer.0.q_proj', 256, 256)
-        lora_model.add_lora_layer('layer.1.q_proj', 256, 256)
+        lora_model.add_lora_layer("layer.0.q_proj", 256, 256)
+        lora_model.add_lora_layer("layer.1.q_proj", 256, 256)
 
         # Set some non-zero weights
         for name, layer in lora_model.lora_layers.items():
@@ -218,13 +219,13 @@ class TestHuggingFaceBridgeLoRA:
 
         # Save to temp directory
         with tempfile.TemporaryDirectory() as tmpdir:
-            save_path = Path(tmpdir) / 'lora_test'
+            save_path = Path(tmpdir) / "lora_test"
             lora_model.save_checkpoint(save_path)
 
             # Verify files exist
-            assert (save_path / 'config.json').exists()
-            assert (save_path / 'adapters.npz').exists()
-            assert (save_path / 'metadata.json').exists()
+            assert (save_path / "config.json").exists()
+            assert (save_path / "adapters.npz").exists()
+            assert (save_path / "metadata.json").exists()
 
             # Load back
             loaded_model = LoRAModel.load_checkpoint(save_path)
@@ -267,6 +268,6 @@ class TestHuggingFaceBridgeLoRA:
         )
 
         # Verify parameter reduction
-        assert stats['trainable_ratio'] < 0.01  # Less than 1% trainable
-        assert stats['lora_params'] < 10_000_000  # Less than 10M LoRA params
-        assert stats['total_training_memory_gb'] < 1.0  # Less than 1GB for training
+        assert stats["trainable_ratio"] < 0.01  # Less than 1% trainable
+        assert stats["lora_params"] < 10_000_000  # Less than 10M LoRA params
+        assert stats["total_training_memory_gb"] < 1.0  # Less than 1GB for training

@@ -5,7 +5,6 @@ Tests causal rules, state encoding, and forward propagation.
 """
 
 
-
 class TestCausalChainBasic:
     """Basic tests for CausalChain initialization."""
 

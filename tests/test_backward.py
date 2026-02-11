@@ -1,6 +1,7 @@
 """
 Tests for backward pass operations and autograd integration.
 """
+
 import numpy as np
 import pytest
 
@@ -19,7 +20,7 @@ class TestBackwardOperations:
     def gpu(self):
         """Initialize GPU backend"""
         backend = Compute()
-        backend.set_architecture('bert')  # Initialize all operations
+        backend.set_architecture("bert")  # Initialize all operations
         yield backend
         backend.cleanup()
 
@@ -48,7 +49,7 @@ class TestBackwardOperations:
 
                 # GELU forward
                 def gelu(x):
-                    return 0.5 * x * (1 + np.tanh(np.sqrt(2/np.pi) * (x + 0.044715 * x**3)))
+                    return 0.5 * x * (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x**3)))
 
                 f_plus = gelu(x_plus)[i, j]
                 f_minus = gelu(x_minus)[i, j]
@@ -57,8 +58,9 @@ class TestBackwardOperations:
         # Check that analytical gradient matches numerical (for small subset)
         analytical_subset = grad_input[:5, :5] / grad_output[:5, :5]
         numerical_subset = numerical_grad[:5, :5]
-        assert np.allclose(analytical_subset, numerical_subset, rtol=0.1, atol=1e-3), \
+        assert np.allclose(analytical_subset, numerical_subset, rtol=0.1, atol=1e-3), (
             f"GELU gradient mismatch: max diff = {np.abs(analytical_subset - numerical_subset).max()}"
+        )
 
     def test_linear_backward(self, gpu):
         """Test linear layer backward pass (CPU fallback)"""
@@ -74,7 +76,7 @@ class TestBackwardOperations:
 
         # Test CPU fallback by temporarily removing shader
         original_shaders = gpu.fnn.shaders.copy()
-        gpu.fnn.shaders = {k: v for k, v in original_shaders.items() if 'linear-backward' not in k}
+        gpu.fnn.shaders = {k: v for k, v in original_shaders.items() if "linear-backward" not in k}
 
         try:
             # CPU backward
@@ -92,12 +94,15 @@ class TestBackwardOperations:
             expected_grad_weight = grad_output.T @ x
             expected_grad_bias = np.sum(grad_output, axis=0)
 
-            assert np.allclose(grad_input, expected_grad_input, rtol=1e-3, atol=1e-4), \
+            assert np.allclose(grad_input, expected_grad_input, rtol=1e-3, atol=1e-4), (
                 f"grad_input mismatch: max diff = {np.abs(grad_input - expected_grad_input).max()}"
-            assert np.allclose(grad_weight, expected_grad_weight, rtol=1e-3, atol=1e-4), \
+            )
+            assert np.allclose(grad_weight, expected_grad_weight, rtol=1e-3, atol=1e-4), (
                 f"grad_weight mismatch: max diff = {np.abs(grad_weight - expected_grad_weight).max()}"
-            assert np.allclose(grad_bias, expected_grad_bias, rtol=1e-3, atol=1e-4), \
+            )
+            assert np.allclose(grad_bias, expected_grad_bias, rtol=1e-3, atol=1e-4), (
                 f"grad_bias mismatch: max diff = {np.abs(grad_bias - expected_grad_bias).max()}"
+            )
         finally:
             gpu.fnn.shaders = original_shaders
 
@@ -123,9 +128,15 @@ class TestBackwardOperations:
         )
 
         # Verify shapes
-        assert grad_input.shape == x.shape, f"grad_input shape: {grad_input.shape} vs expected {x.shape}"
-        assert grad_gamma.shape == gamma.shape, f"grad_gamma shape: {grad_gamma.shape} vs expected {gamma.shape}"
-        assert grad_beta.shape == beta.shape, f"grad_beta shape: {grad_beta.shape} vs expected {beta.shape}"
+        assert grad_input.shape == x.shape, (
+            f"grad_input shape: {grad_input.shape} vs expected {x.shape}"
+        )
+        assert grad_gamma.shape == gamma.shape, (
+            f"grad_gamma shape: {grad_gamma.shape} vs expected {gamma.shape}"
+        )
+        assert grad_beta.shape == beta.shape, (
+            f"grad_beta shape: {grad_beta.shape} vs expected {beta.shape}"
+        )
 
         # Verify finiteness
         assert np.all(np.isfinite(grad_input)), "grad_input has non-finite values"
@@ -134,8 +145,9 @@ class TestBackwardOperations:
 
         # Verify grad_beta is sum of grad_output
         expected_grad_beta = np.sum(grad_output, axis=(0, 1))
-        assert np.allclose(grad_beta, expected_grad_beta, rtol=1e-3, atol=1e-4), \
+        assert np.allclose(grad_beta, expected_grad_beta, rtol=1e-3, atol=1e-4), (
             f"grad_beta mismatch: max diff = {np.abs(grad_beta - expected_grad_beta).max()}"
+        )
 
     def test_softmax_backward(self, gpu):
         """Test softmax backward pass"""
@@ -162,8 +174,9 @@ class TestBackwardOperations:
         sum_term = np.sum(grad_output * softmax_output, axis=-1, keepdims=True)
         expected_grad_input = softmax_output * (grad_output - sum_term)
 
-        assert np.allclose(grad_input, expected_grad_input, rtol=1e-3, atol=1e-4), \
+        assert np.allclose(grad_input, expected_grad_input, rtol=1e-3, atol=1e-4), (
             f"softmax backward mismatch: max diff = {np.abs(grad_input - expected_grad_input).max()}"
+        )
 
 
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
@@ -200,7 +213,7 @@ class TestAutogradIntegration:
 
         with GradientTape() as tape:
             # Record a simple operation
-            y = x * 2.0
+            x * 2.0
 
         # Tape should be usable
         assert tape is not None
@@ -258,8 +271,8 @@ class TestEndToEndTraining:
         model.backward(grad_loss, x)
 
         # Check gradients exist
-        weight = model._parameters.get('weight')
-        if weight is not None and hasattr(weight, 'grad'):
+        weight = model._parameters.get("weight")
+        if weight is not None and hasattr(weight, "grad"):
             assert weight.grad is not None or True  # May be None if backward not implemented
 
         # Optimizer step

@@ -11,6 +11,7 @@ Reference: "Decoupled Weight Decay Regularization" (Loshchilov & Hutter, 2019)
 
 Uses: adamw-update.glsl
 """
+
 from collections.abc import Iterator
 
 import numpy as np
@@ -41,7 +42,7 @@ class AdamW(Optimizer):
         eps: float = 1e-8,
         weight_decay: float = 0.01,  # Default 0.01 (higher than Adam's 0.0)
         amsgrad: bool = False,
-        use_gpu: bool = True
+        use_gpu: bool = True,
     ):
         """
         Initialize AdamW optimizer.
@@ -56,11 +57,11 @@ class AdamW(Optimizer):
             use_gpu: Whether to use GPU acceleration (default: True)
         """
         defaults = {
-            'lr': lr,
-            'betas': betas,
-            'eps': eps,
-            'weight_decay': weight_decay,
-            'amsgrad': amsgrad,
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "amsgrad": amsgrad,
         }
         super().__init__(params, defaults)
         self.use_gpu = use_gpu
@@ -72,6 +73,7 @@ class AdamW(Optimizer):
         if self._backend is None:
             try:
                 from grilly import Compute
+
                 self._backend = Compute()
             except Exception:
                 self._backend = None
@@ -94,21 +96,21 @@ class AdamW(Optimizer):
         self._gradients = gradients
 
         self._step_count += 1
-        beta1, beta2 = self.defaults['betas']
-        lr = self.defaults['lr']
-        eps = self.defaults['eps']
-        weight_decay = self.defaults['weight_decay']
-        amsgrad = self.defaults['amsgrad']
+        beta1, beta2 = self.defaults["betas"]
+        lr = self.defaults["lr"]
+        eps = self.defaults["eps"]
+        weight_decay = self.defaults["weight_decay"]
+        amsgrad = self.defaults["amsgrad"]
 
         # Bias correction terms
-        beta1_t = beta1 ** self._step_count
-        beta2_t = beta2 ** self._step_count
+        beta1_t = beta1**self._step_count
+        beta2_t = beta2**self._step_count
 
         backend = self._get_backend()
         use_gpu = self.use_gpu and backend is not None
 
         for group in self.param_groups:
-            for p in group['params']:
+            for p in group["params"]:
                 if p is None:
                     continue
 
@@ -117,33 +119,33 @@ class AdamW(Optimizer):
 
                 # Initialize state if needed
                 if len(state) == 0:
-                    state['step'] = 0
-                    state['exp_avg'] = np.zeros_like(p, dtype=np.float32)
-                    state['exp_avg_sq'] = np.zeros_like(p, dtype=np.float32)
+                    state["step"] = 0
+                    state["exp_avg"] = np.zeros_like(p, dtype=np.float32)
+                    state["exp_avg_sq"] = np.zeros_like(p, dtype=np.float32)
                     if amsgrad:
-                        state['max_exp_avg_sq'] = np.zeros_like(p, dtype=np.float32)
+                        state["max_exp_avg_sq"] = np.zeros_like(p, dtype=np.float32)
 
-                state['step'] += 1
-                exp_avg = state['exp_avg']
-                exp_avg_sq = state['exp_avg_sq']
+                state["step"] += 1
+                exp_avg = state["exp_avg"]
+                exp_avg_sq = state["exp_avg_sq"]
 
                 # Get gradients
                 grad = None
-                if hasattr(self, '_gradients') and self._gradients is not None:
+                if hasattr(self, "_gradients") and self._gradients is not None:
                     grad = self._gradients.get(param_id, None)
                 if grad is None:
-                    grad = getattr(p, 'grad', None)
+                    grad = getattr(p, "grad", None)
                 if grad is None:
                     continue
 
                 # Ensure gradient is numpy array
-                if hasattr(grad, 'data'):
+                if hasattr(grad, "data"):
                     grad = grad.data
                 if not isinstance(grad, np.ndarray):
                     grad = np.array(grad, dtype=np.float32)
 
                 # Extract parameter data
-                if hasattr(p, 'data'):
+                if hasattr(p, "data"):
                     p_data = p.data
                 else:
                     p_data = p
@@ -155,26 +157,40 @@ class AdamW(Optimizer):
                 # Try GPU update if available
                 if use_gpu and backend is not None:
                     try:
-                        shaders_available = hasattr(backend, 'core') and hasattr(backend.core, 'shaders')
-                        if shaders_available and 'adamw-update' in backend.core.shaders:
+                        shaders_available = hasattr(backend, "core") and hasattr(
+                            backend.core, "shaders"
+                        )
+                        if shaders_available and "adamw-update" in backend.core.shaders:
                             p_data, exp_avg, exp_avg_sq = self._adamw_update_gpu(
-                                backend, p_data, grad, exp_avg, exp_avg_sq,
-                                lr, beta1, beta2, eps, weight_decay, beta1_t, beta2_t, amsgrad
+                                backend,
+                                p_data,
+                                grad,
+                                exp_avg,
+                                exp_avg_sq,
+                                lr,
+                                beta1,
+                                beta2,
+                                eps,
+                                weight_decay,
+                                beta1_t,
+                                beta2_t,
+                                amsgrad,
                             )
-                            if hasattr(p, 'data'):
+                            if hasattr(p, "data"):
                                 p.data = p_data
                             else:
                                 p[:] = p_data
-                            state['exp_avg'] = exp_avg
-                            state['exp_avg_sq'] = exp_avg_sq
-                            if hasattr(p, 'grad') and p.grad is not None:
-                                if hasattr(p, 'zero_grad'):
+                            state["exp_avg"] = exp_avg
+                            state["exp_avg_sq"] = exp_avg_sq
+                            if hasattr(p, "grad") and p.grad is not None:
+                                if hasattr(p, "zero_grad"):
                                     p.zero_grad()
                                 else:
                                     p.grad = None
                             continue
                     except Exception as e:
                         import logging
+
                         logger = logging.getLogger(__name__)
                         logger.debug(f"GPU AdamW update failed: {e}, falling back to CPU")
                         pass
@@ -186,9 +202,9 @@ class AdamW(Optimizer):
 
                 if amsgrad:
                     # Maintain max of all second moment running averages
-                    max_exp_avg_sq = state['max_exp_avg_sq']
+                    max_exp_avg_sq = state["max_exp_avg_sq"]
                     max_exp_avg_sq = np.maximum(max_exp_avg_sq, exp_avg_sq)
-                    state['max_exp_avg_sq'] = max_exp_avg_sq
+                    state["max_exp_avg_sq"] = max_exp_avg_sq
                     denom = np.sqrt(max_exp_avg_sq / (1 - beta2_t)) + eps
                 else:
                     denom = np.sqrt(exp_avg_sq / (1 - beta2_t)) + eps
@@ -204,30 +220,44 @@ class AdamW(Optimizer):
                 p_data -= step_size * exp_avg / denom
 
                 # Update parameter
-                if hasattr(p, 'data') and not isinstance(p, np.ndarray):
+                if hasattr(p, "data") and not isinstance(p, np.ndarray):
                     p.data = p_data
                 else:
                     p[:] = p_data
 
-                state['exp_avg'] = exp_avg
-                state['exp_avg_sq'] = exp_avg_sq
+                state["exp_avg"] = exp_avg
+                state["exp_avg_sq"] = exp_avg_sq
 
                 # Clear gradient
-                if hasattr(p, 'grad') and p.grad is not None:
-                    if hasattr(p, 'zero_grad'):
+                if hasattr(p, "grad") and p.grad is not None:
+                    if hasattr(p, "zero_grad"):
                         p.zero_grad()
                     else:
                         p.grad = None
 
         return loss
 
-    def _adamw_update_gpu(self, backend, param, grad, exp_avg, exp_avg_sq,
-                         lr, beta1, beta2, eps, weight_decay, beta1_t, beta2_t, amsgrad):
+    def _adamw_update_gpu(
+        self,
+        backend,
+        param,
+        grad,
+        exp_avg,
+        exp_avg_sq,
+        lr,
+        beta1,
+        beta2,
+        eps,
+        weight_decay,
+        beta1_t,
+        beta2_t,
+        amsgrad,
+    ):
         """
         GPU-accelerated AdamW update using adamw-update.glsl shader.
         """
         try:
-            if hasattr(backend, 'learning') and hasattr(backend.learning, 'adamw_update'):
+            if hasattr(backend, "learning") and hasattr(backend.learning, "adamw_update"):
                 param, exp_avg, exp_avg_sq = backend.learning.adamw_update(
                     weights=param,
                     gradients=grad,
@@ -240,7 +270,7 @@ class AdamW(Optimizer):
                     weight_decay=weight_decay,
                     beta1_t=beta1_t,
                     beta2_t=beta2_t,
-                    clear_grad=False
+                    clear_grad=False,
                 )
                 return param, exp_avg, exp_avg_sq
         except Exception:

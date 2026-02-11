@@ -88,12 +88,12 @@ class GPUNeuralNetwork:
 
         # Cache activations for backward pass
         self.cache = {
-            'x': x,
-            'h1_pre': h1_pre,
-            'h1': h1,
-            'h2_pre': h2_pre,
-            'h2': h2,
-            'logits': logits,
+            "x": x,
+            "h1_pre": h1_pre,
+            "h1": h1,
+            "h2_pre": h2_pre,
+            "h2": h2,
+            "logits": logits,
         }
 
         return logits
@@ -114,29 +114,29 @@ class GPUNeuralNetwork:
         # Layer 3 backward (no activation, just linear)
         # GPU-accelerated linear backward
         grad_h2, self.dw3, self.db3 = self.fnn.linear_backward(
-            grad_output, self.cache['h2'], self.w3, self.b3
+            grad_output, self.cache["h2"], self.w3, self.b3
         )
         self.dw3 = self.dw3 / batch_size
         self.db3 = self.db3 / batch_size
 
         # Layer 2 backward (ReLU + Linear)
         # GPU-accelerated ReLU backward
-        grad_h2_pre = self.fnn.activation_relu_backward(grad_h2, self.cache['h2_pre'])
+        grad_h2_pre = self.fnn.activation_relu_backward(grad_h2, self.cache["h2_pre"])
 
         # GPU-accelerated linear backward
         grad_h1, self.dw2, self.db2 = self.fnn.linear_backward(
-            grad_h2_pre, self.cache['h1'], self.w2, self.b2
+            grad_h2_pre, self.cache["h1"], self.w2, self.b2
         )
         self.dw2 = self.dw2 / batch_size
         self.db2 = self.db2 / batch_size
 
         # Layer 1 backward (ReLU + Linear)
         # GPU-accelerated ReLU backward
-        grad_h1_pre = self.fnn.activation_relu_backward(grad_h1, self.cache['h1_pre'])
+        grad_h1_pre = self.fnn.activation_relu_backward(grad_h1, self.cache["h1_pre"])
 
         # GPU-accelerated linear backward
         _, self.dw1, self.db1 = self.fnn.linear_backward(
-            grad_h1_pre, self.cache['x'], self.w1, self.b1
+            grad_h1_pre, self.cache["x"], self.w1, self.b1
         )
         self.dw1 = self.dw1 / batch_size
         self.db1 = self.db1 / batch_size
@@ -240,13 +240,13 @@ def main():
 
     # Check available shaders
     available_shaders = list(compute.fnn.shaders.keys())
-    backward_shaders = [s for s in available_shaders if 'backward' in s]
+    backward_shaders = [s for s in available_shaders if "backward" in s]
     print(f"\nBackward shaders available: {len(backward_shaders)}")
     for s in sorted(backward_shaders):
         print(f"  - {s}")
 
     # Load MNIST
-    datasets_root = Path(__file__).parent.parent / 'datasets'
+    datasets_root = Path(__file__).parent.parent / "datasets"
 
     def normalize(x):
         x = x.astype(np.float32) / 255.0
@@ -340,12 +340,14 @@ def main():
         accuracy = 100 * correct / total
         test_loss /= n_test
 
-        print(f"Epoch {epoch + 1}/{epochs}: "
-              f"train_loss={avg_loss:.4f}, "
-              f"test_loss={test_loss:.4f}, "
-              f"accuracy={accuracy:.1f}%, "
-              f"time={epoch_time:.2f}s, "
-              f"{samples_per_sec:.0f} samples/sec")
+        print(
+            f"Epoch {epoch + 1}/{epochs}: "
+            f"train_loss={avg_loss:.4f}, "
+            f"test_loss={test_loss:.4f}, "
+            f"accuracy={accuracy:.1f}%, "
+            f"time={epoch_time:.2f}s, "
+            f"{samples_per_sec:.0f} samples/sec"
+        )
 
     # Final benchmark
     print("\n" + "=" * 70)
@@ -370,7 +372,9 @@ def main():
     elapsed = time.perf_counter() - start
 
     samples_per_sec = (n_iters * 1000) / elapsed
-    print(f"Forward pass only: {samples_per_sec:.0f} samples/sec ({elapsed/n_iters*1000:.2f}ms per batch)")
+    print(
+        f"Forward pass only: {samples_per_sec:.0f} samples/sec ({elapsed / n_iters * 1000:.2f}ms per batch)"
+    )
 
     # Benchmark full training iteration (forward + loss + backward)
     start = time.perf_counter()
@@ -381,7 +385,9 @@ def main():
     elapsed = time.perf_counter() - start
 
     samples_per_sec = (n_iters * 1000) / elapsed
-    print(f"Full training step: {samples_per_sec:.0f} samples/sec ({elapsed/n_iters*1000:.2f}ms per batch)")
+    print(
+        f"Full training step: {samples_per_sec:.0f} samples/sec ({elapsed / n_iters * 1000:.2f}ms per batch)"
+    )
 
     # Compare with CPU-only backward
     print("\n--- Comparison: GPU vs CPU backward ---")
@@ -394,7 +400,7 @@ def main():
     for _ in range(n_iters):
         model.backward(grad)
     elapsed_gpu = time.perf_counter() - start
-    print(f"GPU backward: {elapsed_gpu/n_iters*1000:.2f}ms per batch")
+    print(f"GPU backward: {elapsed_gpu / n_iters * 1000:.2f}ms per batch")
 
     # CPU backward benchmark (using numpy operations)
     batch_size = grad.shape[0]
@@ -402,26 +408,26 @@ def main():
     start = time.perf_counter()
     for _ in range(n_iters):
         # Layer 3 backward (CPU)
-        dw3 = model.cache['h2'].T @ grad / batch_size
-        db3 = np.sum(grad, axis=0) / batch_size
+        model.cache["h2"].T @ grad / batch_size
+        np.sum(grad, axis=0) / batch_size
         dh2 = grad @ model.w3
 
         # Layer 2 backward (CPU)
-        relu_mask2 = (model.cache['h2_pre'] > 0).astype(np.float32)
+        relu_mask2 = (model.cache["h2_pre"] > 0).astype(np.float32)
         dh2_pre = dh2 * relu_mask2
-        dw2 = model.cache['h1'].T @ dh2_pre / batch_size
-        db2 = np.sum(dh2_pre, axis=0) / batch_size
+        model.cache["h1"].T @ dh2_pre / batch_size
+        np.sum(dh2_pre, axis=0) / batch_size
         dh1 = dh2_pre @ model.w2
 
         # Layer 1 backward (CPU)
-        relu_mask1 = (model.cache['h1_pre'] > 0).astype(np.float32)
+        relu_mask1 = (model.cache["h1_pre"] > 0).astype(np.float32)
         dh1_pre = dh1 * relu_mask1
-        dw1 = model.cache['x'].T @ dh1_pre / batch_size
-        db1 = np.sum(dh1_pre, axis=0) / batch_size
+        model.cache["x"].T @ dh1_pre / batch_size
+        np.sum(dh1_pre, axis=0) / batch_size
     elapsed_cpu = time.perf_counter() - start
-    print(f"CPU backward: {elapsed_cpu/n_iters*1000:.2f}ms per batch")
+    print(f"CPU backward: {elapsed_cpu / n_iters * 1000:.2f}ms per batch")
 
-    speedup = elapsed_cpu / elapsed_gpu if elapsed_gpu > 0 else float('inf')
+    speedup = elapsed_cpu / elapsed_gpu if elapsed_gpu > 0 else float("inf")
     print(f"Speedup: {speedup:.2f}x")
 
     print("\nTraining complete!")

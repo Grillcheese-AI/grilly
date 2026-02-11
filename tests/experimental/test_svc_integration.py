@@ -29,8 +29,16 @@ from grilly.experimental.vsa import BinaryOps, HolographicOps
 # =============================================================================
 
 VALID_REALMS = {
-    "technology", "science", "health", "history",
-    "nature", "business", "arts", "social", "general", "conversation",
+    "technology",
+    "science",
+    "health",
+    "history",
+    "nature",
+    "business",
+    "arts",
+    "social",
+    "general",
+    "conversation",
 }
 
 HEALTH_ENTRIES = [
@@ -182,13 +190,20 @@ CONVERSATION_ENTRIES = [
 ]
 
 ALL_ENTRIES = (
-    HEALTH_ENTRIES + SCIENCE_ENTRIES + GENERAL_ENTRIES
-    + IMPERATIVE_ENTRIES + CONVERSATION_ENTRIES
+    HEALTH_ENTRIES + SCIENCE_ENTRIES + GENERAL_ENTRIES + IMPERATIVE_ENTRIES + CONVERSATION_ENTRIES
 )
 
 INSTRUCT_FIELDS = {
-    "id", "text", "svc", "pos", "lemmas", "deps",
-    "root_verb", "realm", "source", "complexity",
+    "id",
+    "text",
+    "svc",
+    "pos",
+    "lemmas",
+    "deps",
+    "root_verb",
+    "realm",
+    "source",
+    "complexity",
 }
 CONVERSATION_FIELDS = INSTRUCT_FIELDS | {"role"}
 
@@ -197,9 +212,10 @@ CONVERSATION_FIELDS = INSTRUCT_FIELDS | {"role"}
 # Helpers
 # =============================================================================
 
+
 def tokenize(text: str) -> list[str]:
     """Tokenize the same way InstantLanguage._tokenize does."""
-    return re.sub(r'[^\w\s]', '', text.lower()).split()
+    return re.sub(r"[^\w\s]", "", text.lower()).split()
 
 
 def svc_to_roles(text: str, svc: dict) -> tuple[list[str], list[str]]:
@@ -229,6 +245,7 @@ def svc_to_roles(text: str, svc: dict) -> tuple[list[str], list[str]]:
 # =============================================================================
 # 1. TestSVCDataLoading
 # =============================================================================
+
 
 class TestSVCDataLoading:
     """Test parsing and schema validation of SVC data."""
@@ -292,6 +309,7 @@ class TestSVCDataLoading:
 # =============================================================================
 # 2. TestSVCToWordEncoding
 # =============================================================================
+
 
 class TestSVCToWordEncoding:
     """Test encoding SVC words with WordEncoder."""
@@ -358,6 +376,7 @@ class TestSVCToWordEncoding:
 # =============================================================================
 # 3. TestSVCRoleMapping
 # =============================================================================
+
 
 class TestSVCRoleMapping:
     """Map SVC s/v/c to SUBJ/VERB/OBJ roles and encode sentences."""
@@ -462,6 +481,7 @@ class TestSVCRoleMapping:
 # 4. TestSVCWorldModelFacts
 # =============================================================================
 
+
 class TestSVCWorldModelFacts:
     """Feed SVC triples into WorldModel as facts."""
 
@@ -525,22 +545,19 @@ class TestSVCWorldModelFacts:
 
         # Health fact still queryable
         h = HEALTH_ENTRIES[0]
-        is_known, _ = wm.query_fact(
-            h["svc"]["s"].lower(), h["root_verb"], h["svc"]["c"].lower()
-        )
+        is_known, _ = wm.query_fact(h["svc"]["s"].lower(), h["root_verb"], h["svc"]["c"].lower())
         assert is_known
 
         # Science fact still queryable
         s = SCIENCE_ENTRIES[0]
-        is_known, _ = wm.query_fact(
-            s["svc"]["s"].lower(), s["root_verb"], s["svc"]["c"].lower()
-        )
+        is_known, _ = wm.query_fact(s["svc"]["s"].lower(), s["root_verb"], s["svc"]["c"].lower())
         assert is_known
 
 
 # =============================================================================
 # 5. TestSVCCognitiveUnderstanding
 # =============================================================================
+
 
 class TestSVCCognitiveUnderstanding:
     """Feed SVC sentences through CognitiveController."""
@@ -572,9 +589,7 @@ class TestSVCCognitiveUnderstanding:
         # Add knowledge from SVC data
         for entry in HEALTH_ENTRIES:
             svc = entry["svc"]
-            ctrl.add_knowledge(
-                svc["s"].lower(), entry["root_verb"], svc["c"].lower()
-            )
+            ctrl.add_knowledge(svc["s"].lower(), entry["root_verb"], svc["c"].lower())
 
         result = ctrl.understand("Exercise is crucial for health")
         assert isinstance(result, UnderstandingResult)
@@ -610,6 +625,7 @@ class TestSVCCognitiveUnderstanding:
 # 6. TestSVCRealmRouting
 # =============================================================================
 
+
 class TestSVCRealmRouting:
     """Use SVC realm field to route via ResonatorMoE."""
 
@@ -618,16 +634,14 @@ class TestSVCRealmRouting:
     def _build_realm_moe(self, dim):
         """Build a ResonatorMoE with one expert per realm."""
         experts = {r: (lambda x, _r=r: x) for r in self.REALMS}
-        expert_vectors = {
-            r: BinaryOps.hash_to_bipolar(r, dim) for r in self.REALMS
-        }
+        expert_vectors = {r: BinaryOps.hash_to_bipolar(r, dim) for r in self.REALMS}
         return ResonatorMoE(dim=dim, experts=experts, expert_vectors=expert_vectors)
 
     def test_realm_hash_vectors_near_orthogonal(self, dim):
         """Realm expert vectors should be approximately orthogonal."""
         vecs = {r: BinaryOps.hash_to_bipolar(r, dim) for r in self.REALMS}
         for i, r1 in enumerate(self.REALMS):
-            for r2 in self.REALMS[i + 1:]:
+            for r2 in self.REALMS[i + 1 :]:
                 sim = BinaryOps.similarity(vecs[r1], vecs[r2])
                 assert abs(sim) < 0.2, f"{r1}/{r2} sim={sim:.3f}"
 
@@ -637,9 +651,7 @@ class TestSVCRealmRouting:
         for realm in self.REALMS:
             query = BinaryOps.hash_to_bipolar(realm, dim)
             result = moe.route(query, top_k=1)
-            assert result[0] == realm, (
-                f"realm={realm} routed to {result[0]}"
-            )
+            assert result[0] == realm, f"realm={realm} routed to {result[0]}"
 
     def test_route_with_noisy_realm_signal(self, dim):
         """Bundling sentence vector with realm indicator still routes correctly."""
@@ -656,14 +668,14 @@ class TestSVCRealmRouting:
             for entry in entries:
                 words, roles = svc_to_roles(entry["text"], entry["svc"])
                 sent_vec = se.encode_sentence(words, roles)
-                realm_indicator = BinaryOps.hash_to_bipolar(
-                    entry["realm"], dim
-                )
+                realm_indicator = BinaryOps.hash_to_bipolar(entry["realm"], dim)
                 # Bundle sentence content with realm signal (bipolarize sent_vec)
-                query = BinaryOps.bundle([
-                    np.sign(sent_vec + 1e-8).astype(np.float32),
-                    realm_indicator,
-                ])
+                query = BinaryOps.bundle(
+                    [
+                        np.sign(sent_vec + 1e-8).astype(np.float32),
+                        realm_indicator,
+                    ]
+                )
                 result = moe.route(query, top_k=1)
                 if result[0] == expected_realm:
                     correct += 1
@@ -682,6 +694,7 @@ class TestSVCRealmRouting:
 # =============================================================================
 # 7. TestSVCTemporalIntegration
 # =============================================================================
+
 
 class TestSVCTemporalIntegration:
     """Test SVC data with temporal reasoning modules."""
@@ -766,9 +779,7 @@ class TestSVCTemporalIntegration:
         recovered_wrong = te.unbind_time(temporal, t=50)
 
         sim_wrong = HolographicOps.similarity(recovered_wrong, sent_vec)
-        sim_right = HolographicOps.similarity(
-            te.unbind_time(temporal, t=10), sent_vec
-        )
+        sim_right = HolographicOps.similarity(te.unbind_time(temporal, t=10), sent_vec)
         assert sim_right > sim_wrong, (
             f"Right time sim={sim_right:.3f} should beat wrong time sim={sim_wrong:.3f}"
         )
@@ -804,6 +815,7 @@ class TestSVCTemporalIntegration:
 # 8. TestSVCBatchPipeline
 # =============================================================================
 
+
 class TestSVCBatchPipeline:
     """End-to-end batch processing of SVC entries through the full pipeline."""
 
@@ -831,9 +843,7 @@ class TestSVCBatchPipeline:
             words, roles = svc_to_roles(entry["text"], entry["svc"])
             vec = se.encode_sentence(words, roles)
             norm = np.linalg.norm(vec)
-            assert abs(norm - 1.0) < 0.01, (
-                f"{entry['id']} norm={norm:.4f}"
-            )
+            assert abs(norm - 1.0) < 0.01, f"{entry['id']} norm={norm:.4f}"
 
     def test_batch_add_facts_and_route(self, dim):
         """Pipeline: parse SVC → add facts → encode → route by realm."""
@@ -842,9 +852,7 @@ class TestSVCBatchPipeline:
         wm = WorldModel(dim=dim)
 
         realm_experts = {r: (lambda x, _r=r: x) for r in ("health", "science", "general")}
-        realm_vectors = {
-            r: BinaryOps.hash_to_bipolar(r, dim) for r in realm_experts
-        }
+        realm_vectors = {r: BinaryOps.hash_to_bipolar(r, dim) for r in realm_experts}
         moe = ResonatorMoE(dim=dim, experts=realm_experts, expert_vectors=realm_vectors)
 
         for entry in ALL_ENTRIES:
@@ -883,9 +891,7 @@ class TestSVCBatchPipeline:
         within_sims = []
         for i in range(len(health_vecs)):
             for j in range(i + 1, len(health_vecs)):
-                within_sims.append(
-                    HolographicOps.similarity(health_vecs[i], health_vecs[j])
-                )
+                within_sims.append(HolographicOps.similarity(health_vecs[i], health_vecs[j]))
 
         # Mean pairwise similarity across health/science
         cross_sims = []
@@ -909,9 +915,7 @@ class TestSVCBatchPipeline:
         # Load all SVC data as world knowledge
         for entry in ALL_ENTRIES:
             svc = entry["svc"]
-            ctrl.add_knowledge(
-                svc["s"].lower(), entry["root_verb"], svc["c"].lower()
-            )
+            ctrl.add_knowledge(svc["s"].lower(), entry["root_verb"], svc["c"].lower())
 
         assert len(ctrl.world.facts) == len(ALL_ENTRIES)
 
@@ -923,4 +927,3 @@ class TestSVCBatchPipeline:
         print(result)
         print(result.surface_meaning)
         print(result.words)
-
