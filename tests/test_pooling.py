@@ -381,6 +381,7 @@ class TestAdaptivePooling:
         np.testing.assert_allclose(grilly_out, torch_out, rtol=1e-5, atol=1e-6)
 
 
+@pytest.mark.gpu
 class TestPoolingEdgeCases:
     """Edge case tests for pooling layers"""
 
