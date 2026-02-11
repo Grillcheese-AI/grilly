@@ -5,9 +5,12 @@ Uses VSA operations to route queries to relevant experts.
 """
 
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from grilly.experimental.moe.relational import RelationalEncoder
 
 from grilly.experimental.cognitive.capsule import CapsuleEncoder, cosine_similarity
 from grilly.experimental.vsa.ops import BinaryOps

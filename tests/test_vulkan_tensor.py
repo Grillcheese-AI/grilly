@@ -15,6 +15,7 @@ except ImportError:
     VULKAN_TENSOR_AVAILABLE = False
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_TENSOR_AVAILABLE, reason="VulkanTensor not available")
 class TestVulkanTensor:
     """Test VulkanTensor GPU-resident tensor operations"""
@@ -96,6 +97,7 @@ class TestVulkanTensor:
         assert result.shape == (4, 8)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_TENSOR_AVAILABLE, reason="VulkanTensor not available")
 class TestVulkanTensorGPU:
     """Test GPU operations with VulkanTensor"""

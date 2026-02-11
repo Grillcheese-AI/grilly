@@ -9,6 +9,7 @@ import os
 import tempfile
 
 import numpy as np
+import pytest
 import onnx
 from onnx import TensorProto, helper, numpy_helper
 
@@ -149,6 +150,7 @@ def _make_transformer_block_onnx(dim=16):
 # ===========================================================================
 
 
+@pytest.mark.gpu
 class TestOnnxLoader:
     def test_load_simple_onnx(self):
         """Load a minimal ONNX model (Linear + ReLU), verify forward pass."""
@@ -378,6 +380,7 @@ class TestOnnxOpCoverage:
 # ===========================================================================
 
 
+@pytest.mark.gpu
 class TestOnnxExporter:
     def test_export_linear(self):
         """Export a single Linear module to ONNX."""

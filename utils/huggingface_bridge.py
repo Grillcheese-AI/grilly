@@ -11,11 +11,16 @@ Also provides LoRA (Low-Rank Adaptation) support for efficient fine-tuning:
 - Apply LoRA to specific model layers
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from grilly.nn.lora import LoRAConfig, LoRAModel
 
 try:
     import torch
@@ -601,7 +606,7 @@ class HuggingFaceBridge:
         rank: int = 8,
         alpha: float = 16.0,
         **kwargs,
-    ) -> tuple[Any, "LoRAModel"]:
+    ) -> tuple[Any, LoRAModel]:
         """
         Load a HuggingFace model with LoRA adapters for fine-tuning.
 
@@ -695,7 +700,7 @@ class HuggingFaceBridge:
             return ["q_proj", "v_proj", "query", "value"]
 
     def _apply_lora_to_model(
-        self, model: Any, lora_model: "LoRAModel", config: "LoRAConfig"
+        self, model: Any, lora_model: LoRAModel, config: LoRAConfig
     ) -> None:
         """
         Apply LoRA adapters to target modules in the model.
@@ -727,7 +732,7 @@ class HuggingFaceBridge:
 
     def save_lora_adapters(
         self,
-        lora_model: "LoRAModel",
+        lora_model: LoRAModel,
         save_path: str | Path,
         model_name: str | None = None,
     ) -> None:
@@ -773,7 +778,7 @@ class HuggingFaceBridge:
     def load_lora_adapters(
         self,
         load_path: str | Path,
-    ) -> "LoRAModel":
+    ) -> LoRAModel:
         """
         Load LoRA adapters from disk.
 
@@ -849,7 +854,7 @@ class HuggingFaceBridge:
         target_modules: list[str],
         rank: int = 8,
         alpha: float = 16.0,
-    ) -> "LoRAModel":
+    ) -> LoRAModel:
         """
         Create LoRA model from extracted weights.
 
@@ -905,7 +910,7 @@ class HuggingFaceBridge:
     def merge_lora_to_model(
         self,
         model: Any,
-        lora_model: "LoRAModel",
+        lora_model: LoRAModel,
     ) -> Any:
         """
         Merge LoRA weights into the base model.

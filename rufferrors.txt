@@ -1,0 +1,228 @@
+Skip to content
+Grillcheese-AI
+grilly
+Repository navigation
+Code
+Issues
+2
+ (2)
+Pull requests
+Actions
+Projects
+Models
+Wiki
+Security
+Insights
+Settings
+CI
+Format: normalize quotes, commas, and spacing #3
+All jobs
+Run details
+Annotations
+1 error
+lint
+failed 2 minutes ago in 9s
+Search logs
+1s
+0s
+1s
+4s
+0s
+199 |     n_samples = 100
+200 |     X = np.random.randn(n_samples, 4).astype(np.float32)
+    |     ^
+201 |     y_true = (X @ np.array([1, 2, -1, 0.5])).astype(np.float32) + 0.5
+    |
+
+N806 Variable `X` in function should be lowercase
+   --> tutorials/08_custom_autograd.py:265:5
+    |
+263 |     # Generate binary classification data
+264 |     np.random.seed(123)
+265 |     X = np.random.randn(50, 2).astype(np.float32)
+    |     ^
+266 |     # Simple linear boundary
+267 |     y_true = np.sign(X[:, 0] + X[:, 1]).astype(np.float32)  # {-1, +1}
+    |
+
+N999 Invalid module name: '09_data_loading'
+--> tutorials/09_data_loading.py:1:1
+
+E402 Module level import not at top of file
+   --> tutorials/09_data_loading.py:192:1
+    |
+190 | print("-" * 70)
+191 |
+192 | from grilly.nn.autograd import matmul, relu
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+
+N806 Variable `X` in function should be lowercase
+   --> tutorials/09_data_loading.py:268:21
+    |
+266 |     n_batches = 0
+267 |
+268 |     for batch_idx, (X, y) in enumerate(dataloader):
+    |                     ^
+269 |         # Flatten and convert to Variable
+270 |         X_flat = X.reshape(X.shape[0], -1).astype(np.float32)
+    |
+
+N806 Variable `X_flat` in function should be lowercase
+   --> tutorials/09_data_loading.py:270:9
+    |
+268 |     for batch_idx, (X, y) in enumerate(dataloader):
+269 |         # Flatten and convert to Variable
+270 |         X_flat = X.reshape(X.shape[0], -1).astype(np.float32)
+    |         ^^^^^^
+271 |         x_var = Variable(X_flat, requires_grad=False)
+    |
+
+N806 Variable `X` in function should be lowercase
+   --> tutorials/09_data_loading.py:309:13
+    |
+308 |     with no_grad():
+309 |         for X, y in dataloader:
+    |             ^
+310 |             X_flat = X.reshape(X.shape[0], -1).astype(np.float32)
+311 |             x_var = Variable(X_flat, requires_grad=False)
+    |
+
+N806 Variable `X_flat` in function should be lowercase
+   --> tutorials/09_data_loading.py:310:13
+    |
+308 |     with no_grad():
+309 |         for X, y in dataloader:
+310 |             X_flat = X.reshape(X.shape[0], -1).astype(np.float32)
+    |             ^^^^^^
+311 |             x_var = Variable(X_flat, requires_grad=False)
+    |
+
+N999 Invalid module name: '10_gpu_training'
+--> tutorials/10_gpu_training.py:1:1
+
+N806 Variable `X` in function should be lowercase
+   --> tutorials/10_gpu_training.py:297:25
+    |
+295 |         n_batches = 0
+296 |
+297 |         for batch_idx, (X, y) in enumerate(train_loader):
+    |                         ^
+298 |             # Flatten images
+299 |             X_flat = X.reshape(X.shape[0], -1).astype(np.float32)
+    |
+
+N806 Variable `X_flat` in function should be lowercase
+   --> tutorials/10_gpu_training.py:299:13
+    |
+297 |         for batch_idx, (X, y) in enumerate(train_loader):
+298 |             # Flatten images
+299 |             X_flat = X.reshape(X.shape[0], -1).astype(np.float32)
+    |             ^^^^^^
+300 |             y = y.astype(np.int64)
+    |
+
+N806 Variable `X` in function should be lowercase
+   --> tutorials/10_gpu_training.py:328:13
+    |
+326 |         n_test = 0
+327 |
+328 |         for X, y in test_loader:
+18 |     from numba import float32, int32, int64, jit, prange
+   |                                       ^^^^^
+19 |
+20 |     NUMBA_AVAILABLE = True
+   |
+help: Remove unused import
+
+UP007 Use `X | Y` for type annotations
+  --> utils/stable_hash.py:10:13
+   |
+ 8 | from typing import Union
+ 9 |
+10 | BytesLike = Union[bytes, bytearray, memoryview]
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+11 | Part = Union[str, int, float, bytes]
+   |
+help: Convert to `X | Y`
+
+UP007 Use `X | Y` for type annotations
+  --> utils/stable_hash.py:11:8
+   |
+10 | BytesLike = Union[bytes, bytearray, memoryview]
+11 | Part = Union[str, int, float, bytes]
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+12 |
+13 | try:
+   |
+help: Convert to `X | Y`
+
+F821 Undefined name `np`
+  --> utils/stable_hash.py:97:80
+   |
+97 | def bipolar_from_key(key: str, dim: int, *, domain: str = "grilly.bipolar") -> np.ndarray:
+   |                                                                                ^^
+98 |     """
+99 |     Deterministically generate a bipolar (+1/-1) vector using a hash-stream.
+   |
+
+F401 `grilly.nn` imported but unused; consider using `importlib.util.find_spec` to test for availability
+  --> utils/vulkan_sentence_transformer.py:26:36
+   |
+25 | try:
+26 |     from grilly import functional, nn
+   |                                    ^^
+27 |
+28 |     GRILLY_AVAILABLE = True
+   |
+help: Remove unused import: `grilly.nn`
+
+F821 Undefined name `up_out`
+    --> utils/vulkan_sentence_transformer.py:1255:49
+     |
+1253 | …         )
+1254 | …         logger.error(
+1255 | …             f"  up_out stats: mean={up_out.mean():.6f}, std={up_out.std():.6f}, min={up_out.min():.6f}, max={up_out.max():.6f}"
+     |                                       ^^^^^^
+1256 | …         )
+1257 | …     # Replace NaN/Inf with zeros (no random noise to avoid divergence)
+     |
+
+F821 Undefined name `up_out`
+    --> utils/vulkan_sentence_transformer.py:1255:74
+     |
+1253 | …         )
+1254 | …         logger.error(
+1255 | …             f"  up_out stats: mean={up_out.mean():.6f}, std={up_out.std():.6f}, min={up_out.min():.6f}, max={up_out.max():.6f}"
+     |                                                                ^^^^^^
+1256 | …         )
+1257 | …     # Replace NaN/Inf with zeros (no random noise to avoid divergence)
+     |
+
+F821 Undefined name `up_out`
+    --> utils/vulkan_sentence_transformer.py:1255:98
+     |
+1253 | …         )
+1254 | …         logger.error(
+1255 | …             f"  up_out stats: mean={up_out.mean():.6f}, std={up_out.std():.6f}, min={up_out.min():.6f}, max={up_out.max():.6f}"
+     |                                                                                        ^^^^^^
+1256 | …         )
+1257 | …     # Replace NaN/Inf with zeros (no random noise to avoid divergence)
+     |
+
+F821 Undefined name `up_out`
+    --> utils/vulkan_sentence_transformer.py:1255:122
+     |
+1253 | …         )
+1254 | …         logger.error(
+1255 | …             f"  up_out stats: mean={up_out.mean():.6f}, std={up_out.std():.6f}, min={up_out.min():.6f}, max={up_out.max():.6f}"
+     |                                                                                                                ^^^^^^
+1256 | …         )
+1257 | …     # Replace NaN/Inf with zeros (no random noise to avoid divergence)
+     |
+
+Found 514 errors.
+Error: Process completed with exit code 1.
+0s
+0s
+0s

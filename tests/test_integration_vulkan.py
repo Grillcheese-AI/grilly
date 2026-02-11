@@ -17,6 +17,7 @@ except ImportError:
     GRILLY_AVAILABLE = False
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not GRILLY_AVAILABLE, reason="Grilly not available")
 class TestVulkanCore:
     """Test core Vulkan functionality"""
@@ -71,6 +72,7 @@ class TestVulkanCore:
             raise
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not GRILLY_AVAILABLE, reason="Grilly not available")
 class TestDeviceManagerVulkan:
     """Test device manager with Vulkan only"""
@@ -99,6 +101,7 @@ class TestDeviceManagerVulkan:
             raise
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not GRILLY_AVAILABLE, reason="Grilly not available")
 class TestPyTorchOpsVulkan:
     """Test PyTorch operations with Vulkan backend"""
@@ -121,6 +124,7 @@ class TestPyTorchOpsVulkan:
             raise
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not GRILLY_AVAILABLE, reason="Grilly not available")
 class TestEndToEndVulkan:
     """End-to-end tests using only Vulkan (AMD compatible)"""

@@ -135,6 +135,7 @@ class TestSNNProcess:
         assert len(result["spikes"]) == 100
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestSNNGPU:
     """Test SNN with GPU (if available)"""

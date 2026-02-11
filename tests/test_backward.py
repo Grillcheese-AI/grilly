@@ -12,6 +12,7 @@ except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestBackwardOperations:
     """Test backward pass operations on GPU"""
@@ -179,6 +180,7 @@ class TestBackwardOperations:
         )
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestAutogradIntegration:
     """Test autograd integration with nn.Module"""
@@ -237,6 +239,7 @@ class TestAutogradIntegration:
             assert output.shape == (4, 5)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestEndToEndTraining:
     """Test end-to-end training loop"""

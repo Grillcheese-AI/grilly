@@ -6,10 +6,14 @@ Uses: rope.glsl, flash-attention2-rope.glsl, attention-prosody-modulation.glsl
 Reference: grilly/backend/capsule_transformer.py
 """
 
+import logging
+
 import numpy as np
 
 from .module import Module
 from .modules import Dropout, LayerNorm, Linear, MultiheadAttention
+
+logger = logging.getLogger(__name__)
 
 
 class RoPE(Module):

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from grilly.experimental.cognitive.memory import WorkingMemory
-from grilly.experimental.cognitive.simulator import InternalSimulator
+from grilly.experimental.cognitive.simulator import InternalSimulator, SimulationResult
 from grilly.experimental.cognitive.understander import Understander, UnderstandingResult
 from grilly.experimental.cognitive.world import WorldModel
 from grilly.experimental.language.system import InstantLanguage, SVCIngestionResult
@@ -23,7 +23,7 @@ class CognitiveState:
     """Current state of the cognitive system."""
 
     understanding: UnderstandingResult | None = None
-    candidates: list[tuple[str, "SimulationResult"]] = field(default_factory=list)
+    candidates: list[tuple[str, SimulationResult]] = field(default_factory=list)
     selected_response: str | None = None
     confidence: float = 0.0
     thinking_steps: list[str] = field(default_factory=list)
@@ -282,10 +282,10 @@ class CognitiveController:
 
     def _apply_temporal_validation(
         self,
-        evaluated: list[tuple[str, "SimulationResult"]],
+        evaluated: list[tuple[str, SimulationResult]],
         decision_time: int | None,
         verbose: bool,
-    ) -> list[tuple[str, "SimulationResult"]]:
+    ) -> list[tuple[str, SimulationResult]]:
         """Execute apply temporal validation."""
 
         if self.temporal_validator is None or self.temporal_world is None:

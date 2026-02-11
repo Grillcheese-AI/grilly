@@ -136,6 +136,7 @@ class TestTensorConversion:
             pytest.skip("PyTorch not available")
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not TENSOR_CONVERSION_AVAILABLE, reason="Tensor conversion not available")
 class TestAutomaticConversion:
     """Test automatic conversion in nn.Module"""

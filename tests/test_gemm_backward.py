@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 
+@pytest.mark.gpu
 class TestLinearGEMMBackward:
     """Test Linear layer backward pass with GEMM optimization"""
 
@@ -190,6 +191,7 @@ class TestLinearGEMMBackward:
         np.testing.assert_allclose(linear.bias.grad, grad_bias_ref, rtol=1e-4, atol=1e-5)
 
 
+@pytest.mark.gpu
 class TestMultiheadAttentionGEMMBackward:
     """Test MultiheadAttention backward pass with GEMM-backed Linear layers"""
 
@@ -232,6 +234,7 @@ class TestMultiheadAttentionGEMMBackward:
         assert not np.any(np.isnan(grad_value))
 
 
+@pytest.mark.gpu
 class TestGEMMPerformance:
     """Performance tests to verify GEMM is faster than fallback"""
 

@@ -12,6 +12,7 @@ except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestAttentionOperations:
     """Test attention operations on GPU"""

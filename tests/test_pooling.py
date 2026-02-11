@@ -26,6 +26,7 @@ def backend():
     compute.cleanup()
 
 
+@pytest.mark.gpu
 class TestMaxPool2dBasic:
     """Basic MaxPool2d functionality tests"""
 
@@ -90,6 +91,7 @@ class TestMaxPool2dBasic:
         assert output.shape == (1, 4, 4, 3)
 
 
+@pytest.mark.gpu
 class TestAvgPool2dBasic:
     """Basic AvgPool2d functionality tests"""
 
@@ -141,6 +143,7 @@ class TestAvgPool2dBasic:
         assert output.shape == (1, 4, 4, 3)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch not available")
 class TestMaxPool2dVsPyTorch:
     """Tests comparing Grilly MaxPool2d with PyTorch"""
@@ -231,6 +234,7 @@ class TestMaxPool2dVsPyTorch:
         np.testing.assert_allclose(grilly_grad_input, x_torch.grad.numpy(), rtol=1e-4, atol=1e-5)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch not available")
 class TestAvgPool2dVsPyTorch:
     """Tests comparing Grilly AvgPool2d with PyTorch"""
@@ -321,6 +325,7 @@ class TestAvgPool2dVsPyTorch:
         np.testing.assert_allclose(grilly_grad_input, x_torch.grad.numpy(), rtol=1e-4, atol=1e-5)
 
 
+@pytest.mark.gpu
 class TestAdaptivePooling:
     """Tests for adaptive pooling layers"""
 
@@ -416,6 +421,7 @@ class TestPoolingEdgeCases:
         assert output.shape == (1, 16, 4, 4)
 
 
+@pytest.mark.gpu
 @pytest.mark.benchmark
 class TestPoolingPerformance:
     """Performance benchmarking tests"""

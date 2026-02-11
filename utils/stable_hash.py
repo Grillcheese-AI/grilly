@@ -5,10 +5,13 @@ from __future__ import annotations
 import hashlib
 import warnings
 from collections.abc import Iterable
-from typing import Union
+from typing import TYPE_CHECKING
 
-BytesLike = Union[bytes, bytearray, memoryview]
-Part = Union[str, int, float, bytes]
+if TYPE_CHECKING:
+    import numpy as np
+
+BytesLike = bytes | bytearray | memoryview
+Part = str | int | float | bytes
 
 try:
     from blake3 import blake3 as _blake3  # type: ignore

@@ -12,6 +12,7 @@ except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestLIFOperations:
     """Test LIF neuron operations on GPU"""
@@ -80,6 +81,7 @@ class TestLIFOperations:
         assert ref_out[0] < refractory[0]  # Refractory decreased
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestFNNOperations:
     """Test FNN operations on GPU"""
@@ -199,6 +201,7 @@ class TestFNNOperations:
         assert abs(output.std() - 1.0) < 0.1
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestFAISSOperations:
     """Test FAISS operations on GPU"""

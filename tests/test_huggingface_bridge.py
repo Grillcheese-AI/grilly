@@ -103,6 +103,7 @@ class TestHuggingFaceBridgeGlobal:
             raise
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not HUGGINGFACE_BRIDGE_AVAILABLE, reason="HuggingFace bridge not available")
 class TestHuggingFaceBridgeVulkanOnly:
     """Test HuggingFace bridge with Vulkan-only operations (AMD compatible)"""

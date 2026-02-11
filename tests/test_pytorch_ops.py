@@ -39,6 +39,7 @@ except ImportError:
     PYTORCH_OPS_AVAILABLE = False
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not PYTORCH_OPS_AVAILABLE, reason="PyTorch ops not available")
 class TestBasicOperations:
     """Test basic operations"""
@@ -75,6 +76,7 @@ class TestBasicOperations:
         assert result.shape == (2, 3, 5)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not PYTORCH_OPS_AVAILABLE, reason="PyTorch ops not available")
 class TestActivations:
     """Test activation functions"""
@@ -119,6 +121,7 @@ class TestActivations:
         assert abs(to_numpy(result)[0]) < 0.01
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not PYTORCH_OPS_AVAILABLE, reason="PyTorch ops not available")
 class TestNormalization:
     """Test normalization operations"""

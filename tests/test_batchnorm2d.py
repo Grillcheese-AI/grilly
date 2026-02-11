@@ -26,6 +26,7 @@ def backend():
     compute.cleanup()
 
 
+@pytest.mark.gpu
 class TestBatchNorm2dBasic:
     """Basic BatchNorm2d functionality tests"""
 
@@ -123,6 +124,7 @@ class TestBatchNorm2dBasic:
         assert output.shape == (8, 16, 32, 32)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch not available")
 class TestBatchNorm2dVsPyTorch:
     """Tests comparing Grilly BatchNorm2d with PyTorch"""
@@ -250,6 +252,7 @@ class TestBatchNorm2dVsPyTorch:
         )
 
 
+@pytest.mark.gpu
 class TestBatchNorm2dEdgeCases:
     """Edge case tests"""
 
@@ -290,6 +293,7 @@ class TestBatchNorm2dEdgeCases:
         assert output.shape == (1, 16, 8, 8)
 
 
+@pytest.mark.gpu
 class TestBatchNorm1d:
     """Tests for BatchNorm1d wrapper"""
 
@@ -318,6 +322,7 @@ class TestBatchNorm1d:
         assert output.shape == (32, 64, 100)
 
 
+@pytest.mark.gpu
 @pytest.mark.benchmark
 class TestBatchNorm2dPerformance:
     """Performance benchmarking tests"""

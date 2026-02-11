@@ -19,15 +19,21 @@ Installation:
 See: https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 import time
 import weakref
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from .base import VULKAN_AVAILABLE
+
+if TYPE_CHECKING:
+    from .core import VulkanCore
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +92,7 @@ class VMABuffer:
         allocation_info,
         size: int,
         bucket_size: int,
-        pool: "VMABufferPool",
+        pool: VMABufferPool,
         usage_flags: int,
     ):
         """Initialize the instance."""
@@ -161,7 +167,7 @@ class VMABufferPool:
     MAX_BUFFERS_PER_BUCKET = 32
     MAX_POOL_MEMORY = 512 * 1024 * 1024  # 512MB
 
-    def __init__(self, core: "VulkanCore", max_memory: int = None):
+    def __init__(self, core: VulkanCore, max_memory: int = None):
         """
         Initialize VMA buffer pool.
 
@@ -527,7 +533,7 @@ class PooledBuffer:
     )
 
     def __init__(
-        self, handle, memory, size: int, bucket_size: int, pool: "BufferPool", usage_flags: int
+        self, handle, memory, size: int, bucket_size: int, pool: BufferPool, usage_flags: int
     ):
         """Initialize the instance."""
 
@@ -575,7 +581,7 @@ class BufferPool:
     MAX_BUFFERS_PER_BUCKET = 32
     MAX_POOL_MEMORY = 512 * 1024 * 1024
 
-    def __init__(self, core: "VulkanCore", max_memory: int = None):
+    def __init__(self, core: VulkanCore, max_memory: int = None):
         """Initialize the instance."""
 
         self.core = core
@@ -771,7 +777,7 @@ import atexit
 atexit.register(_cleanup_global_pool)
 
 
-def get_buffer_pool(core: "VulkanCore" = None, use_vma: bool = None):
+def get_buffer_pool(core: VulkanCore = None, use_vma: bool = None):
     """
     Get or create the global buffer pool.
 
@@ -812,7 +818,7 @@ def get_buffer_pool(core: "VulkanCore" = None, use_vma: bool = None):
         return _global_pool
 
 
-def acquire_buffer(size: int, usage: int = None, core: "VulkanCore" = None):
+def acquire_buffer(size: int, usage: int = None, core: VulkanCore = None):
     """
     Convenience function to acquire a buffer from the global pool.
 

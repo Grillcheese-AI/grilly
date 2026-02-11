@@ -24,6 +24,7 @@ except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not BRIDGE_AVAILABLE, reason="HuggingFace bridge not available")
 @pytest.mark.skipif(
     not SENTENCE_TRANSFORMERS_AVAILABLE, reason="sentence-transformers not available"
@@ -135,6 +136,7 @@ class TestSentenceTransformersGPU:
             pytest.skip(f"Device selection test failed: {e}")
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not BRIDGE_AVAILABLE, reason="HuggingFace bridge not available")
 @pytest.mark.skipif(
     not SENTENCE_TRANSFORMERS_AVAILABLE, reason="sentence-transformers not available"

@@ -32,6 +32,7 @@ except ImportError as e:
     print(f"Multimodal import error: {e}")
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not MULTIMODAL_AVAILABLE, reason="Multimodal modules not available")
 class TestBottleneckFusion:
     """Test Multimodal Bottleneck Transformer (MBT)"""
@@ -66,6 +67,7 @@ class TestBottleneckFusion:
         assert output.shape == (2, 32, 256)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not MULTIMODAL_AVAILABLE, reason="Multimodal modules not available")
 class TestPerceiverIO:
     """Test Perceiver IO architecture"""
@@ -117,6 +119,7 @@ class TestPerceiverIO:
         assert output.shape == (2, 128, 768)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not MULTIMODAL_AVAILABLE, reason="Multimodal modules not available")
 class TestCrossModalAttentionFusion:
     """Test Cross-Modal Attention Fusion"""
@@ -146,6 +149,7 @@ class TestCrossModalAttentionFusion:
         assert output.shape == (2, 256)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not MULTIMODAL_AVAILABLE, reason="Multimodal modules not available")
 class TestImageBindFusion:
     """Test ImageBind-style joint embedding"""
@@ -214,6 +218,7 @@ class TestImageBindFusion:
         assert np.all(similarity >= -1) and np.all(similarity <= 1)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not MULTIMODAL_AVAILABLE, reason="Multimodal modules not available")
 class TestPerceiverResampler:
     """Test Perceiver Resampler (Flamingo)"""
@@ -246,6 +251,7 @@ class TestPerceiverResampler:
         assert output2.shape == (4, 32, 512)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not MULTIMODAL_AVAILABLE, reason="Multimodal modules not available")
 class TestFlamingoFusion:
     """Test Flamingo-style VLM fusion"""
@@ -275,6 +281,7 @@ class TestFlamingoFusion:
         assert output.shape == (4, 32, 512)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not MULTIMODAL_AVAILABLE, reason="Multimodal modules not available")
 class TestVLMLayer:
     """Test VLM transformer layer"""
@@ -292,6 +299,7 @@ class TestVLMLayer:
         assert np.all(np.isfinite(output))
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not MULTIMODAL_AVAILABLE, reason="Multimodal modules not available")
 class TestVisionLanguageModel:
     """Test complete Vision-Language Model"""
@@ -342,6 +350,7 @@ class TestVisionLanguageModel:
         assert 0 <= predicted < 500
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not MULTIMODAL_AVAILABLE, reason="Multimodal modules not available")
 class TestMultimodalIntegration:
     """Integration tests for multimodal modules"""

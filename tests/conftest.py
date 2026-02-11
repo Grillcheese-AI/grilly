@@ -5,6 +5,14 @@ Pytest configuration and fixtures for Grilly tests
 import numpy as np
 import pytest
 
+
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line(
+        "markers", "gpu: marks tests that require Vulkan/GPU (deselect with '-m \"not gpu\"')"
+    )
+
+
 try:
     import grilly
     from grilly.backend.base import VULKAN_AVAILABLE

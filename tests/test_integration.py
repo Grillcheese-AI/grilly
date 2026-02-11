@@ -52,6 +52,7 @@ class TestSNNIntegration:
         assert total_spikes > 0
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestGPUIntegration:
     """Integration tests for GPU operations"""

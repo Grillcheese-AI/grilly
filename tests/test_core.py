@@ -48,6 +48,7 @@ class TestGrillyImports:
         assert isinstance(VULKAN_AVAILABLE, bool)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestComputeInitialization:
     """Test Compute backend initialization"""

@@ -1,5 +1,8 @@
 """Core utilities for glu append."""
 
+import struct
+
+import numpy as np
 
 # ==================================================================
 # GATED LINEAR UNITS (GLU Variants)
@@ -13,8 +16,8 @@ def fused_swiglu(
     x: np.ndarray,
     W_gate: np.ndarray,
     W_up: np.ndarray,
-    b_gate: Optional[np.ndarray] = None,
-    b_up: Optional[np.ndarray] = None,
+    b_gate: np.ndarray | None = None,
+    b_up: np.ndarray | None = None,
     return_cache: bool = False,
 ):
     """
@@ -136,8 +139,8 @@ def fused_reglu(
     x: np.ndarray,
     W_gate: np.ndarray,
     W_up: np.ndarray,
-    b_gate: Optional[np.ndarray] = None,
-    b_up: Optional[np.ndarray] = None,
+    b_gate: np.ndarray | None = None,
+    b_up: np.ndarray | None = None,
     return_cache: bool = False,
 ):
     """
@@ -236,8 +239,8 @@ def fused_geglu(
     x: np.ndarray,
     W_gate: np.ndarray,
     W_up: np.ndarray,
-    b_gate: Optional[np.ndarray] = None,
-    b_up: Optional[np.ndarray] = None,
+    b_gate: np.ndarray | None = None,
+    b_up: np.ndarray | None = None,
     return_cache: bool = False,
 ):
     """

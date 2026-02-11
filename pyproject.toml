@@ -124,11 +124,38 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP"]
-ignore = ["E501"]
+ignore = [
+    "E501",
+    "E402",  # import not at top (conditional imports)
+    "E722",  # bare except (used for broad fallbacks)
+    "E741",  # ambiguous variable name (l, O)
+    "F403",  # star import (vulkan)
+    "F405",  # star import undefined (vulkan)
+    "F811",  # redefined while unused
+    "N801",  # class name (no_grad, enable_grad context managers)
+    "N802",  # function name (VK_MAKE_VERSION etc.)
+    "N803",  # argument name (W_gate, W_up ML convention)
+    "N806",  # variable name (X, y, N ML convention)
+    "N811",  # constant imported as non-constant
+    "N812",  # lowercase imported as non-lowercase
+    "N817",  # camelcase imported as acronym
+    "N999",  # module name (09_data_loading.py tutorials)
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Re-exports in package __init__ files
 "__init__.py" = ["F401"]
+# Tests: unused imports common in test setup
+"tests/**/*.py" = ["F401"]
+"test_quick.py" = ["F401"]
+# Optional deps: numba imports for availability check
+"utils/numba_ops.py" = ["F401"]
+# Scripts, tutorials: optional imports
+"scripts/*.py" = ["F401"]
+"tutorials/*.py" = ["F401"]
+# Optional config/tensor imports
+"backend/snn_compute.py" = ["F401"]
+"nn/module.py" = ["F401"]
 
 [tool.isort]
 profile = "black"

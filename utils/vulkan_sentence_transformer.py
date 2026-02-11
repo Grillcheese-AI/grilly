@@ -23,7 +23,7 @@ GRILLY_AVAILABLE = False
 _GRILLY_IMPORT_ERROR = None
 
 try:
-    from grilly import functional, nn
+    from grilly import functional
 
     GRILLY_AVAILABLE = True
 except ImportError as e:
@@ -1247,12 +1247,12 @@ class VulkanSentenceTransformer:
                 logger.error(
                     f"Layer {layer_idx}: NaN/Inf in FFN output! NaN: {np.isnan(ffn_out).sum()}, Inf: {np.isinf(ffn_out).sum()}"
                 )
-                if "gate_out" in locals() and "up_out" in locals():
+                if "gate_out" in locals() and "input_out" in locals():
                     logger.error(
                         f"  gate_out stats: mean={gate_out.mean():.6f}, std={gate_out.std():.6f}, min={gate_out.min():.6f}, max={gate_out.max():.6f}"
                     )
                     logger.error(
-                        f"  up_out stats: mean={up_out.mean():.6f}, std={up_out.std():.6f}, min={up_out.min():.6f}, max={up_out.max():.6f}"
+                        f"  input_out stats: mean={input_out.mean():.6f}, std={input_out.std():.6f}, min={input_out.min():.6f}, max={input_out.max():.6f}"
                     )
                 # Replace NaN/Inf with zeros (no random noise to avoid divergence)
                 if np.isnan(ffn_out).any() or np.isinf(ffn_out).any():

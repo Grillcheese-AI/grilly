@@ -36,6 +36,7 @@ except ImportError:
     GRILLY_AVAILABLE = False
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not TRANSFORMERS_AVAILABLE, reason="Transformers not available")
 @pytest.mark.skipif(not GRILLY_AVAILABLE, reason="Grilly not available")
 @require_sentencepiece
@@ -252,6 +253,7 @@ class TestT5TokenizerIntegration:
                 pytest.skip(f"Model encoding not available: {e}")
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not TRANSFORMERS_AVAILABLE, reason="Transformers not available")
 @pytest.mark.skipif(not GRILLY_AVAILABLE, reason="Grilly not available")
 @require_sentencepiece
@@ -331,6 +333,7 @@ class TestT5TokenizerExpectedOutputs:
         assert processed.shape[1] == 128
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not TRANSFORMERS_AVAILABLE, reason="Transformers not available")
 @pytest.mark.skipif(not GRILLY_AVAILABLE, reason="Grilly not available")
 @require_sentencepiece

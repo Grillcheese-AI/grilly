@@ -34,6 +34,7 @@ def skip_if_no_torch():
         pytest.skip("PyTorch not available for comparison")
 
 
+@pytest.mark.gpu
 class TestConv2dBasic:
     """Basic Conv2d functionality tests"""
 
@@ -140,6 +141,7 @@ class TestConv2dBasic:
         assert output.shape == (2, 16, 32, 32)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch not available")
 class TestConv2dVsPyTorch:
     """Tests comparing Grilly Conv2d with PyTorch"""
@@ -285,6 +287,7 @@ class TestConv2dVsPyTorch:
         )
 
 
+@pytest.mark.gpu
 class TestConv2dEdgeCases:
     """Edge case tests"""
 
@@ -328,6 +331,7 @@ class TestConv2dEdgeCases:
         assert output.shape == (1, 16, 32, 32)
 
 
+@pytest.mark.gpu
 @pytest.mark.benchmark
 class TestConv2dPerformance:
     """Performance benchmarking tests"""
@@ -399,6 +403,7 @@ class TestConv2dPerformance:
         assert speedup > 0
 
 
+@pytest.mark.gpu
 class TestConv1d:
     """Tests for Conv1d wrapper"""
 
