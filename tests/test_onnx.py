@@ -9,8 +9,8 @@ import os
 import tempfile
 
 import numpy as np
-import pytest
 import onnx
+import pytest
 from onnx import TensorProto, helper, numpy_helper
 
 from grilly.nn.lora import LoRAConfig
