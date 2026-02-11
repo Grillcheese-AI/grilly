@@ -6,8 +6,11 @@ without any training required.
 """
 
 from grilly.experimental.language import (
-    WordEncoder, SentenceEncoder, SentenceGenerator,
-    ResonatorParser, InstantLanguage
+    InstantLanguage,
+    ResonatorParser,
+    SentenceEncoder,
+    SentenceGenerator,
+    WordEncoder,
 )
 
 print("=" * 60)
@@ -69,7 +72,7 @@ print("-" * 60)
 parser = ResonatorParser(sentence_encoder, max_iterations=30)
 
 parsed = parser.parse(sentence_vec)
-print(f"Parsed sentence:")
+print("Parsed sentence:")
 for word, role, conf in parsed:
     print(f"  {word}: {role} (conf={conf:.2f})")
 
@@ -90,7 +93,7 @@ for _, words in lang.sentence_memory:
 
 # Query relations
 result = lang.query_relation("cat", "chased")
-print(f"\nQuery: What did the cat chase?")
+print("\nQuery: What did the cat chase?")
 print(f"Results: {result}")
 
 # Parse sentence
@@ -99,7 +102,7 @@ print(f"\nParsed: {parsed_sent}")
 
 # Find similar sentences
 similar = lang.find_similar_sentences("the cat ran fast", top_k=2)
-print(f"\nSimilar sentences:")
+print("\nSimilar sentences:")
 for sent, sim in similar:
     print(f"  {sent}: {sim:.4f}")
 
@@ -111,5 +114,5 @@ lang.learn_relation("king", "is_to", "queen")
 lang.learn_relation("man", "is_to", "woman")
 
 analogy = lang.analogy("king", "queen", "man")
-print(f"Analogy: king:queen :: man:?")
+print("Analogy: king:queen :: man:?")
 print(f"Answer: {analogy}")

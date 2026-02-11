@@ -11,8 +11,10 @@ Reference: "Decoupled Weight Decay Regularization" (Loshchilov & Hutter, 2019)
 
 Uses: adamw-update.glsl
 """
+from collections.abc import Iterator
+
 import numpy as np
-from typing import Iterator
+
 from .base import Optimizer
 
 

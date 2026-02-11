@@ -12,38 +12,27 @@ This tutorial covers:
 4. Training a neural network with data loaders
 """
 
-import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
-
-import numpy as np
 from pathlib import Path
 
+import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
+import numpy as np
+
 from grilly import Compute
-from grilly.datasets import MNIST, CIFAR10
-from grilly.utils.data import (
-    Dataset,
-    TensorDataset,
-    ArrayDataset,
-    DataLoader,
-    random_split,
-    Compose,
-    ToFloat32,
-    Normalize,
-    Flatten,
-    OneHot,
-)
-from grilly.nn import (
-    Module,
-    Linear,
-    ReLU,
-    Sequential,
-)
+from grilly.datasets import CIFAR10, MNIST
 from grilly.nn.autograd import (
     Variable,
-    tensor,
     cross_entropy,
     no_grad,
 )
-from grilly.optim import SGD
+from grilly.utils.data import (
+    ArrayDataset,
+    Compose,
+    DataLoader,
+    Normalize,
+    OneHot,
+    TensorDataset,
+    random_split,
+)
 
 # Initialize GPU
 compute = Compute()
@@ -197,7 +186,7 @@ print(f"Test set: {len(test_set)} samples")
 print("\n6. Training a Neural Network on MNIST")
 print("-" * 70)
 
-from grilly.nn.autograd import Variable, matmul, relu, softmax, cross_entropy, no_grad
+from grilly.nn.autograd import matmul, relu
 
 
 class SimpleNN:

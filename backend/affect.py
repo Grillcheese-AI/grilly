@@ -3,9 +3,11 @@ Affect MLP operations for Vulkan backend.
 GPU-accelerated affect prediction and training for amygdala.
 """
 
-import numpy as np
 import struct
 import time
+
+import numpy as np
+
 from .base import BufferMixin
 
 

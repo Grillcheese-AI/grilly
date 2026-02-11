@@ -2,8 +2,8 @@
 Linear operations (functional API)
 Uses: fnn-linear.glsl, fnn-linear-backward.glsl
 """
+
 import numpy as np
-from typing import Optional
 
 
 def _get_backend():
@@ -12,7 +12,7 @@ def _get_backend():
     return Compute()
 
 
-def linear(input: np.ndarray, weight: np.ndarray, bias: Optional[np.ndarray] = None) -> np.ndarray:
+def linear(input: np.ndarray, weight: np.ndarray, bias: np.ndarray | None = None) -> np.ndarray:
     """
     Linear transformation: output = input @ weight.T + bias
     Uses: fnn-linear.glsl

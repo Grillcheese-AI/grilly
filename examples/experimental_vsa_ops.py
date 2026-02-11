@@ -5,7 +5,6 @@ Demonstrates binary and holographic VSA operations including binding,
 unbinding, bundling, and similarity computation.
 """
 
-import numpy as np
 from grilly.experimental.vsa import BinaryOps, HolographicOps
 
 print("=" * 60)

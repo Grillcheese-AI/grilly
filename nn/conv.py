@@ -1,7 +1,8 @@
 """Convolutional layers for the Grilly neural network API."""
 
+
 import numpy as np
-from typing import Union, Tuple, Optional
+
 from .module import Module
 from .parameter import Parameter
 
@@ -29,10 +30,10 @@ class Conv2d(Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Union[int, Tuple[int, int]],
-        stride: Union[int, Tuple[int, int]] = 1,
-        padding: Union[int, Tuple[int, int]] = 0,
-        dilation: Union[int, Tuple[int, int]] = 1,
+        kernel_size: int | tuple[int, int],
+        stride: int | tuple[int, int] = 1,
+        padding: int | tuple[int, int] = 0,
+        dilation: int | tuple[int, int] = 1,
         groups: int = 1,
         bias: bool = True,
         padding_mode: str = 'zeros'

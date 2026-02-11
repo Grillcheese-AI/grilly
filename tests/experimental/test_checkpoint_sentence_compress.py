@@ -1,4 +1,3 @@
-import numpy as np
 
 def test_checkpoint_sentence_token_compression(tmp_path):
     try:
@@ -9,9 +8,17 @@ def test_checkpoint_sentence_token_compression(tmp_path):
         from experimental.language.svc_loader import SVCEntry
 
     try:
-        from grilly.utils.ingest_checkpoint import save_ingest_checkpoint, load_ingest_checkpoint, CheckpointView
+        from grilly.utils.ingest_checkpoint import (
+            CheckpointView,
+            load_ingest_checkpoint,
+            save_ingest_checkpoint,
+        )
     except ModuleNotFoundError:
-        from utils.ingest_checkpoint import save_ingest_checkpoint, load_ingest_checkpoint, CheckpointView
+        from utils.ingest_checkpoint import (
+            CheckpointView,
+            load_ingest_checkpoint,
+            save_ingest_checkpoint,
+        )
 
     c = CognitiveController(dim=128, word_use_ngrams=False)
 

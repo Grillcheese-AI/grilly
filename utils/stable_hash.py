@@ -1,10 +1,10 @@
 """Deterministic hashing helpers used for reproducible vector seeding."""
 from __future__ import annotations
 
-from typing import Iterable, Union, Optional
-import os
 import hashlib
 import warnings
+from collections.abc import Iterable
+from typing import Union
 
 BytesLike = Union[bytes, bytearray, memoryview]
 Part = Union[str, int, float, bytes]
@@ -84,7 +84,7 @@ def stable_bytes(*parts: Part, domain: str = "grilly", out_len: int = 32) -> byt
 
     return digest(parts, domain=domain, out_len=out_len)
 
-def bipolar_from_key(key: str, dim: int, *, domain: str = "grilly.bipolar") -> "np.ndarray":
+def bipolar_from_key(key: str, dim: int, *, domain: str = "grilly.bipolar") -> np.ndarray:
     """
     Deterministically generate a bipolar (+1/-1) vector using a hash-stream.
     This avoids RNG differences across numpy versions.

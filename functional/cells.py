@@ -3,8 +3,8 @@ Functional Cell Operations
 
 Uses: place-cell.glsl, time-cell.glsl, theta-gamma-encoding.glsl
 """
+
 import numpy as np
-from typing import Optional, Tuple
 
 
 def _get_backend():
@@ -54,8 +54,8 @@ def time_cell(
     temporal_width: float = 1.0,
     max_rate: float = 15.0,
     baseline_rate: float = 0.1,
-    membrane_state: Optional[np.ndarray] = None
-) -> Tuple[np.ndarray, np.ndarray]:
+    membrane_state: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute time cell firing rates.
     
@@ -108,7 +108,7 @@ def theta_gamma_encoding(
         Theta-gamma encoding (n_theta * n_gamma,)
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'theta-gamma-encoding' in backend.shaders:
         try:
@@ -117,14 +117,14 @@ def theta_gamma_encoding(
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback
     theta_phase = 2 * np.pi * theta_freq * time
     gamma_phase = 2 * np.pi * gamma_freq * time
-    
+
     theta_encoding = np.sin(theta_phase + np.linspace(0, 2*np.pi, n_theta))
     gamma_encoding = np.sin(gamma_phase + np.linspace(0, 2*np.pi, n_gamma))
-    
+
     # Phase-amplitude coupling
     coupling = coupling_strength * np.outer(theta_encoding, gamma_encoding)
     return coupling.flatten().astype(np.float32)

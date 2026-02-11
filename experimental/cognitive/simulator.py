@@ -4,14 +4,15 @@ InternalSimulator - "Think before you speak" simulation.
 Simulates candidate utterances before outputting to verify coherence and appropriateness.
 """
 
-import numpy as np
-from typing import Optional, List
 from dataclasses import dataclass
-from grilly.experimental.language.system import InstantLanguage
+
+import numpy as np
+
+from grilly.experimental.cognitive.capsule import cosine_similarity
 from grilly.experimental.cognitive.memory import WorkingMemory
 from grilly.experimental.cognitive.world import WorldModel
+from grilly.experimental.language.system import InstantLanguage
 from grilly.experimental.vsa.ops import HolographicOps
-from grilly.experimental.cognitive.capsule import cosine_similarity
 
 
 @dataclass
@@ -21,10 +22,10 @@ class SimulationResult:
     vector: np.ndarray
     coherence_score: float
     coherence_reason: str
-    predicted_response: Optional[str]
+    predicted_response: str | None
     social_appropriateness: float
     confidence: float
-    
+
     @property
     def overall_score(self) -> float:
         """Execute overall score."""
@@ -45,7 +46,7 @@ class InternalSimulator:
     
     Based on prediction-by-production models in neuroscience.
     """
-    
+
     def __init__(
         self,
         language_system: InstantLanguage,
@@ -58,7 +59,7 @@ class InternalSimulator:
         self.world = world_model
         self.wm = working_memory
         self.dim = language_system.dim
-        
+
         # Social/pragmatic patterns
         self.social_patterns = {
             "polite": HolographicOps.random_vector(self.dim, seed=7000),
@@ -68,14 +69,14 @@ class InternalSimulator:
             "clear": HolographicOps.random_vector(self.dim, seed=7004),
             "confusing": HolographicOps.random_vector(self.dim, seed=7005),
         }
-        
+
         # History of simulations for learning
-        self.simulation_history: List[SimulationResult] = []
-    
+        self.simulation_history: list[SimulationResult] = []
+
     def simulate_utterance(
         self,
         candidate: str,
-        context: Optional[np.ndarray] = None
+        context: np.ndarray | None = None
     ) -> SimulationResult:
         """
         Simulate saying something.
@@ -85,19 +86,19 @@ class InternalSimulator:
         # 1. Encode the candidate
         words = candidate.lower().split()
         candidate_vec = self.language.sentence_encoder.encode_sentence(words)
-        
+
         # 2. Check coherence with world model
         is_coherent, coherence_score, reason = self.world.check_coherence(candidate_vec)
-        
+
         # 3. Predict response (what would happen if I said this?)
         predicted_response = self._predict_response(candidate_vec, context)
-        
+
         # 4. Check social appropriateness
         social_score = self._check_social(candidate_vec)
-        
+
         # 5. Compute confidence
         confidence = self._compute_confidence(candidate_vec, context)
-        
+
         result = SimulationResult(
             candidate=candidate,
             vector=candidate_vec,
@@ -107,36 +108,36 @@ class InternalSimulator:
             social_appropriateness=social_score,
             confidence=confidence
         )
-        
+
         self.simulation_history.append(result)
         return result
-    
+
     def _predict_response(
         self,
         utterance_vec: np.ndarray,
-        context: Optional[np.ndarray]
-    ) -> Optional[str]:
+        context: np.ndarray | None
+    ) -> str | None:
         """Predict how the listener might respond."""
         # Use causal expectations from world model
         # This is simplified - real system would be more sophisticated
-        
+
         # Check if utterance is a question
         # Questions predict answers
         question_pattern = self.language.word_encoder.encode_word("question")
         is_question = HolographicOps.similarity(utterance_vec, question_pattern) > 0.3
-        
+
         if is_question:
             return "[expects answer]"
-        
+
         # Check if utterance is a command
         command_pattern = self.language.word_encoder.encode_word("command")
         is_command = HolographicOps.similarity(utterance_vec, command_pattern) > 0.3
-        
+
         if is_command:
             return "[expects action]"
-        
+
         return "[expects acknowledgment]"
-    
+
     def _check_social(self, utterance_vec: np.ndarray) -> float:
         """Check social appropriateness of utterance."""
         # Compute similarity to good/bad social patterns
@@ -144,22 +145,22 @@ class InternalSimulator:
         rude_sim = HolographicOps.similarity(utterance_vec, self.social_patterns["rude"])
         helpful_sim = HolographicOps.similarity(utterance_vec, self.social_patterns["helpful"])
         harmful_sim = HolographicOps.similarity(utterance_vec, self.social_patterns["harmful"])
-        
+
         # Positive patterns - negative patterns
         score = (polite_sim + helpful_sim) - (rude_sim + harmful_sim)
-        
+
         # Normalize to [0, 1]
         return (score + 1) / 2
-    
+
     def _compute_confidence(
         self,
         utterance_vec: np.ndarray,
-        context: Optional[np.ndarray]
+        context: np.ndarray | None
     ) -> float:
         """Compute confidence in the utterance."""
         # Base confidence from working memory
         wm_context = self.wm.get_context_vector()
-        
+
         if context is not None:
             # Check similarity to context
             context_sim = HolographicOps.similarity(utterance_vec, context)

@@ -359,6 +359,7 @@ class TestConv2dPerformance:
     def test_conv2d_speedup_vs_cpu(self, backend):
         """Measure speedup vs PyTorch CPU"""
         import time
+
         from grilly.nn import Conv2d as GrillyConv2d
 
         # Create layers

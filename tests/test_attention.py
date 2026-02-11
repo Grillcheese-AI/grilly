@@ -1,8 +1,8 @@
 """
 Tests for attention operations
 """
-import pytest
 import numpy as np
+import pytest
 
 try:
     from grilly import Compute
@@ -14,14 +14,14 @@ except ImportError:
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestAttentionOperations:
     """Test attention operations on GPU"""
-    
+
     @pytest.fixture
     def gpu(self):
         """Initialize GPU backend"""
         backend = Compute()
         yield backend
         backend.cleanup()
-    
+
     def test_attention_scores(self, gpu):
         """Test attention score computation"""
         batch_size = 2
@@ -38,7 +38,7 @@ class TestAttentionOperations:
         # Output shape: (batch, num_heads, seq_len, seq_len)
         assert scores.shape == (batch_size, num_heads, seq_len, seq_len)
         assert np.all(np.isfinite(scores))
-    
+
     def test_attention_output(self, gpu):
         """Test attention output computation"""
         batch_size = 2

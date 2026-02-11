@@ -1,9 +1,10 @@
 """Checkpoint helpers for SVC ingestion snapshots and restore flows."""
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Dict, Optional, List, Tuple
 import json
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 
 
@@ -54,7 +55,7 @@ def save_ingest_checkpoint(
     include_sentence_memory: bool = False,
     max_sentences: int = 0,
     sentence_compress: str = "auto",  # auto|fp16|bitpack
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
 ) -> str:
     """Run save ingest checkpoint."""
 
@@ -130,7 +131,7 @@ def save_ingest_checkpoint(
     sent_offsets = np.zeros((0,), dtype=np.int64)
 
     if include_sentence_memory:
-        mem: List[Tuple[np.ndarray, List[str]]] = getattr(lang, "sentence_memory", []) or []
+        mem: list[tuple[np.ndarray, list[str]]] = getattr(lang, "sentence_memory", []) or []
         if max_sentences and max_sentences > 0:
             mem = mem[:max_sentences]
 
@@ -138,10 +139,10 @@ def save_ingest_checkpoint(
         sent_vecs = _stack_or_empty([v for (v, toks) in mem], dim, np.float32)
 
         # token vocabulary + ids
-        token_to_id: Dict[str, int] = {}
-        vocab_list: List[str] = []
-        ids: List[int] = []
-        offsets: List[int] = [0]
+        token_to_id: dict[str, int] = {}
+        vocab_list: list[str] = []
+        ids: list[int] = []
+        offsets: list[int] = [0]
 
         for _, toks in mem:
             for t in toks:
@@ -313,7 +314,7 @@ class CheckpointView:
         return [str(vocab[j]) for j in ids]
 
 
-def load_ingest_checkpoint(path: str, controller: Any, *, strict_dim: bool = True) -> Dict[str, Any]:
+def load_ingest_checkpoint(path: str, controller: Any, *, strict_dim: bool = True) -> dict[str, Any]:
     """Run load ingest checkpoint."""
 
     p = Path(path)

@@ -16,9 +16,9 @@ Usage:
 """
 
 import argparse
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 
 
 def _fmt_rate(n: int, dt: float) -> str:
@@ -61,17 +61,23 @@ def main() -> None:
     # Repo-layout compatibility: some setups package everything under "grilly",
     # others run directly from the repo root.
     try:
-        from grilly.utils.ingest_checkpoint import save_ingest_checkpoint, load_ingest_checkpoint, CheckpointView
-        from grilly.experimental.language.svc_loader import load_svc_entries, SVCIngestionEngine
         from grilly.experimental.cognitive.controller import CognitiveController
+        from grilly.experimental.language.svc_loader import SVCIngestionEngine, load_svc_entries
         from grilly.experimental.moe.routing import ResonatorMoE
         from grilly.experimental.vsa.ops import BinaryOps
+        from grilly.utils.ingest_checkpoint import (
+            CheckpointView,
+            load_ingest_checkpoint,
+            save_ingest_checkpoint,
+        )
     except ModuleNotFoundError:
-        from experimental.language.svc_loader import load_svc_entries, SVCIngestionEngine
         from experimental.cognitive.controller import CognitiveController
+        from experimental.language.svc_loader import SVCIngestionEngine, load_svc_entries
         from experimental.moe.routing import ResonatorMoE
         from experimental.vsa.ops import BinaryOps
-        from utils.ingest_checkpoint import save_ingest_checkpoint, load_ingest_checkpoint, CheckpointView
+        from utils.ingest_checkpoint import (
+            save_ingest_checkpoint,
+        )
 
     print("=" * 60)
     print("Grilly SVC Ingestion (streaming)")
@@ -138,7 +144,7 @@ def main() -> None:
             verbose=args.verbose,
             engine=engine,
         )
-        
+
 
         total += len(chunk)
         total_templates += res.templates_learned

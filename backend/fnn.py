@@ -8,9 +8,10 @@ Performance hierarchy:
 3. Pure numpy (baseline fallback)
 """
 
-import numpy as np
 import struct
-from typing import Optional
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:
@@ -19,16 +20,34 @@ if VULKAN_AVAILABLE:
 # Try to import numba-accelerated operations for CPU fallback
 try:
     from ..utils.numba_ops import (
-        layernorm as numba_layernorm,
-        softmax as numba_softmax,
-        linear as numba_linear,
-        gelu as numba_gelu,
-        silu as numba_silu,
-        relu as numba_relu,
-        gcu as numba_gcu,
-        roswish as numba_roswish,
-        swiglu as numba_swiglu,
         NUMBA_AVAILABLE,
+    )
+    from ..utils.numba_ops import (
+        gcu as numba_gcu,
+    )
+    from ..utils.numba_ops import (
+        gelu as numba_gelu,
+    )
+    from ..utils.numba_ops import (
+        layernorm as numba_layernorm,
+    )
+    from ..utils.numba_ops import (
+        linear as numba_linear,
+    )
+    from ..utils.numba_ops import (
+        relu as numba_relu,
+    )
+    from ..utils.numba_ops import (
+        roswish as numba_roswish,
+    )
+    from ..utils.numba_ops import (
+        silu as numba_silu,
+    )
+    from ..utils.numba_ops import (
+        softmax as numba_softmax,
+    )
+    from ..utils.numba_ops import (
+        swiglu as numba_swiglu,
     )
 except ImportError:
     NUMBA_AVAILABLE = False
@@ -200,7 +219,7 @@ class VulkanFNN(BufferMixin):
             self._release_buffer(buf_out)
 
             return result.reshape(original_shape) if len(original_shape) > 1 else result
-    
+
     def activation_gelu(self, input_data, return_gpu_tensor=False):
         """Apply GELU activation"""
         from ..utils.tensor_conversion import VulkanTensor
@@ -268,7 +287,7 @@ class VulkanFNN(BufferMixin):
             self._release_buffer(buf_out)
 
             return result.reshape(original_shape) if len(original_shape) > 1 else result
-    
+
     def activation_silu(self, input_data, return_gpu_tensor=False):
         """Apply SiLU (Swish) activation: x * sigmoid(x)"""
         from ..utils.tensor_conversion import VulkanTensor
@@ -597,7 +616,7 @@ class VulkanFNN(BufferMixin):
         self._release_buffers([buf_in, buf_out, buf_max, buf_sum])
 
         return result
-    
+
     def xavier_init(self, input_dim: int, output_dim: int, seed: int = 42) -> np.ndarray:
         """
         GPU-accelerated Xavier initialization
@@ -656,7 +675,7 @@ class VulkanFNN(BufferMixin):
         self._release_buffers([buf_weights])
 
         return result.reshape(output_dim, input_dim)
-    
+
     def activation_gelu_backward(self, grad_output, input_data):
         """
         GPU-accelerated GELU backward pass
@@ -1466,7 +1485,7 @@ class VulkanFNN(BufferMixin):
             self._release_buffer(buf_output)
 
             return result.reshape(output_shape)
-    
+
     # ------------------------------------------------------------------
     # Linear backward pass
     # ------------------------------------------------------------------
@@ -1475,7 +1494,7 @@ class VulkanFNN(BufferMixin):
         grad_output: np.ndarray,
         x: np.ndarray,
         weights: np.ndarray,
-        bias: Optional[np.ndarray] = None
+        bias: np.ndarray | None = None
     ) -> tuple:
         """
         Backward pass for linear layer using GEMM.
@@ -1905,7 +1924,7 @@ class VulkanFNN(BufferMixin):
     # ------------------------------------------------------------------
     # Dropout (CPU fallback)
     # ------------------------------------------------------------------
-    def dropout(self, x: np.ndarray, dropout_prob: float = 0.1, is_training: bool = True, seed: Optional[int] = None) -> np.ndarray:
+    def dropout(self, x: np.ndarray, dropout_prob: float = 0.1, is_training: bool = True, seed: int | None = None) -> np.ndarray:
         """
         Simple dropout implementation for test coverage. Scales activations to
         keep expected value consistent during training.
@@ -1916,7 +1935,7 @@ class VulkanFNN(BufferMixin):
         mask = rng.random(x.shape, dtype=x.dtype) >= dropout_prob
         scale = 1.0 / (1.0 - dropout_prob)
         return x * mask * scale
-    
+
     # ------------------------------------------------------------------
     # Residual connection
     # ------------------------------------------------------------------
@@ -1996,7 +2015,7 @@ class VulkanFNN(BufferMixin):
         self,
         x,
         weights: np.ndarray,
-        bias: Optional[np.ndarray] = None,
+        bias: np.ndarray | None = None,
         return_gpu_tensor=False,
     ) -> np.ndarray:
         """
@@ -2115,7 +2134,7 @@ class VulkanFNN(BufferMixin):
         self,
         x,
         weights: np.ndarray,
-        bias: Optional[np.ndarray] = None,
+        bias: np.ndarray | None = None,
         return_gpu_tensor=False,
     ) -> np.ndarray:
         """
@@ -2222,7 +2241,7 @@ class VulkanFNN(BufferMixin):
         self,
         x,
         weights: np.ndarray,
-        bias: Optional[np.ndarray] = None,
+        bias: np.ndarray | None = None,
         return_gpu_tensor=False,
     ) -> np.ndarray:
         """
@@ -2333,7 +2352,7 @@ class VulkanFNN(BufferMixin):
         self,
         x: np.ndarray,
         weights: np.ndarray,
-        bias: Optional[np.ndarray] = None
+        bias: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Fused Linear + GCU: GCU(x @ W.T + b)
@@ -2411,7 +2430,7 @@ class VulkanFNN(BufferMixin):
         self,
         x: np.ndarray,
         weights: np.ndarray,
-        bias: Optional[np.ndarray] = None,
+        bias: np.ndarray | None = None,
         alpha: float = 1.0,
         beta: float = 1.0
     ) -> np.ndarray:

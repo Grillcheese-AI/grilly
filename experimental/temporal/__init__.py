@@ -12,10 +12,10 @@ Submodules:
     - validator: TemporalDecisionValidator
 """
 
-from .encoder import TemporalEncoder
 from .causal import CausalChain, CausalRule
+from .counterfactual import CounterfactualQuery, CounterfactualReasoner, CounterfactualResult
+from .encoder import TemporalEncoder
 from .state import TemporalState, TemporalWorldModel
-from .counterfactual import CounterfactualReasoner, CounterfactualQuery, CounterfactualResult
 from .validator import TemporalDecisionValidator, ValidationResult
 
 __all__ = [

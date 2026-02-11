@@ -12,9 +12,10 @@ Uses: fft-bitrev.glsl, fft-butterfly.glsl, fft-magnitude.glsl,
       fft-power-spectrum.glsl, fft-normalize.glsl
 """
 
-import numpy as np
 import struct
-from typing import Tuple
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:
@@ -30,7 +31,7 @@ class VulkanFFT(BufferMixin):
         self.pipelines = pipelines
         self.shaders = shaders
 
-    def fft(self, input_data: np.ndarray, inverse: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+    def fft(self, input_data: np.ndarray, inverse: bool = False) -> tuple[np.ndarray, np.ndarray]:
         """
         Compute FFT or IFFT.
 
@@ -245,7 +246,7 @@ class VulkanFFT(BufferMixin):
             magnitude = self.fft_magnitude(real_part, imag_part)
             return (magnitude ** 2).astype(np.float32)
 
-    def fft_normalize(self, real_part: np.ndarray, imag_part: np.ndarray, N: int) -> Tuple[np.ndarray, np.ndarray]:
+    def fft_normalize(self, real_part: np.ndarray, imag_part: np.ndarray, N: int) -> tuple[np.ndarray, np.ndarray]:
         """
         Normalize FFT output.
 

@@ -1,8 +1,8 @@
 """
 Tests for learning operations
 """
-import pytest
 import numpy as np
+import pytest
 
 try:
     from grilly import Compute, Learning
@@ -14,14 +14,14 @@ except ImportError:
 @pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
 class TestLearningOperations:
     """Test learning operations on GPU"""
-    
+
     @pytest.fixture
     def gpu(self):
         """Initialize GPU backend"""
         backend = Compute()
         yield backend
         backend.cleanup()
-    
+
     def test_whitening_transform(self, gpu):
         """Test whitening transform"""
         # Create correlated data
@@ -44,20 +44,20 @@ class TestLearningOperations:
         assert np.all(np.isfinite(whitened))
         assert new_mean.shape == (n_features,)
         assert new_var.shape == (n_features,)
-    
+
     def test_nlms_predict(self, gpu):
         """Test NLMS prediction"""
         n_features = 32
         n_filters = 4
-        
+
         weights = np.random.randn(n_filters, n_features).astype(np.float32)
         input_signal = np.random.randn(n_features).astype(np.float32)
-        
+
         predictions = gpu.nlms_predict(weights, input_signal)
-        
+
         assert predictions.shape == (n_filters,)
         assert np.all(np.isfinite(predictions))
-    
+
     def test_nlms_update(self, gpu):
         """Test NLMS weight update"""
         n_features = 32

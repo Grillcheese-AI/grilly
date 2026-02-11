@@ -12,10 +12,10 @@ Key Features:
 - Operator overloading for natural syntax
 """
 
-import numpy as np
-from typing import Optional, List, Callable, Tuple, Any, Set, Union
-from collections import deque
+from collections.abc import Callable
+from typing import Optional
 
+import numpy as np
 
 # Global flag to disable gradient computation
 _grad_enabled = True
@@ -73,8 +73,8 @@ class GradFn:
     of intermediate variables before backward() is called.
     """
 
-    def __init__(self, name: str, backward_fn: Callable, inputs: List['Variable'],
-                 gpu_backward_fn: Optional[Callable] = None):
+    def __init__(self, name: str, backward_fn: Callable, inputs: list['Variable'],
+                 gpu_backward_fn: Callable | None = None):
         """Initialize the instance."""
 
         self.name = name
@@ -82,7 +82,7 @@ class GradFn:
         self.gpu_backward_fn = gpu_backward_fn  # GPU version (optional)
         # Use strong references to prevent GC of intermediate variables
         self._inputs = list(inputs)
-        self._next_functions: List[Optional['GradFn']] = []
+        self._next_functions: list[GradFn | None] = []
 
         # Build the graph edges
         for v in inputs:
@@ -92,7 +92,7 @@ class GradFn:
                 self._next_functions.append(None)
 
     @property
-    def inputs(self) -> List[Optional['Variable']]:
+    def inputs(self) -> list[Optional['Variable']]:
         """Get input variables."""
         return self._inputs
 
@@ -125,9 +125,9 @@ class Variable:
 
     def __init__(
         self,
-        data: Union[np.ndarray, float, int, list],
+        data: np.ndarray | float | int | list,
         requires_grad: bool = False,
-        grad_fn: Optional[GradFn] = None,
+        grad_fn: GradFn | None = None,
     ):
         """
         Args:
@@ -143,7 +143,7 @@ class Variable:
             self.data = np.array(data, dtype=np.float32)
 
         self.requires_grad = requires_grad
-        self.grad: Optional[np.ndarray] = None
+        self.grad: np.ndarray | None = None
         self.grad_fn = grad_fn
         self._is_leaf = grad_fn is None
 
@@ -178,7 +178,7 @@ class Variable:
         """Clear the gradient."""
         self.grad = None
 
-    def backward(self, grad_output: Optional[np.ndarray] = None, retain_graph: bool = False,
+    def backward(self, grad_output: np.ndarray | None = None, retain_graph: bool = False,
                  use_gpu: bool = True):
         """
         Compute gradients via reverse-mode automatic differentiation.
@@ -631,7 +631,7 @@ class Function(metaclass=FunctionMeta):
         raise NotImplementedError("Subclasses must implement forward()")
 
     @staticmethod
-    def backward(ctx: 'FunctionCtx', grad_output: np.ndarray) -> Tuple:
+    def backward(ctx: 'FunctionCtx', grad_output: np.ndarray) -> tuple:
         """
         Compute gradients for inputs.
 
@@ -707,8 +707,8 @@ class FunctionCtx:
     def __init__(self):
         """Initialize the instance."""
 
-        self.saved_tensors: Tuple[Variable, ...] = ()
-        self._saved_data: Tuple[np.ndarray, ...] = ()
+        self.saved_tensors: tuple[Variable, ...] = ()
+        self._saved_data: tuple[np.ndarray, ...] = ()
 
     def save_for_backward(self, *tensors):
         """
@@ -730,7 +730,7 @@ class FunctionCtx:
         self._saved_data = tuple(data)
 
     @property
-    def needs_input_grad(self) -> Tuple[bool, ...]:
+    def needs_input_grad(self) -> tuple[bool, ...]:
         """
         Check which inputs need gradients.
 
@@ -777,8 +777,8 @@ def _ensure_variable(x, copy=False) -> Variable:
     return Variable(x, requires_grad=False)
 
 
-def _make_backward(name: str, inputs: List[Variable], backward_fn: Callable,
-                   gpu_backward_fn: Optional[Callable] = None) -> Optional[GradFn]:
+def _make_backward(name: str, inputs: list[Variable], backward_fn: Callable,
+                   gpu_backward_fn: Callable | None = None) -> GradFn | None:
     """
     Create a GradFn if any input requires gradient.
 

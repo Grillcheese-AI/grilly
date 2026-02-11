@@ -4,13 +4,14 @@ WorkingMemory - Internal scratchpad for cognitive operations.
 Provides limited-capacity working memory with activation decay and attention.
 """
 
-import numpy as np
 import time
-from typing import List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
-from grilly.experimental.vsa.ops import HolographicOps
+
+import numpy as np
+
 from grilly.experimental.cognitive.capsule import CapsuleEncoder
+from grilly.experimental.vsa.ops import HolographicOps
 
 
 class WorkingMemorySlot(Enum):
@@ -28,7 +29,7 @@ class WorkingMemoryItem:
     vector: np.ndarray
     content: str  # Human-readable
     slot: WorkingMemorySlot
-    capsule_vector: Optional[np.ndarray] = None
+    capsule_vector: np.ndarray | None = None
     activation: float = 1.0
     timestamp: float = field(default_factory=time.time)
     source: str = "unknown"
@@ -48,13 +49,13 @@ class WorkingMemory:
     This is where "thinking" happens - composing and testing
     before committing to output.
     """
-    
+
     DEFAULT_DIM = 4096
     DEFAULT_CAPACITY = 7
     DEFAULT_DECAY_RATE = 0.1
     DEFAULT_CAPSULE_DIM = 32
     DEFAULT_SEMANTIC_DIMS = 28
-    
+
     def __init__(
         self,
         dim: int = DEFAULT_DIM,
@@ -70,7 +71,7 @@ class WorkingMemory:
         self.decay_rate = decay_rate
         self.capsule_dim = capsule_dim
         self.semantic_dims = semantic_dims
-        self.capsule_encoder: Optional[CapsuleEncoder] = None
+        self.capsule_encoder: CapsuleEncoder | None = None
 
         if capsule_dim > 0:
             self.capsule_encoder = CapsuleEncoder(
@@ -78,16 +79,16 @@ class WorkingMemory:
                 capsule_dim=capsule_dim,
                 semantic_dims=semantic_dims
             )
-        
+
         # The slots
-        self.items: List[WorkingMemoryItem] = []
-        
+        self.items: list[WorkingMemoryItem] = []
+
         # Focus of attention (index into items)
-        self.focus_idx: Optional[int] = None
-        
+        self.focus_idx: int | None = None
+
         # Binding buffer for chunking
-        self.binding_buffer: List[np.ndarray] = []
-    
+        self.binding_buffer: list[np.ndarray] = []
+
     def add(
         self,
         vector: np.ndarray,
@@ -95,8 +96,8 @@ class WorkingMemory:
         slot: WorkingMemorySlot,
         confidence: float = 1.0,
         source: str = "unknown",
-        capsule_vector: Optional[np.ndarray] = None,
-        cognitive_features: Optional[np.ndarray] = None
+        capsule_vector: np.ndarray | None = None,
+        cognitive_features: np.ndarray | None = None
     ) -> int:
         """Add item to working memory."""
         if capsule_vector is None and self.capsule_encoder is not None:
@@ -111,11 +112,11 @@ class WorkingMemory:
             confidence=confidence,
             source=source
         )
-        
+
         # Check capacity
         if len(self.items) >= self.capacity:
             # Remove least activated item
-            min_idx = min(range(len(self.items)), 
+            min_idx = min(range(len(self.items)),
                          key=lambda i: self.items[i].activation)
             self.items.pop(min_idx)
             if self.focus_idx is not None:
@@ -123,31 +124,31 @@ class WorkingMemory:
                     self.focus_idx = None
                 elif min_idx < self.focus_idx:
                     self.focus_idx -= 1
-        
+
         self.items.append(item)
         return len(self.items) - 1
-    
+
     def attend(self, idx: int):
         """Direct attention to an item (boosts activation)."""
         if 0 <= idx < len(self.items):
             self.focus_idx = idx
             self.items[idx].activation = 1.0
-    
+
     def decay(self):
         """Apply activation decay to all items."""
         for item in self.items:
             item.activation *= (1 - self.decay_rate)
-        
+
         # Boost focused item
         if self.focus_idx is not None:
             self.items[self.focus_idx].activation = min(
                 1.0, self.items[self.focus_idx].activation + 0.2
             )
-    
-    def get_by_slot(self, slot: WorkingMemorySlot) -> List[WorkingMemoryItem]:
+
+    def get_by_slot(self, slot: WorkingMemorySlot) -> list[WorkingMemoryItem]:
         """Get all items of a particular type."""
         return [item for item in self.items if item.slot == slot]
-    
+
     def get_context_vector(self) -> np.ndarray:
         """
         Get weighted sum of all items as context.
@@ -156,14 +157,14 @@ class WorkingMemory:
         """
         if not self.items:
             return np.zeros(self.dim, dtype=np.float32)
-        
+
         weighted = []
         for item in self.items:
             weighted.append(item.vector * item.activation)
-        
+
         return HolographicOps.bundle(weighted, normalize=True)
 
-    def get_context_capsule(self) -> Optional[np.ndarray]:
+    def get_context_capsule(self) -> np.ndarray | None:
         """
         Get weighted capsule context vector if available.
         """
@@ -185,7 +186,7 @@ class WorkingMemory:
             context = context / norm
 
         return context.astype(np.float32)
-    
+
     def bind_focused(self) -> np.ndarray:
         """
         Bind all items in binding buffer with focus.
@@ -194,17 +195,17 @@ class WorkingMemory:
         """
         if self.focus_idx is None or not self.binding_buffer:
             return np.zeros(self.dim, dtype=np.float32)
-        
+
         result = self.items[self.focus_idx].vector.copy()
         for vec in self.binding_buffer:
             result = HolographicOps.convolve(result, vec)
-        
+
         self.binding_buffer.clear()
         return result
-    
+
     def clear_candidates(self):
         """Clear all candidate responses."""
         self.items = [
-            item for item in self.items 
+            item for item in self.items
             if item.slot != WorkingMemorySlot.CANDIDATE
         ]

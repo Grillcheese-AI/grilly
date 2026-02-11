@@ -15,8 +15,9 @@ Author: Grilly Team
 Date: February 2026
 """
 
+from typing import Any
+
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any
 
 from .ops import BinaryOps
 
@@ -28,13 +29,13 @@ class ResonatorNetwork:
     current estimates from the composite vector and projecting the result
     onto the target factor codebook.
     """
-    
+
     def __init__(
         self,
-        codebooks: Dict[str, np.ndarray],
+        codebooks: dict[str, np.ndarray],
         max_iterations: int = 20,
         convergence_threshold: float = 0.95,
-        vsa_backend: Optional[Any] = None
+        vsa_backend: Any | None = None
     ):
         """
         Initialize resonator network.
@@ -51,23 +52,23 @@ class ResonatorNetwork:
         """
         if not codebooks:
             raise ValueError("Codebooks cannot be empty")
-        
+
         self.codebooks = codebooks
         self.factor_names = list(codebooks.keys())
         self.max_iterations = max_iterations
         self.convergence_threshold = convergence_threshold
-        
+
         # Validate dimensions
         dims = [cb.shape[-1] for cb in codebooks.values()]
         assert len(set(dims)) == 1, "All codebooks must have same dimension"
         self.dim = dims[0]
         self.vsa_backend = vsa_backend
-    
+
     def factorize(
         self,
         composite: np.ndarray,
-        init_estimates: Optional[Dict[str, np.ndarray]] = None
-    ) -> Tuple[Dict[str, np.ndarray], Dict[str, int], int]:
+        init_estimates: dict[str, np.ndarray] | None = None
+    ) -> tuple[dict[str, np.ndarray], dict[str, int], int]:
         """
         Factorize composite vector into components.
         
@@ -86,13 +87,13 @@ class ResonatorNetwork:
         if init_estimates is not None:
             # Use provided initialization
             return self._factorize_single_run(composite, init_estimates)
-        
+
         # Multiple restarts to find best solution
         num_restarts = 10 if len(self.factor_names) > 1 else 1
         best_score = -np.inf
         best_result = None
         best_iterations = 0
-        
+
         for restart in range(num_restarts):
             # Different initialization strategies
             if restart == 0:
@@ -105,47 +106,47 @@ class ResonatorNetwork:
                     codebook = self.codebooks[name]
                     idx = np.random.randint(len(codebook))
                     init[name] = codebook[idx].copy()
-            
+
             estimates, indices, iters = self._factorize_single_run(composite, init)
-            
+
             # Score this solution by how well it reconstructs the composite
             reconstructed = np.ones(self.dim, dtype=np.float32)
             for name in self.factor_names:
                 reconstructed = BinaryOps.bind(reconstructed, estimates[name])
-            
+
             score = BinaryOps.similarity(reconstructed, composite)
-            
+
             if score > best_score:
                 best_score = score
                 best_result = (estimates, indices)
                 best_iterations = iters
-            
+
             # Early termination if we found a perfect match
             if score > 0.99:
                 break
-        
+
         return best_result[0], best_result[1], best_iterations
-    
+
     def _factorize_single_run(
         self,
         composite: np.ndarray,
-        init_estimates: Dict[str, np.ndarray]
-    ) -> Tuple[Dict[str, np.ndarray], Dict[str, int], int]:
+        init_estimates: dict[str, np.ndarray]
+    ) -> tuple[dict[str, np.ndarray], dict[str, int], int]:
         """Single factorization run with given initialization."""
         estimates = {k: v.copy() for k, v in init_estimates.items()}
-        
+
         # Resonator dynamics
         for iteration in range(self.max_iterations):
             new_estimates = {}
             converged = True
-            
+
             for name in self.factor_names:
                 # Unbind all OTHER factors from composite
                 unbound = composite.copy()
                 for other_name, other_est in estimates.items():
                     if other_name != name:
                         unbound = BinaryOps.unbind(unbound, other_est)
-                
+
                 # Project onto codebook (find best match)
                 codebook = self.codebooks[name]
 
@@ -162,19 +163,19 @@ class ResonatorNetwork:
                     best_idx = int(np.argmax(similarities))
 
                 best_match = codebook[best_idx].copy()
-                
+
                 # Check convergence
                 old_sim = BinaryOps.similarity(estimates[name], best_match)
                 if old_sim < self.convergence_threshold:
                     converged = False
-                
+
                 new_estimates[name] = best_match
-            
+
             estimates = new_estimates
-            
+
             if converged:
                 break
-        
+
         # Get final indices
         indices = {}
         for name in self.factor_names:
@@ -191,9 +192,9 @@ class ResonatorNetwork:
                 similarities = codebook @ estimates[name]
 
                 indices[name] = int(np.argmax(similarities))
-        
+
         return estimates, indices, iteration + 1
-    
+
     def _init_estimate(self, name: str, composite: np.ndarray = None) -> np.ndarray:
         """
         Initialize estimate for a factor.
@@ -202,7 +203,7 @@ class ResonatorNetwork:
         Otherwise uses random codebook entry.
         """
         codebook = self.codebooks[name]
-        
+
         if composite is not None:
             # Find best matching item in codebook
 
@@ -222,11 +223,11 @@ class ResonatorNetwork:
         else:
             idx = np.random.randint(len(codebook))
             return codebook[idx].copy()
-    
+
     def factorize_partial(
         self,
         composite: np.ndarray,
-        known_factors: Dict[str, np.ndarray]
+        known_factors: dict[str, np.ndarray]
     ) -> np.ndarray:
         """
         Extract unknown factor when some factors are known.

@@ -1,8 +1,8 @@
 """
 Tests for backward pass operations and autograd integration.
 """
-import pytest
 import numpy as np
+import pytest
 
 try:
     from grilly import Compute
@@ -208,7 +208,7 @@ class TestAutogradIntegration:
     def test_training_context(self):
         """Test TrainingContext for training loop"""
         try:
-            from grilly.nn import Linear, TrainingContext, MSELoss
+            from grilly.nn import Linear, MSELoss, TrainingContext
         except ImportError:
             pytest.skip("TrainingContext not available")
 

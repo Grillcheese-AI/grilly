@@ -4,9 +4,6 @@ Learning Rate Schedulers
 Implements various learning rate scheduling strategies to match PyTorch's API.
 """
 import math
-import numpy as np
-from typing import List, Optional, Union
-import warnings
 
 
 class LRScheduler:
@@ -28,13 +25,13 @@ class LRScheduler:
 
         # Store initial learning rates
         if not isinstance(optimizer.param_groups, list):
-            raise TypeError('{} is not an Optimizer'.format(type(optimizer).__name__))
+            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
 
         self.base_lrs = []
         for i, group in enumerate(optimizer.param_groups):
             if 'lr' not in group:
                 raise KeyError("param 'lr' is not specified in "
-                             "param_groups[{}] when resuming an optimizer".format(i))
+                             f"param_groups[{i}] when resuming an optimizer")
             self.base_lrs.append(group['lr'])
 
         self.last_epoch = last_epoch
@@ -178,13 +175,12 @@ class ReduceLROnPlateau:
         self.factor = factor
 
         if not isinstance(optimizer.param_groups, list):
-            raise TypeError('{} is not an Optimizer'.format(type(optimizer).__name__))
+            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
         self.optimizer = optimizer
 
         if isinstance(min_lr, (list, tuple)):
             if len(min_lr) != len(optimizer.param_groups):
-                raise ValueError("expected {} min_lrs, got {}".format(
-                    len(optimizer.param_groups), len(min_lr)))
+                raise ValueError(f"expected {len(optimizer.param_groups)} min_lrs, got {len(min_lr)}")
             self.min_lrs = list(min_lr)
         else:
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
@@ -320,15 +316,15 @@ class OneCycleLR(LRScheduler):
             raise ValueError("You must define either total_steps OR (epochs AND steps_per_epoch)")
         elif total_steps is not None:
             if total_steps <= 0 or not isinstance(total_steps, int):
-                raise ValueError("Expected positive integer total_steps, but got {}".format(total_steps))
+                raise ValueError(f"Expected positive integer total_steps, but got {total_steps}")
             self.total_steps = total_steps
         else:
             if epochs is None or steps_per_epoch is None:
                 raise ValueError("You must define both epochs and steps_per_epoch")
             if epochs <= 0 or not isinstance(epochs, int):
-                raise ValueError("Expected positive integer epochs, but got {}".format(epochs))
+                raise ValueError(f"Expected positive integer epochs, but got {epochs}")
             if steps_per_epoch <= 0 or not isinstance(steps_per_epoch, int):
-                raise ValueError("Expected positive integer steps_per_epoch, but got {}".format(steps_per_epoch))
+                raise ValueError(f"Expected positive integer steps_per_epoch, but got {steps_per_epoch}")
             self.total_steps = epochs * steps_per_epoch
 
         self.step_size_up = float(pct_start * self.total_steps) - 1
@@ -336,11 +332,11 @@ class OneCycleLR(LRScheduler):
 
         # Validate pct_start
         if pct_start < 0 or pct_start > 1:
-            raise ValueError("Expected float between 0 and 1 pct_start, but got {}".format(pct_start))
+            raise ValueError(f"Expected float between 0 and 1 pct_start, but got {pct_start}")
 
         # Validate anneal_strategy
         if anneal_strategy not in ['cos', 'linear']:
-            raise ValueError("anneal_strategy must be one of 'cos' or 'linear', instead got {}".format(anneal_strategy))
+            raise ValueError(f"anneal_strategy must be one of 'cos' or 'linear', instead got {anneal_strategy}")
         elif anneal_strategy == 'cos':
             self.anneal_func = self._annealing_cos
         elif anneal_strategy == 'linear':
@@ -366,8 +362,7 @@ class OneCycleLR(LRScheduler):
         """Format parameter to be a list per parameter group."""
         if isinstance(param, (list, tuple)):
             if len(param) != len(optimizer.param_groups):
-                raise ValueError("expected {} values for {}, got {}".format(
-                    len(optimizer.param_groups), name, len(param)))
+                raise ValueError(f"expected {len(optimizer.param_groups)} values for {name}, got {len(param)}")
             return list(param)
         else:
             return [param] * len(optimizer.param_groups)
@@ -387,8 +382,8 @@ class OneCycleLR(LRScheduler):
         step_num = self.last_epoch
 
         if step_num > self.total_steps:
-            raise ValueError("Tried to step {} times. The specified number of total steps is {}"
-                           .format(step_num + 1, self.total_steps))
+            raise ValueError(f"Tried to step {step_num + 1} times. The specified number of total steps is {self.total_steps}"
+                           )
 
         for initial_lr, max_lr, min_lr in zip(self.initial_lrs, self.max_lrs, self.min_lrs):
             if step_num <= self.step_size_up:

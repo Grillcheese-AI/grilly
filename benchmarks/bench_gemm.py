@@ -8,21 +8,22 @@ Usage:
     python benchmarks/bench_gemm.py
 """
 
-import numpy as np
-import sys
 import os
+import sys
+
+import numpy as np
 
 # Ensure the repo root is on the path so grilly and benchmarks are importable.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from benchmarks.utils import (
+    format_size,
     get_gpu_backend,
     print_header,
     print_row,
     print_summary_table,
     time_cpu,
     time_fn,
-    format_size,
 )
 
 # Square matrix sizes to benchmark (N x N).

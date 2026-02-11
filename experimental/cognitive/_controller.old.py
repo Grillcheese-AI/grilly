@@ -4,15 +4,15 @@ CognitiveController - Main "think before speak" controller.
 Orchestrates understanding, simulation, and response generation with confidence gating.
 """
 
-import numpy as np
-from typing import Dict, List, Optional, Tuple, Callable, TYPE_CHECKING
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from grilly.experimental.language.system import InstantLanguage, SVCIngestionResult
+from typing import TYPE_CHECKING
+
 from grilly.experimental.cognitive.memory import WorkingMemory
-from grilly.experimental.cognitive.world import WorldModel
 from grilly.experimental.cognitive.simulator import InternalSimulator
-from grilly.experimental.cognitive.understander import Understander
-from grilly.experimental.cognitive.understander import UnderstandingResult
+from grilly.experimental.cognitive.understander import Understander, UnderstandingResult
+from grilly.experimental.cognitive.world import WorldModel
+from grilly.experimental.language.system import InstantLanguage, SVCIngestionResult
 
 if TYPE_CHECKING:
     from grilly.experimental.language.svc_loader import SVCEntry
@@ -21,11 +21,11 @@ if TYPE_CHECKING:
 @dataclass
 class CognitiveState:
     """Current state of the cognitive system."""
-    understanding: Optional[UnderstandingResult] = None
-    candidates: List[Tuple[str, 'SimulationResult']] = field(default_factory=list)
-    selected_response: Optional[str] = None
+    understanding: UnderstandingResult | None = None
+    candidates: list[tuple[str, 'SimulationResult']] = field(default_factory=list)
+    selected_response: str | None = None
     confidence: float = 0.0
-    thinking_steps: List[str] = field(default_factory=list)
+    thinking_steps: list[str] = field(default_factory=list)
 
 
 class CognitiveController:
@@ -41,10 +41,10 @@ class CognitiveController:
     6. VERIFY: Final coherence check
     7. OUTPUT: Return response (if confidence high enough)
     """
-    
+
     DEFAULT_DIM = 4096
     DEFAULT_CONFIDENCE_THRESHOLD = 0.6
-    
+
     def __init__(
         self,
         dim: int = DEFAULT_DIM,
@@ -54,35 +54,35 @@ class CognitiveController:
 
         self.dim = dim
         self.confidence_threshold = confidence_threshold
-        
+
         # Core components
         self.language = InstantLanguage(dim=dim)
         self.world = WorldModel(dim=dim)
         self.wm = WorkingMemory(dim=dim)
         self.simulator = InternalSimulator(self.language, self.world, self.wm)
         self.understander = Understander(self.language, self.world, self.wm)
-        
+
         # State tracking
-        self.current_state: Optional[CognitiveState] = None
-        self.thinking_trace: List[str] = []
+        self.current_state: CognitiveState | None = None
+        self.thinking_trace: list[str] = []
 
         # Optional temporal validation
         self.temporal_world = None
         self.temporal_validator = None
-        self.decision_extractor: Optional[Callable[[str], Dict[str, object]]] = None
+        self.decision_extractor: Callable[[str], dict[str, object]] | None = None
         self.temporal_check_horizon = 5
-    
+
     def add_knowledge(self, subject: str, relation: str, object_: str):
         """Add knowledge to world model."""
         self.world.add_fact(subject, relation, object_)
 
     def ingest_svc(
         self,
-        entries: List['SVCEntry'],
+        entries: list['SVCEntry'],
         learn_templates: bool = True,
         build_realm_vectors: bool = True,
         verbose: bool = False,
-        engine: Optional[object] = None,
+        engine: object | None = None,
     ) -> SVCIngestionResult:
         """
         Ingest SVC data into the full cognitive system.
@@ -148,7 +148,7 @@ class CognitiveController:
                 )
 
         return result
-    
+
     def understand(self, text: str) -> UnderstandingResult:
         """Just understand without responding."""
         return self.understander.understand(text)
@@ -157,7 +157,7 @@ class CognitiveController:
         self,
         world_model,
         validator,
-        decision_extractor: Optional[Callable[[str], Dict[str, object]]] = None,
+        decision_extractor: Callable[[str], dict[str, object]] | None = None,
         check_horizon: int = 5
     ) -> None:
         """
@@ -173,13 +173,13 @@ class CognitiveController:
         self.temporal_validator = validator
         self.decision_extractor = decision_extractor
         self.temporal_check_horizon = check_horizon
-    
+
     def process(
         self,
         input_text: str,
         verbose: bool = False,
-        decision_time: Optional[int] = None
-    ) -> Optional[str]:
+        decision_time: int | None = None
+    ) -> str | None:
         """
         Process input and generate response.
         
@@ -187,24 +187,24 @@ class CognitiveController:
         """
         self.thinking_trace = []
         state = CognitiveState()
-        
+
         # 1. UNDERSTAND
         if verbose:
             self.thinking_trace.append(f"Understanding: {input_text}")
-        
+
         understanding = self.understander.understand(input_text, verbose=verbose)
         state.understanding = understanding
-        
+
         if verbose:
             self.thinking_trace.append(f"Inferences: {understanding.inferences}")
             self.thinking_trace.append(f"Confidence: {understanding.confidence:.2f}")
-        
+
         # 2. GENERATE candidates
         candidates = self._generate_candidates(understanding)
-        
+
         if verbose:
             self.thinking_trace.append(f"Generated {len(candidates)} candidates")
-        
+
         # 3. SIMULATE each candidate
         evaluated = []
         for candidate in candidates:
@@ -213,13 +213,13 @@ class CognitiveController:
                 context=understanding.deep_meaning
             )
             evaluated.append((candidate, result))
-            
+
             if verbose:
                 self.thinking_trace.append(
                     f"Candidate '{candidate}': score={result.overall_score:.2f}, "
                     f"coherence={result.coherence_score:.2f}"
                 )
-        
+
         # Sort by overall score
         evaluated.sort(key=lambda x: x[1].overall_score, reverse=True)
         state.candidates = evaluated
@@ -231,30 +231,30 @@ class CognitiveController:
             verbose=verbose
         )
         state.candidates = evaluated
-        
+
         # 4. SELECT best candidate
         if evaluated:
             best_candidate, best_result = evaluated[0]
             state.selected_response = best_candidate
             state.confidence = best_result.overall_score
-            
+
             # 5. VERIFY final check
             if best_result.overall_score >= self.confidence_threshold:
                 if verbose:
                     self.thinking_trace.append(f"Selected: {best_candidate}")
                     self.thinking_trace.append(f"Final confidence: {state.confidence:.2f}")
-                
+
                 self.current_state = state
                 return best_candidate
-        
+
         # Confidence too low - don't output
         if verbose:
             self.thinking_trace.append("Confidence too low - not responding")
-        
+
         self.current_state = state
         return None
 
-    def _extract_decision(self, text: str) -> Dict[str, object]:
+    def _extract_decision(self, text: str) -> dict[str, object]:
         """
         Extract decision variables from text.
 
@@ -275,10 +275,10 @@ class CognitiveController:
 
     def _apply_temporal_validation(
         self,
-        evaluated: List[Tuple[str, 'SimulationResult']],
-        decision_time: Optional[int],
+        evaluated: list[tuple[str, 'SimulationResult']],
+        decision_time: int | None,
         verbose: bool
-    ) -> List[Tuple[str, 'SimulationResult']]:
+    ) -> list[tuple[str, 'SimulationResult']]:
         """Execute apply temporal validation."""
 
         if self.temporal_validator is None or self.temporal_world is None:
@@ -287,7 +287,7 @@ class CognitiveController:
         if decision_time is None:
             decision_time = getattr(self.temporal_world, "current_time", 0)
 
-        filtered: List[Tuple[str, 'SimulationResult']] = []
+        filtered: list[tuple[str, SimulationResult]] = []
         for candidate, result in evaluated:
             decision = self._extract_decision(candidate)
             if not decision:
@@ -308,14 +308,14 @@ class CognitiveController:
                 )
 
         return filtered
-    
-    def _generate_candidates(self, understanding: UnderstandingResult) -> List[str]:
+
+    def _generate_candidates(self, understanding: UnderstandingResult) -> list[str]:
         """Generate candidate responses."""
         candidates = []
-        
+
         # Simple generation based on understanding
         # In practice, this would be more sophisticated
-        
+
         # If it's a question, generate answer
         if any("?" in word for word in understanding.words):
             # Try to answer based on retrieved knowledge
@@ -323,17 +323,17 @@ class CognitiveController:
                 candidates.append(understanding.inferences[0])
             else:
                 candidates.append("I'm not sure.")
-        
+
         # Generate acknowledgment
         candidates.append("I understand.")
-        
+
         # Generate response based on inferences
         if understanding.inferences:
             for inf in understanding.inferences[:2]:
                 candidates.append(f"Based on that, {inf.lower()}")
-        
+
         return candidates
-    
-    def get_thinking_trace(self) -> List[str]:
+
+    def get_thinking_trace(self) -> list[str]:
         """Get the thinking trace from last process call."""
         return self.thinking_trace.copy()

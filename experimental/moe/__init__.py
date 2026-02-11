@@ -9,7 +9,7 @@ Submodules:
 """
 
 from .relational import RelationalEncoder
-from .routing import ResonatorMoE, RelationalMoE
+from .routing import RelationalMoE, ResonatorMoE
 
 __all__ = [
     "RelationalEncoder",

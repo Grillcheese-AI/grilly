@@ -7,27 +7,24 @@ all components produce correct results.
 """
 
 import json
-import os
-import tempfile
-import pytest
-import numpy as np
 
+import numpy as np
+import pytest
+
+from grilly.experimental.cognitive.controller import CognitiveController
+from grilly.experimental.language.encoder import SentenceEncoder, WordEncoder
+from grilly.experimental.language.generator import SentenceGenerator
 from grilly.experimental.language.svc_loader import (
-    SVCEntry,
     SVCBatch,
+    SVCEntry,
     SVCIngestionEngine,
-    load_svc_entries,
     load_svc_batch,
+    load_svc_entries,
     load_svc_entries_from_dicts,
 )
 from grilly.experimental.language.system import InstantLanguage, SVCIngestionResult
-from grilly.experimental.language.encoder import WordEncoder, SentenceEncoder
-from grilly.experimental.language.generator import SentenceGenerator
-from grilly.experimental.cognitive.controller import CognitiveController
-from grilly.experimental.cognitive.world import WorldModel
 from grilly.experimental.moe.routing import ResonatorMoE
 from grilly.experimental.vsa.ops import BinaryOps, HolographicOps
-
 
 # =============================================================================
 # Inline SVC Test Data

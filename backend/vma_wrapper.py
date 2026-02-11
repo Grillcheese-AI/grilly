@@ -15,15 +15,22 @@ Build VMA:
 """
 
 import ctypes
-from ctypes import (
-    c_void_p, c_uint32, c_uint64, c_int, c_float,
-    c_size_t, POINTER, Structure, byref, cast
-)
-import numpy as np
-import os
-import sys
-import platform
 import logging
+import os
+import platform
+import sys
+from ctypes import (
+    POINTER,
+    Structure,
+    byref,
+    c_float,
+    c_int,
+    c_uint32,
+    c_uint64,
+    c_void_p,
+)
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -524,8 +531,8 @@ def build_vma_library():
     - Linux: GCC/Clang and development headers
     - Vulkan SDK installed
     """
-    import subprocess
     import shutil
+    import subprocess
 
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     vma_dir = os.path.join(base_dir, 'VulkanMemoryAllocator')
@@ -625,7 +632,7 @@ extern "C" {
         # Create CMakeLists.txt
         cmake_file = os.path.join(build_dir, 'CMakeLists.txt')
         with open(cmake_file, 'w') as f:
-            f.write(f'''
+            f.write('''
 cmake_minimum_required(VERSION 3.10)
 project(vma_wrapper)
 
@@ -634,13 +641,13 @@ set(CMAKE_CXX_STANDARD 11)
 find_package(Vulkan REQUIRED)
 
 add_library(vma SHARED vma_wrapper.cpp)
-target_include_directories(vma PRIVATE ${{Vulkan_INCLUDE_DIRS}})
-target_link_libraries(vma PRIVATE ${{Vulkan_LIBRARIES}})
+target_include_directories(vma PRIVATE ${Vulkan_INCLUDE_DIRS})
+target_link_libraries(vma PRIVATE ${Vulkan_LIBRARIES})
 
 if(WIN32)
     set_target_properties(vma PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${{CMAKE_BINARY_DIR}}"
-        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${{CMAKE_BINARY_DIR}}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
     )
 endif()
 ''')
@@ -662,7 +669,7 @@ endif()
             shutil.copy2(dll_src, dll_dst)
             print(f"VMA library built: {dll_dst}")
         else:
-            print(f"Warning: Could not find built DLL")
+            print("Warning: Could not find built DLL")
 
     else:
         # Linux/macOS - use g++

@@ -14,7 +14,6 @@ Supported architectures:
 - XLM-RoBERTa (xlm-roberta): Multilingual RoBERTa
 - ALBERT (albert): Factorized embeddings, parameter sharing
 """
-from typing import Dict, Optional, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,18 +21,18 @@ logger = logging.getLogger(__name__)
 
 class ShaderRegistry:
     """Registry for architecture-specific shaders"""
-    
+
     def __init__(self):
         # Map: (shader_name, architecture) -> shader_file
         """Initialize the instance."""
 
-        self._registry: Dict[tuple, str] = {}
-        self._generic_shaders: Dict[str, str] = {}
-        
+        self._registry: dict[tuple, str] = {}
+        self._generic_shaders: dict[str, str] = {}
+
     def register_generic(self, shader_name: str, shader_file: str):
         """Register a generic shader (works for all architectures)"""
         self._generic_shaders[shader_name] = shader_file
-        
+
     def register_architecture_specific(
         self,
         shader_name: str,
@@ -43,12 +42,12 @@ class ShaderRegistry:
         """Register an architecture-specific shader"""
         key = (shader_name, architecture.lower())
         self._registry[key] = shader_file
-        
+
     def get_shader(
         self,
         shader_name: str,
-        architecture: Optional[str] = None
-    ) -> Optional[str]:
+        architecture: str | None = None
+    ) -> str | None:
         """
         Get shader file name for given architecture.
         
@@ -65,12 +64,12 @@ class ShaderRegistry:
             if key in self._registry:
                 logger.debug(f"Using architecture-specific shader: {shader_name}-{architecture}")
                 return self._registry[key]
-        
+
         # Fall back to generic
         if shader_name in self._generic_shaders:
             logger.debug(f"Using generic shader: {shader_name}")
             return self._generic_shaders[shader_name]
-        
+
         # Try architecture-specific without architecture (for backwards compatibility)
         if architecture:
             # Check if there's a variant like 'attention-output-bert'
@@ -78,23 +77,23 @@ class ShaderRegistry:
             if variant_name in self._generic_shaders:
                 logger.debug(f"Using variant shader: {variant_name}")
                 return self._generic_shaders[variant_name]
-        
+
         logger.warning(f"Shader not found: {shader_name} (architecture: {architecture})")
         return None
-    
-    def list_shaders(self, architecture: Optional[str] = None) -> List[str]:
+
+    def list_shaders(self, architecture: str | None = None) -> list[str]:
         """List all available shaders for an architecture"""
         shaders = set()
-        
+
         if architecture:
             # Add architecture-specific shaders
             for (name, arch), _ in self._registry.items():
                 if arch == architecture.lower():
                     shaders.add(name)
-        
+
         # Add generic shaders
         shaders.update(self._generic_shaders.keys())
-        
+
         return sorted(shaders)
 
 
@@ -121,7 +120,7 @@ def register_architecture_shader(
     _registry.register_architecture_specific(shader_name, architecture, shader_file)
 
 
-def get_shader(shader_name: str, architecture: Optional[str] = None) -> Optional[str]:
+def get_shader(shader_name: str, architecture: str | None = None) -> str | None:
     """Get shader file name for given architecture"""
     return _registry.get_shader(shader_name, architecture)
 
@@ -147,16 +146,16 @@ def _initialize_registry():
         'fnn-residual',
         'rope',  # RoPE (Rotary Position Embeddings)
     ]
-    
+
     for shader in generic_shaders:
         _registry.register_generic(shader, shader)
-    
+
     # Register architecture-specific shaders
     # These are optimized variants for specific architectures
     _registry.register_architecture_specific('attention-output', 'gpt', 'attention-output-gpt')
     _registry.register_architecture_specific('attention-output', 'granite', 'attention-output-gpt')  # Granite uses GPT-style causal attention
     _registry.register_architecture_specific('attention-output', 't5', 'attention-output-t5')
-    
+
     # Note: BERT, DistilBERT, RoBERTa, MPNet, XLM-RoBERTa, ALBERT all use the generic
     # 'attention-output' shader since they share the same bidirectional attention pattern.
     # Architecture-specific shaders are only created when there's a significant

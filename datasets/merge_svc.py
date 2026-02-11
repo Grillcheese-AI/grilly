@@ -8,8 +8,8 @@ into a single shuffled training file.
 import json
 import random
 import sys
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "_data"
 
@@ -23,7 +23,7 @@ SEED = 42
 def load_jsonl(filepath: Path) -> list[str]:
     """Load all lines from a JSONL file as raw strings."""
     lines = []
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -68,7 +68,7 @@ def main():
             except json.JSONDecodeError:
                 pass
 
-    print(f"\n--- Merged Stats ---")
+    print("\n--- Merged Stats ---")
     print(f"  Total entries:  {total:,}")
     print(f"  Source split:   {dict(source_counter)}")
     print(f"  Realm dist:     {dict(realm_counter.most_common())}")

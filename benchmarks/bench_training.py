@@ -2,13 +2,19 @@
 Benchmark: Full training loop (forward -> loss -> backward -> optimizer step).
 """
 
-import numpy as np
 import sys
 import time
+
+import numpy as np
+
 sys.path.insert(0, '.')
 
 from benchmarks.utils import (
-    print_header, print_row, print_summary_table, format_time, get_gpu_backend,
+    format_time,
+    get_gpu_backend,
+    print_header,
+    print_row,
+    print_summary_table,
 )
 
 

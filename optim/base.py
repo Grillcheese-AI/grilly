@@ -3,8 +3,10 @@ Base Optimizer class (PyTorch-like)
 
 Similar to torch.optim.Optimizer
 """
+from collections.abc import Iterator
+from typing import Any
+
 import numpy as np
-from typing import Iterator, Dict, Any, Optional
 
 
 class Optimizer:
@@ -14,8 +16,8 @@ class Optimizer:
     Similar to torch.optim.Optimizer, but works with numpy arrays
     and GPU-accelerated operations via Vulkan shaders.
     """
-    
-    def __init__(self, params: Iterator[np.ndarray], defaults: Dict[str, Any]):
+
+    def __init__(self, params: Iterator[np.ndarray], defaults: dict[str, Any]):
         """
         Initialize optimizer.
         
@@ -24,14 +26,14 @@ class Optimizer:
             defaults: Dictionary of default hyperparameter values
         """
         self.defaults = defaults
-        self.state: Dict[int, Dict[str, Any]] = {}
+        self.state: dict[int, dict[str, Any]] = {}
         self.param_groups: list = []
-        
+
         # Convert params to list of parameter groups
         param_groups = list(params)
         if len(param_groups) == 0:
             raise ValueError("Optimizer got an empty parameter list")
-        
+
         # If first element is a dict, it's a parameter group
         if isinstance(param_groups[0], dict):
             self.param_groups = param_groups
@@ -44,7 +46,7 @@ class Optimizer:
             for key, value in self.defaults.items():
                 if key not in group:
                     group[key] = value
-        
+
         # Initialize state for each parameter
         for group in self.param_groups:
             for p in group['params']:
@@ -58,7 +60,7 @@ class Optimizer:
                 param_id = id(p)
                 if param_id not in self.state:
                     self.state[param_id] = {}
-    
+
     def zero_grad(self):
         """
         Clear gradients for all parameters.
@@ -68,7 +70,7 @@ class Optimizer:
         This method is provided for API compatibility.
         """
         pass
-    
+
     def step(self, closure=None):
         """
         Perform a single optimization step.
@@ -79,8 +81,8 @@ class Optimizer:
         Must be implemented by subclasses.
         """
         raise NotImplementedError
-    
-    def state_dict(self) -> Dict[str, Any]:
+
+    def state_dict(self) -> dict[str, Any]:
         """
         Return the state of the optimizer as a dict.
         
@@ -91,8 +93,8 @@ class Optimizer:
             'state': self.state,
             'param_groups': self.param_groups,
         }
-    
-    def load_state_dict(self, state_dict: Dict[str, Any]):
+
+    def load_state_dict(self, state_dict: dict[str, Any]):
         """
         Load optimizer state from state_dict.
         
@@ -101,7 +103,7 @@ class Optimizer:
         """
         self.state = state_dict.get('state', {})
         self.param_groups = state_dict.get('param_groups', [])
-    
+
     def __repr__(self):
         """Return a debug representation."""
 

@@ -5,8 +5,10 @@ Uses: fisher-natural-gradient.glsl
 
 Implements natural gradient descent using Fisher information matrix.
 """
+from collections.abc import Iterator
+
 import numpy as np
-from typing import Iterator, Dict, Any, Optional
+
 from .base import Optimizer
 
 
@@ -22,7 +24,7 @@ class NaturalGradient(Optimizer):
     
     Reference: grilly/backend/learning.py natural_gradient
     """
-    
+
     def __init__(
         self,
         params: Iterator[np.ndarray],
@@ -46,7 +48,7 @@ class NaturalGradient(Optimizer):
         super().__init__(params, defaults)
         self.use_gpu = use_gpu
         self._backend = None
-    
+
     def _get_backend(self):
         """Get or create backend instance"""
         if self._backend is None:
@@ -56,7 +58,7 @@ class NaturalGradient(Optimizer):
             except Exception:
                 self._backend = None
         return self._backend
-    
+
     def step(self, closure=None):
         """
         Perform a single optimization step.
@@ -67,37 +69,37 @@ class NaturalGradient(Optimizer):
         loss = None
         if closure is not None:
             loss = closure()
-        
+
         backend = self._get_backend()
         use_gpu = self.use_gpu and backend is not None
         lr = self.defaults['lr']
         fisher_momentum = self.defaults['fisher_momentum']
-        
+
         for group in self.param_groups:
             for p in group['params']:
                 if p is None:
                     continue
-                
+
                 param_id = id(p)
                 state = self.state[param_id]
-                
+
                 # Initialize Fisher information if needed
                 if 'fisher' not in state:
                     state['fisher'] = np.ones_like(p, dtype=np.float32) * 1e-6
-                
+
                 fisher = state['fisher']
-                
+
                 # Get gradients
                 grad = getattr(p, 'grad', None)
                 if grad is None:
                     continue
-                
+
                 # Get parameter data
                 p_data = p.data if hasattr(p, 'data') and not isinstance(p, np.ndarray) else p
                 # Ensure numpy array
                 if not isinstance(p_data, np.ndarray):
                     p_data = np.array(p_data, dtype=np.float32)
-                
+
                 # Try GPU update if available
                 if use_gpu and backend is not None and hasattr(backend, 'learning'):
                     try:
@@ -109,7 +111,7 @@ class NaturalGradient(Optimizer):
                             )
                             fisher = fisher.reshape(p.shape)
                             state['fisher'] = fisher
-                        
+
                         # Apply natural gradient
                         if hasattr(backend.learning, 'natural_gradient'):
                             natural_grad = backend.learning.natural_gradient(
@@ -118,7 +120,7 @@ class NaturalGradient(Optimizer):
                             )
                             natural_grad = natural_grad.reshape(p.shape)
                             p_data -= natural_grad  # natural_gradient already includes lr
-                            
+
                             # Update parameter (handle wrapper or direct numpy array)
                             if hasattr(p, 'data') and not isinstance(p, np.ndarray):
                                 # Parameter wrapper or custom class
@@ -126,7 +128,7 @@ class NaturalGradient(Optimizer):
                             else:
                                 # Direct numpy array - update in-place
                                 p[:] = p_data
-                            
+
                             # Clear gradient after update
                             if hasattr(p, 'grad') and p.grad is not None:
                                 if hasattr(p, 'zero_grad'):
@@ -139,17 +141,17 @@ class NaturalGradient(Optimizer):
                         logger = logging.getLogger(__name__)
                         logger.debug(f"GPU Natural Gradient update failed: {e}, falling back to CPU")
                         pass  # Fall back to CPU
-                
+
                 # CPU fallback
                 # Update Fisher information (simplified - use gradient squared)
                 fisher = fisher_momentum * fisher + (1 - fisher_momentum) * (grad ** 2)
                 state['fisher'] = fisher
-                
+
                 # Apply natural gradient: F^(-1) * grad ≈ grad / (fisher + eps)
                 eps = 1e-8
                 natural_grad = grad / (fisher + eps)
                 p_data -= lr * natural_grad
-                
+
                 # Update parameter (handle wrapper or direct numpy array)
                 if hasattr(p, 'data') and not isinstance(p, np.ndarray):
                     # Parameter wrapper or custom class
@@ -157,12 +159,12 @@ class NaturalGradient(Optimizer):
                 else:
                     # Direct numpy array - update in-place
                     p[:] = p_data
-                
+
                 # Clear gradient after update
                 if hasattr(p, 'grad') and p.grad is not None:
                     if hasattr(p, 'zero_grad'):
                         p.zero_grad()
                     else:
                         p.grad = None
-        
+
         return loss

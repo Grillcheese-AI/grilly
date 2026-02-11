@@ -11,10 +11,10 @@ Demonstrates GPU-accelerated transformer building blocks:
 These are the core operations used in BERT, GPT, LLaMA, etc.
 """
 
-import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
-
-import numpy as np
 import time
+
+import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
+import numpy as np
 
 from grilly import Compute
 

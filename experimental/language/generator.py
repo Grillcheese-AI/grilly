@@ -4,8 +4,9 @@ SentenceGenerator for instant sentence generation.
 Generates sentences from templates and relations.
 """
 
+
 import numpy as np
-from typing import Dict, List, Tuple
+
 from grilly.experimental.language.encoder import SentenceEncoder
 from grilly.experimental.vsa.ops import HolographicOps
 
@@ -19,21 +20,21 @@ class SentenceGenerator:
     
     No training needed!
     """
-    
+
     def __init__(self, sentence_encoder: SentenceEncoder):
         """Initialize the instance."""
 
         self.encoder = sentence_encoder
         self.word_encoder = sentence_encoder.word_encoder
         self.dim = sentence_encoder.dim
-        
+
         # Common templates
-        self.templates: Dict[str, dict] = {}
+        self.templates: dict[str, dict] = {}
         self._init_templates()
-        
+
         # Learned sentence patterns
-        self.patterns: Dict[str, np.ndarray] = {}
-    
+        self.patterns: dict[str, np.ndarray] = {}
+
     def _init_templates(self):
         """Initialize common sentence templates."""
         self.templates = {
@@ -70,12 +71,12 @@ class SentenceGenerator:
                 "example": ["Lightning", "causes", "thunder", "because", "it", "heats"],
             },
         }
-    
+
     def generate_from_roles(
         self,
-        role_fillers: Dict[str, str],
+        role_fillers: dict[str, str],
         template_name: str = "simple_transitive"
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Generate sentence by filling template roles.
         
@@ -88,10 +89,10 @@ class SentenceGenerator:
         """
         if template_name not in self.templates:
             raise ValueError(f"Unknown template: {template_name}")
-        
+
         template = self.templates[template_name]
         pattern = template["pattern"]
-        
+
         words = []
         for role in pattern:
             if role in role_fillers:
@@ -104,15 +105,15 @@ class SentenceGenerator:
             else:
                 # Try to find a default or placeholder
                 words.append(f"[{role}]")
-        
+
         return words
-    
+
     def generate_from_relation(
         self,
         subject: str,
         relation: str,
         object_: str
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Generate sentence expressing a relation.
         
@@ -131,7 +132,7 @@ class SentenceGenerator:
             "part_of": ("copula", {"AUX": "is part of"}),
             "contains": ("simple_transitive", {"VERB": "contains"}),
         }
-        
+
         if relation in relation_templates:
             template_name, extras = relation_templates[relation]
             fillers = {"SUBJ": subject.capitalize(), "OBJ": object_, **extras}
@@ -139,10 +140,10 @@ class SentenceGenerator:
         else:
             # Default: simple statement
             return [subject.capitalize(), relation, object_]
-    
+
     def learn_pattern(
         self,
-        sentences: List[List[str]],
+        sentences: list[list[str]],
         pattern_name: str
     ):
         """
@@ -151,17 +152,17 @@ class SentenceGenerator:
         Extract the common structure from multiple sentences.
         """
         pattern_vecs = []
-        
+
         for words in sentences:
             sent_vec = self.encoder.encode_sentence(words)
             pattern_vecs.append(sent_vec)
-        
+
         # Average to get prototype pattern
         self.patterns[pattern_name] = HolographicOps.bundle(pattern_vecs)
-    
+
     def learn_svc_templates(
         self,
-        word_lists: List[List[str]],
+        word_lists: list[list[str]],
         template_name: str,
     ) -> None:
         """
@@ -188,8 +189,8 @@ class SentenceGenerator:
         auto_roles = self.encoder._auto_assign_roles(first_words)
 
         # Derive a compact role pattern (unique ordered roles)
-        seen: Dict[str, bool] = {}
-        role_pattern: List[str] = []
+        seen: dict[str, bool] = {}
+        role_pattern: list[str] = []
         for role in auto_roles:
             if role not in seen:
                 seen[role] = True
@@ -202,10 +203,10 @@ class SentenceGenerator:
 
     def complete_sentence(
         self,
-        partial: List[str],
-        partial_roles: List[str],
+        partial: list[str],
+        partial_roles: list[str],
         missing_role: str
-    ) -> List[Tuple[str, float]]:
+    ) -> list[tuple[str, float]]:
         """
         Complete a partial sentence by finding what fits a missing role.
         
@@ -213,9 +214,9 @@ class SentenceGenerator:
         """
         # Encode partial sentence
         partial_vec = self.encoder.encode_sentence(partial, partial_roles)
-        
+
         # Query what should fill the missing role
         query = self.encoder.query_role(partial_vec, missing_role)
-        
+
         # Find closest words
         return self.word_encoder.find_closest(query)

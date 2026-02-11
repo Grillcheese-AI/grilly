@@ -6,8 +6,9 @@ Uses: domain-router.glsl, domain-predict.glsl, domain-classifier.glsl,
 
 Reference: ref/brain/gpu_brain.py domain_routing
 """
+
 import numpy as np
-from typing import Optional
+
 from .module import Module
 from .modules import Linear, Softmax
 
@@ -20,7 +21,7 @@ class DomainRouter(Module):
     
     Reference: ref/brain/gpu_brain.py domain_routing
     """
-    
+
     def __init__(self, embed_dim: int, num_domains: int, num_experts: int):
         """
         Initialize DomainRouter layer.
@@ -34,19 +35,19 @@ class DomainRouter(Module):
         self.embed_dim = embed_dim
         self.num_domains = num_domains
         self.num_experts = num_experts
-        
+
         # Domain predictor
         self.domain_predictor = Linear(embed_dim, num_domains)
         self._modules['domain_predictor'] = self.domain_predictor
-        
+
         # Expert weights per domain
         limit = np.sqrt(6.0 / (num_domains + num_experts))
         self.expert_weights = np.random.uniform(-limit, limit, (num_domains, num_experts)).astype(np.float32)
         self._parameters['expert_weights'] = self.expert_weights
-        
+
         self.softmax = Softmax(dim=-1)
         self._modules['softmax'] = self.softmax
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - route to experts.
@@ -58,20 +59,20 @@ class DomainRouter(Module):
             Routing weights (batch, num_experts)
         """
         backend = self._get_backend()
-        
+
         # Predict domain probabilities
         domain_probs = self.domain_predictor(x)  # (batch, num_domains)
         domain_probs = self.softmax(domain_probs)
-        
+
         # Route to experts
         if hasattr(backend, 'domain_route'):
             routing_weights = backend.domain_route(domain_probs, self.expert_weights)
         else:
             # CPU fallback: domain_probs @ expert_weights
             routing_weights = domain_probs @ self.expert_weights  # (batch, num_experts)
-        
+
         return routing_weights
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -84,7 +85,7 @@ class DomainPredictor(Module):
     
     Uses: domain-predict.glsl
     """
-    
+
     def __init__(self, embed_dim: int, num_domains: int):
         """
         Initialize DomainPredictor layer.
@@ -96,12 +97,12 @@ class DomainPredictor(Module):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_domains = num_domains
-        
+
         self.predictor = Linear(embed_dim, num_domains)
         self._modules['predictor'] = self.predictor
         self.softmax = Softmax(dim=-1)
         self._modules['softmax'] = self.softmax
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - predict domain.
@@ -114,7 +115,7 @@ class DomainPredictor(Module):
         """
         logits = self.predictor(x)
         return self.softmax(logits)
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -127,7 +128,7 @@ class DomainClassifier(Module):
     
     Uses: domain-classifier.glsl
     """
-    
+
     def __init__(self, embed_dim: int, num_domains: int):
         """
         Initialize DomainClassifier layer.
@@ -139,12 +140,12 @@ class DomainClassifier(Module):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_domains = num_domains
-        
+
         self.classifier = Linear(embed_dim, num_domains)
         self._modules['classifier'] = self.classifier
         self.softmax = Softmax(dim=-1)
         self._modules['softmax'] = self.softmax
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - classify domain.
@@ -157,7 +158,7 @@ class DomainClassifier(Module):
         """
         logits = self.classifier(x)
         return self.softmax(logits)
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -170,7 +171,7 @@ class ExpertCombiner(Module):
     
     Uses: domain-combine-experts.glsl
     """
-    
+
     def __init__(self, expert_dim: int, num_experts: int, output_dim: int):
         """
         Initialize ExpertCombiner layer.
@@ -184,15 +185,15 @@ class ExpertCombiner(Module):
         self.expert_dim = expert_dim
         self.num_experts = num_experts
         self.output_dim = output_dim
-        
+
         # Combination weights
         limit = np.sqrt(6.0 / (expert_dim * num_experts + output_dim))
         self.combine_weight = np.random.uniform(-limit, limit, (output_dim, expert_dim * num_experts)).astype(np.float32)
         self.combine_bias = np.zeros(output_dim, dtype=np.float32)
-        
+
         self._parameters['combine_weight'] = self.combine_weight
         self._parameters['combine_bias'] = self.combine_bias
-    
+
     def forward(self, expert_outputs: np.ndarray, routing_weights: np.ndarray) -> np.ndarray:
         """
         Forward pass - combine expert outputs.
@@ -205,7 +206,7 @@ class ExpertCombiner(Module):
             Combined output (batch, output_dim)
         """
         backend = self._get_backend()
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'domain-combine-experts' in backend.shaders:
             try:
@@ -213,19 +214,19 @@ class ExpertCombiner(Module):
                 pass
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         batch_size = expert_outputs.shape[0]
-        
+
         # Weight expert outputs by routing weights
         weighted = expert_outputs * routing_weights[:, :, None]  # (batch, num_experts, expert_dim)
-        
+
         # Flatten and combine
         weighted_flat = weighted.reshape(batch_size, -1)  # (batch, num_experts * expert_dim)
         output = weighted_flat @ self.combine_weight.T + self.combine_bias
-        
+
         return output
-    
+
     def __repr__(self):
         """Return a debug representation."""
 

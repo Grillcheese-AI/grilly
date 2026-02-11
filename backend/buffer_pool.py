@@ -19,13 +19,13 @@ Installation:
 See: https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
 """
 
-import numpy as np
+import logging
 import threading
-from collections import defaultdict
-from typing import Dict, List, Optional, Any
 import time
 import weakref
-import logging
+from collections import defaultdict
+
+import numpy as np
 
 from .base import VULKAN_AVAILABLE
 
@@ -49,13 +49,10 @@ except ImportError:
 if VULKAN_AVAILABLE:
     from vulkan import (
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_SHARING_MODE_EXCLUSIVE,
         VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         vkDestroyBuffer,
         vkFreeMemory,
-        VkBufferCreateInfo,
     )
 
 
@@ -154,7 +151,7 @@ class VMABufferPool:
         self.core = core
         self.max_memory = max_memory or self.MAX_POOL_MEMORY
         self._allocator = None
-        self._buckets: Dict[int, List[VMABuffer]] = defaultdict(list)
+        self._buckets: dict[int, list[VMABuffer]] = defaultdict(list)
         self._total_pooled_memory = 0
         self._lock = threading.Lock()
         self._stats = {
@@ -551,7 +548,7 @@ class BufferPool:
 
         self.core = core
         self.max_memory = max_memory or self.MAX_POOL_MEMORY
-        self._buckets: Dict[int, List[PooledBuffer]] = defaultdict(list)
+        self._buckets: dict[int, list[PooledBuffer]] = defaultdict(list)
         self._total_pooled_memory = 0
         self._lock = threading.Lock()
         self._stats = {
@@ -734,6 +731,7 @@ def _cleanup_global_pool():
 
 
 import atexit
+
 atexit.register(_cleanup_global_pool)
 
 

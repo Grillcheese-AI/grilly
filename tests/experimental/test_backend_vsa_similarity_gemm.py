@@ -3,15 +3,15 @@ GPU GEMM-based similarity tests (RDNA2-friendly tiled kernel).
 
 These tests validate that vsa-similarity-gemm matches the CPU dot baseline.
 """
-import pytest
 import numpy as np
+import pytest
 
 
 @pytest.mark.gpu
 class TestVulkanVSASimilarityGEMM:
     def test_similarity_matrix_gemm_matches_cpu(self, small_dim, rng):
-        from grilly.backend.experimental.vsa import VulkanVSA
         from grilly.backend.core import VulkanCore
+        from grilly.backend.experimental.vsa import VulkanVSA
 
         try:
             core = VulkanCore()

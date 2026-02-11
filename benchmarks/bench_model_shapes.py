@@ -7,13 +7,18 @@ Compares three modes:
   3. GPU-resident (VulkanTensor, data stays on GPU between ops)
 """
 
-import numpy as np
 import sys
 import time
+
+import numpy as np
+
 sys.path.insert(0, '.')
 
 from benchmarks.utils import (
-    print_header, print_summary_table, format_time, get_gpu_backend,
+    format_time,
+    get_gpu_backend,
+    print_header,
+    print_summary_table,
 )
 
 

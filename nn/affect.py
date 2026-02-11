@@ -5,10 +5,11 @@ Uses: affect-mlp-forward.glsl, affect-mlp-backward.glsl
 
 Reference: ref/brain/amygdala.py
 """
+
 import numpy as np
-from typing import Optional, Tuple, Dict
+
 from .module import Module
-from .modules import Linear, Dropout, GELU
+from .modules import Dropout
 
 
 class AffectMLP(Module):
@@ -19,7 +20,7 @@ class AffectMLP(Module):
     
     Reference: ref/brain/amygdala.py
     """
-    
+
     def __init__(
         self,
         embedding_dim: int,
@@ -47,31 +48,31 @@ class AffectMLP(Module):
         self.output_dim = output_dim
         self.leaky_slope = leaky_slope
         self.dropout_rate = dropout_rate
-        
+
         # Layer 1
         limit1 = np.sqrt(6.0 / (embedding_dim + hidden1_dim))
         self.W1 = np.random.uniform(-limit1, limit1, (hidden1_dim, embedding_dim)).astype(np.float32)
         self.b1 = np.zeros(hidden1_dim, dtype=np.float32)
         self._parameters['W1'] = self.W1
         self._parameters['b1'] = self.b1
-        
+
         # Layer 2
         limit2 = np.sqrt(6.0 / (hidden1_dim + hidden2_dim))
         self.W2 = np.random.uniform(-limit2, limit2, (hidden2_dim, hidden1_dim)).astype(np.float32)
         self.b2 = np.zeros(hidden2_dim, dtype=np.float32)
         self._parameters['W2'] = self.W2
         self._parameters['b2'] = self.b2
-        
+
         # Output layer
         limit3 = np.sqrt(6.0 / (hidden2_dim + output_dim))
         self.W3 = np.random.uniform(-limit3, limit3, (output_dim, hidden2_dim)).astype(np.float32)
         self.b3 = np.zeros(output_dim, dtype=np.float32)
         self._parameters['W3'] = self.W3
         self._parameters['b3'] = self.b3
-        
+
         self.dropout = Dropout(dropout_rate)
         self._modules['dropout'] = self.dropout
-    
+
     def forward(self, embeddings: np.ndarray, apply_output_activation: bool = False) -> np.ndarray:
         """
         Forward pass - predict affect (valence, arousal).
@@ -84,7 +85,7 @@ class AffectMLP(Module):
             Affect predictions (batch, output_dim) - [valence, arousal]
         """
         backend = self._get_backend()
-        
+
         # Try GPU forward pass if available
         if hasattr(backend, 'affect') and hasattr(backend.affect, 'affect_mlp_forward'):
             try:
@@ -97,37 +98,37 @@ class AffectMLP(Module):
                 return output
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         # Layer 1
         h1 = embeddings @ self.W1.T + self.b1
         h1 = np.where(h1 > 0, h1, h1 * self.leaky_slope)  # LeakyReLU
         if self.training:
             h1 = self.dropout(h1)
-        
+
         # Layer 2 (with residual from layer 1)
         h2 = h1 @ self.W2.T + self.b2
         h2 = np.where(h2 > 0, h2, h2 * self.leaky_slope)  # LeakyReLU
         if self.training:
             h2 = self.dropout(h2)
-        
+
         # Output layer
         output = h2 @ self.W3.T + self.b3
-        
+
         if apply_output_activation:
             # Tanh for valence, sigmoid for arousal
             output[:, 0] = np.tanh(output[:, 0])  # valence: [-1, 1]
             output[:, 1] = 1 / (1 + np.exp(-output[:, 1]))  # arousal: [0, 1]
-        
+
         return output
-    
+
     def backward(
         self,
         grad_output: np.ndarray,
         embeddings: np.ndarray,
-        h1: Optional[np.ndarray] = None,
-        h2: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+        h1: np.ndarray | None = None,
+        h2: np.ndarray | None = None
+    ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
         """
         Backward pass using affect-mlp-backward.glsl
         
@@ -141,7 +142,7 @@ class AffectMLP(Module):
             (grad_input, grad_dict) - grad_input (batch, embedding_dim), grad_dict with weight gradients
         """
         backend = self._get_backend()
-        
+
         # Try GPU backward if available
         if hasattr(backend, 'affect') and hasattr(backend.affect, 'affect_mlp_backward'):
             try:
@@ -152,7 +153,7 @@ class AffectMLP(Module):
                 return grad_dict['grad_input'], grad_dict
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback (simplified)
         # This is a placeholder - full implementation would compute all gradients
         grad_input = np.zeros_like(embeddings)
@@ -166,7 +167,7 @@ class AffectMLP(Module):
             'grad_input': grad_input
         }
         return grad_input, grad_dict
-    
+
     def __repr__(self):
         """Return a debug representation."""
 

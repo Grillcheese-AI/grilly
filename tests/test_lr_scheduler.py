@@ -2,20 +2,18 @@
 Tests for Learning Rate Schedulers.
 Validates correctness against PyTorch schedulers.
 """
+
 import numpy as np
 import pytest
-import math
 
 # Try to import PyTorch for reference comparisons
 try:
     import torch
     import torch.optim as torch_optim
-    from torch.optim.lr_scheduler import (
-        StepLR as TorchStepLR,
-        CosineAnnealingLR as TorchCosineAnnealingLR,
-        ReduceLROnPlateau as TorchReduceLROnPlateau,
-        OneCycleLR as TorchOneCycleLR
-    )
+    from torch.optim.lr_scheduler import CosineAnnealingLR as TorchCosineAnnealingLR
+    from torch.optim.lr_scheduler import OneCycleLR as TorchOneCycleLR
+    from torch.optim.lr_scheduler import ReduceLROnPlateau as TorchReduceLROnPlateau
+    from torch.optim.lr_scheduler import StepLR as TorchStepLR
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -46,8 +44,8 @@ class TestSchedulersBasic:
 
     def test_steplr_init(self):
         """Test StepLR initialization"""
-        from grilly.optim import SGD, StepLR
         from grilly.nn import Parameter
+        from grilly.optim import SGD, StepLR
 
         param = Parameter(np.random.randn(10, 10).astype(np.float32))
         optimizer = SGD([param], lr=0.1)
@@ -60,8 +58,8 @@ class TestSchedulersBasic:
 
     def test_steplr_decay(self):
         """Test StepLR decays learning rate"""
-        from grilly.optim import SGD, StepLR
         from grilly.nn import Parameter
+        from grilly.optim import SGD, StepLR
 
         param = Parameter(np.random.randn(10, 10).astype(np.float32))
         optimizer = SGD([param], lr=0.1)
@@ -89,8 +87,9 @@ class TestStepLRVsPyTorch:
 
     def test_steplr_matches_pytorch(self):
         """Verify StepLR matches PyTorch exactly"""
-        from grilly.optim import SGD as GrillySGD, StepLR as GrillyStepLR
         from grilly.nn import Parameter as GrillyParameter
+        from grilly.optim import SGD as GrillySGD
+        from grilly.optim import StepLR as GrillyStepLR
 
         # Create identical optimizers
         param_init = np.random.randn(5, 5).astype(np.float32)
@@ -120,8 +119,9 @@ class TestCosineAnnealingLRVsPyTorch:
 
     def test_cosine_matches_pytorch(self):
         """Verify CosineAnnealingLR matches PyTorch"""
-        from grilly.optim import SGD as GrillySGD, CosineAnnealingLR as GrillyCosineAnnealingLR
         from grilly.nn import Parameter as GrillyParameter
+        from grilly.optim import SGD as GrillySGD
+        from grilly.optim import CosineAnnealingLR as GrillyCosineAnnealingLR
 
         param_init = np.random.randn(5, 5).astype(np.float32)
         grilly_param = GrillyParameter(param_init.copy())
@@ -145,8 +145,8 @@ class TestCosineAnnealingLRVsPyTorch:
 
     def test_cosine_min_max(self):
         """Test CosineAnnealingLR reaches min and max values"""
-        from grilly.optim import SGD, CosineAnnealingLR
         from grilly.nn import Parameter
+        from grilly.optim import SGD, CosineAnnealingLR
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         optimizer = SGD([param], lr=0.1)
@@ -170,8 +170,9 @@ class TestReduceLROnPlateauVsPyTorch:
 
     def test_plateau_matches_pytorch(self):
         """Verify ReduceLROnPlateau matches PyTorch"""
-        from grilly.optim import SGD as GrillySGD, ReduceLROnPlateau as GrillyReduceLROnPlateau
         from grilly.nn import Parameter as GrillyParameter
+        from grilly.optim import SGD as GrillySGD
+        from grilly.optim import ReduceLROnPlateau as GrillyReduceLROnPlateau
 
         param_init = np.random.randn(5, 5).astype(np.float32)
         grilly_param = GrillyParameter(param_init.copy())
@@ -197,8 +198,8 @@ class TestReduceLROnPlateauVsPyTorch:
 
     def test_plateau_reduces_on_plateau(self):
         """Test ReduceLROnPlateau actually reduces LR on plateau"""
-        from grilly.optim import SGD, ReduceLROnPlateau
         from grilly.nn import Parameter
+        from grilly.optim import SGD, ReduceLROnPlateau
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         optimizer = SGD([param], lr=0.1)
@@ -221,8 +222,9 @@ class TestOneCycleLRVsPyTorch:
 
     def test_onecycle_matches_pytorch(self):
         """Verify OneCycleLR matches PyTorch"""
-        from grilly.optim import SGD as GrillySGD, OneCycleLR as GrillyOneCycleLR
         from grilly.nn import Parameter as GrillyParameter
+        from grilly.optim import SGD as GrillySGD
+        from grilly.optim import OneCycleLR as GrillyOneCycleLR
 
         param_init = np.random.randn(5, 5).astype(np.float32)
         grilly_param = GrillyParameter(param_init.copy())
@@ -248,8 +250,8 @@ class TestOneCycleLRVsPyTorch:
 
     def test_onecycle_reaches_max(self):
         """Test OneCycleLR reaches max_lr"""
-        from grilly.optim import SGD, OneCycleLR
         from grilly.nn import Parameter
+        from grilly.optim import SGD, OneCycleLR
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         optimizer = SGD([param], lr=0.01, momentum=0.9)
@@ -265,8 +267,8 @@ class TestOneCycleLRVsPyTorch:
 
     def test_onecycle_with_adam(self):
         """Test OneCycleLR with Adam optimizer (uses betas instead of momentum)"""
-        from grilly.optim import Adam, OneCycleLR
         from grilly.nn import Parameter
+        from grilly.optim import Adam, OneCycleLR
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         optimizer = Adam([param], lr=0.001)
@@ -285,8 +287,8 @@ class TestSchedulersEdgeCases:
 
     def test_steplr_single_step(self):
         """Test StepLR with step_size=1"""
-        from grilly.optim import SGD, StepLR
         from grilly.nn import Parameter
+        from grilly.optim import SGD, StepLR
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         optimizer = SGD([param], lr=0.1)
@@ -300,8 +302,8 @@ class TestSchedulersEdgeCases:
 
     def test_cosine_single_cycle(self):
         """Test CosineAnnealingLR completes one full cycle"""
-        from grilly.optim import SGD, CosineAnnealingLR
         from grilly.nn import Parameter
+        from grilly.optim import SGD, CosineAnnealingLR
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         optimizer = SGD([param], lr=1.0)
@@ -320,8 +322,8 @@ class TestSchedulersEdgeCases:
 
     def test_plateau_mode_max(self):
         """Test ReduceLROnPlateau with mode='max'"""
-        from grilly.optim import SGD, ReduceLROnPlateau
         from grilly.nn import Parameter
+        from grilly.optim import SGD, ReduceLROnPlateau
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         optimizer = SGD([param], lr=0.1)
@@ -345,8 +347,8 @@ class TestSchedulersEdgeCases:
 
     def test_onecycle_error_on_no_total_steps(self):
         """Test OneCycleLR raises error without total_steps"""
-        from grilly.optim import SGD, OneCycleLR
         from grilly.nn import Parameter
+        from grilly.optim import SGD, OneCycleLR
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         optimizer = SGD([param], lr=0.1)

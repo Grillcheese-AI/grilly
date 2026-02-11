@@ -25,8 +25,8 @@ class TestAdamWBasic:
 
     def test_adamw_init(self):
         """Test AdamW initialization"""
-        from grilly.optim import AdamW
         from grilly.nn import Parameter
+        from grilly.optim import AdamW
 
         param = Parameter(np.random.randn(10, 10).astype(np.float32))
         optimizer = AdamW([param], lr=0.001, weight_decay=0.01)
@@ -39,8 +39,8 @@ class TestAdamWBasic:
 
     def test_adamw_step(self):
         """Test AdamW performs update step"""
-        from grilly.optim import AdamW
         from grilly.nn import Parameter
+        from grilly.optim import AdamW
 
         param = Parameter(np.ones((5, 5), dtype=np.float32))
         param.grad = np.ones_like(param.data) * 0.1  # Small gradient
@@ -58,8 +58,8 @@ class TestAdamWBasic:
 
     def test_adamw_state_initialization(self):
         """Test AdamW initializes optimizer state"""
-        from grilly.optim import AdamW
         from grilly.nn import Parameter
+        from grilly.optim import AdamW
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         param.grad = np.random.randn(5, 5).astype(np.float32)
@@ -79,8 +79,8 @@ class TestAdamWBasic:
 
     def test_adamw_amsgrad(self):
         """Test AdamW with AMSGrad variant"""
-        from grilly.optim import AdamW
         from grilly.nn import Parameter
+        from grilly.optim import AdamW
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         param.grad = np.random.randn(5, 5).astype(np.float32)
@@ -100,8 +100,8 @@ class TestAdamWVsPyTorch:
 
     def test_adamw_decoupled_weight_decay(self):
         """Verify AdamW uses decoupled weight decay (vs Adam's coupled)"""
-        from grilly.optim import AdamW as GrillyAdamW
         from grilly.nn import Parameter as GrillyParameter
+        from grilly.optim import AdamW as GrillyAdamW
 
         np.random.seed(42)
         torch.manual_seed(42)
@@ -135,8 +135,8 @@ class TestAdamWVsPyTorch:
 
     def test_adamw_multiple_steps(self):
         """Test AdamW matches PyTorch over multiple optimization steps"""
-        from grilly.optim import AdamW as GrillyAdamW
         from grilly.nn import Parameter as GrillyParameter
+        from grilly.optim import AdamW as GrillyAdamW
 
         np.random.seed(42)
         torch.manual_seed(42)
@@ -171,8 +171,9 @@ class TestAdamWVsPyTorch:
 
     def test_adamw_vs_adam_weight_decay(self):
         """Verify AdamW behaves differently from Adam with weight decay"""
-        from grilly.optim import AdamW as GrillyAdamW, Adam as GrillyAdam
         from grilly.nn import Parameter as GrillyParameter
+        from grilly.optim import Adam as GrillyAdam
+        from grilly.optim import AdamW as GrillyAdamW
 
         np.random.seed(42)
 
@@ -201,8 +202,9 @@ class TestAdamWVsPyTorch:
 
     def test_adamw_no_weight_decay(self):
         """Test AdamW with weight_decay=0 matches Adam"""
-        from grilly.optim import AdamW as GrillyAdamW, Adam as GrillyAdam
         from grilly.nn import Parameter as GrillyParameter
+        from grilly.optim import Adam as GrillyAdam
+        from grilly.optim import AdamW as GrillyAdamW
 
         np.random.seed(42)
 
@@ -233,8 +235,8 @@ class TestAdamWVsPyTorch:
 
     def test_adamw_bias_correction(self):
         """Test AdamW bias correction matches PyTorch"""
-        from grilly.optim import AdamW as GrillyAdamW
         from grilly.nn import Parameter as GrillyParameter
+        from grilly.optim import AdamW as GrillyAdamW
 
         np.random.seed(42)
         torch.manual_seed(42)
@@ -268,8 +270,8 @@ class TestAdamWEdgeCases:
 
     def test_adamw_zero_gradient(self):
         """Test AdamW with zero gradients (no NaN/Inf)"""
-        from grilly.optim import AdamW
         from grilly.nn import Parameter
+        from grilly.optim import AdamW
 
         param = Parameter(np.ones((5, 5), dtype=np.float32))
         param.grad = np.zeros_like(param.data)
@@ -287,8 +289,8 @@ class TestAdamWEdgeCases:
 
     def test_adamw_large_gradient(self):
         """Test AdamW handles large gradients without overflow"""
-        from grilly.optim import AdamW
         from grilly.nn import Parameter
+        from grilly.optim import AdamW
 
         param = Parameter(np.ones((5, 5), dtype=np.float32))
         param.grad = np.ones_like(param.data) * 1000.0  # Large gradient
@@ -302,8 +304,8 @@ class TestAdamWEdgeCases:
 
     def test_adamw_multiple_param_groups(self):
         """Test AdamW with multiple parameter groups"""
-        from grilly.optim import AdamW
         from grilly.nn import Parameter
+        from grilly.optim import AdamW
 
         param1 = Parameter(np.random.randn(5, 5).astype(np.float32))
         param2 = Parameter(np.random.randn(3, 3).astype(np.float32))
@@ -324,8 +326,8 @@ class TestAdamWEdgeCases:
 
     def test_adamw_gradient_clearing(self):
         """Test AdamW clears gradients after step"""
-        from grilly.optim import AdamW
         from grilly.nn import Parameter
+        from grilly.optim import AdamW
 
         param = Parameter(np.random.randn(5, 5).astype(np.float32))
         param.grad = np.random.randn(5, 5).astype(np.float32)

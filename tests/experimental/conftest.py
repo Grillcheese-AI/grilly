@@ -2,10 +2,9 @@
 Shared fixtures for experimental tests.
 """
 
-import pytest
-import numpy as np
-from typing import Generator
 
+import numpy as np
+import pytest
 
 # =============================================================================
 # Common Constants

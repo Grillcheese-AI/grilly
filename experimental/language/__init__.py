@@ -12,18 +12,18 @@ Submodules:
     - svc_loader: SVC data loading utilities
 """
 
-from .encoder import WordEncoder, SentenceEncoder
+from .encoder import SentenceEncoder, WordEncoder
 from .generator import SentenceGenerator
 from .parser import ResonatorParser
-from .system import InstantLanguage, SVCIngestionResult
 from .svc_loader import (
-    SVCEntry,
     SVCBatch,
+    SVCEntry,
     SVCIngestionEngine,
-    load_svc_entries,
     load_svc_batch,
+    load_svc_entries,
     load_svc_entries_from_dicts,
 )
+from .system import InstantLanguage, SVCIngestionResult
 
 __all__ = [
     "WordEncoder",

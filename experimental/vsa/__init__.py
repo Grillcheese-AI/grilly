@@ -15,6 +15,6 @@ from .resonator import ResonatorNetwork
 
 __all__ = [
     "BinaryOps",
-    "HolographicOps", 
+    "HolographicOps",
     "ResonatorNetwork",
 ]

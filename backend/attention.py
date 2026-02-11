@@ -3,9 +3,11 @@ Attention operations for Vulkan backend.
 GPU-accelerated attention mechanisms for transformers.
 """
 
-import numpy as np
-import struct
 import logging
+import struct
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 from .shader_registry import get_shader
 
@@ -15,9 +17,15 @@ logger = logging.getLogger(__name__)
 try:
     from ..utils.numba_ops import (
         NUMBA_AVAILABLE,
-        rope as numba_rope,
-        prosody_modulation as numba_prosody_modulation,
+    )
+    from ..utils.numba_ops import (
         attention_output as numba_attention_output,
+    )
+    from ..utils.numba_ops import (
+        prosody_modulation as numba_prosody_modulation,
+    )
+    from ..utils.numba_ops import (
+        rope as numba_rope,
     )
 except ImportError:
     NUMBA_AVAILABLE = False
@@ -31,7 +39,7 @@ if VULKAN_AVAILABLE:
 
 class VulkanAttention(BufferMixin):
     """Attention operations: scores, mask, output, concat heads"""
-    
+
     def __init__(self, core, pipelines, shaders, architecture: str = None):
         """Initialize the instance."""
 
@@ -40,7 +48,7 @@ class VulkanAttention(BufferMixin):
         self.shaders = shaders
         self.architecture = architecture  # Model architecture (e.g., 'bert', 'gpt', 't5')
         self._pool = None  # Lazy initialization
-    
+
     def attention_scores(self, queries, keys, num_heads, head_dim, scale=None):
         """
         Compute attention scores: Q @ K^T / sqrt(head_dim)
@@ -57,10 +65,10 @@ class VulkanAttention(BufferMixin):
         """
         q = queries.astype(np.float32)
         k = keys.astype(np.float32)
-        
+
         if scale is None:
             scale = 1.0 / np.sqrt(head_dim)
-        
+
         # Handle flattened head dimension
         if q.ndim == 3:
             batch_size, seq_len, _ = q.shape
@@ -68,7 +76,7 @@ class VulkanAttention(BufferMixin):
             k = k.reshape(batch_size, seq_len, num_heads, head_dim)
         else:
             batch_size, seq_len, num_heads, head_dim = q.shape
-        
+
         q_flat = q.flatten()
         k_flat = k.flatten()
         scores_size = batch_size * num_heads * seq_len * seq_len * 4
@@ -120,7 +128,7 @@ class VulkanAttention(BufferMixin):
             return result
         finally:
             self._release_buffers([buf_q, buf_k, buf_v_dummy, buf_scores])
-    
+
     def attention_mask(self, attention_scores, use_causal=True, mask_value=-1e9, custom_mask=None):
         """
         Apply mask to attention scores
@@ -136,9 +144,9 @@ class VulkanAttention(BufferMixin):
         """
         scores = attention_scores.astype(np.float32)
         batch_size, num_heads, seq_len, _ = scores.shape
-        
+
         scores_flat = scores.flatten()
-        
+
         # Create mask buffer
         if use_causal:
             # Causal mask (seq_len, seq_len) - for backward compatibility
@@ -153,7 +161,7 @@ class VulkanAttention(BufferMixin):
                 # No mask - return scores unchanged
                 return scores
             mask_flat = custom_mask.astype(np.float32).flatten()
-        
+
         # Create buffers
         buf_scores = self._acquire_buffer(scores_flat.nbytes)
         buf_mask = self._acquire_buffer(mask_flat.nbytes)
@@ -194,7 +202,7 @@ class VulkanAttention(BufferMixin):
             return result
         finally:
             self._release_buffers([buf_scores, buf_mask])
-    
+
     def attention_output(self, attention_weights, values, num_heads, head_dim):
         """
         Compute attention output: weights @ values
@@ -210,17 +218,17 @@ class VulkanAttention(BufferMixin):
         """
         weights = attention_weights.astype(np.float32)
         v = values.astype(np.float32)
-        
+
         batch_size, num_heads_w, seq_len, _ = weights.shape
-        
+
         if v.ndim == 3:
             v = v.reshape(batch_size, seq_len, num_heads, head_dim)
-        
+
         # Try to get architecture-specific shader, fall back to generic
         shader_name = get_shader('attention-output', self.architecture)
         if shader_name is None:
             shader_name = 'attention-output'  # Fall back to generic
-        
+
         # Check if shader is available
         if shader_name not in self.shaders:
             # CPU fallback: weights @ v
@@ -238,7 +246,7 @@ class VulkanAttention(BufferMixin):
             # Transpose back to (batch, seq_len, num_heads, head_dim)
             result = result.transpose(0, 2, 1, 3)
             return result
-        
+
         weights_flat = weights.flatten()
         v_flat = v.flatten()
 
@@ -286,7 +294,7 @@ class VulkanAttention(BufferMixin):
             return result
         finally:
             self._release_buffers([buf_weights, buf_v, buf_out])
-    
+
     def attention_concat_heads(self, attention_output):
         """
         Concatenate attention heads
@@ -299,7 +307,7 @@ class VulkanAttention(BufferMixin):
         """
         output = attention_output.astype(np.float32)
         batch_size, seq_len, num_heads, head_dim = output.shape
-        
+
         output_flat = output.flatten()
         concat_size = batch_size * seq_len * num_heads * head_dim * 4
 
@@ -342,7 +350,7 @@ class VulkanAttention(BufferMixin):
             return result
         finally:
             self._release_buffers([buf_in, buf_out])
-    
+
     def flash_attention2(
         self,
         queries,
@@ -381,10 +389,10 @@ class VulkanAttention(BufferMixin):
         q = queries.astype(np.float32)
         k = keys.astype(np.float32)
         v = values.astype(np.float32)
-        
+
         if scale is None:
             scale = 1.0 / np.sqrt(head_dim)
-        
+
         # Handle flattened head dimension
         if q.ndim == 3:
             batch_size, seq_len, _ = q.shape
@@ -393,29 +401,29 @@ class VulkanAttention(BufferMixin):
             v = v.reshape(batch_size, seq_len, num_heads, head_dim)
         else:
             batch_size, seq_len, num_heads, head_dim = q.shape
-        
+
         # Create causal mask if requested
         if causal and mask is None:
             mask = np.ones((batch_size, seq_len), dtype=np.float32)
             for i in range(seq_len):
                 for j in range(i + 1, seq_len):
                     mask[:, j] = 0.0
-        
+
         # Flatten tensors
         q_flat = q.flatten()
         k_flat = k.flatten()
         v_flat = v.flatten()
-        
+
         # Calculate number of tiles
         num_tiles_q = (seq_len + tile_size_q - 1) // tile_size_q
         num_tiles_k = (seq_len + tile_size_k - 1) // tile_size_k
-        
+
         # Temporary buffers for online softmax
         num_q_positions = batch_size * seq_len * num_heads
         running_max_size = num_q_positions * 4  # float32
         running_sum_size = num_q_positions * 4
         output_accum_size = batch_size * seq_len * num_heads * head_dim * 4
-        
+
         # Create buffers
         buf_q = self._acquire_buffer(q_flat.nbytes)
         buf_k = self._acquire_buffer(k_flat.nbytes)
@@ -571,7 +579,7 @@ class VulkanAttention(BufferMixin):
             if buf_mask is not None:
                 buffers.append(buf_mask)
             self._release_buffers(buffers)
-    
+
     def apply_rope(self, q_or_k: np.ndarray, position_ids: np.ndarray = None, rope_base: float = 10000.0, rope_scaling: float = 1.0) -> np.ndarray:
         """
         Apply RoPE (Rotary Position Embeddings) to Q or K tensors.
@@ -589,19 +597,19 @@ class VulkanAttention(BufferMixin):
             # CPU fallback for RoPE
             logger.debug("RoPE shader not available, using CPU fallback")
             return self._rope_cpu(q_or_k, position_ids, rope_base, rope_scaling)
-        
+
         qk = q_or_k.astype(np.float32)
         batch_size, seq_len, num_heads, head_dim = qk.shape
-        
+
         # Create position_ids if not provided
         if position_ids is None:
             position_ids = np.arange(seq_len, dtype=np.int32)
             position_ids = np.tile(position_ids, (batch_size, 1))
-        
+
         # Flatten for GPU
         qk_flat = qk.flatten()
         total_elements = len(qk_flat)
-        
+
         # Create buffers
         buf_input = self._acquire_buffer(qk_flat.nbytes)
         buf_output = self._acquire_buffer(qk_flat.nbytes)
@@ -647,7 +655,7 @@ class VulkanAttention(BufferMixin):
             return result
         finally:
             self._release_buffers([buf_input, buf_output])
-    
+
     def apply_prosody_modulation(
         self,
         attention_scores: np.ndarray,
@@ -671,18 +679,18 @@ class VulkanAttention(BufferMixin):
             # CPU fallback
             logger.debug("Prosody modulation shader not available, using CPU fallback")
             return self._prosody_modulation_cpu(attention_scores, prosody_features, prosody_weights, prosody_strength)
-        
+
         scores = attention_scores.astype(np.float32)
         prosody = prosody_features.astype(np.float32)
         weights = prosody_weights.astype(np.float32)
-        
+
         batch_size, num_heads, seq_len, _ = scores.shape
         prosody_dim = prosody_features.shape[-1]
-        
+
         scores_flat = scores.flatten()
         prosody_flat = prosody.flatten()
         weights_flat = weights.flatten()
-        
+
         # Create buffers
         buf_scores = self._acquire_buffer(scores_flat.nbytes)
         buf_prosody = self._acquire_buffer(prosody_flat.nbytes)
@@ -729,7 +737,7 @@ class VulkanAttention(BufferMixin):
             return result
         finally:
             self._release_buffers([buf_scores, buf_prosody, buf_weights])
-    
+
     def _prosody_modulation_cpu(
         self,
         attention_scores: np.ndarray,
@@ -759,7 +767,7 @@ class VulkanAttention(BufferMixin):
         prosody_bias = prosody_bias[:, :, np.newaxis, :]  # (batch, num_heads, 1, seq_len)
 
         return attention_scores + prosody_strength * prosody_bias
-    
+
     def _rope_cpu(self, q_or_k: np.ndarray, position_ids: np.ndarray = None, rope_base: float = 10000.0, rope_scaling: float = 1.0) -> np.ndarray:
         """
         CPU fallback for RoPE using PyTorch's rotate_half approach (numba-accelerated if available).

@@ -11,12 +11,12 @@ Submodules:
     - controller: CognitiveController for full pipeline
 """
 
-from .memory import WorkingMemory, WorkingMemorySlot, WorkingMemoryItem
-from .world import WorldModel, Fact
+from .capsule import CapsuleEncoder, batch_cosine_similarity, cosine_similarity
+from .controller import CognitiveController
+from .memory import WorkingMemory, WorkingMemoryItem, WorkingMemorySlot
 from .simulator import InternalSimulator, SimulationResult
 from .understander import Understander, UnderstandingResult
-from .controller import CognitiveController
-from .capsule import CapsuleEncoder, cosine_similarity, batch_cosine_similarity
+from .world import Fact, WorldModel
 
 __all__ = [
     "WorkingMemory",

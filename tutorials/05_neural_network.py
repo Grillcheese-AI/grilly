@@ -8,10 +8,10 @@ Demonstrates: Linear layers, activations, and backward passes.
 Based on PyTorch's neural network tutorials.
 """
 
-import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
-
-import numpy as np
 import math
+
+import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
+import numpy as np
 
 from grilly import Compute
 

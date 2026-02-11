@@ -2,8 +2,8 @@
 Dropout functions (functional API)
 Uses: fnn-dropout.glsl
 """
+
 import numpy as np
-from typing import Optional
 
 
 def _get_backend():
@@ -27,6 +27,6 @@ def dropout(input: np.ndarray, p: float = 0.5, training: bool = True) -> np.ndar
     """
     if not training or p == 0:
         return input
-    
+
     backend = _get_backend()
     return backend.dropout(input, p=p)

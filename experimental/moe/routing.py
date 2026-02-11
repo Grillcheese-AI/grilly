@@ -4,10 +4,13 @@ ResonatorMoE - Resonator-based Mixture of Experts routing.
 Uses VSA operations to route queries to relevant experts.
 """
 
+from collections.abc import Callable
+from typing import Any, Optional
+
 import numpy as np
-from typing import Dict, List, Callable, Optional, Tuple, Any
-from grilly.experimental.vsa.ops import BinaryOps
+
 from grilly.experimental.cognitive.capsule import CapsuleEncoder, cosine_similarity
+from grilly.experimental.vsa.ops import BinaryOps
 
 
 class ResonatorMoE:
@@ -18,16 +21,16 @@ class ResonatorMoE:
     query and expert vectors. Supports top-k expert selection
     and weighted combination.
     """
-    
+
     def __init__(
         self,
         dim: int,
-        experts: Dict[str, Callable],
-        expert_vectors: Optional[Dict[str, np.ndarray]] = None,
-        expert_capsules: Optional[Dict[str, np.ndarray]] = None,
-        capsule_encoder: Optional[CapsuleEncoder] = None,
+        experts: dict[str, Callable],
+        expert_vectors: dict[str, np.ndarray] | None = None,
+        expert_capsules: dict[str, np.ndarray] | None = None,
+        capsule_encoder: CapsuleEncoder | None = None,
         capsule_weight: float = 0.3,
-        vsa_backend: Optional[Any] = None
+        vsa_backend: Any | None = None
     ):
         """
         Initialize ResonatorMoE.
@@ -40,7 +43,7 @@ class ResonatorMoE:
         """
         self.dim = dim
         self.experts = experts
-        
+
         # Generate or use provided expert vectors
         if expert_vectors is not None:
             self.expert_vectors = expert_vectors
@@ -79,13 +82,13 @@ class ResonatorMoE:
         query_capsule = self.capsule_encoder.encode_vector(query)
         cap_sim = cosine_similarity(query_capsule, expert_capsule)
         return (1.0 - self.capsule_weight) * vsa_sim + self.capsule_weight * cap_sim
-    
+
     def route(
         self,
         query: np.ndarray,
         top_k: int = 1,
-        threshold: Optional[float] = None
-    ) -> List[str]:
+        threshold: float | None = None
+    ) -> list[str]:
         """
         Route query to top-k most similar experts.
         
@@ -115,18 +118,18 @@ class ResonatorMoE:
         # Filter by threshold if provided
         if threshold is not None:
             similarities = [(n, s) for n, s in similarities if s >= threshold]
-        
+
         # Sort by similarity (descending)
         similarities.sort(key=lambda x: x[1], reverse=True)
-        
+
         # Return top-k expert names
         return [name for name, _ in similarities[:top_k]]
-    
+
     def get_weights(
         self,
         query: np.ndarray,
         normalize: bool = True
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """
         Get expert weights based on query similarity.
         
@@ -143,15 +146,15 @@ class ResonatorMoE:
             sim = self._combined_similarity(query, name)
             # Convert similarity [-1, 1] to non-negative weight [0, 2]
             weights[name] = sim + 1.0
-        
+
         # Apply softmax normalization if requested
         if normalize:
             exp_weights = {k: np.exp(v) for k, v in weights.items()}
             total = sum(exp_weights.values())
             weights = {k: v / total for k, v in exp_weights.items()}
-        
+
         return weights
-    
+
     def forward(
         self,
         x: np.ndarray,
@@ -171,32 +174,32 @@ class ResonatorMoE:
         """
         # Route to top-k experts
         selected = self.route(query, top_k=top_k)
-        
+
         if not selected:
             # No experts selected, return zeros
             return np.zeros_like(x)
-        
+
         # Get weights for selected experts
         weights = self.get_weights(query, normalize=True)
-        
+
         # Apply experts and combine
         outputs = []
         total_weight = 0.0
-        
+
         for expert_name in selected:
             expert_fn = self.experts[expert_name]
             expert_output = expert_fn(x)
             weight = weights.get(expert_name, 0.0)
-            
+
             outputs.append(expert_output * weight)
             total_weight += weight
-        
+
         # Combine weighted outputs
         if total_weight > 0:
             result = sum(outputs) / total_weight
         else:
             result = sum(outputs)
-        
+
         return result.astype(np.float32)
 
 
@@ -204,8 +207,8 @@ class ResonatorMoE:
     def from_realm_vectors(
         cls,
         dim: int,
-        realm_expert_fns: Dict[str, Callable],
-        realm_vectors: Optional[Dict[str, np.ndarray]] = None,
+        realm_expert_fns: dict[str, Callable],
+        realm_vectors: dict[str, np.ndarray] | None = None,
     ) -> 'ResonatorMoE':
         """
         Build a ResonatorMoE from SVC realm expert vectors.
@@ -239,12 +242,12 @@ class RelationalMoE(ResonatorMoE):
     Extends ResonatorMoE to use RelationalEncoder for creating
     expert vectors from relational concepts.
     """
-    
+
     def __init__(
         self,
         dim: int,
-        experts: Dict[str, Callable],
-        expert_relations: Dict[str, Tuple[str, str]],
+        experts: dict[str, Callable],
+        expert_relations: dict[str, tuple[str, str]],
         relational_encoder: Optional['RelationalEncoder'] = None
     ):
         """
@@ -259,18 +262,18 @@ class RelationalMoE(ResonatorMoE):
                                If None, creates a new one.
         """
         from grilly.experimental.moe.relational import RelationalEncoder
-        
+
         if relational_encoder is None:
             relational_encoder = RelationalEncoder(dim=dim)
-        
+
         self.relational_encoder = relational_encoder
         self.expert_relations = expert_relations
-        
+
         # Create expert vectors from relations
         expert_vectors = {}
         for expert_name, (source, target) in expert_relations.items():
             # Encode the target concept as the expert vector
             expert_vectors[expert_name] = relational_encoder.encode(target)
-        
+
         # Initialize parent with computed expert vectors
         super().__init__(dim=dim, experts=experts, expert_vectors=expert_vectors)

@@ -3,7 +3,9 @@ Pooling layers for neural networks.
 """
 
 import numpy as np
+
 from .module import Module
+
 
 def get_compute():
     """Run get compute."""

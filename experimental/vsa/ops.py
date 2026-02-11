@@ -19,15 +19,14 @@ import numpy as np
 
 # Stable hashing (BLAKE3) for deterministic string->vector
 try:
-    from utils.stable_hash import stable_u32, bipolar_from_key
+    from utils.stable_hash import bipolar_from_key, stable_u32
 except ModuleNotFoundError:
     try:
-        from grilly.utils.stable_hash import stable_u32, bipolar_from_key  # type: ignore
+        from grilly.utils.stable_hash import bipolar_from_key, stable_u32  # type: ignore
     except Exception:
         stable_u32 = None  # type: ignore
         bipolar_from_key = None  # type: ignore
 
-from typing import List, Optional
 
 
 class BinaryOps:
@@ -39,7 +38,7 @@ class BinaryOps:
     
     All operations are O(d) and embarrassingly parallel.
     """
-    
+
     @staticmethod
     def bind(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """
@@ -81,7 +80,7 @@ class BinaryOps:
             raise ValueError("Batch inputs must be 2D (batch, dim)")
 
         return (a_batch * b_batch).astype(np.float32)
-    
+
     @staticmethod
     def unbind(composite: np.ndarray, known: np.ndarray) -> np.ndarray:
         """
@@ -98,9 +97,9 @@ class BinaryOps:
             The recovered vector (approximately the original bound vector)
         """
         return (composite * known).astype(np.float32)
-    
+
     @staticmethod
-    def bundle(vectors: List[np.ndarray], normalize: bool = True) -> np.ndarray:
+    def bundle(vectors: list[np.ndarray], normalize: bool = True) -> np.ndarray:
         """
         Bundle multiple vectors via majority voting.
         
@@ -116,13 +115,13 @@ class BinaryOps:
         """
         if not vectors:
             raise ValueError("Cannot bundle empty list of vectors")
-        
+
         result = np.sum(vectors, axis=0)
-        
+
         if normalize:
             # Majority vote: sign of sum (with small epsilon to break ties)
             result = np.sign(result + 1e-8).astype(np.float32)
-        
+
         return result
 
     @staticmethod
@@ -148,7 +147,7 @@ class BinaryOps:
             result = np.sign(result + 1e-8).astype(np.float32)
 
         return result
-    
+
     @staticmethod
     def similarity(a: np.ndarray, b: np.ndarray) -> float:
         """
@@ -186,9 +185,9 @@ class BinaryOps:
             raise ValueError("codebook must have shape (num_vectors, dim)")
 
         return (codebook @ query) / float(query.shape[0])
-    
+
     @staticmethod
-    def random_bipolar(dim: int, seed: Optional[int] = None) -> np.ndarray:
+    def random_bipolar(dim: int, seed: int | None = None) -> np.ndarray:
         """
         Generate a random bipolar vector (+1/-1).
 
@@ -198,7 +197,7 @@ class BinaryOps:
             return np.sign(np.random.randn(dim)).astype(np.float32)
         rng = np.random.RandomState(seed)
         return np.sign(rng.randn(dim)).astype(np.float32)
-    
+
     @staticmethod
     def hash_to_bipolar(s: str, dim: int) -> np.ndarray:
         """
@@ -228,7 +227,7 @@ class HolographicOps:
     HRR preserves more information than binary binding but unbinding
     is approximate rather than exact.
     """
-    
+
     @staticmethod
     def convolve(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """
@@ -271,7 +270,7 @@ class HolographicOps:
         fft_a = np.fft.fft(a_batch, axis=1)
         fft_b = np.fft.fft(b_batch, axis=1)
         return np.real(np.fft.ifft(fft_a * fft_b, axis=1)).astype(np.float32)
-    
+
     @staticmethod
     def correlate(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """
@@ -287,9 +286,9 @@ class HolographicOps:
             Approximate recovered vector
         """
         return np.real(np.fft.ifft(np.fft.fft(a) * np.conj(np.fft.fft(b)))).astype(np.float32)
-    
+
     @staticmethod
-    def bundle(vectors: List[np.ndarray], normalize: bool = True) -> np.ndarray:
+    def bundle(vectors: list[np.ndarray], normalize: bool = True) -> np.ndarray:
         """
         Bundle multiple vectors via element-wise sum.
         
@@ -302,14 +301,14 @@ class HolographicOps:
         """
         if not vectors:
             raise ValueError("Cannot bundle empty list of vectors")
-        
+
         result = np.sum(vectors, axis=0).astype(np.float32)
-        
+
         if normalize:
             norm = np.linalg.norm(result)
             if norm > 0:
                 result = result / norm
-        
+
         return result
 
     @staticmethod
@@ -337,7 +336,7 @@ class HolographicOps:
             result = result / norms
 
         return result
-    
+
     @staticmethod
     def similarity(a: np.ndarray, b: np.ndarray) -> float:
         """
@@ -352,10 +351,10 @@ class HolographicOps:
         """
         norm_a = np.linalg.norm(a)
         norm_b = np.linalg.norm(b)
-        
+
         if norm_a == 0 or norm_b == 0:
             return 0.0
-        
+
         return float(np.dot(a, b) / (norm_a * norm_b))
 
     @staticmethod
@@ -386,9 +385,9 @@ class HolographicOps:
         norms = np.where(norms == 0, 1.0, norms)
         sims = (codebook @ query) / (norms * norm_query)
         return sims.astype(np.float32)
-    
+
     @staticmethod
-    def random_vector(dim: int, seed: Optional[int] = None) -> np.ndarray:
+    def random_vector(dim: int, seed: int | None = None) -> np.ndarray:
         """
         Generate a random unit vector.
 

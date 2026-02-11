@@ -10,9 +10,10 @@ Shaders used:
 - lora-backward.glsl: Gradient computation for A and B matrices
 """
 
-import numpy as np
 import struct
-from typing import Optional, Tuple
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:
@@ -53,7 +54,7 @@ class VulkanLoRA(BufferMixin):
         A: np.ndarray,
         B: np.ndarray,
         scale: float = 1.0,
-        bias: Optional[np.ndarray] = None,
+        bias: np.ndarray | None = None,
     ) -> np.ndarray:
         """
         Fused LoRA forward pass.
@@ -100,7 +101,7 @@ class VulkanLoRA(BufferMixin):
         A: np.ndarray,
         B: np.ndarray,
         scale: float,
-        bias: Optional[np.ndarray],
+        bias: np.ndarray | None,
     ) -> np.ndarray:
         """CPU fallback for LoRA forward."""
         # Base output: x @ W^T
@@ -125,7 +126,7 @@ class VulkanLoRA(BufferMixin):
         A: np.ndarray,
         B: np.ndarray,
         scale: float,
-        bias: Optional[np.ndarray],
+        bias: np.ndarray | None,
         batch_size: int,
         in_features: int,
         out_features: int,
@@ -219,9 +220,9 @@ class VulkanLoRA(BufferMixin):
         x: np.ndarray,
         A: np.ndarray,
         B: np.ndarray,
-        h: Optional[np.ndarray] = None,
+        h: np.ndarray | None = None,
         scale: float = 1.0,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         LoRA backward pass - compute gradients for A and B.
 
@@ -278,7 +279,7 @@ class VulkanLoRA(BufferMixin):
         B: np.ndarray,
         h: np.ndarray,
         scale: float,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """CPU fallback for LoRA backward."""
         # grad_B = scale * h^T @ grad_output
         # h has shape (batch, rank), grad_output has shape (batch, out_features)
@@ -307,7 +308,7 @@ class VulkanLoRA(BufferMixin):
         in_features: int,
         out_features: int,
         rank: int,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """GPU implementation of LoRA backward."""
         device = self.core.device
 
@@ -425,8 +426,8 @@ class VulkanLoRA(BufferMixin):
         A: np.ndarray,
         B: np.ndarray,
         scale: float = 1.0,
-        bias: Optional[np.ndarray] = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        bias: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         LoRA forward pass that also returns intermediate h for backward.
 

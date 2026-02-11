@@ -13,16 +13,16 @@ This module provides GPU acceleration for:
 """
 
 from .base import VULKAN_AVAILABLE
-from .compute import VulkanCompute
-from .snn_compute import SNNCompute
-from .learning import VulkanLearning
-from .lora import VulkanLoRA
 from .capsule_transformer import (
     CapsuleMemory,
     CapsuleTransformerConfig,
     CognitiveFeatures,
     MemoryType,
 )
+from .compute import VulkanCompute
+from .learning import VulkanLearning
+from .lora import VulkanLoRA
+from .snn_compute import SNNCompute
 
 __all__ = [
     'VULKAN_AVAILABLE',

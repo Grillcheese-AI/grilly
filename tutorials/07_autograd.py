@@ -9,11 +9,10 @@ Based on PyTorch's autograd tutorial.
 """
 
 import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
-
 import numpy as np
 
 from grilly import Compute
-from grilly.nn.autograd import Variable, linspace, randn, no_grad
+from grilly.nn.autograd import linspace, no_grad, randn
 
 # Initialize GPU (for later use)
 compute = Compute()
@@ -72,7 +71,7 @@ for t in range(5000):
 print("=" * 80)
 print(f"\nResult: y = {a.data.item():.4f} + {b.data.item():.4f}x + "
       f"{c.data.item():.4f}x^2 + {d.data.item():.4f}x^3")
-print(f"Expected (Taylor): y ≈ 1.0 + 1.0x + 0.5x^2 + 0.167x^3")
+print("Expected (Taylor): y ≈ 1.0 + 1.0x + 0.5x^2 + 0.167x^3")
 
 # Final comparison
 y_pred_final = a.data + b.data * x.data + c.data * x.data**2 + d.data * x.data**3

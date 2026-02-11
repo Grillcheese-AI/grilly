@@ -63,9 +63,7 @@ _logger = logging.getLogger(__name__)
 
 # Import buffer pool components (lazy - may not be available)
 try:
-    from .buffer_pool import (
-        BufferPool, VMABufferPool, PooledBuffer, VMABuffer, PYVMA_AVAILABLE
-    )
+    from .buffer_pool import PYVMA_AVAILABLE, BufferPool, PooledBuffer, VMABuffer, VMABufferPool
     BUFFER_POOL_AVAILABLE = True
 except ImportError:
     BUFFER_POOL_AVAILABLE = False

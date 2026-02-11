@@ -4,8 +4,8 @@ Functional FAISS Operations
 Uses: faiss-distance.glsl, faiss-topk.glsl, faiss-ivf-filter.glsl,
       faiss-kmeans-update.glsl, faiss-quantize.glsl
 """
+
 import numpy as np
-from typing import Tuple, Optional
 
 
 def _get_backend():
@@ -43,7 +43,7 @@ def faiss_distance(
         # CPU fallback
         if query.ndim == 1:
             query = query.reshape(1, -1)
-        
+
         if distance_type == 'l2':
             diff = query[:, None, :] - vectors[None, :, :]
             return np.sqrt(np.sum(diff ** 2, axis=2))
@@ -58,7 +58,7 @@ def faiss_distance(
 def faiss_topk(
     distances: np.ndarray,
     k: int
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Get top-k nearest neighbors.
     
@@ -101,7 +101,7 @@ def faiss_ivf_filter(
         Cluster assignments (num_vectors,)
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'faiss-kmeans-update' in backend.shaders:
         try:
@@ -110,7 +110,7 @@ def faiss_ivf_filter(
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback - Assign each vector to nearest centroid
     distances = np.linalg.norm(vectors[:, None, :] - centroids[None, :, :], axis=2)
     assignments = np.argmin(distances, axis=1)
@@ -138,7 +138,7 @@ def faiss_kmeans_update(
         Updated centroids (nlist, dim)
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'faiss-kmeans-update' in backend.shaders:
         try:
@@ -147,23 +147,23 @@ def faiss_kmeans_update(
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback
     new_centroids = np.zeros_like(centroids)
     counts = np.zeros(nlist, dtype=np.int32)
-    
+
     for i, vec in enumerate(vectors):
         cluster = assignments[i]
         new_centroids[cluster] += vec
         counts[cluster] += 1
-    
+
     # Normalize by counts
     for c in range(nlist):
         if counts[c] > 0:
             new_centroids[c] /= counts[c]
         else:
             new_centroids[c] = centroids[c]  # Keep old centroid if no vectors assigned
-    
+
     return new_centroids
 
 
@@ -171,7 +171,7 @@ def faiss_quantize(
     vectors: np.ndarray,
     codebook: np.ndarray,
     nbits: int = 8
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Quantize vectors using codebook.
     
@@ -186,7 +186,7 @@ def faiss_quantize(
         (quantized_vectors, codes) - codes (num_vectors,)
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'faiss-quantize' in backend.shaders:
         try:
@@ -195,7 +195,7 @@ def faiss_quantize(
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback - Find nearest codebook entry for each vector
     distances = np.linalg.norm(vectors[:, None, :] - codebook[None, :, :], axis=2)
     codes = np.argmin(distances, axis=1)

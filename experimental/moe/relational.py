@@ -7,9 +7,10 @@ Provides deterministic encoding of concepts with support for:
 - Relation extraction (analogies, transformations)
 """
 
-import numpy as np
 import hashlib
-from typing import Optional, List, Dict
+
+import numpy as np
+
 from grilly.experimental.vsa.ops import BinaryOps
 
 
@@ -20,9 +21,9 @@ class RelationalEncoder:
     Uses hash-based deterministic encoding to ensure same input
     produces same vector. Supports modality and polarity tags.
     """
-    
+
     DEFAULT_DIM = 1024
-    
+
     def __init__(self, dim: int = DEFAULT_DIM):
         """
         Initialize RelationalEncoder.
@@ -31,13 +32,13 @@ class RelationalEncoder:
             dim: Dimension of encoded vectors (default: 1024)
         """
         self.dim = dim
-        self._cache: Dict[str, np.ndarray] = {}
-    
+        self._cache: dict[str, np.ndarray] = {}
+
     def encode(
         self,
         concept: str,
-        modality: Optional[str] = None,
-        polarity: Optional[str] = None
+        modality: str | None = None,
+        polarity: str | None = None
     ) -> np.ndarray:
         """
         Encode a concept as a bipolar vector.
@@ -57,31 +58,31 @@ class RelationalEncoder:
         if polarity:
             key_parts.append(f"pol:{polarity}")
         cache_key = "|".join(key_parts)
-        
+
         if cache_key in self._cache:
             return self._cache[cache_key]
-        
+
         # Hash-based deterministic encoding
         hash_input = cache_key.encode('utf-8')
         hash_obj = hashlib.sha256(hash_input)
         hash_bytes = hash_obj.digest()
-        
+
         # Generate bipolar vector from hash
         vector = np.zeros(self.dim, dtype=np.float32)
-        
+
         # Use hash bytes to set vector elements
         for i in range(self.dim):
             byte_idx = i % len(hash_bytes)
             bit = (hash_bytes[byte_idx] >> (i % 8)) & 1
             vector[i] = 1.0 if bit else -1.0
-        
+
         # Apply polarity flip if negative
         if polarity == "negative":
             vector = -vector
-        
+
         self._cache[cache_key] = vector
         return vector
-    
+
     def get_opposite(self, vector: np.ndarray) -> np.ndarray:
         """
         Get the opposite/negated version of a vector.
@@ -95,7 +96,7 @@ class RelationalEncoder:
             Negated vector
         """
         return -vector
-    
+
     def extract_relation(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         """
         Extract the transformation/relation from vector A to vector B.
@@ -110,7 +111,7 @@ class RelationalEncoder:
             Relation vector representing transformation A→B
         """
         return BinaryOps.bind(a, b)
-    
+
     def apply_relation(self, vector: np.ndarray, relation: np.ndarray) -> np.ndarray:
         """
         Apply a relation to a vector.
@@ -125,8 +126,8 @@ class RelationalEncoder:
             Transformed vector
         """
         return BinaryOps.bind(vector, relation)
-    
-    def encode_batch(self, concepts: List[str]) -> np.ndarray:
+
+    def encode_batch(self, concepts: list[str]) -> np.ndarray:
         """
         Encode multiple concepts efficiently.
         
@@ -137,7 +138,7 @@ class RelationalEncoder:
             Array of shape (len(concepts), dim)
         """
         return np.array([self.encode(c) for c in concepts])
-    
+
     def similarity_batch(
         self,
         query: np.ndarray,

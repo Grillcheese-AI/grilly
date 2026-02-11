@@ -4,8 +4,10 @@ GPU-accelerated vector similarity search using custom Vulkan compute shaders.
 """
 
 import logging
-import numpy as np
 import struct
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:

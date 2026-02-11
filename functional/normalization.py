@@ -2,8 +2,8 @@
 Normalization functions (functional API)
 Uses: fnn-layernorm.glsl, snn-rmsnorm.glsl
 """
+
 import numpy as np
-from typing import Optional
 
 
 def _get_backend():
@@ -12,9 +12,9 @@ def _get_backend():
     return Compute()
 
 
-def layer_norm(input: np.ndarray, normalized_shape: int, 
-               weight: Optional[np.ndarray] = None, 
-               bias: Optional[np.ndarray] = None,
+def layer_norm(input: np.ndarray, normalized_shape: int,
+               weight: np.ndarray | None = None,
+               bias: np.ndarray | None = None,
                eps: float = 1e-5) -> np.ndarray:
     """
     Layer normalization
@@ -31,10 +31,10 @@ def layer_norm(input: np.ndarray, normalized_shape: int,
         Normalized tensor
     """
     backend = _get_backend()
-    
+
     if weight is None:
         weight = np.ones(normalized_shape, dtype=np.float32)
     if bias is None:
         bias = np.zeros(normalized_shape, dtype=np.float32)
-    
+
     return backend.layernorm(input, weight, bias, eps=eps)

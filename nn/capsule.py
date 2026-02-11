@@ -5,10 +5,10 @@ Uses: capsule-project.glsl, semantic-encoder.glsl, dg-sparse-expand.glsl
 
 Reference: grilly/backend/capsule_transformer.py
 """
+
 import numpy as np
-from typing import Optional
+
 from .module import Module
-from .modules import Linear
 
 
 class CapsuleProject(Module):
@@ -21,7 +21,7 @@ class CapsuleProject(Module):
     
     Reference: grilly/backend/capsule_transformer.py
     """
-    
+
     def __init__(self, in_dim: int = 384, out_dim: int = 32):
         """
         Initialize CapsuleProject layer.
@@ -33,20 +33,20 @@ class CapsuleProject(Module):
         super().__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
-        
+
         # Capsule projection weights
         limit = np.sqrt(6.0 / (in_dim + out_dim))
         weight_data = np.random.uniform(-limit, limit, (out_dim, in_dim)).astype(np.float32)
         bias_data = np.zeros(out_dim, dtype=np.float32)
-        
+
         # Register as parameters (will be converted to Parameter if available)
         self.register_parameter('weight', weight_data)
         self.register_parameter('bias', bias_data)
-        
+
         # Store direct references for backward compatibility
         self.weight = self._parameters['weight']
         self.bias = self._parameters['bias']
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - project to capsule space.
@@ -58,10 +58,10 @@ class CapsuleProject(Module):
             Capsule vectors (batch, out_dim) or (batch, seq_len, out_dim)
         """
         backend = self._get_backend()
-        
+
         # Store input for backward pass
         self._cached_input = x
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'capsule-project' in backend.shaders:
             try:
@@ -70,10 +70,10 @@ class CapsuleProject(Module):
                 return backend.linear(x, self.weight, self.bias)
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         return x @ self.weight.T + self.bias
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for CapsuleProject.
@@ -89,7 +89,7 @@ class CapsuleProject(Module):
             x = getattr(self, '_cached_input', None)
         if x is None:
             raise ValueError("Input x is required for backward pass")
-        
+
         # Extract parameter data
         if hasattr(self.weight, 'data'):
             weight_data = self.weight.data
@@ -97,14 +97,14 @@ class CapsuleProject(Module):
             weight_data = self.weight
         else:
             weight_data = np.asarray(self.weight, dtype=np.float32)
-        
+
         if hasattr(self.bias, 'data'):
             bias_data = self.bias.data
         elif isinstance(self.bias, np.ndarray):
             bias_data = self.bias
         else:
             bias_data = np.asarray(self.bias, dtype=np.float32)
-        
+
         # Handle batched input
         if grad_output.ndim == 3:
             # (batch, seq_len, out_dim)
@@ -115,16 +115,16 @@ class CapsuleProject(Module):
             # (batch, out_dim)
             grad_output_flat = grad_output
             x_flat = x
-        
+
         # Gradient w.r.t. weight: grad_output^T @ x
         grad_weight = grad_output_flat.T @ x_flat  # (out_dim, in_dim)
-        
+
         # Gradient w.r.t. bias: sum over batch dimension
         grad_bias = np.sum(grad_output_flat, axis=0)  # (out_dim,)
-        
+
         # Gradient w.r.t. input: grad_output @ weight
         grad_input = grad_output_flat @ weight_data  # (batch, in_dim)
-        
+
         # Accumulate gradients
         # Handle both Parameter objects and numpy arrays
         if hasattr(self.weight, 'grad'):
@@ -147,7 +147,7 @@ class CapsuleProject(Module):
                         param.grad = grad_weight
             else:
                 self.weight.grad = grad_weight
-        
+
         if hasattr(self.bias, 'grad'):
             if self.bias.grad is None:
                 self.bias.grad = grad_bias
@@ -168,13 +168,13 @@ class CapsuleProject(Module):
                         param.grad = grad_bias
             else:
                 self.bias.grad = grad_bias
-        
+
         # Reshape grad_input if needed
         if grad_output.ndim == 3:
             grad_input = grad_input.reshape(batch_size, seq_len, -1)
-        
+
         return grad_input
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -187,7 +187,7 @@ class SemanticEncoder(Module):
     
     Uses: semantic-encoder.glsl
     """
-    
+
     def __init__(self, in_dim: int, out_dim: int):
         """
         Initialize SemanticEncoder layer.
@@ -199,19 +199,19 @@ class SemanticEncoder(Module):
         super().__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
-        
+
         limit = np.sqrt(6.0 / (in_dim + out_dim))
         weight_data = np.random.uniform(-limit, limit, (out_dim, in_dim)).astype(np.float32)
         bias_data = np.zeros(out_dim, dtype=np.float32)
-        
+
         # Register as parameters
         self.register_parameter('weight', weight_data)
         self.register_parameter('bias', bias_data)
-        
+
         # Store direct references
         self.weight = self._parameters['weight']
         self.bias = self._parameters['bias']
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - semantic encoding.
@@ -223,7 +223,7 @@ class SemanticEncoder(Module):
             Encoded output (batch, out_dim) or (batch, seq_len, out_dim)
         """
         backend = self._get_backend()
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'semantic-encoder' in backend.shaders:
             try:
@@ -231,10 +231,10 @@ class SemanticEncoder(Module):
                 return backend.linear(x, self.weight, self.bias)
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         return x @ self.weight.T + self.bias
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -251,7 +251,7 @@ class DentateGyrus(Module):
     
     Reference: grilly/backend/capsule_transformer.py DentateGyrus
     """
-    
+
     def __init__(self, in_dim: int = 32, out_dim: int = 128, sparsity: float = 0.02):
         """
         Initialize DentateGyrus layer.
@@ -265,26 +265,26 @@ class DentateGyrus(Module):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.sparsity = sparsity
-        
+
         # Sparse expansion matrix (only 2% of connections active)
         # Initialize with sparse pattern
         num_connections = int(in_dim * out_dim * sparsity)
         weight_data = np.zeros((out_dim, in_dim), dtype=np.float32)
-        
+
         # Randomly activate sparse connections
         indices = np.random.choice(in_dim * out_dim, num_connections, replace=False)
         row_indices = indices // in_dim
         col_indices = indices % in_dim
-        
+
         limit = np.sqrt(6.0 / (in_dim + out_dim))
         weight_data[row_indices, col_indices] = np.random.uniform(-limit, limit, num_connections).astype(np.float32)
-        
+
         # Register as parameter
         self.register_parameter('weight', weight_data)
-        
+
         # Store direct reference for backward compatibility
         self.weight = self._parameters['weight']
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - sparse expansion.
@@ -296,10 +296,10 @@ class DentateGyrus(Module):
             Sparse expanded vectors (batch, out_dim) or (batch, seq_len, out_dim)
         """
         backend = self._get_backend()
-        
+
         # Store input and activations for backward pass
         self._cached_input = x
-        
+
         # Extract parameter data (convert to numpy array)
         if hasattr(self.weight, 'data'):
             weight_data = np.asarray(self.weight.data, dtype=np.float32)
@@ -307,13 +307,13 @@ class DentateGyrus(Module):
             weight_data = np.asarray(self.weight, dtype=np.float32)
         else:
             weight_data = np.asarray(self.weight, dtype=np.float32)
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'dg-sparse-expand' in backend.shaders:
             try:
                 # For now, use linear projection (full DG shader would do top-k sparsification)
                 activations = backend.linear(x, weight_data.T, None)
-                
+
                 # Apply top-k sparsification (CPU for now, would be in shader)
                 k = max(1, int(self.out_dim * self.sparsity))
                 if activations.ndim == 2:
@@ -344,11 +344,11 @@ class DentateGyrus(Module):
                     return sparse
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback with top-k sparsification
         activations = x @ weight_data.T
         k = max(1, int(self.out_dim * self.sparsity))
-        
+
         if activations.ndim == 2:
             # (batch, out_dim)
             sparse = np.zeros_like(activations)
@@ -374,7 +374,7 @@ class DentateGyrus(Module):
             self._cached_top_k = top_k_idx
             self._cached_activations = activations
             return sparse
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for DentateGyrus.
@@ -390,10 +390,10 @@ class DentateGyrus(Module):
             x = getattr(self, '_cached_input', None)
         if x is None:
             raise ValueError("Input x is required for backward pass")
-        
+
         top_k_indices = getattr(self, '_cached_top_k', None)
         activations = getattr(self, '_cached_activations', None)
-        
+
         if top_k_indices is None or activations is None:
             # Fallback: recompute
             activations = x @ self.weight.T
@@ -402,7 +402,7 @@ class DentateGyrus(Module):
                 top_k_indices = [np.argsort(np.abs(activations[i]))[-k:] for i in range(activations.shape[0])]
             else:
                 top_k_indices = np.argsort(np.abs(activations))[-k:]
-        
+
         # Extract parameter data (convert to numpy array)
         if hasattr(self.weight, 'data'):
             weight_data = np.asarray(self.weight.data, dtype=np.float32)
@@ -410,7 +410,7 @@ class DentateGyrus(Module):
             weight_data = np.asarray(self.weight, dtype=np.float32)
         else:
             weight_data = np.asarray(self.weight, dtype=np.float32)
-        
+
         # Create mask for sparse gradients (only top-k positions get gradients)
         if grad_output.ndim == 2:
             # (batch, out_dim)
@@ -424,20 +424,20 @@ class DentateGyrus(Module):
             # (out_dim,)
             grad_sparse = np.zeros_like(grad_output)
             grad_sparse[top_k_indices] = grad_output[top_k_indices]
-        
+
         # Gradient w.r.t. input: grad_sparse @ weight
         if grad_output.ndim == 2:
             grad_input = grad_sparse @ weight_data
         else:
             grad_input = grad_sparse @ weight_data
-        
+
         # Gradient w.r.t. weight: grad_sparse^T @ x
         if grad_output.ndim == 2:
             x_flat = x.reshape(-1, x.shape[-1]) if x.ndim == 3 else x
             grad_weight = grad_sparse.T @ x_flat
         else:
             grad_weight = np.outer(grad_sparse, x)
-        
+
         # Accumulate gradients (same pattern as CapsuleProject)
         if hasattr(self.weight, 'grad'):
             if self.weight.grad is None:
@@ -459,9 +459,9 @@ class DentateGyrus(Module):
                         param.grad = grad_weight
             else:
                 self.weight.grad = grad_weight
-        
+
         return grad_input
-    
+
     def __repr__(self):
         """Return a debug representation."""
 

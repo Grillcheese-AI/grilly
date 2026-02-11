@@ -7,19 +7,19 @@ available and falls back to CPU implementations otherwise.
 
 import json
 import re
-import time
-import numpy as np
-from typing import Dict, List, Optional, Iterator, Tuple, TYPE_CHECKING
+from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from collections import defaultdict
+from typing import TYPE_CHECKING, Optional
 
-from grilly.experimental.vsa.ops import HolographicOps, BinaryOps
+import numpy as np
+
+from grilly.experimental.vsa.ops import BinaryOps, HolographicOps
 
 if TYPE_CHECKING:
     from grilly.backend.experimental.vsa import VulkanVSA
-    from grilly.experimental.language.encoder import WordEncoder, SentenceEncoder
-    from grilly.experimental.language.generator import SentenceGenerator
+    from grilly.experimental.language.encoder import SentenceEncoder, WordEncoder
 
 
 # ---------------------------------------------------------------------------
@@ -34,16 +34,16 @@ class SVCEntry:
     svc_s: str
     svc_v: str
     svc_c: str
-    pos: List[str]
-    deps: List[str]
-    lemmas: List[str]
+    pos: list[str]
+    deps: list[str]
+    lemmas: list[str]
     root_verb: str
     realm: str
     source: str
     complexity: float
 
     @classmethod
-    def from_dict(cls, data: Dict) -> 'SVCEntry':
+    def from_dict(cls, data: dict) -> 'SVCEntry':
         """Create SVCEntry from JSON dict."""
         return cls(
             id=data.get("id", ""),
@@ -60,12 +60,12 @@ class SVCEntry:
             complexity=data.get("complexity", 0.0),
         )
 
-    def tokenize(self) -> List[str]:
+    def tokenize(self) -> list[str]:
         """Tokenize text the same way InstantLanguage does."""
         text = re.sub(r'[^\w\s]', '', self.text.lower())
         return text.split()
 
-    def to_roles(self) -> Tuple[List[str], List[str]]:
+    def to_roles(self) -> tuple[list[str], list[str]]:
         """Map SVC s/v/c fields to per-word SUBJ/VERB/OBJ roles.
 
         Returns:
@@ -76,7 +76,7 @@ class SVCEntry:
         s_words = set(re.sub(r'[^\w\s]', '', self.svc_s.lower()).split())
         c_words = set(re.sub(r'[^\w\s]', '', self.svc_c.lower()).split())
 
-        roles: List[str] = []
+        roles: list[str] = []
         for w in words:
             if w in v_words:
                 roles.append("VERB")
@@ -96,25 +96,25 @@ class SVCEntry:
 @dataclass
 class SVCBatch:
     """A batch of loaded SVC entries with statistics."""
-    entries: List[SVCEntry]
-    realm_counts: Dict[str, int] = field(default_factory=dict)
-    source_counts: Dict[str, int] = field(default_factory=dict)
-    verb_counts: Dict[str, int] = field(default_factory=dict)
+    entries: list[SVCEntry]
+    realm_counts: dict[str, int] = field(default_factory=dict)
+    source_counts: dict[str, int] = field(default_factory=dict)
+    verb_counts: dict[str, int] = field(default_factory=dict)
     avg_complexity: float = 0.0
     total_loaded: int = 0
     total_skipped: int = 0
 
     @property
-    def realms(self) -> List[str]:
+    def realms(self) -> list[str]:
         """Execute realms."""
 
         return sorted(self.realm_counts.keys())
 
     @property
-    def realm_entries(self) -> Dict[str, List[SVCEntry]]:
+    def realm_entries(self) -> dict[str, list[SVCEntry]]:
         """Execute realm entries."""
 
-        grouped: Dict[str, List[SVCEntry]] = defaultdict(list)
+        grouped: dict[str, list[SVCEntry]] = defaultdict(list)
         for entry in self.entries:
             grouped[entry.realm].append(entry)
         return dict(grouped)
@@ -139,11 +139,11 @@ class SVCBatch:
 
 def load_svc_entries(
     path: str,
-    max_entries: Optional[int] = None,
-    realms: Optional[List[str]] = None,
-    min_complexity: Optional[float] = None,
-    max_complexity: Optional[float] = None,
-    sources: Optional[List[str]] = None,
+    max_entries: int | None = None,
+    realms: list[str] | None = None,
+    min_complexity: float | None = None,
+    max_complexity: float | None = None,
+    sources: list[str] | None = None,
 ) -> Iterator[SVCEntry]:
     """Load SVC entries from JSONL file with optional filtering."""
     path_obj = Path(path)
@@ -151,7 +151,7 @@ def load_svc_entries(
         raise FileNotFoundError(f"SVC data file not found: {path}")
 
     count = 0
-    with open(path_obj, 'r', encoding='utf-8') as f:
+    with open(path_obj, encoding='utf-8') as f:
         for line in f:
             if max_entries is not None and count >= max_entries:
                 break
@@ -177,17 +177,17 @@ def load_svc_entries(
 
 def load_svc_batch(
     path: str,
-    max_entries: Optional[int] = None,
-    realms: Optional[List[str]] = None,
-    min_complexity: Optional[float] = None,
-    max_complexity: Optional[float] = None,
-    sources: Optional[List[str]] = None,
+    max_entries: int | None = None,
+    realms: list[str] | None = None,
+    min_complexity: float | None = None,
+    max_complexity: float | None = None,
+    sources: list[str] | None = None,
 ) -> SVCBatch:
     """Load SVC entries into a batch with computed statistics."""
-    entries: List[SVCEntry] = []
-    realm_counts: Dict[str, int] = defaultdict(int)
-    source_counts: Dict[str, int] = defaultdict(int)
-    verb_counts: Dict[str, int] = defaultdict(int)
+    entries: list[SVCEntry] = []
+    realm_counts: dict[str, int] = defaultdict(int)
+    source_counts: dict[str, int] = defaultdict(int)
+    verb_counts: dict[str, int] = defaultdict(int)
     total_complexity = 0.0
     total_skipped = 0
 
@@ -195,7 +195,7 @@ def load_svc_batch(
     if not path_obj.exists():
         raise FileNotFoundError(f"SVC data file not found: {path}")
 
-    with open(path_obj, 'r', encoding='utf-8') as f:
+    with open(path_obj, encoding='utf-8') as f:
         for line in f:
             if max_entries is not None and len(entries) >= max_entries:
                 break
@@ -239,9 +239,9 @@ def load_svc_batch(
 
 
 def load_svc_entries_from_dicts(
-    data: List[Dict],
-    realms: Optional[List[str]] = None,
-) -> List[SVCEntry]:
+    data: list[dict],
+    realms: list[str] | None = None,
+) -> list[SVCEntry]:
     """Load SVC entries from in-memory dicts (for testing)."""
     entries = []
     for d in data:
@@ -259,8 +259,8 @@ def load_svc_entries_from_dicts(
 def _try_get_vulkan_vsa() -> Optional['VulkanVSA']:
     """Attempt to create a VulkanVSA instance.  Returns None on failure."""
     try:
-        from grilly.backend.experimental.vsa import VulkanVSA
         from grilly.backend.core import VulkanCore
+        from grilly.backend.experimental.vsa import VulkanVSA
         core = VulkanCore()
         return VulkanVSA(core)
     except Exception:
@@ -284,7 +284,7 @@ class SVCIngestionEngine:
     def __init__(
         self,
         dim: int,
-        gpu: Optional[object] = None,
+        gpu: object | None = None,
     ):
         """
         Args:
@@ -297,7 +297,7 @@ class SVCIngestionEngine:
         self.dim = dim
 
         if gpu is False:
-            self._gpu: Optional['VulkanVSA'] = None
+            self._gpu: VulkanVSA | None = None
         elif gpu is None:
             self._gpu = _try_get_vulkan_vsa()
         else:
@@ -309,7 +309,7 @@ class SVCIngestionEngine:
 
     def bundle(
         self,
-        vectors: List[np.ndarray],
+        vectors: list[np.ndarray],
         normalize: bool = True,
     ) -> np.ndarray:
         """Bundle (superpose) a list of vectors.
@@ -380,8 +380,8 @@ class SVCIngestionEngine:
         self,
         composite: np.ndarray,
         codebook: np.ndarray,
-        other_estimates: Optional[List[np.ndarray]] = None,
-    ) -> Tuple[np.ndarray, int]:
+        other_estimates: list[np.ndarray] | None = None,
+    ) -> tuple[np.ndarray, int]:
         """One resonator projection step.
 
         GPU: ``VulkanVSA.resonator_step`` -> ``vsa-resonator-step.spv``
@@ -405,10 +405,10 @@ class SVCIngestionEngine:
 
     def batch_encode_sentences(
         self,
-        entries: List[SVCEntry],
+        entries: list[SVCEntry],
         word_encoder: 'WordEncoder',
         sentence_encoder: 'SentenceEncoder',
-    ) -> Tuple[List[np.ndarray], List[List[str]]]:
+    ) -> tuple[list[np.ndarray], list[list[str]]]:
         """Encode a batch of SVC entries into sentence vectors.
 
         For each entry this:
@@ -420,12 +420,12 @@ class SVCIngestionEngine:
         Returns:
             ``(sentence_vectors, word_lists)`` as parallel lists.
         """
-        sentence_vecs: List[np.ndarray] = []
-        word_lists: List[List[str]] = []
+        sentence_vecs: list[np.ndarray] = []
+        word_lists: list[list[str]] = []
 
         # Cache of (role, pos_mod) -> (role bound with position) to reduce convolves.
         # For long corpora this cuts per-token binding cost roughly in half.
-        rolepos_cache: Dict[Tuple[str, int], np.ndarray] = {}
+        rolepos_cache: dict[tuple[str, int], np.ndarray] = {}
         pos_mod = len(sentence_encoder.position_vectors)
 
         def _rolepos(role: str, i: int) -> np.ndarray:
@@ -448,7 +448,7 @@ class SVCIngestionEngine:
             for w in words:
                 word_encoder.encode_word(w)
 
-            components: List[np.ndarray] = []
+            components: list[np.ndarray] = []
             for i, (word, role) in enumerate(zip(words, roles)):
                 word_vec = word_encoder.encode_word(word)
                 # Bind word with role-position slot (GPU convolve when available).
@@ -464,13 +464,13 @@ class SVCIngestionEngine:
 
     def batch_build_realm_vectors(
         self,
-        realm_sentence_vecs: Dict[str, List[np.ndarray]],
-    ) -> Dict[str, np.ndarray]:
+        realm_sentence_vecs: dict[str, list[np.ndarray]],
+    ) -> dict[str, np.ndarray]:
         """Bundle sentence vectors per realm into prototype vectors.
 
         Uses ``self.bundle`` (GPU ``vsa-bundle.spv`` when available).
         """
-        realm_vectors: Dict[str, np.ndarray] = {}
+        realm_vectors: dict[str, np.ndarray] = {}
         for realm, vecs in realm_sentence_vecs.items():
             if vecs:
                 realm_vectors[realm] = self.bundle(vecs, normalize=True)
@@ -481,7 +481,7 @@ class SVCIngestionEngine:
         query_vec: np.ndarray,
         sentence_vecs: np.ndarray,
         top_k: int = 5,
-    ) -> List[Tuple[int, float]]:
+    ) -> list[tuple[int, float]]:
         """Find top-k most similar sentences to *query_vec*.
 
         Uses ``self.similarity_batch`` (GPU ``vsa-similarity-batch.spv``
@@ -503,8 +503,8 @@ class SVCIngestionEngine:
         self,
         queries: np.ndarray,
         realm_codebook: np.ndarray,
-        realm_names: List[str],
-    ) -> List[str]:
+        realm_names: list[str],
+    ) -> list[str]:
         """Route each query to its best-matching realm.
 
         Uses ``self.similarity_batch`` per query (GPU accelerated).
@@ -517,7 +517,7 @@ class SVCIngestionEngine:
         Returns:
             List of realm names (length N).
         """
-        results: List[str] = []
+        results: list[str] = []
         for i in range(queries.shape[0]):
             sims = self.similarity_batch(queries[i], realm_codebook)
             best_idx = int(np.argmax(sims))

@@ -10,8 +10,10 @@ GPU-accelerated learning operations:
 - Optimizer updates (Adam, SGD, etc.)
 """
 
-import numpy as np
 import struct
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:

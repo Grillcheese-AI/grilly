@@ -5,8 +5,8 @@ Provides a lightweight capsule encoder and similarity helpers
 without requiring the full capsule transformer stack.
 """
 
+
 import numpy as np
-from typing import Optional
 
 
 class CapsuleEncoder:
@@ -42,7 +42,7 @@ class CapsuleEncoder:
     def encode_vector(
         self,
         vec: np.ndarray,
-        cognitive_features: Optional[np.ndarray] = None
+        cognitive_features: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Encode a vector into capsule space.

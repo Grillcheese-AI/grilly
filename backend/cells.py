@@ -3,8 +3,10 @@ Place and Time cell operations for Vulkan backend.
 GPU-accelerated spatial and temporal encoding for hippocampal-inspired memory.
 """
 
-import numpy as np
 import struct
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:

@@ -25,11 +25,13 @@ References:
     - https://arxiv.org/abs/2106.09685
 """
 
-import numpy as np
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Tuple, Union, Iterator
-from pathlib import Path
 import json
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 from .autograd import Variable, matmul
 
@@ -52,12 +54,12 @@ class LoRAConfig:
     rank: int = 8
     alpha: float = 16.0
     dropout: float = 0.0
-    target_modules: List[str] = field(default_factory=lambda: ['q_proj', 'v_proj'])
+    target_modules: list[str] = field(default_factory=lambda: ['q_proj', 'v_proj'])
     bias: str = 'none'  # 'none', 'all', 'lora_only'
     init_lora_weights: str = 'gaussian'  # 'gaussian', 'kaiming', 'zeros'
-    modules_to_save: Optional[List[str]] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
+    modules_to_save: list[str] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert config to dictionary for serialization."""
         return {
             'rank': self.rank,
@@ -68,23 +70,23 @@ class LoRAConfig:
             'init_lora_weights': self.init_lora_weights,
             'modules_to_save': self.modules_to_save,
         }
-    
+
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> 'LoRAConfig':
+    def from_dict(cls, d: dict[str, Any]) -> 'LoRAConfig':
         """Create config from dictionary."""
         return cls(**d)
-    
-    def save(self, path: Union[str, Path]) -> None:
+
+    def save(self, path: str | Path) -> None:
         """Save config to JSON file."""
         path = Path(path)
         with open(path, 'w') as f:
             json.dump(self.to_dict(), f, indent=2)
-    
+
     @classmethod
-    def load(cls, path: Union[str, Path]) -> 'LoRAConfig':
+    def load(cls, path: str | Path) -> 'LoRAConfig':
         """Load config from JSON file."""
         path = Path(path)
-        with open(path, 'r') as f:
+        with open(path) as f:
             return cls.from_dict(json.load(f))
 
 
@@ -116,7 +118,7 @@ class LoRALinear:
         >>> y = lora.forward(x)
         >>> print(f"Trainable params: {lora.num_trainable_params()}")
     """
-    
+
     def __init__(
         self,
         in_features: int,
@@ -126,7 +128,7 @@ class LoRALinear:
         dropout: float = 0.0,
         bias: bool = False,
         init_weights: str = 'gaussian',
-        base_weights: Optional[np.ndarray] = None,
+        base_weights: np.ndarray | None = None,
     ):
         """Initialize the instance."""
 
@@ -137,7 +139,7 @@ class LoRALinear:
         self.scaling = alpha / rank
         self.dropout = dropout
         self.has_bias = bias
-        
+
         # Frozen pre-trained weights (not trainable)
         if base_weights is not None:
             assert base_weights.shape == (out_features, in_features), \
@@ -149,13 +151,13 @@ class LoRALinear:
                 np.random.randn(out_features, in_features).astype(np.float32) * 0.01,
                 requires_grad=False
             )
-        
+
         # LoRA adapters (trainable)
         # A: (rank, in_features) - projects input to low-rank space
         # B: (out_features, rank) - projects from low-rank space to output
         self.lora_A = self._init_lora_A(init_weights)
         self.lora_B = self._init_lora_B()  # Always zeros
-        
+
         # Optional bias
         if bias:
             self.bias = Variable(
@@ -164,11 +166,11 @@ class LoRALinear:
             )
         else:
             self.bias = None
-        
+
         # Training state
         self._merged = False
         self._enabled = True
-    
+
     def _init_lora_A(self, method: str) -> Variable:
         """Initialize LoRA A matrix."""
         if method == 'gaussian':
@@ -182,14 +184,14 @@ class LoRALinear:
         else:
             raise ValueError(f"Unknown init method: {method}")
         return Variable(data, requires_grad=True)
-    
+
     def _init_lora_B(self) -> Variable:
         """Initialize LoRA B matrix (always zeros for stable training start)."""
         return Variable(
             np.zeros((self.out_features, self.rank), dtype=np.float32),
             requires_grad=True
         )
-    
+
     def forward(self, x: Variable) -> Variable:
         """
         Forward pass with LoRA adaptation.
@@ -207,49 +209,49 @@ class LoRALinear:
         else:
             # Compute base + LoRA
             base_output = matmul(x, self.W.T)
-            
+
             if self._enabled:
                 # LoRA forward: x @ A^T @ B^T * scaling
                 lora_output = matmul(matmul(x, self.lora_A.T), self.lora_B.T)
                 output = base_output + lora_output * self.scaling
             else:
                 output = base_output
-        
+
         # Add bias if present
         if self.bias is not None:
             output = output + self.bias
-        
+
         return output
-    
+
     def __call__(self, x: Variable) -> Variable:
         """Allow calling layer directly."""
         return self.forward(x)
-    
-    def parameters(self) -> List[Variable]:
+
+    def parameters(self) -> list[Variable]:
         """Get trainable parameters (only LoRA adapters and optional bias)."""
         params = [self.lora_A, self.lora_B]
         if self.bias is not None:
             params.append(self.bias)
         return params
-    
-    def lora_parameters(self) -> List[Variable]:
+
+    def lora_parameters(self) -> list[Variable]:
         """Get only LoRA adapter parameters (A and B matrices)."""
         return [self.lora_A, self.lora_B]
-    
+
     def num_trainable_params(self) -> int:
         """Count trainable parameters."""
         count = self.rank * (self.in_features + self.out_features)
         if self.bias is not None:
             count += self.out_features
         return count
-    
+
     def num_total_params(self) -> int:
         """Count total parameters (including frozen base weights)."""
         base = self.out_features * self.in_features
         if self.bias is not None:
             base += self.out_features
         return base + self.num_trainable_params()
-    
+
     def merge_weights(self) -> None:
         """
         Merge LoRA weights into base weights for inference.
@@ -259,7 +261,7 @@ class LoRALinear:
         """
         if self._merged:
             return
-        
+
         # W_merged = W + scaling * B @ A
         delta_W = self.scaling * np.matmul(self.lora_B.data, self.lora_A.data)
         self.W = Variable(
@@ -267,7 +269,7 @@ class LoRALinear:
             requires_grad=False
         )
         self._merged = True
-    
+
     def unmerge_weights(self) -> None:
         """
         Unmerge LoRA weights from base weights.
@@ -276,7 +278,7 @@ class LoRALinear:
         """
         if not self._merged:
             return
-        
+
         # W_original = W_merged - scaling * B @ A
         delta_W = self.scaling * np.matmul(self.lora_B.data, self.lora_A.data)
         self.W = Variable(
@@ -284,21 +286,21 @@ class LoRALinear:
             requires_grad=False
         )
         self._merged = False
-    
+
     def enable_lora(self) -> None:
         """Enable LoRA adaptation."""
         self._enabled = True
-    
+
     def disable_lora(self) -> None:
         """Disable LoRA adaptation (use only base weights)."""
         self._enabled = False
-    
+
     def reset_lora_parameters(self) -> None:
         """Reset LoRA parameters to initial values."""
         self.lora_A = self._init_lora_A('gaussian')
         self.lora_B = self._init_lora_B()
-    
-    def get_state_dict(self) -> Dict[str, np.ndarray]:
+
+    def get_state_dict(self) -> dict[str, np.ndarray]:
         """Get state dict for saving (only LoRA weights)."""
         state = {
             'lora_A': self.lora_A.data.copy(),
@@ -307,14 +309,14 @@ class LoRALinear:
         if self.bias is not None:
             state['bias'] = self.bias.data.copy()
         return state
-    
-    def load_state_dict(self, state: Dict[str, np.ndarray]) -> None:
+
+    def load_state_dict(self, state: dict[str, np.ndarray]) -> None:
         """Load LoRA weights from state dict."""
         self.lora_A = Variable(state['lora_A'].astype(np.float32), requires_grad=True)
         self.lora_B = Variable(state['lora_B'].astype(np.float32), requires_grad=True)
         if 'bias' in state and self.bias is not None:
             self.bias = Variable(state['bias'].astype(np.float32), requires_grad=True)
-    
+
     def __repr__(self) -> str:
         """Return a debug representation."""
 
@@ -337,14 +339,14 @@ class LoRAEmbedding:
         alpha: Scaling factor
         base_weights: Pre-trained embedding weights
     """
-    
+
     def __init__(
         self,
         num_embeddings: int,
         embedding_dim: int,
         rank: int = 8,
         alpha: float = 16.0,
-        base_weights: Optional[np.ndarray] = None,
+        base_weights: np.ndarray | None = None,
     ):
         """Initialize the instance."""
 
@@ -353,7 +355,7 @@ class LoRAEmbedding:
         self.rank = rank
         self.alpha = alpha
         self.scaling = alpha / rank
-        
+
         # Base embeddings (frozen)
         if base_weights is not None:
             self.weight = Variable(base_weights.astype(np.float32), requires_grad=False)
@@ -362,7 +364,7 @@ class LoRAEmbedding:
                 np.random.randn(num_embeddings, embedding_dim).astype(np.float32) * 0.01,
                 requires_grad=False
             )
-        
+
         # LoRA adapters
         self.lora_A = Variable(
             np.random.randn(rank, num_embeddings).astype(np.float32) * 0.01,
@@ -372,10 +374,10 @@ class LoRAEmbedding:
             np.zeros((embedding_dim, rank), dtype=np.float32),
             requires_grad=True
         )
-        
+
         self._merged = False
         self._enabled = True
-    
+
     def forward(self, input_ids: np.ndarray) -> Variable:
         """
         Embedding lookup with LoRA adaptation.
@@ -388,25 +390,25 @@ class LoRAEmbedding:
         """
         # Base embedding lookup
         embeddings = self.weight.data[input_ids]
-        
+
         if self._enabled and not self._merged:
             # LoRA adaptation: one-hot @ A^T @ B^T
             one_hot = np.zeros((input_ids.size, self.num_embeddings), dtype=np.float32)
             one_hot[np.arange(input_ids.size), input_ids.flatten()] = 1.0
             one_hot = one_hot.reshape(input_ids.shape + (self.num_embeddings,))
-            
+
             lora_out = np.matmul(
                 np.matmul(one_hot, self.lora_A.data.T),
                 self.lora_B.data.T
             )
             embeddings = embeddings + self.scaling * lora_out
-        
+
         return Variable(embeddings, requires_grad=False)
-    
-    def parameters(self) -> List[Variable]:
+
+    def parameters(self) -> list[Variable]:
         """Get trainable parameters."""
         return [self.lora_A, self.lora_B]
-    
+
     def merge_weights(self) -> None:
         """Merge LoRA into base embeddings."""
         if self._merged:
@@ -414,7 +416,7 @@ class LoRAEmbedding:
         delta_W = self.scaling * np.matmul(self.lora_B.data, self.lora_A.data).T
         self.weight = Variable(self.weight.data + delta_W, requires_grad=False)
         self._merged = True
-    
+
     def unmerge_weights(self) -> None:
         """Unmerge LoRA from base embeddings."""
         if not self._merged:
@@ -439,16 +441,16 @@ class LoRAAttention:
         out_weights: Pre-trained output projection weights (embed_dim, embed_dim)
         apply_lora_to: Which projections to apply LoRA ('q', 'k', 'v', 'o')
     """
-    
+
     def __init__(
         self,
         embed_dim: int,
         num_heads: int,
         rank: int = 8,
         alpha: float = 16.0,
-        qkv_weights: Optional[np.ndarray] = None,
-        out_weights: Optional[np.ndarray] = None,
-        apply_lora_to: List[str] = ['q', 'v'],
+        qkv_weights: np.ndarray | None = None,
+        out_weights: np.ndarray | None = None,
+        apply_lora_to: list[str] = ['q', 'v'],
     ):
         """Initialize the instance."""
 
@@ -457,39 +459,39 @@ class LoRAAttention:
         self.head_dim = embed_dim // num_heads
         self.rank = rank
         self.alpha = alpha
-        
+
         # Create LoRA layers for selected projections
         self.q_proj = LoRALinear(
             embed_dim, embed_dim, rank=rank, alpha=alpha,
             base_weights=qkv_weights[0] if qkv_weights is not None else None
         ) if 'q' in apply_lora_to else None
-        
+
         self.k_proj = LoRALinear(
             embed_dim, embed_dim, rank=rank, alpha=alpha,
             base_weights=qkv_weights[1] if qkv_weights is not None else None
         ) if 'k' in apply_lora_to else None
-        
+
         self.v_proj = LoRALinear(
             embed_dim, embed_dim, rank=rank, alpha=alpha,
             base_weights=qkv_weights[2] if qkv_weights is not None else None
         ) if 'v' in apply_lora_to else None
-        
+
         self.o_proj = LoRALinear(
             embed_dim, embed_dim, rank=rank, alpha=alpha,
             base_weights=out_weights
         ) if 'o' in apply_lora_to else None
-        
+
         # Store which projections have LoRA
         self.apply_lora_to = apply_lora_to
-    
-    def parameters(self) -> List[Variable]:
+
+    def parameters(self) -> list[Variable]:
         """Get all trainable LoRA parameters."""
         params = []
         for proj in [self.q_proj, self.k_proj, self.v_proj, self.o_proj]:
             if proj is not None:
                 params.extend(proj.parameters())
         return params
-    
+
     def num_trainable_params(self) -> int:
         """Count trainable parameters."""
         count = 0
@@ -497,20 +499,20 @@ class LoRAAttention:
             if proj is not None:
                 count += proj.num_trainable_params()
         return count
-    
+
     def merge_weights(self) -> None:
         """Merge all LoRA weights."""
         for proj in [self.q_proj, self.k_proj, self.v_proj, self.o_proj]:
             if proj is not None:
                 proj.merge_weights()
-    
+
     def unmerge_weights(self) -> None:
         """Unmerge all LoRA weights."""
         for proj in [self.q_proj, self.k_proj, self.v_proj, self.o_proj]:
             if proj is not None:
                 proj.unmerge_weights()
-    
-    def get_state_dict(self) -> Dict[str, Dict[str, np.ndarray]]:
+
+    def get_state_dict(self) -> dict[str, dict[str, np.ndarray]]:
         """Get state dict for all LoRA projections."""
         state = {}
         for name, proj in [('q_proj', self.q_proj), ('k_proj', self.k_proj),
@@ -518,8 +520,8 @@ class LoRAAttention:
             if proj is not None:
                 state[name] = proj.get_state_dict()
         return state
-    
-    def load_state_dict(self, state: Dict[str, Dict[str, np.ndarray]]) -> None:
+
+    def load_state_dict(self, state: dict[str, dict[str, np.ndarray]]) -> None:
         """Load LoRA weights for all projections."""
         for name, proj in [('q_proj', self.q_proj), ('k_proj', self.k_proj),
                           ('v_proj', self.v_proj), ('o_proj', self.o_proj)]:
@@ -542,20 +544,20 @@ class LoRAModel:
         >>> lora_model = LoRAModel(config)
         >>> lora_model.add_lora_layer('layer.0.attention.q_proj', 768, 768, q_weights)
     """
-    
+
     def __init__(self, config: LoRAConfig):
         """Initialize the instance."""
 
         self.config = config
-        self.lora_layers: Dict[str, LoRALinear] = {}
+        self.lora_layers: dict[str, LoRALinear] = {}
         self._merged = False
-    
+
     def add_lora_layer(
         self,
         name: str,
         in_features: int,
         out_features: int,
-        base_weights: Optional[np.ndarray] = None,
+        base_weights: np.ndarray | None = None,
     ) -> LoRALinear:
         """
         Add a LoRA layer.
@@ -580,42 +582,42 @@ class LoRAModel:
         )
         self.lora_layers[name] = layer
         return layer
-    
-    def get_layer(self, name: str) -> Optional[LoRALinear]:
+
+    def get_layer(self, name: str) -> LoRALinear | None:
         """Get a LoRA layer by name."""
         return self.lora_layers.get(name)
-    
+
     def parameters(self) -> Iterator[Variable]:
         """Iterate over all trainable parameters."""
         for layer in self.lora_layers.values():
             yield from layer.parameters()
-    
+
     def lora_parameters(self) -> Iterator[Variable]:
         """Iterate over only LoRA adapter parameters."""
         for layer in self.lora_layers.values():
             yield from layer.lora_parameters()
-    
+
     def num_trainable_params(self) -> int:
         """Count total trainable parameters."""
         return sum(layer.num_trainable_params() for layer in self.lora_layers.values())
-    
+
     def num_total_params(self) -> int:
         """Count total parameters including frozen."""
         return sum(layer.num_total_params() for layer in self.lora_layers.values())
-    
+
     def merge_weights(self) -> None:
         """Merge all LoRA weights into base weights."""
         for layer in self.lora_layers.values():
             layer.merge_weights()
         self._merged = True
-    
+
     def unmerge_weights(self) -> None:
         """Unmerge all LoRA weights."""
         for layer in self.lora_layers.values():
             layer.unmerge_weights()
         self._merged = False
-    
-    def save_checkpoint(self, path: Union[str, Path]) -> None:
+
+    def save_checkpoint(self, path: str | Path) -> None:
         """
         Save LoRA checkpoint.
         
@@ -626,21 +628,21 @@ class LoRAModel:
         """
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        
+
         # Save config
         self.config.save(path / 'config.json')
-        
+
         # Save adapter weights
         state = {}
         for name, layer in self.lora_layers.items():
             state[name] = layer.get_state_dict()
-        
+
         np.savez(path / 'adapters.npz', **{
             f"{name}_{key}": value
             for name, layer_state in state.items()
             for key, value in layer_state.items()
         })
-        
+
         # Save layer metadata
         metadata = {
             name: {
@@ -653,9 +655,9 @@ class LoRAModel:
         }
         with open(path / 'metadata.json', 'w') as f:
             json.dump(metadata, f, indent=2)
-    
+
     @classmethod
-    def load_checkpoint(cls, path: Union[str, Path]) -> 'LoRAModel':
+    def load_checkpoint(cls, path: str | Path) -> 'LoRAModel':
         """
         Load LoRA checkpoint.
         
@@ -666,18 +668,18 @@ class LoRAModel:
             Loaded LoRAModel
         """
         path = Path(path)
-        
+
         # Load config
         config = LoRAConfig.load(path / 'config.json')
         model = cls(config)
-        
+
         # Load metadata
-        with open(path / 'metadata.json', 'r') as f:
+        with open(path / 'metadata.json') as f:
             metadata = json.load(f)
-        
+
         # Load adapter weights
         adapters = np.load(path / 'adapters.npz')
-        
+
         # Reconstruct layers
         for name, meta in metadata.items():
             layer = model.add_lora_layer(
@@ -685,7 +687,7 @@ class LoRAModel:
                 in_features=meta['in_features'],
                 out_features=meta['out_features'],
             )
-            
+
             # Load weights
             state = {}
             for key in ['lora_A', 'lora_B', 'bias']:
@@ -693,9 +695,9 @@ class LoRAModel:
                 if full_key in adapters:
                     state[key] = adapters[full_key]
             layer.load_state_dict(state)
-        
+
         return model
-    
+
     def print_trainable_parameters(self) -> None:
         """Print summary of trainable parameters."""
         trainable = self.num_trainable_params()
@@ -738,7 +740,7 @@ def calculate_lora_params(
     in_features: int,
     out_features: int,
     rank: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Calculate LoRA parameter count and memory usage.
     
@@ -754,13 +756,13 @@ def calculate_lora_params(
     """
     lora_params_per_layer = rank * (in_features + out_features)
     total_lora_params = num_lora_layers * lora_params_per_layer
-    
+
     # Memory in bytes (float32)
     base_memory = model_params * 4
     lora_memory = total_lora_params * 4
     # Adam optimizer: 2x for m and v
     optimizer_memory = total_lora_params * 4 * 2
-    
+
     return {
         'base_params': model_params,
         'lora_params': total_lora_params,

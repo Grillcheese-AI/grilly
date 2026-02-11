@@ -5,8 +5,8 @@ Uses: memory-read.glsl, memory-write.glsl, memory-context-aggregate.glsl,
       memory-query-pooling.glsl, memory-inject-concat.glsl, memory-inject-gate.glsl,
       memory-inject-residual.glsl
 """
+
 import numpy as np
-from typing import Optional, Tuple
 
 
 def _get_backend():
@@ -22,7 +22,7 @@ def memory_read(
     queries: np.ndarray,
     memory_keys: np.ndarray,
     memory_values: np.ndarray,
-    temperature: Optional[float] = None
+    temperature: float | None = None
 ) -> np.ndarray:
     """
     Read from key-value memory using attention mechanism.
@@ -53,7 +53,7 @@ def memory_write(
     write_index: int,
     write_mode: int = 0,
     blend_factor: float = 0.5
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Write key-value pair to memory.
     
@@ -92,7 +92,7 @@ def memory_context_aggregate(memory_contexts: np.ndarray) -> np.ndarray:
         Aggregated context (batch, dim)
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if hasattr(backend, 'shaders') and 'memory-context-aggregate' in backend.shaders:
         try:
@@ -101,7 +101,7 @@ def memory_context_aggregate(memory_contexts: np.ndarray) -> np.ndarray:
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback (mean pooling)
     return memory_contexts.mean(axis=1)
 
@@ -129,7 +129,7 @@ def memory_inject_concat(
     x: np.ndarray,
     memory_context: np.ndarray,
     proj_weight: np.ndarray,
-    proj_bias: Optional[np.ndarray] = None
+    proj_bias: np.ndarray | None = None
 ) -> np.ndarray:
     """
     Inject memory context by concatenation.
@@ -146,7 +146,7 @@ def memory_inject_concat(
         Output (batch, seq_len, dim)
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'memory-inject-concat' in backend.shaders:
         try:
@@ -155,7 +155,7 @@ def memory_inject_concat(
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback
     batch_size, seq_len, dim = x.shape
     mem_expanded = memory_context[:, None, :]  # (batch, 1, dim)
@@ -198,7 +198,7 @@ def memory_inject_residual(
     x: np.ndarray,
     memory_context: np.ndarray,
     mem_proj_weight: np.ndarray,
-    mem_proj_bias: Optional[np.ndarray] = None
+    mem_proj_bias: np.ndarray | None = None
 ) -> np.ndarray:
     """
     Inject memory context with residual connection.
@@ -215,7 +215,7 @@ def memory_inject_residual(
         Output (batch, seq_len, dim)
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'memory-inject-residual' in backend.shaders:
         try:
@@ -224,7 +224,7 @@ def memory_inject_residual(
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback
     batch_size, seq_len, dim = x.shape
     mem_proj = memory_context @ mem_proj_weight.T

@@ -19,14 +19,11 @@ Requirements:
 """
 
 import os
-import sys
 import platform
 import subprocess
-import shutil
-import tempfile
+import sys
 import urllib.request
 from pathlib import Path
-
 
 # VMA release URL (header-only library)
 VMA_VERSION = "3.0.1"
@@ -100,7 +97,7 @@ def download_vma_header(target_dir: Path) -> bool:
         print(f"VMA header already exists: {target_file}")
         return True
 
-    print(f"Downloading VMA header from GitHub...")
+    print("Downloading VMA header from GitHub...")
     try:
         urllib.request.urlretrieve(VMA_HEADER_URL, target_file)
         print(f"Downloaded: {target_file}")
@@ -237,7 +234,7 @@ def clone_pyvma(target_dir: Path) -> bool:
         print(f"PyVMA already cloned: {target_dir}")
         return True
 
-    print(f"Cloning PyVMA repository...")
+    print("Cloning PyVMA repository...")
     result = subprocess.run(
         ["git", "clone", PYVMA_REPO, str(target_dir)],
         capture_output=True, text=True
@@ -258,7 +255,7 @@ def fix_pyvma_paths(pyvma_dir: Path):
     if not setup_file.exists():
         return
 
-    with open(setup_file, 'r') as f:
+    with open(setup_file) as f:
         content = f.read()
 
     # Check if already fixed
@@ -370,8 +367,8 @@ def verify_installation() -> bool:
         if hasattr(pyvma, 'vmaCreateAllocator'):
             print_success("PyVMA is working correctly!")
             print(f"  Version: {getattr(pyvma, '__version__', 'unknown')}")
-            print(f"  vmaCreateAllocator: available")
-            print(f"  vmaCreateBuffer: available")
+            print("  vmaCreateAllocator: available")
+            print("  vmaCreateBuffer: available")
             return True
         else:
             print_error("PyVMA imported but VMA functions not available")

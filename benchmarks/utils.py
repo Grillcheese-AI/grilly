@@ -3,9 +3,8 @@ Benchmark utilities for timing, VRAM monitoring, and result formatting.
 """
 
 import time
+
 import numpy as np
-import os
-import sys
 
 
 def time_fn(fn, *args, warmup=2, repeats=5, **kwargs):
@@ -119,7 +118,7 @@ def check_gpu_available():
     if backend is None:
         print("WARNING: GPU backend not available. Only CPU benchmarks will run.")
         return False
-    print(f"GPU backend initialized successfully")
+    print("GPU backend initialized successfully")
     if hasattr(backend, 'core') and hasattr(backend.core, 'device_name'):
         print(f"  Device: {backend.core.device_name}")
     return True

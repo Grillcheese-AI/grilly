@@ -8,9 +8,10 @@ GPU-accelerated contrastive learning:
 Uses: contrastive-loss.glsl, contrastive-gradient.glsl
 """
 
-import numpy as np
 import struct
-from typing import Tuple
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:
@@ -125,7 +126,7 @@ class VulkanContrastive(BufferMixin):
         negative: np.ndarray,
         loss: float,
         temperature: float = 0.07
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Compute contrastive loss gradients.
 

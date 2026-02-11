@@ -15,8 +15,8 @@ Output: conversations_svc_cleaned.jsonl
 import json
 import re
 import sys
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "_data"
 INPUT_FILE = DATA_DIR / "conversations_svc_semantic.jsonl"
@@ -141,7 +141,7 @@ def main():
     realm_counter = Counter()
     drop_reasons = Counter()
 
-    with open(INPUT_FILE, "r", encoding="utf-8") as fin, \
+    with open(INPUT_FILE, encoding="utf-8") as fin, \
          open(OUTPUT_FILE, "w", encoding="utf-8") as fout:
 
         for line in fin:
@@ -184,7 +184,7 @@ def main():
             if total % 20000 == 0:
                 print(f"  Processed {total:,}... kept {kept:,}, dropped {dropped:,}")
 
-    print(f"\n--- Results ---")
+    print("\n--- Results ---")
     print(f"  Total input:   {total:,}")
     print(f"  Kept:          {kept:,} ({kept/total*100:.1f}%)")
     print(f"  Dropped:       {dropped:,} ({dropped/total*100:.1f}%)")

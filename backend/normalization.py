@@ -3,9 +3,10 @@ Normalization operations for Vulkan backend.
 GPU-accelerated batch normalization with forward/backward passes.
 """
 
-import numpy as np
 import struct
-from typing import Optional, Tuple
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:
@@ -27,8 +28,8 @@ class VulkanNormalization(BufferMixin):
         input_data: np.ndarray,
         gamma: np.ndarray,
         beta: np.ndarray,
-        running_mean: Optional[np.ndarray],
-        running_var: Optional[np.ndarray],
+        running_mean: np.ndarray | None,
+        running_var: np.ndarray | None,
         batch_mean: np.ndarray,
         batch_var: np.ndarray,
         eps: float = 1e-5,
@@ -113,7 +114,7 @@ class VulkanNormalization(BufferMixin):
         gamma: np.ndarray,
         eps: float = 1e-5,
         affine: bool = True
-    ) -> Tuple[np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None]:
         """BatchNorm2d backward pass"""
         if 'batchnorm2d-backward' not in self.shaders:
             return self._batchnorm2d_backward_cpu(grad_output, input_data, batch_mean, batch_var, gamma, eps, affine)

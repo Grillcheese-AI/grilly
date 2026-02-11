@@ -5,10 +5,11 @@ Fused Operations Tutorial
 Fused shaders combine multiple operations into single GPU dispatch for better performance.
 """
 
-import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
-
-import numpy as np
 import time
+
+import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
+import numpy as np
+
 from grilly import Compute
 
 compute = Compute()
@@ -39,7 +40,7 @@ for _ in range(iterations):
 fused_time = (time.perf_counter() - start) / iterations * 1000
 
 speedup = separate_time / fused_time
-print(f"\nLinear+GELU Benchmark (32x256 -> 512):")
+print("\nLinear+GELU Benchmark (32x256 -> 512):")
 print(f"  Separate: {separate_time:.2f}ms")
 print(f"  Fused:    {fused_time:.2f}ms")
 print(f"  Speedup:  {speedup:.2f}x")

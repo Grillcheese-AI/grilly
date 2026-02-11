@@ -5,11 +5,12 @@ Provides GPU implementations of VSA operations for high-performance
 hyperdimensional computing.
 """
 
+
 import numpy as np
-from typing import List, Optional, Tuple
+
+from ..base import BufferMixin
 from ..core import VulkanCore
 from ..pipelines import VulkanPipelines
-from ..base import BufferMixin
 
 
 class VulkanVSA(BufferMixin):
@@ -170,7 +171,7 @@ class VulkanVSA(BufferMixin):
         finally:
             self._release_buffers([a_buf, b_buf, result_buf])
 
-    def bundle(self, vectors: List[np.ndarray]) -> np.ndarray:
+    def bundle(self, vectors: list[np.ndarray]) -> np.ndarray:
         """
         GPU-accelerated bundling (superposition with majority voting).
 
@@ -469,7 +470,7 @@ class VulkanVSA(BufferMixin):
         codebook: np.ndarray,
         top_k: int = 1,
         mask_value: float = -1e20,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Top-k routing on GPU: GEMM -> row-wise argmax (k rounds with masking).
 
@@ -587,8 +588,8 @@ class VulkanVSA(BufferMixin):
         self,
         composite: np.ndarray,
         codebook: np.ndarray,
-        other_estimates: Optional[List[np.ndarray]] = None
-    ) -> Tuple[np.ndarray, int]:
+        other_estimates: list[np.ndarray] | None = None
+    ) -> tuple[np.ndarray, int]:
         """
         GPU-accelerated resonator projection step.
 

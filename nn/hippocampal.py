@@ -10,13 +10,15 @@ Uses: capsule-project.glsl, dg-sparse-expand.glsl, faiss-distance.glsl, faiss-to
 Reference: grilly/backend/capsule_transformer.py VulkanCapsuleTransformer
 Reference: ref/core/ca3_memory_store.py CA3MemoryStore
 """
+from typing import Any
+
 import numpy as np
-from typing import Optional, List, Tuple, Dict, Any
+
+from .capsule import CapsuleProject, DentateGyrus
+from .memory import MemoryInjectGate, MemoryQueryPooling, MemoryRead
 from .module import Module
-from .transformer import TransformerEncoderLayer, RoPE
-from .capsule import CapsuleProject, DentateGyrus, SemanticEncoder
-from .memory import MemoryRead, MemoryQueryPooling, MemoryInjectGate
-from .modules import LayerNorm, Linear
+from .modules import LayerNorm
+from .transformer import RoPE, TransformerEncoderLayer
 
 
 class HippocampalTransformerLayer(Module):
@@ -32,7 +34,7 @@ class HippocampalTransformerLayer(Module):
     
     Reference: grilly/backend/capsule_transformer.py
     """
-    
+
     def __init__(
         self,
         d_model: int = 384,
@@ -41,7 +43,7 @@ class HippocampalTransformerLayer(Module):
         capsule_dim: int = 32,
         dg_dim: int = 128,
         num_memories: int = 10000,
-        injection_layers: List[int] = None,
+        injection_layers: list[int] = None,
         dropout: float = 0.1,
         use_rope: bool = True,
         use_ca3: bool = True
@@ -71,15 +73,15 @@ class HippocampalTransformerLayer(Module):
         self.injection_layers = injection_layers or [4, 5]
         self.use_rope = use_rope
         self.use_ca3 = use_ca3
-        
+
         # Capsule encoding
         self.capsule_project = CapsuleProject(in_dim=d_model, out_dim=capsule_dim)
         self._modules['capsule_project'] = self.capsule_project
-        
+
         # Dentate Gyrus sparse expansion
         self.dentate_gyrus = DentateGyrus(in_dim=capsule_dim, out_dim=dg_dim, sparsity=0.02)
         self._modules['dentate_gyrus'] = self.dentate_gyrus
-        
+
         # CA3 Memory (for pattern completion)
         if use_ca3:
             self.ca3_memory = MemoryRead(
@@ -88,15 +90,15 @@ class HippocampalTransformerLayer(Module):
                 num_memories=num_memories
             )
             self._modules['ca3_memory'] = self.ca3_memory
-        
+
         # Memory query pooling
         self.memory_query = MemoryQueryPooling(in_dim=d_model, out_dim=dg_dim)
         self._modules['memory_query'] = self.memory_query
-        
+
         # Memory injection (gated)
         self.memory_inject = MemoryInjectGate(dim=d_model)
         self._modules['memory_inject'] = self.memory_inject
-        
+
         # Transformer encoder layers
         self.encoder_layers = []
         for i in range(6):  # Default 6 layers
@@ -109,24 +111,24 @@ class HippocampalTransformerLayer(Module):
             )
             self.encoder_layers.append(layer)
             self._modules[f'encoder_{i}'] = layer
-        
+
         # RoPE if requested
         if use_rope:
             self.rope = RoPE(head_dim=d_model // nhead)
             self._modules['rope'] = self.rope
         else:
             self.rope = None
-        
+
         # Layer normalization
         self.norm = LayerNorm(d_model)
         self._modules['norm'] = self.norm
-    
+
     def forward(
         self,
         x: np.ndarray,
-        memory_keys: Optional[np.ndarray] = None,
-        memory_values: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        memory_keys: np.ndarray | None = None,
+        memory_values: np.ndarray | None = None
+    ) -> tuple[np.ndarray, dict[str, Any]]:
         """
         Forward pass through hippocampal transformer.
         
@@ -140,14 +142,14 @@ class HippocampalTransformerLayer(Module):
         """
         batch_size, seq_len, _ = x.shape
         stats = {}
-        
+
         # 1. Capsule Encoding (384D → 32D)
         # Project to capsule space for each sequence position
         x_flat = x.reshape(-1, self.d_model)  # (batch * seq_len, d_model)
         capsules = self.capsule_project(x_flat)  # (batch * seq_len, capsule_dim)
         capsules = capsules.reshape(batch_size, seq_len, self.capsule_dim)
         stats['capsules'] = capsules
-        
+
         # 2. Dentate Gyrus Sparse Expansion (32D → 128D)
         # Expand capsules to sparse DG representations
         dg_vectors = []
@@ -159,13 +161,13 @@ class HippocampalTransformerLayer(Module):
             dg_vectors.append(np.stack(batch_dg))
         dg_vectors = np.stack(dg_vectors)  # (batch, seq_len, dg_dim)
         stats['dg_vectors'] = dg_vectors
-        
+
         # 3. CA3 Pattern Completion (if enabled)
         memory_context = None
         if self.use_ca3:
             # Pool sequence to get memory query
             memory_query = self.memory_query(x)  # (batch, dg_dim)
-            
+
             # Retrieve from CA3 memory
             if memory_keys is not None and memory_values is not None:
                 # Use provided memory
@@ -174,7 +176,7 @@ class HippocampalTransformerLayer(Module):
                 # Use internal memory
                 memory_context = self.ca3_memory.forward(memory_query)  # (batch, capsule_dim)
             stats['memory_context'] = memory_context
-        
+
         # 4. Pass through transformer layers with memory injection
         output = x
         for i, layer in enumerate(self.encoder_layers):
@@ -182,24 +184,24 @@ class HippocampalTransformerLayer(Module):
             if self.use_rope and self.rope is not None:
                 # Apply RoPE to queries/keys (simplified - would need to extract Q/K/V)
                 pass  # RoPE is applied within FlashAttention2 if used
-            
+
             output = layer(output)
-            
+
             # Inject memory at specified layers
             if i in self.injection_layers and memory_context is not None:
                 output = self.memory_inject(output, memory_context)
                 stats[f'memory_injected_layer_{i}'] = True
-        
+
         # Final normalization
         output = self.norm(output)
-        
+
         return output, stats
-    
+
     def store_memory(
         self,
         capsules: np.ndarray,
         dg_vectors: np.ndarray,
-        content: Optional[str] = None
+        content: str | None = None
     ) -> int:
         """
         Store memories in CA3.
@@ -214,11 +216,11 @@ class HippocampalTransformerLayer(Module):
         """
         if not self.use_ca3:
             return 0
-        
+
         if capsules.ndim == 1:
             capsules = capsules.reshape(1, -1)
             dg_vectors = dg_vectors.reshape(1, -1)
-        
+
         # Write to CA3 memory
         # Note: This would need to be implemented with MemoryWrite layer
         # For now, just update internal memory buffers
@@ -226,14 +228,14 @@ class HippocampalTransformerLayer(Module):
         for i in range(len(capsules)):
             # Find next write index
             write_idx = self.ca3_memory.write_index if hasattr(self.ca3_memory, 'write_index') else 0
-            
+
             # Write to memory
             self.ca3_memory.memory_keys[write_idx] = dg_vectors[i]
             self.ca3_memory.memory_values[write_idx] = capsules[i]
             num_stored += 1
-        
+
         return num_stored
-    
+
     def __repr__(self):
         """Return a debug representation."""
 

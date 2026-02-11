@@ -14,16 +14,14 @@ any gradient descent.
 """
 
 import numpy as np
+from grilly.experimental.cognitive import CognitiveController
 from grilly.experimental.language import (
     InstantLanguage,
-    SVCIngestionResult,
     SVCIngestionEngine,
     load_svc_entries_from_dicts,
 )
-from grilly.experimental.cognitive import CognitiveController
 from grilly.experimental.moe import ResonatorMoE
-from grilly.experimental.vsa import BinaryOps, HolographicOps
-
+from grilly.experimental.vsa import BinaryOps
 
 # =============================================================================
 # Inline SVC Data (mirrors real dataset schema)
@@ -241,7 +239,7 @@ def main():
         ["exercise", "improves", "health"]
     )
     top_results = engine.batch_similarity_search(query_vec, all_vecs, top_k=3)
-    print(f"   Query: 'exercise improves health'")
+    print("   Query: 'exercise improves health'")
     for idx, sim in top_results:
         words = lang.sentence_memory[idx][1]
         print(f"   {sim:.4f}: {' '.join(words)}")

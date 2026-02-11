@@ -4,8 +4,7 @@ Example: Resonator-based Mixture of Experts
 Demonstrates relational encoding and expert routing using VSA operations.
 """
 
-import numpy as np
-from grilly.experimental.moe import RelationalEncoder, ResonatorMoE, RelationalMoE
+from grilly.experimental.moe import RelationalEncoder, RelationalMoE, ResonatorMoE
 from grilly.experimental.vsa import HolographicOps
 
 print("=" * 60)
@@ -62,7 +61,7 @@ print(f"MoE initialized with {len(experts)} experts")
 query = HolographicOps.random_vector(dim)
 result = moe.route(query, top_k=2)
 
-print(f"\nQuery routed to top-2 experts:")
+print("\nQuery routed to top-2 experts:")
 print(f"Expert names: {result}")
 weights = moe.get_weights(query, normalize=True)
 print(f"Weights: {weights}")
@@ -93,7 +92,7 @@ rel_moe = RelationalMoE(
 query_entity = encoder.encode("cat", modality="text")
 rel_result = rel_moe.route(query_entity, top_k=2)
 
-print(f"Relational routing for 'cat':")
+print("Relational routing for 'cat':")
 print(f"Selected experts: {rel_result}")
 rel_weights = rel_moe.get_weights(query_entity, normalize=True)
 print(f"Weights: {rel_weights}")

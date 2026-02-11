@@ -12,8 +12,8 @@ Validates instruct and conversation JSONL files for:
 import json
 import random
 import sys
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "_data"
 
@@ -37,7 +37,7 @@ SAMPLE_SIZE = 1000
 def sample_lines(filepath: Path, n: int) -> list[dict]:
     """Reservoir sample n lines from a JSONL file."""
     reservoir = []
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         for i, line in enumerate(f):
             line = line.strip()
             if not line:
@@ -58,7 +58,7 @@ def sample_lines(filepath: Path, n: int) -> list[dict]:
 def count_lines(filepath: Path) -> int:
     """Count total lines in file."""
     count = 0
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 count += 1
@@ -248,22 +248,22 @@ def validate_file(filepath: Path, expected_source: str, expected_fields: set):
     print(f"  Source match:  {n - source_errors}/{n} ({(n - source_errors)/n*100:.1f}%)")
 
     if schema_examples:
-        print(f"\n  Schema error examples:")
+        print("\n  Schema error examples:")
         for eid, errs in schema_examples:
             print(f"    [{eid}] {errs}")
 
     if svc_examples:
-        print(f"\n  SVC error examples:")
+        print("\n  SVC error examples:")
         for eid, errs in svc_examples:
             print(f"    [{eid}] {errs}")
 
     if quality_examples:
-        print(f"\n  Quality error examples:")
+        print("\n  Quality error examples:")
         for eid, errs in quality_examples:
             print(f"    [{eid}] {errs}")
 
     # Distributions
-    print(f"\n  --- Distributions ---")
+    print("\n  --- Distributions ---")
     print(f"  Realms: {dict(realm_counter.most_common())}")
     if complexity_values:
         print(f"  Complexity: min={min(complexity_values):.2f}, max={max(complexity_values):.2f}, "

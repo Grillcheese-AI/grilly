@@ -12,7 +12,7 @@ import json
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -67,7 +67,7 @@ def save_hippocampal_checkpoint(
     include_sentence_memory: bool = False,
     max_sentences: int = 0,
     sentence_compress: str = "auto",
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
 ) -> str:
     """Save a hippocampal checkpoint (.hippo.npz).
 
@@ -91,7 +91,7 @@ def save_hippocampal_checkpoint(
     # relation_memory: Dict[str, List[Tuple[str, str]]]
     raw_rm = getattr(lang, "relation_memory", {}) or {}
     relation_memory_pairs = 0
-    relation_memory_dict: Dict[str, list] = {}
+    relation_memory_dict: dict[str, list] = {}
     for rname, pairs in raw_rm.items():
         pair_list = [[a, b] for (a, b) in pairs]
         relation_memory_dict[rname] = pair_list
@@ -108,7 +108,7 @@ def save_hippocampal_checkpoint(
 
     # templates: Dict[str, dict] from SentenceGenerator
     raw_templates = getattr(getattr(lang, "generator", None), "templates", {}) or {}
-    templates_dict: Dict[str, dict] = {}
+    templates_dict: dict[str, dict] = {}
     for tname, tval in raw_templates.items():
         templates_dict[tname] = {
             "pattern": list(tval.get("pattern", [])),
@@ -167,16 +167,16 @@ def save_hippocampal_checkpoint(
     sent_offsets = np.zeros((0,), dtype=np.int64)
 
     if include_sentence_memory:
-        mem: List[Tuple[np.ndarray, List[str]]] = getattr(lang, "sentence_memory", []) or []
+        mem: list[tuple[np.ndarray, list[str]]] = getattr(lang, "sentence_memory", []) or []
         if max_sentences and max_sentences > 0:
             mem = mem[:max_sentences]
 
         sent_vecs = _stack_or_empty([v for (v, _) in mem], dim)
 
-        token_to_id: Dict[str, int] = {}
-        vocab_list: List[str] = []
-        ids: List[int] = []
-        offsets: List[int] = [0]
+        token_to_id: dict[str, int] = {}
+        vocab_list: list[str] = []
+        ids: list[int] = []
+        offsets: list[int] = [0]
         for _, toks in mem:
             for t in toks:
                 t = str(t)
@@ -319,11 +319,11 @@ class HippoCheckpointView:
         self.dim: int = int(self.manifest.get("dim", 0))
 
     # -- EC --
-    def vocab(self) -> Tuple[list, np.ndarray]:
+    def vocab(self) -> tuple[list, np.ndarray]:
         """Return (word_list, vectors)."""
         return list(self._data["ec_vocab_words"]), self._data["ec_vocab_vecs"]
 
-    def relation_memory(self) -> Dict[str, List[List[str]]]:
+    def relation_memory(self) -> dict[str, list[list[str]]]:
         """Return relation_memory dict: {relation: [[word_a, word_b], ...]}."""
         try:
             return json.loads(str(self._data["ec_relation_memory_json"][0]))
@@ -331,7 +331,7 @@ class HippoCheckpointView:
             return {}
 
     # -- DG --
-    def templates(self) -> Dict[str, dict]:
+    def templates(self) -> dict[str, dict]:
         """Return templates dict: {name: {pattern: [...], example: [...]}}."""
         try:
             return json.loads(str(self._data["dg_templates_json"][0]))
@@ -339,7 +339,7 @@ class HippoCheckpointView:
             return {}
 
     # -- CA3 --
-    def facts(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def facts(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Return (subjects, relations, objects, confidences)."""
         return (
             self._data["ca3_fact_s"],
@@ -364,7 +364,7 @@ class HippoCheckpointView:
             return _unpack_bipolar(packed, self.dim, dtype=dtype)[0]
         return self._data["ca1_sent_vecs"][i].astype(dtype, copy=False)
 
-    def get_sentence_tokens(self, i: int) -> List[str]:
+    def get_sentence_tokens(self, i: int) -> list[str]:
         offsets = self._data["ca1_sent_offsets"].astype(int, copy=False)
         a, b = int(offsets[i]), int(offsets[i + 1])
         ids = self._data["ca1_sent_token_ids"][a:b].astype(int, copy=False)

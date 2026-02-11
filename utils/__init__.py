@@ -3,43 +3,43 @@ Utilities Module
 
 Helper functions for data loading, visualization, checkpointing, device management, etc.
 """
+from .checkpoint import load_checkpoint, save_checkpoint
 from .data import (
+    ArrayDataset,
+    BatchSampler,
+    # Transforms
+    Compose,
+    ConcatDataset,
+    # DataLoader
+    DataLoader,
     # Dataset classes
     Dataset,
-    TensorDataset,
-    ArrayDataset,
-    Subset,
-    ConcatDataset,
+    Flatten,
+    Lambda,
+    Normalize,
+    OneHot,
+    RandomFlip,
+    RandomNoise,
     # Samplers
     RandomSampler,
     SequentialSampler,
-    BatchSampler,
-    # DataLoader
-    DataLoader,
+    Subset,
+    TensorDataset,
+    ToFloat32,
     default_collate,
     random_split,
-    # Transforms
-    Compose,
-    ToFloat32,
-    Normalize,
-    Flatten,
-    RandomNoise,
-    RandomFlip,
-    OneHot,
-    Lambda,
 )
-from .checkpoint import save_checkpoint, load_checkpoint
-from .device import get_device, set_device, device_count
-from .initialization import xavier_uniform_, xavier_normal_, kaiming_uniform_, kaiming_normal_
+from .device import device_count, get_device, set_device
+from .initialization import kaiming_normal_, kaiming_uniform_, xavier_normal_, xavier_uniform_
 
 # Visualization utilities (optional dependency)
 try:
     from .visualization import (
-        plot_training_history,
         plot_gradient_flow,
         plot_parameter_distribution,
+        plot_training_history,
         print_model_summary,
-        visualize_attention_weights
+        visualize_attention_weights,
     )
     VISUALIZATION_AVAILABLE = True
 except ImportError:
@@ -53,8 +53,11 @@ except ImportError:
 # Multi-backend device management
 try:
     from .device_manager import (
-        DeviceManager, get_device_manager, get_vulkan_backend,
-        get_cuda_backend, get_torch
+        DeviceManager,
+        get_cuda_backend,
+        get_device_manager,
+        get_torch,
+        get_vulkan_backend,
     )
     DEVICE_MANAGER_AVAILABLE = True
 except Exception:
@@ -77,8 +80,16 @@ except Exception:
 # PyTorch compatibility
 try:
     from .pytorch_compat import (
-        Tensor, tensor, zeros, ones, randn, arange, cat, stack,
-        from_numpy, to_numpy
+        Tensor,
+        arange,
+        cat,
+        from_numpy,
+        ones,
+        randn,
+        stack,
+        tensor,
+        to_numpy,
+        zeros,
     )
     PYTORCH_COMPAT_AVAILABLE = True
 except Exception:
@@ -173,9 +184,12 @@ if PYTORCH_COMPAT_AVAILABLE:
 # Tensor conversion utilities
 try:
     from .tensor_conversion import (
-        to_vulkan, to_vulkan_batch, from_vulkan,
-        ensure_vulkan_compatible, convert_module_inputs,
-        auto_convert_to_vulkan
+        auto_convert_to_vulkan,
+        convert_module_inputs,
+        ensure_vulkan_compatible,
+        from_vulkan,
+        to_vulkan,
+        to_vulkan_batch,
     )
     TENSOR_CONVERSION_AVAILABLE = True
 except Exception:
@@ -197,10 +211,28 @@ if TENSOR_CONVERSION_AVAILABLE:
 # PyTorch operations
 try:
     from .pytorch_ops import (
-        add, mul, matmul, bmm, relu, gelu, softmax, sigmoid, tanh,
-        layer_norm, batch_norm, dropout, conv2d, max_pool2d, avg_pool2d,
-        mse_loss, cross_entropy_loss, flatten, reshape, transpose,
-        unsqueeze, squeeze
+        add,
+        avg_pool2d,
+        batch_norm,
+        bmm,
+        conv2d,
+        cross_entropy_loss,
+        dropout,
+        flatten,
+        gelu,
+        layer_norm,
+        matmul,
+        max_pool2d,
+        mse_loss,
+        mul,
+        relu,
+        reshape,
+        sigmoid,
+        softmax,
+        squeeze,
+        tanh,
+        transpose,
+        unsqueeze,
     )
     PYTORCH_OPS_AVAILABLE = True
 except Exception:
@@ -227,9 +259,9 @@ if VULKAN_SENTENCE_TRANSFORMER_AVAILABLE:
 
 # ONNX utilities
 try:
-    from .onnx_loader import OnnxModelLoader, OnnxOpRegistry, GrillyOnnxModel
     from .onnx_exporter import OnnxExporter
     from .onnx_finetune import OnnxFineTuner
+    from .onnx_loader import GrillyOnnxModel, OnnxModelLoader, OnnxOpRegistry
     ONNX_AVAILABLE = True
 except Exception:
     ONNX_AVAILABLE = False
@@ -249,4 +281,4 @@ if ONNX_AVAILABLE:
     ])
 
 # Stable hashing
-from .stable_hash import stable_u32, stable_u64, stable_bytes, bipolar_from_key
+from .stable_hash import bipolar_from_key, stable_bytes, stable_u32, stable_u64

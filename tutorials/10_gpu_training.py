@@ -13,11 +13,11 @@ Features:
 - Cross-entropy backward (GPU shader: cross-entropy-backward.spv)
 """
 
-import _path_setup  # noqa: F401
-
-import numpy as np
 import time
 from pathlib import Path
+
+import _path_setup  # noqa: F401
+import numpy as np
 
 from grilly import Compute
 from grilly.datasets import MNIST
@@ -275,14 +275,14 @@ def main():
     learning_rate = 0.05
     epochs = 30
 
-    print(f"\nTraining parameters:")
+    print("\nTraining parameters:")
     print(f"  Learning rate: {learning_rate}")
     print(f"  Batch size: {batch_size}")
     print(f"  Epochs: {epochs}")
-    print(f"\nGPU Operations:")
-    print(f"  Forward: linear (GPU), activation_relu (GPU)")
-    print(f"  Backward: linear_backward (GPU), activation_relu_backward (GPU)")
-    print(f"  Loss grad: cross_entropy_backward (GPU)")
+    print("\nGPU Operations:")
+    print("  Forward: linear (GPU), activation_relu (GPU)")
+    print("  Backward: linear_backward (GPU), activation_relu_backward (GPU)")
+    print("  Loss grad: cross_entropy_backward (GPU)")
 
     # Training loop
     print("\n" + "=" * 70)

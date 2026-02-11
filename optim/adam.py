@@ -3,9 +3,10 @@ Adam Optimizer
 
 Uses: adam-update.glsl, affect-adam.glsl
 """
+from collections.abc import Iterator
+
 import numpy as np
-import struct
-from typing import Iterator, Dict, Any, Optional
+
 from .base import Optimizer
 
 
@@ -22,7 +23,7 @@ class Adam(Optimizer):
     - v_hat = v / (1 - beta2^t)
     - param = param - lr * m_hat / (sqrt(v_hat) + eps)
     """
-    
+
     def __init__(
         self,
         params: Iterator[np.ndarray],
@@ -53,7 +54,7 @@ class Adam(Optimizer):
         self.use_gpu = use_gpu
         self._backend = None
         self._step_count = 0
-    
+
     def _get_backend(self):
         """Get or create backend instance"""
         if self._backend is None:
@@ -63,7 +64,7 @@ class Adam(Optimizer):
             except Exception:
                 self._backend = None
         return self._backend
-    
+
     def step(self, closure=None, gradients=None):
         """
         Perform a single optimization step.
@@ -76,63 +77,63 @@ class Adam(Optimizer):
         loss = None
         if closure is not None:
             loss = closure()
-        
+
         # Store gradients for use in parameter updates
         self._gradients = gradients
-        
+
         self._step_count += 1
         beta1, beta2 = self.defaults['betas']
         lr = self.defaults['lr']
         eps = self.defaults['eps']
         weight_decay = self.defaults['weight_decay']
-        
+
         # Bias correction terms
         beta1_t = beta1 ** self._step_count
         beta2_t = beta2 ** self._step_count
-        
+
         backend = self._get_backend()
         use_gpu = self.use_gpu and backend is not None
-        
+
         for group in self.param_groups:
             for p in group['params']:
                 if p is None:
                     continue
-                
+
                 param_id = id(p)
                 state = self.state[param_id]
-                
+
                 # Initialize state if needed
                 if len(state) == 0:
                     state['step'] = 0
                     state['exp_avg'] = np.zeros_like(p, dtype=np.float32)
                     state['exp_avg_sq'] = np.zeros_like(p, dtype=np.float32)
-                
+
                 state['step'] += 1
                 exp_avg = state['exp_avg']
                 exp_avg_sq = state['exp_avg_sq']
-                
+
                 # Get gradients from backward pass
                 # Gradients are stored in param.grad after calling backward()
                 grad = None
-                
+
                 # First, try to get from gradients dict (if manually provided for compatibility)
                 if hasattr(self, '_gradients') and self._gradients is not None:
                     grad = self._gradients.get(param_id, None)
-                
+
                 # Then, try to get from param.grad (from backward pass)
                 if grad is None:
                     grad = getattr(p, 'grad', None)
-                
+
                 # If still no gradient, skip this parameter
                 if grad is None:
                     continue
-                
+
                 # Ensure gradient is numpy array (extract from wrapper if needed)
                 if hasattr(grad, 'data'):
                     grad = grad.data
                 if not isinstance(grad, np.ndarray):
                     grad = np.array(grad, dtype=np.float32)
-                
+
                 # Extract parameter data if it's wrapped
                 if hasattr(p, 'data'):
                     p_data = p.data
@@ -146,7 +147,7 @@ class Adam(Optimizer):
                 # Apply weight decay
                 if weight_decay != 0:
                     grad = grad + weight_decay * p_data
-                
+
                 # Try GPU update if available
                 if use_gpu and backend is not None:
                     try:
@@ -158,7 +159,7 @@ class Adam(Optimizer):
                                 shader_name = 'adam-update'
                             elif 'affect-adam' in backend.core.shaders:
                                 shader_name = 'affect-adam'
-                        
+
                         if shader_name is not None:
                             p_data, exp_avg, exp_avg_sq = self._adam_update_gpu(
                                 backend, p_data, grad, exp_avg, exp_avg_sq,
@@ -183,18 +184,18 @@ class Adam(Optimizer):
                         logger = logging.getLogger(__name__)
                         logger.debug(f"GPU Adam update failed: {e}, falling back to CPU")
                         pass  # Fall back to CPU
-                
+
                 # CPU fallback
                 exp_avg = beta1 * exp_avg + (1 - beta1) * grad
                 exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad
-                
+
                 # Bias correction
                 m_hat = exp_avg / (1 - beta1_t) if beta1_t < 1.0 else exp_avg
                 v_hat = exp_avg_sq / (1 - beta2_t) if beta2_t < 1.0 else exp_avg_sq
-                
+
                 # Update parameters (in-place)
                 p_data -= lr * m_hat / (np.sqrt(v_hat) + eps)
-                
+
                 # Update parameter (handle wrapper or direct numpy array)
                 if hasattr(p, 'data') and not isinstance(p, np.ndarray):
                     # Parameter wrapper or custom class
@@ -202,19 +203,19 @@ class Adam(Optimizer):
                 else:
                     # Direct numpy array - update in-place
                     p[:] = p_data
-                
+
                 state['exp_avg'] = exp_avg
                 state['exp_avg_sq'] = exp_avg_sq
-                
+
                 # Clear gradient after update (from backward pass)
                 if hasattr(p, 'grad') and p.grad is not None:
                     if hasattr(p, 'zero_grad'):
                         p.zero_grad()
                     else:
                         p.grad = None
-        
+
         return loss
-    
+
     def _adam_update_gpu(self, backend, param, grad, exp_avg, exp_avg_sq,
                         lr, beta1, beta2, eps, beta1_t, beta2_t):
         """
@@ -237,10 +238,10 @@ class Adam(Optimizer):
                     clear_grad=False
                 )
                 return param, exp_avg, exp_avg_sq
-        except Exception as e:
+        except Exception:
             # Fall back to CPU if GPU fails
             pass
-        
+
         # CPU fallback
         exp_avg = beta1 * exp_avg + (1 - beta1) * grad
         exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad
@@ -258,7 +259,7 @@ class AffectAdam(Adam):
     
     Similar to Adam but optimized for affect/emotion processing.
     """
-    
+
     def __init__(
         self,
         params: Iterator[np.ndarray],
@@ -274,7 +275,7 @@ class AffectAdam(Adam):
         Args are the same as Adam.
         """
         super().__init__(params, lr, betas, eps, weight_decay, use_gpu)
-    
+
     def _adam_update_gpu(self, backend, param, grad, exp_avg, exp_avg_sq,
                         lr, beta1, beta2, eps, beta1_t, beta2_t):
         """

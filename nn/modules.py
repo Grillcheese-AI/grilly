@@ -2,8 +2,9 @@
 Neural Network Modules (PyTorch-like)
 All modules use GPU-accelerated Vulkan shaders
 """
+
 import numpy as np
-from typing import Optional, Tuple
+
 from .module import Module
 
 # Try to import Parameter class
@@ -20,7 +21,7 @@ class Linear(Module):
     Linear (fully connected) layer
     Uses: fnn-linear.glsl, fnn-linear-backward.glsl
     """
-    
+
     def __init__(self, in_features: int, out_features: int, bias: bool = True):
         """Initialize the instance."""
 
@@ -28,7 +29,7 @@ class Linear(Module):
         self.in_features = in_features
         self.out_features = out_features
         self.bias = bias
-        
+
         # Initialize weights using Xavier initialization (fnn-xavier-init.glsl)
         backend = self._get_backend()
         if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'xavier_init') and hasattr(backend, 'core') and 'fnn-xavier-init' in backend.core.shaders:
@@ -43,7 +44,7 @@ class Linear(Module):
             # CPU fallback
             limit = np.sqrt(6.0 / (in_features + out_features))
             weight_data = np.random.uniform(-limit, limit, (out_features, in_features)).astype(np.float32)
-        
+
         # Create Parameter objects (support .grad attribute)
         if _PARAMETER_AVAILABLE and ParameterClass is not None:
             self.weight = ParameterClass(weight_data, requires_grad=True)
@@ -91,7 +92,7 @@ class Linear(Module):
                     else:
                         self.grad = np.zeros_like(self.data, dtype=np.float32)
             self.weight = ParamWrapper(weight_data)
-        
+
         if bias:
             if _PARAMETER_AVAILABLE and ParameterClass is not None:
                 self.bias = ParameterClass(np.zeros(out_features, dtype=np.float32), requires_grad=True)
@@ -141,12 +142,12 @@ class Linear(Module):
                 self.bias = ParamWrapper(np.zeros(out_features, dtype=np.float32))
         else:
             self.bias = None
-        
+
         # Register parameters
         self.register_parameter('weight', self.weight)
         if self.bias is not None:
             self.register_parameter('bias', self.bias)
-    
+
     def forward(self, x) -> np.ndarray:
         """Forward pass with GEMM fast path if available."""
         backend = self._get_backend()
@@ -198,7 +199,7 @@ class Linear(Module):
         else:
             return out_2d.reshape(b, s, out_features)
 
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass using fnn-linear-backward.glsl
@@ -225,24 +226,24 @@ class Linear(Module):
                 grad_input, grad_weight, grad_bias = backend.fnn.linear_backward(
                     grad_output, x, weight, bias
                 )
-                
+
                 # Store gradients in parameters (from backward pass)
                 if self.weight is not None:
                     if not hasattr(self.weight, 'grad') or self.weight.grad is None:
                         self.weight.grad = grad_weight
                     else:
                         self.weight.grad += grad_weight
-                
+
                 if self.bias is not None and grad_bias is not None:
                     if not hasattr(self.bias, 'grad') or self.bias.grad is None:
                         self.bias.grad = grad_bias
                     else:
                         self.bias.grad += grad_bias
-                
+
                 return grad_input
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         # Handle both 2D and 3D inputs
         grad_output_shape = grad_output.shape
@@ -266,22 +267,22 @@ class Linear(Module):
             grad_input = grad_input_2d.reshape(grad_output_shape[0], grad_output_shape[1], -1)
         else:
             grad_input = grad_input_2d
-        
+
         # Store gradients in parameters (from backward pass)
         if self.weight is not None:
             if not hasattr(self.weight, 'grad') or self.weight.grad is None:
                 self.weight.grad = grad_weight
             else:
                 self.weight.grad += grad_weight
-        
+
         if self.bias is not None and grad_bias is not None:
             if not hasattr(self.bias, 'grad') or self.bias.grad is None:
                 self.bias.grad = grad_bias
             else:
                 self.bias.grad += grad_bias
-        
+
         return grad_input
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -379,29 +380,29 @@ class LayerNorm(Module):
     Layer Normalization
     Uses: fnn-layernorm.glsl
     """
-    
+
     def __init__(self, normalized_shape: int, eps: float = 1e-5):
         """Initialize the instance."""
 
         super().__init__()
         self.normalized_shape = normalized_shape
         self.eps = eps
-        
+
         # Create learnable parameters
         self.weight = _create_param_wrapper(np.ones(normalized_shape, dtype=np.float32))
         self.bias = _create_param_wrapper(np.zeros(normalized_shape, dtype=np.float32))
-        
+
         # Register parameters
         self.register_parameter('weight', self.weight)
         self.register_parameter('bias', self.bias)
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using fnn-layernorm.glsl"""
         backend = self._get_backend()
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias)
         return backend.fnn.layernorm(x, weight, bias, eps=self.eps)
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for LayerNorm.
@@ -427,47 +428,47 @@ class LayerNorm(Module):
         var = np.var(x, axis=-1, keepdims=True)
         std = np.sqrt(var + self.eps)
         normalized_x = (x - mean) / std
-        
+
         # Get weight
         weight = _get_param_array(self.weight)
-        
+
         # Compute gradients w.r.t. weight and bias
         # Sum over all dimensions except the last (normalized dimension)
         reduce_dims = tuple(range(len(x.shape) - 1))
-        
+
         if self.weight is not None:
             grad_weight = np.sum(grad_output * normalized_x, axis=reduce_dims)
             if not hasattr(self.weight, 'grad') or self.weight.grad is None:
                 self.weight.grad = grad_weight
             else:
                 self.weight.grad += grad_weight
-        
+
         if self.bias is not None:
             grad_bias = np.sum(grad_output, axis=reduce_dims)
             if not hasattr(self.bias, 'grad') or self.bias.grad is None:
                 self.bias.grad = grad_bias
             else:
                 self.bias.grad += grad_bias
-        
+
         # Compute gradient w.r.t. input
         # grad_input = (grad_output * weight) / std - mean((grad_output * weight) / std) / N
         #            - normalized_x * mean((grad_output * weight) * normalized_x) / N
         N = x.shape[-1]
         grad_weighted = grad_output * weight
         grad_scaled = grad_weighted / std
-        
+
         # First term: grad_scaled
         grad_input = grad_scaled
-        
+
         # Second term: subtract mean of grad_scaled
         grad_input = grad_input - np.mean(grad_scaled, axis=-1, keepdims=True)
-        
+
         # Third term: subtract normalized_x * mean(grad_weighted * normalized_x)
         grad_norm = np.mean(grad_weighted * normalized_x, axis=-1, keepdims=True)
         grad_input = grad_input - normalized_x * grad_norm
-        
+
         return grad_input
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -479,7 +480,7 @@ class Dropout(Module):
     Dropout layer
     Uses: fnn-dropout.glsl
     """
-    
+
     def __init__(self, p: float = 0.5, inplace: bool = False):
         """Initialize the instance."""
 
@@ -487,13 +488,13 @@ class Dropout(Module):
         self.p = p
         self.inplace = inplace
         self._mask = None  # Store mask from forward pass for backward
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using fnn-dropout.glsl"""
         if not self.training or self.p == 0.0:
             self._mask = None
             return x
-        
+
         backend = self._get_backend()
         if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'dropout'):
             try:
@@ -505,12 +506,12 @@ class Dropout(Module):
                 return output
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         mask = np.random.binomial(1, 1 - self.p, size=x.shape).astype(np.float32)
         self._mask = mask  # Save mask for backward pass
         return x * mask / (1 - self.p)
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for Dropout.
@@ -527,17 +528,17 @@ class Dropout(Module):
         """
         if not self.training or self.p == 0.0:
             return grad_output
-        
+
         # Use saved mask from forward pass
         if self._mask is None:
             # If mask wasn't saved (shouldn't happen), return scaled gradient
             return grad_output / (1 - self.p)
-        
+
         # grad_input = grad_output * mask / (1 - p)
         grad_input = grad_output * self._mask / (1 - self.p)
-        
+
         return grad_input
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -549,18 +550,18 @@ class ReLU(Module):
     ReLU activation: max(0, x)
     Uses: activation-relu.glsl
     """
-    
+
     def __init__(self, inplace: bool = False):
         """Initialize the instance."""
 
         super().__init__()
         self.inplace = inplace
-    
+
     def forward(self, x) -> np.ndarray:
         """Forward pass using activation-relu.glsl"""
         backend = self._get_backend()
         return backend.activation_relu(x, return_gpu_tensor=self._return_gpu_tensor)
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for ReLU.
@@ -574,7 +575,7 @@ class ReLU(Module):
         """
         # ReLU backward: gradient is 0 where x < 0, else grad_output
         return grad_output * (x > 0).astype(np.float32)
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -586,12 +587,12 @@ class GELU(Module):
     GELU activation
     Uses: activation-gelu.glsl
     """
-    
+
     def forward(self, x) -> np.ndarray:
         """Forward pass using activation-gelu.glsl"""
         backend = self._get_backend()
         return backend.activation_gelu(x, return_gpu_tensor=self._return_gpu_tensor)
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for GELU.
@@ -605,8 +606,8 @@ class GELU(Module):
         """
         if x is None:
             raise ValueError("Input x is required for GELU backward pass")
-        
-        # GELU backward: d/dx GELU(x) = 0.5 * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3))) + 
+
+        # GELU backward: d/dx GELU(x) = 0.5 * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3))) +
         #                 0.5 * x * (1 - tanh^2(...)) * sqrt(2/pi) * (1 + 3 * 0.044715 * x^2)
         backend = self._get_backend()
         if hasattr(backend, 'activation_gelu_backward'):
@@ -614,7 +615,7 @@ class GELU(Module):
                 return backend.activation_gelu_backward(grad_output, x)
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         sqrt_2_pi = np.sqrt(2.0 / np.pi)
         coeff = 0.044715
@@ -623,7 +624,7 @@ class GELU(Module):
         tanh_inner = np.tanh(inner)
         gelu_grad = 0.5 * (1.0 + tanh_inner) + 0.5 * x * (1.0 - tanh_inner ** 2) * sqrt_2_pi * (1.0 + 3.0 * coeff * x ** 2)
         return grad_output * gelu_grad
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -635,12 +636,12 @@ class SiLU(Module):
     SiLU (Swish) activation: x * sigmoid(x)
     Uses: activation-silu.glsl
     """
-    
+
     def forward(self, x) -> np.ndarray:
         """Forward pass using activation-silu.glsl"""
         backend = self._get_backend()
         return backend.activation_silu(x, return_gpu_tensor=self._return_gpu_tensor)
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for SiLU.
@@ -656,7 +657,7 @@ class SiLU(Module):
         sigmoid_x = 1.0 / (1.0 + np.exp(-x))
         silu_grad = sigmoid_x * (1.0 + x * (1.0 - sigmoid_x))
         return grad_output * silu_grad
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -842,18 +843,18 @@ class Softmax(Module):
     Softmax activation
     Uses: activation-softmax.glsl
     """
-    
+
     def __init__(self, dim: int = -1):
         """Initialize the instance."""
 
         super().__init__()
         self.dim = dim
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using activation-softmax.glsl"""
         backend = self._get_backend()
         return backend.activation_softmax(x, dim=self.dim)
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for Softmax.
@@ -869,7 +870,7 @@ class Softmax(Module):
         softmax_x = self.forward(x)
         grad_input = softmax_x * (grad_output - np.sum(grad_output * softmax_x, axis=self.dim, keepdims=True))
         return grad_input
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -881,7 +882,7 @@ class Softplus(Module):
     Softplus activation: log(1 + exp(x))
     Uses: activation-softplus.glsl
     """
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using activation-softplus.glsl"""
         backend = self._get_backend()
@@ -890,10 +891,10 @@ class Softplus(Module):
                 return backend.fnn.activation_softplus(x)
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         return np.log(1.0 + np.exp(x))
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for Softplus.
@@ -908,7 +909,7 @@ class Softplus(Module):
         # Softplus backward: d/dx log(1 + exp(x)) = sigmoid(x) = 1 / (1 + exp(-x))
         sigmoid_x = 1.0 / (1.0 + np.exp(-x))
         return grad_output * sigmoid_x
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -920,21 +921,21 @@ class Embedding(Module):
     Embedding layer
     Uses: embedding-lookup.glsl
     """
-    
+
     def __init__(self, num_embeddings: int, embedding_dim: int):
         """Initialize the instance."""
 
         super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
-        
+
         # Initialize embeddings (normal distribution)
         embedding_data = np.random.normal(0, 1, (num_embeddings, embedding_dim)).astype(np.float32)
         self.weight = _create_param_wrapper(embedding_data)
-        
+
         # Register parameter
         self.register_parameter('weight', self.weight)
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using embedding-lookup.glsl"""
         backend = self._get_backend()
@@ -950,7 +951,7 @@ class Embedding(Module):
         if isinstance(x, np.ndarray):
             return weight[x.astype(np.int32)]
         return weight[x]
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for Embedding.
@@ -964,47 +965,47 @@ class Embedding(Module):
         """
         if x is None:
             raise ValueError("Input token IDs x are required for Embedding backward pass")
-        
+
         # Embedding backward: accumulate gradients into weight matrix
         if self.weight is not None:
             backend = self._get_backend()
-            
+
             # Try GPU-accelerated backward if available
             if hasattr(backend, 'learning') and hasattr(backend.learning, 'embedding_backward'):
                 try:
                     grad_weight = backend.learning.embedding_backward(
                         grad_output, x, self.num_embeddings, self.embedding_dim
                     )
-                    
+
                     # Store gradients in parameter
                     if not hasattr(self.weight, 'grad') or self.weight.grad is None:
                         self.weight.grad = grad_weight
                     else:
                         self.weight.grad += grad_weight
-                    
+
                     # No gradient w.r.t. input (token IDs are discrete)
                     return None
                 except Exception:
                     pass  # Fall back to CPU
-            
+
             # CPU fallback: accumulate gradients for each token
             grad_weight = np.zeros_like(_get_param_array(self.weight))
-            
+
             x_flat = x.flatten()
             grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
-            
+
             for i, token_id in enumerate(x_flat):
                 if 0 <= token_id < self.num_embeddings:
                     grad_weight[int(token_id)] += grad_flat[i]
-            
+
             if not hasattr(self.weight, 'grad') or self.weight.grad is None:
                 self.weight.grad = grad_weight
             else:
                 self.weight.grad += grad_weight
-        
+
         # No gradient w.r.t. input (token IDs are discrete)
         return None
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -1105,7 +1106,7 @@ class Sequential(Module):
                 self._cached_activations.append(current)
 
         return current
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass through all modules in reverse order.
@@ -1124,17 +1125,17 @@ class Sequential(Module):
             # If no cached activations, we can't do proper backward
             # This shouldn't happen if forward was called first
             raise RuntimeError("No cached activations found. Call forward() before backward().")
-        
+
         grad = grad_output
         modules_list = list(self._modules.values())
-        
+
         # Backward through modules in reverse order
         # cached_activations[0] is input, cached_activations[i+1] is output of module i
         for i in range(len(modules_list) - 1, -1, -1):
             module = modules_list[i]
             module_input = self._cached_activations[i]  # Input to module i
             module_output = self._cached_activations[i + 1]  # Output of module i
-            
+
             if hasattr(module, 'backward'):
                 try:
                     # Pass both input and output for backward (some modules need both)
@@ -1145,9 +1146,9 @@ class Sequential(Module):
                 except NotImplementedError:
                     # If backward not implemented, just pass through
                     pass
-        
+
         return grad
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -1160,7 +1161,7 @@ class Residual(Module):
     Residual connection: output = input + module(input)
     Uses: fnn-residual.glsl
     """
-    
+
     def __init__(self, module: Module):
         """Initialize the instance."""
 
@@ -1169,26 +1170,26 @@ class Residual(Module):
         self._modules['module'] = module
         self._cached_input = None
         self._cached_module_output = None
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass: x + module(x)"""
         backend = self._get_backend()
         module_out = self.module(x)
-        
+
         # Cache input for backward pass
         self._cached_input = x
         self._cached_module_output = module_out
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'fnn') and hasattr(backend.fnn, 'residual'):
             try:
                 return backend.fnn.residual(x, module_out)
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         return x + module_out
-    
+
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
         Backward pass for Residual.
@@ -1208,7 +1209,7 @@ class Residual(Module):
             x = self._cached_input
             if x is None:
                 raise ValueError("Input x is required for Residual backward pass")
-        
+
         # Residual backward: grad_input = grad_output + grad_module
         # The gradient flows through both the residual connection and the module
         if hasattr(self.module, 'backward'):
@@ -1219,7 +1220,7 @@ class Residual(Module):
                 # If backward not properly implemented, just pass through residual gradient
                 return grad_output
         return grad_output
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -1231,7 +1232,7 @@ class MultiheadAttention(Module):
     Multi-head attention
     Uses: attention-scores.glsl, attention-output.glsl, attention-concat-heads.glsl
     """
-    
+
     def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.0):
         """Initialize the instance."""
 
@@ -1240,21 +1241,21 @@ class MultiheadAttention(Module):
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
         self.dropout = dropout
-        
+
         if embed_dim % num_heads != 0:
             raise ValueError(f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})")
-        
+
         # Create projection layers
         self.q_proj = Linear(embed_dim, embed_dim)
         self.k_proj = Linear(embed_dim, embed_dim)
         self.v_proj = Linear(embed_dim, embed_dim)
         self.out_proj = Linear(embed_dim, embed_dim)
-        
+
         self._modules['q_proj'] = self.q_proj
         self._modules['k_proj'] = self.k_proj
         self._modules['v_proj'] = self.v_proj
         self._modules['out_proj'] = self.out_proj
-        
+
         # Initialize cached values for backward pass
         self._cached_query = None
         self._cached_key = None
@@ -1266,9 +1267,9 @@ class MultiheadAttention(Module):
         self._cached_scores = None
         self._cached_scores_pre_softmax = None
         self._cached_attn_output = None
-    
-    def forward(self, query: np.ndarray, key: np.ndarray, value: np.ndarray, 
-                mask: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
+
+    def forward(self, query: np.ndarray, key: np.ndarray, value: np.ndarray,
+                mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
         """
         Forward pass for multi-head attention.
         
@@ -1286,39 +1287,39 @@ class MultiheadAttention(Module):
         self._cached_key = key
         self._cached_value = value
         self._cached_mask = mask
-        
+
         # Project to Q, K, V
         q = self.q_proj(query)
         k = self.k_proj(key)
         v = self.v_proj(value)
-        
+
         # Cache Q, K, V for backward
         self._cached_q = q
         self._cached_k = k
         self._cached_v = v
-        
+
         # Reshape for multi-head attention
         batch_size, seq_len_q, _ = q.shape
         _, seq_len_k, _ = k.shape
-        
+
         # Reshape: (batch, seq_len, embed_dim) -> (batch, seq_len, num_heads, head_dim)
         q_4d = q.reshape(batch_size, seq_len_q, self.num_heads, self.head_dim)
         k_4d = k.reshape(batch_size, seq_len_k, self.num_heads, self.head_dim)
         v_4d = v.reshape(batch_size, seq_len_k, self.num_heads, self.head_dim)
-        
+
         # Compute attention using backend
         backend = self._get_backend()
-        
+
         # Reshape for attention computation: (batch, seq_len, num_heads, head_dim) -> (batch, num_heads, seq_len, head_dim)
         q_reshaped = q_4d.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len_q, head_dim)
         k_reshaped = k_4d.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len_k, head_dim)
         v_reshaped = v_4d.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len_k, head_dim)
-        
+
         # Compute attention scores
         scores = backend.attention.attention_scores(
             q_reshaped, k_reshaped, num_heads=self.num_heads, head_dim=self.head_dim
         )
-        
+
         # Backend may return scores in different shape - normalize to (batch, num_heads, seq_len_q, seq_len_k)
         if scores.shape == (batch_size, seq_len_q, self.num_heads, seq_len_k):
             # Backend returned (batch, seq_len_q, num_heads, seq_len_k) - transpose to (batch, num_heads, seq_len_q, seq_len_k)
@@ -1330,44 +1331,44 @@ class MultiheadAttention(Module):
             else:
                 # Fallback: compute manually
                 scores = np.einsum('bhqd,bhkd->bhqk', q_reshaped, k_reshaped) / np.sqrt(self.head_dim)
-        
+
         # Cache pre-softmax scores for backward
         self._cached_scores_pre_softmax = scores.copy()
-        
+
         # Apply mask if provided
         if mask is not None:
             scores = backend.attention.attention_mask(scores, mask)
-        
+
         # Apply softmax (CPU for now - backend softmax expects 3D)
         # scores is (batch, num_heads, seq_len_q, seq_len_k)
         scores_max = scores.max(axis=-1, keepdims=True)
         scores_exp = np.exp(scores - scores_max)
         scores_softmax = scores_exp / scores_exp.sum(axis=-1, keepdims=True)
-        
+
         # Cache softmax scores for backward
         self._cached_scores = scores_softmax.copy()
-        
+
         # Compute attention output
         # scores_softmax: (batch, num_heads, seq_len_q, seq_len_k)
         # v_reshaped: (batch, num_heads, seq_len_k, head_dim)
         # Output: (batch, num_heads, seq_len_q, head_dim)
         attn_output = np.einsum('bhqk,bhkd->bhqd', scores_softmax, v_reshaped)
-        
+
         # Cache attention output for backward (in shape: batch, num_heads, seq_len_q, head_dim)
         self._cached_attn_output = attn_output.copy()
-        
+
         # Reshape back: (batch, num_heads, seq_len_q, head_dim) -> (batch, seq_len_q, embed_dim)
         attn_output_reshaped = attn_output.transpose(0, 2, 1, 3).reshape(batch_size, seq_len_q, self.embed_dim)
         attn_weights = scores_softmax
-        
+
         # Project output
         output = self.out_proj(attn_output_reshaped)
-        
+
         return output, attn_weights
-    
-    def backward(self, grad_output: np.ndarray, query: np.ndarray = None, 
-                 key: np.ndarray = None, value: np.ndarray = None, 
-                 mask: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+    def backward(self, grad_output: np.ndarray, query: np.ndarray = None,
+                 key: np.ndarray = None, value: np.ndarray = None,
+                 mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Backward pass for multi-head attention.
         
@@ -1393,29 +1394,29 @@ class MultiheadAttention(Module):
             value = self._cached_value
         if mask is None:
             mask = self._cached_mask
-        
+
         if query is None or key is None or value is None:
             raise ValueError("Query, key, and value are required for MultiheadAttention backward pass")
-        
+
         # Get cached intermediate values
         scores = self._cached_scores  # (batch, num_heads, seq_len_q, seq_len_k)
         attn_output = self._cached_attn_output  # (batch, num_heads, seq_len_q, head_dim)
         q = self._cached_q  # (batch, seq_len_q, embed_dim)
         k = self._cached_k  # (batch, seq_len_k, embed_dim)
         v = self._cached_v  # (batch, seq_len_k, embed_dim)
-        
+
         batch_size, seq_len_q, _ = query.shape
         _, seq_len_k, _ = key.shape
-        
+
         # Step 1: Backward through output projection
         # _cached_attn_output is (batch, num_heads, seq_len_q, head_dim)
         # Need to reshape to (batch, seq_len_q, embed_dim) for out_proj backward
         attn_output_for_proj = self._cached_attn_output.transpose(0, 2, 1, 3).reshape(batch_size, seq_len_q, self.embed_dim)
-        
+
         # Flatten batch and seq_len for Linear backward: (batch * seq_len, embed_dim)
         grad_output_flat = grad_output.reshape(-1, self.embed_dim)
         attn_output_flat = attn_output_for_proj.reshape(-1, self.embed_dim)
-        
+
         if hasattr(self.out_proj, 'backward'):
             grad_attn_output_flat = self.out_proj.backward(grad_output_flat, attn_output_flat)
             grad_attn_output = grad_attn_output_flat.reshape(batch_size, seq_len_q, self.embed_dim)
@@ -1423,54 +1424,54 @@ class MultiheadAttention(Module):
             # Simplified: assume linear projection
             weight = _get_param_array(self.out_proj.weight)
             grad_attn_output = grad_output @ weight.T
-        
+
         # Reshape grad_attn_output: (batch, seq_len_q, embed_dim) -> (batch, num_heads, seq_len_q, head_dim)
         grad_attn_output = grad_attn_output.reshape(batch_size, seq_len_q, self.num_heads, self.head_dim)
         grad_attn_output = grad_attn_output.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len_q, head_dim)
-        
+
         # Reshape V for backward: (batch, seq_len_k, embed_dim) -> (batch, num_heads, seq_len_k, head_dim)
         v_reshaped = v.reshape(batch_size, seq_len_k, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        
+
         # Step 2: Backward through attention output: grad_V and grad_scores
         # grad_V = scores^T @ grad_attn_output
         # grad_scores = grad_attn_output @ V^T
         # v_reshaped: (batch, num_heads, seq_len_k, head_dim) -> transpose to (batch, num_heads, head_dim, seq_len_k)
         v_reshaped_T = v_reshaped.transpose(0, 1, 3, 2)  # (batch, num_heads, head_dim, seq_len_k)
         grad_scores = np.matmul(grad_attn_output, v_reshaped_T)  # (batch, num_heads, seq_len_q, seq_len_k)
-        
+
         # scores: (batch, num_heads, seq_len_q, seq_len_k) -> transpose to (batch, num_heads, seq_len_k, seq_len_q)
         scores_T = scores.transpose(0, 1, 3, 2)  # (batch, num_heads, seq_len_k, seq_len_q)
         grad_v = np.matmul(scores_T, grad_attn_output)  # (batch, num_heads, seq_len_k, head_dim)
-        
+
         # Step 3: Backward through softmax
         # Softmax backward: grad_pre_softmax = scores * (grad_scores - sum(grad_scores * scores, dim=-1, keepdims=True))
         grad_scores_weighted = grad_scores * scores
         grad_scores_sum = np.sum(grad_scores_weighted, axis=-1, keepdims=True)
         grad_pre_softmax = scores * (grad_scores - grad_scores_sum)
-        
+
         # Step 4: Backward through attention scores: grad_Q and grad_K
         # scores = Q @ K^T / sqrt(head_dim)
         # grad_Q = grad_pre_softmax @ K / sqrt(head_dim)
         # grad_K = grad_pre_softmax^T @ Q / sqrt(head_dim)
         scale = 1.0 / np.sqrt(self.head_dim)
-        
+
         # Reshape Q and K for backward
         q_reshaped = q.reshape(batch_size, seq_len_q, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
         k_reshaped = k.reshape(batch_size, seq_len_k, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        
+
         # grad_pre_softmax: (batch, num_heads, seq_len_q, seq_len_k)
         # k_reshaped: (batch, num_heads, seq_len_k, head_dim)
         grad_q_reshaped = np.matmul(grad_pre_softmax, k_reshaped) * scale  # (batch, num_heads, seq_len_q, head_dim)
-        
+
         # grad_pre_softmax^T: (batch, num_heads, seq_len_k, seq_len_q)
         grad_pre_softmax_T = grad_pre_softmax.transpose(0, 1, 3, 2)  # (batch, num_heads, seq_len_k, seq_len_q)
         grad_k_reshaped = np.matmul(grad_pre_softmax_T, q_reshaped) * scale  # (batch, num_heads, seq_len_k, head_dim)
-        
+
         # Reshape back: (batch, num_heads, seq_len, head_dim) -> (batch, seq_len, embed_dim)
         grad_q = grad_q_reshaped.transpose(0, 2, 1, 3).reshape(batch_size, seq_len_q, self.embed_dim)
         grad_k = grad_k_reshaped.transpose(0, 2, 1, 3).reshape(batch_size, seq_len_k, self.embed_dim)
         grad_v = grad_v.transpose(0, 2, 1, 3).reshape(batch_size, seq_len_k, self.embed_dim)
-        
+
         # Step 5: Backward through Q, K, V projections
         # Flatten batch and seq_len dimensions for Linear backward
         grad_q_flat = grad_q.reshape(-1, self.embed_dim)
@@ -1479,27 +1480,27 @@ class MultiheadAttention(Module):
         query_flat = query.reshape(-1, self.embed_dim)
         key_flat = key.reshape(-1, self.embed_dim)
         value_flat = value.reshape(-1, self.embed_dim)
-        
+
         if hasattr(self.q_proj, 'backward'):
             grad_query_flat = self.q_proj.backward(grad_q_flat, query_flat)
             grad_query = grad_query_flat.reshape(batch_size, seq_len_q, self.embed_dim)
         else:
             grad_query = grad_q
-        
+
         if hasattr(self.k_proj, 'backward'):
             grad_key_flat = self.k_proj.backward(grad_k_flat, key_flat)
             grad_key = grad_key_flat.reshape(batch_size, seq_len_k, self.embed_dim)
         else:
             grad_key = grad_k
-        
+
         if hasattr(self.v_proj, 'backward'):
             grad_value_flat = self.v_proj.backward(grad_v_flat, value_flat)
             grad_value = grad_value_flat.reshape(batch_size, seq_len_k, self.embed_dim)
         else:
             grad_value = grad_v
-        
+
         return grad_query, grad_key, grad_value  # Placeholder
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -1511,7 +1512,7 @@ class FlashAttention2(Module):
     Flash Attention 2 (memory-efficient attention)
     Uses: flash-attention2.glsl, flash-attention2-rope.glsl
     """
-    
+
     def __init__(self, embed_dim: int, num_heads: int, use_rope: bool = False):
         """Initialize the instance."""
 
@@ -1520,19 +1521,19 @@ class FlashAttention2(Module):
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
         self.use_rope = use_rope
-        
+
         if embed_dim % num_heads != 0:
             raise ValueError(f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})")
-        
+
         # Initialize cached values for backward pass
         self._cached_q = None
         self._cached_k = None
         self._cached_v = None
         self._cached_mask = None
         self._cached_output = None
-    
+
     def forward(self, q: np.ndarray, k: np.ndarray, v: np.ndarray,
-                mask: Optional[np.ndarray] = None) -> np.ndarray:
+                mask: np.ndarray | None = None) -> np.ndarray:
         """
         Forward pass using Flash Attention 2.
         
@@ -1550,7 +1551,7 @@ class FlashAttention2(Module):
         self._cached_k = k.copy()
         self._cached_v = v.copy()
         self._cached_mask = mask
-        
+
         # Handle different input shapes
         if q.ndim == 3:
             # (batch, seq_len, embed_dim) -> reshape to (batch, seq_len, num_heads, head_dim)
@@ -1558,7 +1559,7 @@ class FlashAttention2(Module):
             q = q.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
             k = k.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
             v = v.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
-        
+
         backend = self._get_backend()
         if hasattr(backend, 'flash_attention2'):
             try:
@@ -1567,20 +1568,20 @@ class FlashAttention2(Module):
                 return output
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback: use standard attention computation
         # This is similar to FlashAttention but without tiling
         batch_size, seq_len, _, _ = q.shape
-        
+
         # Reshape for attention: (batch, seq_len, num_heads, head_dim) -> (batch, num_heads, seq_len, head_dim)
         q_reshaped = q.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
         k_reshaped = k.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
         v_reshaped = v.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
-        
+
         # Compute attention scores: Q @ K^T / sqrt(head_dim)
         scale = 1.0 / np.sqrt(self.head_dim)
         scores = np.einsum('bhqd,bhkd->bhqk', q_reshaped, k_reshaped) * scale
-        
+
         # Apply mask if provided
         if mask is not None:
             if mask.ndim == 2:
@@ -1590,24 +1591,24 @@ class FlashAttention2(Module):
                 scores = np.where(mask_expanded > 0, scores, -1e9)
             else:
                 scores = scores + mask
-        
+
         # Apply softmax
         scores_max = scores.max(axis=-1, keepdims=True)
         scores_exp = np.exp(scores - scores_max)
         scores_softmax = scores_exp / scores_exp.sum(axis=-1, keepdims=True)
-        
+
         # Compute attention output: scores @ V
         output = np.einsum('bhqk,bhkd->bhqd', scores_softmax, v_reshaped)
-        
+
         # Reshape back: (batch, num_heads, seq_len, head_dim) -> (batch, seq_len, num_heads, head_dim)
         output = output.transpose(0, 2, 1, 3)
-        
+
         self._cached_output = output.copy()
         return output
-    
-    def backward(self, grad_output: np.ndarray, q: np.ndarray = None, 
+
+    def backward(self, grad_output: np.ndarray, q: np.ndarray = None,
                  k: np.ndarray = None, v: np.ndarray = None,
-                 mask: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                 mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Backward pass for Flash Attention 2.
         
@@ -1633,10 +1634,10 @@ class FlashAttention2(Module):
             v = self._cached_v
         if mask is None:
             mask = self._cached_mask
-        
+
         if q is None or k is None or v is None:
             raise ValueError("Query, key, and value are required for FlashAttention2 backward pass")
-        
+
         # Handle different input shapes
         if q.ndim == 3:
             # (batch, seq_len, embed_dim) -> reshape to (batch, seq_len, num_heads, head_dim)
@@ -1646,22 +1647,22 @@ class FlashAttention2(Module):
             v = v.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
         else:
             batch_size, seq_len, _, _ = q.shape
-        
+
         # Handle grad_output shape
         if grad_output.ndim == 3:
             # (batch, seq_len, embed_dim) -> reshape to (batch, seq_len, num_heads, head_dim)
             grad_output = grad_output.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
-        
+
         # Reshape for attention computation: (batch, seq_len, num_heads, head_dim) -> (batch, num_heads, seq_len, head_dim)
         q_reshaped = q.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
         k_reshaped = k.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
         v_reshaped = v.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
         grad_output_reshaped = grad_output.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len, head_dim)
-        
+
         # Recompute attention scores for backward (same as forward)
         scale = 1.0 / np.sqrt(self.head_dim)
         scores = np.einsum('bhqd,bhkd->bhqk', q_reshaped, k_reshaped) * scale
-        
+
         # Apply mask if provided
         if mask is not None:
             if mask.ndim == 2:
@@ -1670,26 +1671,26 @@ class FlashAttention2(Module):
                 scores = np.where(mask_expanded > 0, scores, -1e9)
             else:
                 scores = scores + mask
-        
+
         # Apply softmax
         scores_max = scores.max(axis=-1, keepdims=True)
         scores_exp = np.exp(scores - scores_max)
         scores_softmax = scores_exp / scores_exp.sum(axis=-1, keepdims=True)
-        
+
         # Step 1: Backward through attention output: grad_V and grad_scores
         # grad_V = scores^T @ grad_output
         # grad_scores = grad_output @ V^T
         v_reshaped_T = v_reshaped.transpose(0, 1, 3, 2)  # (batch, num_heads, head_dim, seq_len)
         grad_scores = np.matmul(grad_output_reshaped, v_reshaped_T)  # (batch, num_heads, seq_len, seq_len)
-        
+
         scores_T = scores_softmax.transpose(0, 1, 3, 2)  # (batch, num_heads, seq_len, seq_len)
         grad_v = np.matmul(scores_T, grad_output_reshaped)  # (batch, num_heads, seq_len, head_dim)
-        
+
         # Step 2: Backward through softmax
         grad_scores_weighted = grad_scores * scores_softmax
         grad_scores_sum = np.sum(grad_scores_weighted, axis=-1, keepdims=True)
         grad_pre_softmax = scores_softmax * (grad_scores - grad_scores_sum)
-        
+
         # Step 3: Backward through attention scores: grad_Q and grad_K
         # scores = Q @ K^T / sqrt(head_dim)
         # grad_Q = grad_pre_softmax @ K / sqrt(head_dim)
@@ -1697,20 +1698,20 @@ class FlashAttention2(Module):
         grad_q_reshaped = np.matmul(grad_pre_softmax, k_reshaped) * scale  # (batch, num_heads, seq_len, head_dim)
         grad_pre_softmax_T = grad_pre_softmax.transpose(0, 1, 3, 2)  # (batch, num_heads, seq_len, seq_len)
         grad_k_reshaped = np.matmul(grad_pre_softmax_T, q_reshaped) * scale  # (batch, num_heads, seq_len, head_dim)
-        
+
         # Reshape back: (batch, num_heads, seq_len, head_dim) -> (batch, seq_len, num_heads, head_dim)
         grad_q = grad_q_reshaped.transpose(0, 2, 1, 3)  # (batch, seq_len, num_heads, head_dim)
         grad_k = grad_k_reshaped.transpose(0, 2, 1, 3)  # (batch, seq_len, num_heads, head_dim)
         grad_v = grad_v.transpose(0, 2, 1, 3)  # (batch, seq_len, num_heads, head_dim)
-        
+
         # If original inputs were 3D, reshape back
         if self._cached_q.ndim == 3:
             grad_q = grad_q.reshape(batch_size, seq_len, self.embed_dim)
             grad_k = grad_k.reshape(batch_size, seq_len, self.embed_dim)
             grad_v = grad_v.reshape(batch_size, seq_len, self.embed_dim)
-        
+
         return grad_q, grad_k, grad_v
-    
+
     def __repr__(self):
         """Return a debug representation."""
 

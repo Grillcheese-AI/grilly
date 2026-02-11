@@ -4,7 +4,8 @@ Tensor Conversion Utilities
 Seamless conversion between PyTorch tensors and Vulkan (numpy arrays).
 Provides automatic conversion for seamless integration with GPU acceleration on AMD.
 """
-from typing import Union, Any, Tuple, List, Optional
+from typing import Any, Union
+
 import numpy as np
 
 try:
@@ -17,7 +18,7 @@ except ImportError:
 from .device_manager import get_device_manager
 
 
-def to_vulkan(tensor: Union[np.ndarray, Any], keep_on_gpu: bool = False) -> Union[np.ndarray, 'VulkanTensor']:
+def to_vulkan(tensor: np.ndarray | Any, keep_on_gpu: bool = False) -> Union[np.ndarray, 'VulkanTensor']:
     """
     Convert PyTorch tensor (or any tensor-like object) to numpy array for Vulkan.
     
@@ -44,7 +45,7 @@ def to_vulkan(tensor: Union[np.ndarray, Any], keep_on_gpu: bool = False) -> Unio
         >>> result = linear(x_gpu)  # Faster, no CPU transfer
     """
     device_manager = get_device_manager()
-    
+
     # If keep_on_gpu is True, try to create a GPU buffer directly
     if keep_on_gpu:
         try:
@@ -52,11 +53,11 @@ def to_vulkan(tensor: Union[np.ndarray, Any], keep_on_gpu: bool = False) -> Unio
         except Exception:
             # Fall back to regular conversion if GPU buffer creation fails
             pass
-    
+
     return device_manager.to_vulkan(tensor)
 
 
-def to_vulkan_gpu(tensor: Union[np.ndarray, Any]) -> 'VulkanTensor':
+def to_vulkan_gpu(tensor: np.ndarray | Any) -> 'VulkanTensor':
     """
     Convert tensor directly to Vulkan GPU buffer (stays on GPU, no CPU round-trip).
     
@@ -77,11 +78,11 @@ def to_vulkan_gpu(tensor: Union[np.ndarray, Any]) -> 'VulkanTensor':
     # Get numpy array first
     device_manager = get_device_manager()
     numpy_array = device_manager.to_vulkan(tensor)
-    
+
     # Ensure float32
     if numpy_array.dtype != np.float32:
         numpy_array = numpy_array.astype(np.float32)
-    
+
     # Create VulkanTensor wrapper
     return VulkanTensor(numpy_array)
 
@@ -401,7 +402,7 @@ class VulkanTensor:
             pass  # Ignore cleanup errors
 
 
-def to_vulkan_batch(tensors: Union[List, Tuple, Any]) -> Union[np.ndarray, List[np.ndarray], Tuple[np.ndarray, ...]]:
+def to_vulkan_batch(tensors: list | tuple | Any) -> np.ndarray | list[np.ndarray] | tuple[np.ndarray, ...]:
     """
     Convert a batch of PyTorch tensors to numpy arrays for Vulkan.
     
@@ -436,7 +437,7 @@ def from_vulkan(array: np.ndarray, device: str = 'cuda') -> Any:
         >>> torch_result = from_vulkan(result, device='cuda')  # Convert to PyTorch CUDA
     """
     device_manager = get_device_manager()
-    
+
     if device == 'cuda':
         try:
             return device_manager.to_cuda(array)
@@ -466,7 +467,7 @@ def auto_convert_to_vulkan(func):
     return wrapper
 
 
-def ensure_vulkan_compatible(data: Union[np.ndarray, Any]) -> np.ndarray:
+def ensure_vulkan_compatible(data: np.ndarray | Any) -> np.ndarray:
     """
     Ensure data is Vulkan-compatible numpy array.
 

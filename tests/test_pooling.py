@@ -452,6 +452,7 @@ class TestPoolingPerformance:
     def test_maxpool2d_speedup_vs_cpu(self, backend):
         """Measure speedup vs PyTorch CPU"""
         import time
+
         from grilly.nn import MaxPool2d as GrillyMaxPool
 
         # Create layers

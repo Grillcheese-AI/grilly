@@ -8,11 +8,12 @@ Output: conversations_svc_semantic.jsonl
 
 import json
 import re
-import spacy
-from pathlib import Path
-from typing import Generator, Dict, Any, Optional, List
-from dataclasses import dataclass
 from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import spacy
 
 print("Loading spaCy model...")
 nlp = spacy.load("en_core_web_sm")
@@ -121,22 +122,22 @@ def extract_svc(doc) -> SVCResult:
     verb_parts = []
     complement_parts = []
     dobj_parts = []
-    
+
     root = None
     for token in doc:
         if token.dep_ == "ROOT":
             root = token
             break
-    
+
     if not root or root.pos_ not in ("VERB", "AUX"):
         return SVCResult("", "", "", False)
-    
+
     # Collect verb phrase
     for token in doc:
         if token == root or token.head == root:
             if token.dep_ in ("aux", "auxpass", "neg") or token == root:
                 verb_parts.append((token.i, token.text))
-    
+
     # Collect grammatical subject
     has_grammatical_subject = False
     for token in doc:
@@ -146,7 +147,7 @@ def extract_svc(doc) -> SVCResult:
             for t in subtree:
                 if t.i < root.i:
                     subject_parts.append((t.i, t.text))
-    
+
     # Collect direct object
     for token in doc:
         if token.dep_ in ("dobj", "attr", "oprd"):
@@ -154,25 +155,25 @@ def extract_svc(doc) -> SVCResult:
             for t in subtree:
                 if t.dep_ != "punct":
                     dobj_parts.append((t.i, t.text))
-    
+
     # SEMANTIC: Promote direct object in imperatives
     is_imperative = not has_grammatical_subject and dobj_parts
     if is_imperative:
         subject_parts = dobj_parts
         dobj_parts = []
-    
+
     # Complement = rest after verb
     verb_end = max([i for i, _ in verb_parts]) if verb_parts else root.i
     subject_indices = {i for i, _ in subject_parts}
-    
+
     for token in doc:
         if token.i > verb_end and token.dep_ != "punct" and token.i not in subject_indices:
             complement_parts.append((token.i, token.text))
-    
+
     subject = " ".join(t for _, t in sorted(subject_parts))
     verb = " ".join(t for _, t in sorted(verb_parts))
     complement = " ".join(t for _, t in sorted(complement_parts))
-    
+
     valid = bool(verb and len(doc) >= 3)
     return SVCResult(subject, verb, complement, valid)
 
@@ -203,29 +204,29 @@ def compute_complexity(doc) -> float:
     depth_score = min(avg_depth / 5, 1.0)
     return round((length_score + clause_score + depth_score) / 3, 2)
 
-def process_sentence(doc, sent_id: str, role: str) -> Optional[Dict[str, Any]]:
+def process_sentence(doc, sent_id: str, role: str) -> dict[str, Any] | None:
     """Process single sentence into SVC format"""
     if len(doc) < 3 or len(doc) > 100:
         return None
-    
+
     has_verb = any(t.pos_ in ("VERB", "AUX") and t.dep_ == "ROOT" for t in doc)
     if not has_verb:
         return None
-    
+
     svc = extract_svc(doc)
     if not svc.valid:
         return None
-    
+
     pos = [t.pos_ for t in doc if t.pos_ != "PUNCT"]
     lemmas = [t.lemma_.lower() for t in doc if t.pos_ != "PUNCT"]
     deps = [t.dep_ for t in doc if t.pos_ != "PUNCT"]
-    
+
     root_verb = ""
     for t in doc:
         if t.dep_ == "ROOT":
             root_verb = t.lemma_.lower()
             break
-    
+
     return {
         "id": sent_id,
         "text": doc.text.strip(),
@@ -247,60 +248,60 @@ def process_sentence(doc, sent_id: str, role: str) -> Optional[Dict[str, Any]]:
 def process_conversations(input_path: Path, output_path: Path):
     """Process conversation dataset"""
     stats = Counter()
-    
-    with open(input_path, 'r', encoding='utf-8') as fin, \
+
+    with open(input_path, encoding='utf-8') as fin, \
          open(output_path, 'w', encoding='utf-8') as fout:
-        
+
         for line_num, line in enumerate(fin):
             try:
                 data = json.loads(line)
             except json.JSONDecodeError:
                 stats['json_errors'] += 1
                 continue
-            
+
             messages = data.get('messages', [])
             conv_id = data.get('conversation_id', f'conv_{line_num}')
-            
+
             for msg_idx, msg in enumerate(messages):
                 role = msg.get('role', 'unknown')
                 content = msg.get('content', '')
-                
+
                 # Clean the content
                 cleaned = clean_text(content)
                 if not cleaned:
                     continue
-                
+
                 # Split into sentences
                 try:
                     doc = nlp(cleaned)
                     for sent_num, sent in enumerate(doc.sents):
                         sent_text = sent.text.strip()
-                        
+
                         if not is_valid_sentence(sent_text):
                             stats['filtered_invalid'] += 1
                             continue
-                        
+
                         sent_id = f"{conv_id}_m{msg_idx}_s{sent_num}"
-                        
+
                         try:
                             sent_doc = nlp(sent_text)
                             result = process_sentence(sent_doc, sent_id, role)
-                            
+
                             if result:
                                 fout.write(json.dumps(result) + '\n')
                                 stats['success'] += 1
                                 stats[f'role_{role}'] += 1
                             else:
                                 stats['filtered_no_svc'] += 1
-                        except Exception as e:
+                        except Exception:
                             stats['process_errors'] += 1
-                            
-                except Exception as e:
+
+                except Exception:
                     stats['nlp_errors'] += 1
-            
+
             if (line_num + 1) % 100 == 0:
                 print(f"Processed {line_num + 1} conversations, {stats['success']} sentences...")
-    
+
     return stats
 
 def main():
@@ -308,14 +309,14 @@ def main():
 
     input_path = Path(r"E:\Grillcheese Inc\grilly\grilly\experimental_datasets\conversations_dataset_anonymized_cleaned.jsonl")
     output_path = Path(r"C:\Users\grill\Desktop\GrillCheese\data_learning\conversations_svc_semantic.jsonl")
-    
+
     print(f"Input: {input_path}")
     print(f"Output: {output_path}")
     print("Processing conversations with semantic SVC extraction...")
     print()
-    
+
     stats = process_conversations(input_path, output_path)
-    
+
     print("\n=== Processing Complete ===")
     print(f"Successful sentences: {stats['success']}")
     print(f"  - From user: {stats.get('role_user', 0)}")

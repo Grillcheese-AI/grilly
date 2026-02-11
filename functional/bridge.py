@@ -41,7 +41,7 @@ def continuous_to_spikes(
     from grilly import Compute
     backend = Compute()
     return backend.continuous_to_spikes(
-        continuous, 
+        continuous,
         num_timesteps=num_timesteps,
         encoding_type=encoding_type,
         projection_weights=projection_weights,
@@ -102,7 +102,7 @@ def bridge_temporal_weights(
         Temporally weighted weights
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'bridge-temporal-weights' in backend.shaders:
         try:
@@ -111,7 +111,7 @@ def bridge_temporal_weights(
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback - Apply temporal decay to weights
     temporal_decay = np.exp(-np.arange(temporal_window) / temporal_window)
     # Simple implementation: return weights with temporal scaling

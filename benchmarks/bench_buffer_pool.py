@@ -2,13 +2,18 @@
 Benchmark: Buffer pool hit rate, allocation speed, and VRAM usage.
 """
 
-import numpy as np
 import sys
 import time
+
+import numpy as np
+
 sys.path.insert(0, '.')
 
 from benchmarks.utils import (
-    print_header, format_time, format_size, get_gpu_backend,
+    format_size,
+    format_time,
+    get_gpu_backend,
+    print_header,
 )
 
 
@@ -111,7 +116,7 @@ def main():
         print(f"  Pooled Mem:  {format_size(stats.get('total_pooled_memory', 0))}")
         print(f"  VMA Enabled: {stats.get('vma_enabled', False)}")
         if stats.get('buckets'):
-            print(f"  Buckets:")
+            print("  Buckets:")
             for bsize, count in sorted(stats['buckets'].items()):
                 print(f"    {format_size(bsize)}: {count} buffers")
     else:

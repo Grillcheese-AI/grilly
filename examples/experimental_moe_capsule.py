@@ -5,9 +5,8 @@ Demonstrates routing with capsule similarity blending.
 """
 
 import numpy as np
-
-from grilly.experimental.moe.routing import ResonatorMoE
 from grilly.experimental.cognitive.capsule import CapsuleEncoder
+from grilly.experimental.moe.routing import ResonatorMoE
 
 
 def main() -> None:

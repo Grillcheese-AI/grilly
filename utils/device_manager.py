@@ -5,17 +5,18 @@ Manages multiple backends (Vulkan, CUDA, CPU) and allows seamless switching
 between them. Supports HuggingFace models on CUDA while using Vulkan for
 custom operations.
 """
-from typing import Optional, Dict, Any, Union
+from typing import Any
+
 import numpy as np
 
 # Backend instances (lazy initialization)
-_vulkan_backend: Optional[Any] = None
-_cuda_backend: Optional[Any] = None
-_cpu_backend: Optional[Any] = None
+_vulkan_backend: Any | None = None
+_cuda_backend: Any | None = None
+_cpu_backend: Any | None = None
 
 # Current device settings
 _current_device: str = 'vulkan'
-_default_cuda_device: Optional[str] = None
+_default_cuda_device: str | None = None
 
 
 class DeviceManager:
@@ -25,7 +26,7 @@ class DeviceManager:
     Allows running HuggingFace models on CUDA while using Vulkan for
     custom GPU-accelerated operations.
     """
-    
+
     def __init__(self):
         """Initialize the instance."""
 
@@ -34,7 +35,7 @@ class DeviceManager:
         self._torch = None
         self._current = 'vulkan'
         self._cuda_device = None
-        
+
     @property
     def vulkan(self):
         """Get Vulkan backend (lazy initialization)"""
@@ -45,7 +46,7 @@ class DeviceManager:
             except Exception as e:
                 raise RuntimeError(f"Failed to initialize Vulkan backend: {e}")
         return self._vulkan
-    
+
     @property
     def cuda(self):
         """Get CUDA backend (PyTorch) (lazy initialization)"""
@@ -61,7 +62,7 @@ class DeviceManager:
             except Exception as e:
                 raise RuntimeError(f"Failed to initialize CUDA backend: {e}")
         return self._cuda
-    
+
     @property
     def torch(self):
         """Get PyTorch module"""
@@ -72,8 +73,8 @@ class DeviceManager:
             except ImportError:
                 raise RuntimeError("PyTorch is not installed. Install with: pip install torch")
         return self._torch
-    
-    def set_device(self, device: str, cuda_index: Optional[int] = None):
+
+    def set_device(self, device: str, cuda_index: int | None = None):
         """
         Set current device.
         
@@ -84,9 +85,9 @@ class DeviceManager:
         device = device.lower()
         if device not in ('vulkan', 'cuda', 'cpu'):
             raise ValueError(f"Unknown device: {device}. Must be 'vulkan', 'cuda', or 'cpu'")
-        
+
         self._current = device
-        
+
         if device == 'cuda' and cuda_index is not None:
             if self._torch is None:
                 import torch
@@ -97,11 +98,11 @@ class DeviceManager:
                 import torch
                 self._torch = torch
             self._cuda_device = self._torch.device('cuda:0')
-    
+
     def get_device(self) -> str:
         """Get current device name"""
         return self._current
-    
+
     def get_cuda_device(self):
         """Get PyTorch CUDA device"""
         if self._torch is None:
@@ -110,8 +111,8 @@ class DeviceManager:
         if self._cuda_device is None:
             self._cuda_device = self._torch.device('cuda:0')
         return self._cuda_device
-    
-    def to_vulkan(self, tensor: Union[np.ndarray, Any]) -> np.ndarray:
+
+    def to_vulkan(self, tensor: np.ndarray | Any) -> np.ndarray:
         """
         Convert tensor to numpy array for Vulkan operations.
         
@@ -129,8 +130,8 @@ class DeviceManager:
             return tensor.numpy()
         else:
             return np.array(tensor)
-    
-    def to_cuda(self, array: np.ndarray, dtype: Optional[Any] = None):
+
+    def to_cuda(self, array: np.ndarray, dtype: Any | None = None):
         """
         Convert numpy array to CUDA tensor.
         
@@ -144,14 +145,14 @@ class DeviceManager:
         if self._torch is None:
             import torch
             self._torch = torch
-        
+
         tensor = self._torch.from_numpy(array)
         if dtype is not None:
             tensor = tensor.to(dtype)
-        
+
         return tensor.to(self.get_cuda_device())
-    
-    def device_count(self, backend: Optional[str] = None) -> int:
+
+    def device_count(self, backend: str | None = None) -> int:
         """
         Get number of available devices for a backend.
         
@@ -162,7 +163,7 @@ class DeviceManager:
             Number of devices
         """
         backend = backend or self._current
-        
+
         if backend == 'cuda':
             if self._torch is None:
                 try:
@@ -175,8 +176,8 @@ class DeviceManager:
             return 1  # Vulkan device count would require enumeration
         else:
             return 1  # CPU
-    
-    def synchronize(self, backend: Optional[str] = None):
+
+    def synchronize(self, backend: str | None = None):
         """
         Synchronize operations on a backend.
         
@@ -184,7 +185,7 @@ class DeviceManager:
             backend: Backend name or None for current
         """
         backend = backend or self._current
-        
+
         if backend == 'cuda':
             if self._torch is None:
                 import torch
@@ -196,7 +197,7 @@ class DeviceManager:
 
 
 # Global device manager instance
-_device_manager: Optional[DeviceManager] = None
+_device_manager: DeviceManager | None = None
 
 
 def get_device_manager() -> DeviceManager:
@@ -207,7 +208,7 @@ def get_device_manager() -> DeviceManager:
     return _device_manager
 
 
-def set_device(device: str, cuda_index: Optional[int] = None):
+def set_device(device: str, cuda_index: int | None = None):
     """Set current device (convenience function)"""
     get_device_manager().set_device(device, cuda_index)
 

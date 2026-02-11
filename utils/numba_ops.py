@@ -10,13 +10,13 @@ Performance hierarchy:
 3. Pure numpy (baseline)
 """
 
+
 import numpy as np
-from typing import Tuple, Optional
 
 # Try to import numba
 try:
     import numba
-    from numba import jit, prange, float32, int32, int64
+    from numba import float32, int32, int64, jit, prange
     NUMBA_AVAILABLE = True
 
     # Configure numba for best performance

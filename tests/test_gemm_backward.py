@@ -238,6 +238,7 @@ class TestGEMMPerformance:
     def test_gemm_vs_cpu_performance(self):
         """Benchmark GEMM vs CPU fallback (requires manual verification)"""
         import time
+
         from grilly.nn import Linear
 
         # Large problem size

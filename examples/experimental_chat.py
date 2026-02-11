@@ -5,12 +5,11 @@ Default mode uses CognitiveController to generate responses.
 """
 
 import argparse
-from typing import Optional
 
 from grilly.experimental.cognitive import CognitiveController
 
 
-def parse_fact(text: str) -> Optional[tuple[str, str, str]]:
+def parse_fact(text: str) -> tuple[str, str, str] | None:
     """
     Parse "/fact subject|relation|object".
     Returns tuple or None if invalid.

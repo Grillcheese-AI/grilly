@@ -1,11 +1,11 @@
 """Multimodal fusion modules for Grilly neural network workflows."""
 
 
-import numpy as np
-from typing import Optional, List, Dict, Tuple, Union
-from .module import Module
-from .modules import Linear, LayerNorm, GELU, Dropout, MultiheadAttention, Sequential
 
+import numpy as np
+
+from .module import Module
+from .modules import GELU, Dropout, LayerNorm, Linear, MultiheadAttention, Sequential
 
 # =============================================================================
 # 1. Multimodal Bottleneck Transformer (MBT)
@@ -191,7 +191,7 @@ class PerceiverIO(Module):
     def forward(
         self,
         inputs: np.ndarray,
-        output_queries: Optional[np.ndarray] = None
+        output_queries: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Process inputs through Perceiver IO.
@@ -340,7 +340,7 @@ class CrossModalAttentionFusion(Module):
             'fusion_ffn': self.fusion_ffn,
         }
 
-    def _encode_modality(self, x: np.ndarray, layers: List[dict]) -> np.ndarray:
+    def _encode_modality(self, x: np.ndarray, layers: list[dict]) -> np.ndarray:
         """Encode through modality-specific layers."""
         for layer in layers:
             # Self-attention
@@ -529,8 +529,8 @@ class ImageBindFusion(Module):
         self,
         image_features: np.ndarray,
         text_features: np.ndarray,
-        audio_features: Optional[np.ndarray] = None
-    ) -> Dict[str, np.ndarray]:
+        audio_features: np.ndarray | None = None
+    ) -> dict[str, np.ndarray]:
         """
         Joint training with image as binding modality.
 

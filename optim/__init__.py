@@ -3,19 +3,13 @@ Optimizers Module (PyTorch-like)
 
 GPU-accelerated optimizers using Vulkan compute shaders.
 """
-from .base import Optimizer
 from .adam import Adam, AffectAdam
 from .adamw import AdamW
-from .sgd import SGD
-from .nlms import NLMS
+from .base import Optimizer
+from .lr_scheduler import CosineAnnealingLR, LRScheduler, OneCycleLR, ReduceLROnPlateau, StepLR
 from .natural_gradient import NaturalGradient
-from .lr_scheduler import (
-    LRScheduler,
-    StepLR,
-    CosineAnnealingLR,
-    ReduceLROnPlateau,
-    OneCycleLR
-)
+from .nlms import NLMS
+from .sgd import SGD
 
 __all__ = [
     'Optimizer',

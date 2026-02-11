@@ -2,13 +2,18 @@
 Benchmark: VSA (Vector Symbolic Architecture) operations.
 """
 
-import numpy as np
 import sys
+
+import numpy as np
+
 sys.path.insert(0, '.')
 
 from benchmarks.utils import (
-    time_fn, time_cpu, print_header, print_row, print_summary_table,
-    format_size,
+    print_header,
+    print_row,
+    print_summary_table,
+    time_cpu,
+    time_fn,
 )
 
 

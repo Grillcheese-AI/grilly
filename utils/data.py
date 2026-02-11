@@ -4,13 +4,12 @@ Data Loading Utilities for Grilly
 Provides Dataset and DataLoader classes similar to PyTorch's torch.utils.data module.
 """
 
-import numpy as np
-from typing import (
-    Iterator, Optional, Callable, List, Tuple, Any, Union, Sequence
-)
-from abc import ABC, abstractmethod
 import math
+from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any
 
+import numpy as np
 
 # ============================================================================
 # Dataset Base Classes
@@ -74,7 +73,7 @@ class TensorDataset(Dataset):
 
         return self.tensors[0].shape[0]
 
-    def __getitem__(self, idx: int) -> Tuple[np.ndarray, ...]:
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, ...]:
         """Execute getitem."""
 
         return tuple(t[idx] for t in self.tensors)
@@ -94,9 +93,9 @@ class ArrayDataset(Dataset):
     def __init__(
         self,
         data: np.ndarray,
-        labels: Optional[np.ndarray] = None,
-        transform: Optional[Callable] = None,
-        target_transform: Optional[Callable] = None,
+        labels: np.ndarray | None = None,
+        transform: Callable | None = None,
+        target_transform: Callable | None = None,
     ):
         """Initialize the instance."""
 
@@ -110,7 +109,7 @@ class ArrayDataset(Dataset):
 
         return len(self.data)
 
-    def __getitem__(self, idx: int) -> Union[np.ndarray, Tuple[np.ndarray, Any]]:
+    def __getitem__(self, idx: int) -> np.ndarray | tuple[np.ndarray, Any]:
         """Execute getitem."""
 
         x = self.data[idx]
@@ -162,7 +161,7 @@ class ConcatDataset(Dataset):
         datasets: List of datasets to concatenate
     """
 
-    def __init__(self, datasets: List[Dataset]):
+    def __init__(self, datasets: list[Dataset]):
         """Initialize the instance."""
 
         self.datasets = datasets
@@ -208,7 +207,7 @@ class RandomSampler:
         self,
         data_source: Dataset,
         replacement: bool = False,
-        num_samples: Optional[int] = None
+        num_samples: int | None = None
     ):
         """Initialize the instance."""
 
@@ -315,7 +314,7 @@ class BatchSampler:
         self.batch_size = batch_size
         self.drop_last = drop_last
 
-    def __iter__(self) -> Iterator[List[int]]:
+    def __iter__(self) -> Iterator[list[int]]:
         """Execute iter."""
 
         batch = []
@@ -339,7 +338,7 @@ class BatchSampler:
 # Collate Functions
 # ============================================================================
 
-def default_collate(batch: List[Tuple]) -> Tuple[np.ndarray, ...]:
+def default_collate(batch: list[tuple]) -> tuple[np.ndarray, ...]:
     """
     Default collate function that stacks samples into batches.
 
@@ -393,7 +392,7 @@ class DataLoader:
         sampler=None,
         batch_sampler=None,
         num_workers: int = 0,  # Ignored, included for compatibility
-        collate_fn: Optional[Callable] = None,
+        collate_fn: Callable | None = None,
         drop_last: bool = False,
     ):
         """Initialize the instance."""
@@ -460,8 +459,8 @@ class DataLoader:
 def random_split(
     dataset: Dataset,
     lengths: Sequence[int],
-    generator: Optional[np.random.Generator] = None
-) -> List[Subset]:
+    generator: np.random.Generator | None = None
+) -> list[Subset]:
     """
     Randomly split a dataset into non-overlapping subsets.
 
@@ -500,7 +499,7 @@ def random_split(
 class Compose:
     """Compose multiple transforms together."""
 
-    def __init__(self, transforms: List[Callable]):
+    def __init__(self, transforms: list[Callable]):
         """Initialize the instance."""
 
         self.transforms = transforms
@@ -532,8 +531,8 @@ class Normalize:
 
     def __init__(
         self,
-        mean: Union[float, np.ndarray],
-        std: Union[float, np.ndarray]
+        mean: float | np.ndarray,
+        std: float | np.ndarray
     ):
         """Initialize the instance."""
 

@@ -4,22 +4,22 @@ Checkpoint Utilities
 Save and load model checkpoints with support for Module objects.
 Uses numpy's .npz format for efficient binary storage.
 """
-import json
-import numpy as np
-from pathlib import Path
-from typing import Dict, Any, Optional, Union
 import pickle
+from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 
 def save_checkpoint(
-    model: Optional[Any] = None,
-    model_state: Optional[Dict[str, Any]] = None,
-    optimizer: Optional[Any] = None,
-    optimizer_state: Optional[Dict[str, Any]] = None,
+    model: Any | None = None,
+    model_state: dict[str, Any] | None = None,
+    optimizer: Any | None = None,
+    optimizer_state: dict[str, Any] | None = None,
     epoch: int = 0,
-    loss: Optional[float] = None,
+    loss: float | None = None,
     filepath: str = "checkpoint.npz",
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 ):
     """
     Save model checkpoint.
@@ -67,7 +67,7 @@ def save_checkpoint(
                                 if buffer is not None:
                                     module_state[f"{name}.{bname}"] = np.asarray(buffer, dtype=np.float32)
                         model_state.update(module_state)
-    
+
     # Extract state dict from optimizer if provided
     if optimizer is not None:
         if hasattr(optimizer, 'state_dict'):
@@ -80,25 +80,25 @@ def save_checkpoint(
                     k: np.asarray(v, dtype=np.float32) if isinstance(v, np.ndarray) else v
                     for k, v in state.items()
                 }
-    
+
     # Prepare checkpoint data
     checkpoint_data = {
         'epoch': epoch,
         'loss': loss if loss is not None else np.nan,
     }
-    
+
     # Add metadata
     if metadata:
         checkpoint_data['metadata'] = metadata
-    
+
     # Save model state
     if model_state:
         checkpoint_data['model_state'] = model_state
-    
+
     # Save optimizer state
     if optimizer_state:
         checkpoint_data['optimizer_state'] = optimizer_state
-    
+
     # Choose format based on file extension
     filepath = Path(filepath)
     if filepath.suffix == '.npz':
@@ -119,14 +119,14 @@ def save_checkpoint(
                         # Skip non-numeric values
                         continue
             return flat
-        
+
         # Save main checkpoint metadata
         metadata_dict = {
             'epoch': np.array([checkpoint_data['epoch']], dtype=np.int32),
             'loss': np.array([checkpoint_data['loss']], dtype=np.float32) if not np.isnan(checkpoint_data['loss']) else np.array([0.0], dtype=np.float32),
         }
         np.savez_compressed(str(filepath), **metadata_dict)
-        
+
         # Save model state (flattened)
         if model_state:
             flat_model_state = flatten_state_dict(model_state)
@@ -135,7 +135,7 @@ def save_checkpoint(
                     str(filepath.with_suffix('.model.npz')),
                     **flat_model_state
                 )
-        
+
         # Save optimizer state as pickle (contains nested dicts)
         if optimizer_state:
             with open(filepath.with_suffix('.optimizer.pkl'), 'wb') as f:
@@ -144,16 +144,16 @@ def save_checkpoint(
         # Fallback to pickle for .pth files
         with open(filepath, 'wb') as f:
             pickle.dump(checkpoint_data, f)
-    
+
     print(f"Checkpoint saved to {filepath}")
 
 
 def load_checkpoint(
     filepath: str,
-    model: Optional[Any] = None,
-    optimizer: Optional[Any] = None,
+    model: Any | None = None,
+    optimizer: Any | None = None,
     strict: bool = True
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Load model checkpoint.
     
@@ -167,20 +167,20 @@ def load_checkpoint(
         Checkpoint dictionary with keys: epoch, loss, model_state, optimizer_state
     """
     filepath = Path(filepath)
-    
+
     # Load based on format
     if filepath.suffix == '.npz':
         # Load main checkpoint
         checkpoint_data = np.load(str(filepath), allow_pickle=True)
         checkpoint = {}
-        
+
         # Convert numpy scalars to Python types
         if 'epoch' in checkpoint_data.files:
             checkpoint['epoch'] = int(checkpoint_data['epoch'][0])
         if 'loss' in checkpoint_data.files:
             loss_val = checkpoint_data['loss'][0]
             checkpoint['loss'] = float(loss_val) if not np.isnan(loss_val) else None
-        
+
         # Load model state (unflatten)
         model_file = filepath.with_suffix('.model.npz')
         if model_file.exists():
@@ -198,10 +198,10 @@ def load_checkpoint(
                         current = current[part]
                     current[parts[-1]] = value
                 return result
-            
+
             flat_dict = {k: model_data[k] for k in model_data.files}
             checkpoint['model_state'] = unflatten_state_dict(flat_dict)
-        
+
         # Load optimizer state
         optimizer_file = filepath.with_suffix('.optimizer.pkl')
         if optimizer_file.exists():
@@ -211,7 +211,7 @@ def load_checkpoint(
         # Load from pickle
         with open(filepath, 'rb') as f:
             checkpoint = pickle.load(f)
-    
+
     # Load state into model if provided
     if model is not None and 'model_state' in checkpoint:
         if hasattr(model, 'load_state_dict'):
@@ -231,7 +231,7 @@ def load_checkpoint(
                 for name, buffer in model._buffers.items():
                     if name in model_state:
                         model._buffers[name] = np.asarray(model_state[name], dtype=np.float32)
-    
+
     # Load state into optimizer if provided
     if optimizer is not None and 'optimizer_state' in checkpoint:
         if hasattr(optimizer, 'load_state_dict'):
@@ -239,5 +239,5 @@ def load_checkpoint(
         elif hasattr(optimizer, 'state'):
             # Manual optimizer state loading
             optimizer.state = checkpoint['optimizer_state']
-    
+
     return checkpoint

@@ -3,8 +3,9 @@ Normalization layers (PyTorch-like).
 GPU-accelerated batch normalization using Vulkan shaders.
 """
 
+
 import numpy as np
-from typing import Optional
+
 from .module import Module
 from .parameter import Parameter
 

@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def test_hash_to_bipolar_is_deterministic():
     try:
         from grilly.experimental.vsa.ops import BinaryOps

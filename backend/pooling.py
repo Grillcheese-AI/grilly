@@ -3,8 +3,10 @@ GPU-accelerated pooling operations for embeddings.
 Supports mean, max, and sum pooling with optional mask support.
 """
 
-import numpy as np
 import struct
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:

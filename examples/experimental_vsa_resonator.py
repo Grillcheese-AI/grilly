@@ -4,7 +4,6 @@ Example: Resonator Network
 Demonstrates factorization of composite VSA vectors into constituent components.
 """
 
-import numpy as np
 from grilly.experimental.vsa import HolographicOps, ResonatorNetwork
 
 print("=" * 60)

@@ -360,6 +360,7 @@ class TestBatchNorm2dPerformance:
     def test_batchnorm2d_speedup_vs_cpu(self, backend):
         """Measure speedup vs PyTorch CPU"""
         import time
+
         from grilly.nn import BatchNorm2d as GrillyBN
 
         # Create layers

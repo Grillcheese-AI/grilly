@@ -12,14 +12,9 @@ This tutorial shows:
 """
 
 import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
-
 import numpy as np
 
-from grilly.nn.autograd import (
-    Variable, Function, FunctionCtx,
-    tensor, randn, no_grad
-)
-
+from grilly.nn.autograd import Function, FunctionCtx, Variable, no_grad, randn, tensor
 
 # ============================================================================
 # Example 1: Custom ReLU
@@ -252,7 +247,7 @@ def main():
             b2.data -= learning_rate * b2.grad
 
     final_loss = loss.item()
-    print(f"\n   Training complete!")
+    print("\n   Training complete!")
     print(f"   Initial loss: {initial_loss:.6f}")
     print(f"   Final loss:   {final_loss:.6f}")
     print(f"   Improvement:  {(1 - final_loss/initial_loss)*100:.1f}%")

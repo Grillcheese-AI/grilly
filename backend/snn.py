@@ -2,8 +2,10 @@
 Spiking Neural Network (SNN) operations for Vulkan backend.
 """
 
-import numpy as np
 import struct
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:

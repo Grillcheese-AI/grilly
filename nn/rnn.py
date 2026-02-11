@@ -1,6 +1,7 @@
 """Recurrent neural network modules for LSTM and GRU architectures."""
+
 import numpy as np
-from typing import Optional, Tuple, List
+
 from .module import Module
 from .parameter import Parameter
 
@@ -31,7 +32,7 @@ class LSTMCell(Module):
             self.bias_hh = None
 
     def forward(self, input: np.ndarray,
-                hx: Optional[Tuple[np.ndarray, np.ndarray]] = None) -> Tuple[np.ndarray, np.ndarray]:
+                hx: tuple[np.ndarray, np.ndarray] | None = None) -> tuple[np.ndarray, np.ndarray]:
         """Compute one LSTM step and return ``(h_new, c_new)``."""
         batch_size = input.shape[0]
 
@@ -144,8 +145,8 @@ class LSTM(Module):
     def forward(
         self,
         input: np.ndarray,
-        hx: Optional[Tuple[np.ndarray, np.ndarray]] = None
-    ) -> Tuple[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+        hx: tuple[np.ndarray, np.ndarray] | None = None
+    ) -> tuple[np.ndarray, tuple[np.ndarray, np.ndarray]]:
         """
         Forward pass through LSTM.
 
@@ -281,7 +282,7 @@ class GRUCell(Module):
             self.bias_ih = None
             self.bias_hh = None
 
-    def forward(self, input: np.ndarray, hx: Optional[np.ndarray] = None) -> np.ndarray:
+    def forward(self, input: np.ndarray, hx: np.ndarray | None = None) -> np.ndarray:
         """
         Forward pass through GRU cell.
 
@@ -403,8 +404,8 @@ class GRU(Module):
     def forward(
         self,
         input: np.ndarray,
-        hx: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        hx: np.ndarray | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Forward pass through GRU.
 

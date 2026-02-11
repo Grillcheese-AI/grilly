@@ -8,9 +8,9 @@ import numpy as np
 from grilly.experimental.cognitive import CognitiveController
 from grilly.experimental.cognitive.simulator import SimulationResult
 from grilly.experimental.temporal import (
-    TemporalWorldModel,
     CounterfactualReasoner,
-    TemporalDecisionValidator
+    TemporalDecisionValidator,
+    TemporalWorldModel,
 )
 
 

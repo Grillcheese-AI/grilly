@@ -1,98 +1,113 @@
 """Neural network module namespace for the Grilly framework."""
-from .module import Module
-from .parameter import Parameter, parameter
-from .modules import (
-    Linear,
-    LayerNorm,
-    Dropout,
-    ReLU,
-    GELU,
-    SiLU,
-    GCU,
-    RoSwish,
-    SwiGLU,
-    Softmax,
-    Softplus,
-    MultiheadAttention,
-    FlashAttention2,
-    Embedding,
-    Sequential,
-    Residual,
-)
-from .snn import (
-    LIFNeuron,
-    SNNLayer,
-    HebbianLayer,
-    STDPLayer,
-    GIFNeuron,
-    SNNMatMul,
-    SNNSoftmax,
-    SNNRMSNorm,
-    SNNReadout,
-    Synapse,
-)
-
-# Placeholders for modules to be created
-# These will be imported when the respective modules are implemented
-from .memory import (
-    MemoryRead,
-    MemoryWrite,
-    MemoryContextAggregate,
-    MemoryQueryPooling,
-    MemoryInject,
-    MemoryInjectConcat,
-    MemoryInjectGate,
-    MemoryInjectResidual,
-)
-
-from .cells import (
-    PlaceCell,
-    TimeCell,
-    ThetaGammaEncoder,
-)
-
-from .transformer import (
-    TransformerEncoderLayer,
-    TransformerDecoderLayer,
-    RoPE,
-    ProsodyModulatedAttention,
-)
-
-from .hippocampal import (
-    HippocampalTransformerLayer,
-)
-
-from .routing import (
-    DomainRouter,
-    DomainPredictor,
-    DomainClassifier,
-    ExpertCombiner,
-)
-
 from .affect import (
     AffectMLP,
 )
 
+# Autograd utilities
+from .autograd import (
+    Function,
+    FunctionCtx,
+    GradFn,
+    Variable,
+    abs,
+    acos,
+    # Arithmetic
+    add,
+    arange,
+    asin,
+    atan,
+    atan2,
+    bce_loss,
+    bce_with_logits_loss,
+    clamp,
+    clone,
+    concat,
+    contiguous,
+    cos,
+    # Loss functions
+    cross_entropy,
+    div,
+    elu,
+    # Context managers
+    enable_grad,
+    # Comparisons
+    eq,
+    exp,
+    expand,
+    eye,
+    flatten,
+    full,
+    ge,
+    gelu,
+    gt,
+    index,
+    is_grad_enabled,
+    kl_div_loss,
+    l1_loss,
+    le,
+    leaky_relu,
+    linspace,
+    log,
+    lt,
+    matmul,
+    max,
+    mean,
+    min,
+    mse_loss,
+    mul,
+    ne,
+    neg,
+    nll_loss,
+    no_grad,
+    norm,
+    ones,
+    permute,
+    pow,
+    rand,
+    randn,
+    # Activations
+    relu,
+    repeat,
+    # Shapes
+    reshape,
+    sigmoid,
+    silu,
+    # Trigonometric
+    sin,
+    smooth_l1_loss,
+    softmax,
+    softplus,
+    sqrt,
+    squeeze,
+    stack,
+    std,
+    sub,
+    # Reductions
+    sum,
+    tan,
+    tanh,
+    # Factory functions
+    tensor,
+    transpose,
+    unsqueeze,
+    var,
+    view,
+    where,
+    zeros,
+)
 from .capsule import (
     CapsuleProject,
-    SemanticEncoder,
     DentateGyrus,
+    SemanticEncoder,
 )
-
 from .capsule_embedding import (
     CapsuleEmbedding,
     ContrastiveLoss,
 )
-
-from .decoding import (
-    GreedyDecoder,
-    SampleDecoder,
-)
-
-from .loss import (
-    MSELoss,
-    CrossEntropyLoss,
-    BCELoss,
+from .cells import (
+    PlaceCell,
+    ThetaGammaEncoder,
+    TimeCell,
 )
 
 # Convolutional layers
@@ -100,134 +115,114 @@ from .conv import (
     Conv1d,
     Conv2d,
 )
+from .decoding import (
+    GreedyDecoder,
+    SampleDecoder,
+)
+from .hippocampal import (
+    HippocampalTransformerLayer,
+)
+from .loss import (
+    BCELoss,
+    CrossEntropyLoss,
+    MSELoss,
+)
+
+# Placeholders for modules to be created
+# These will be imported when the respective modules are implemented
+from .memory import (
+    MemoryContextAggregate,
+    MemoryInject,
+    MemoryInjectConcat,
+    MemoryInjectGate,
+    MemoryInjectResidual,
+    MemoryQueryPooling,
+    MemoryRead,
+    MemoryWrite,
+)
+from .module import Module
+from .modules import (
+    GCU,
+    GELU,
+    Dropout,
+    Embedding,
+    FlashAttention2,
+    LayerNorm,
+    Linear,
+    MultiheadAttention,
+    ReLU,
+    Residual,
+    RoSwish,
+    Sequential,
+    SiLU,
+    Softmax,
+    Softplus,
+    SwiGLU,
+)
 
 # Normalization layers
 from .normalization import (
     BatchNorm1d,
     BatchNorm2d,
 )
+from .parameter import Parameter, parameter
 
 # Pooling layers
 from .pooling import (
-    MaxPool2d,
-    AvgPool2d,
-    AdaptiveMaxPool2d,
     AdaptiveAvgPool2d,
+    AdaptiveMaxPool2d,
+    AvgPool2d,
+    MaxPool2d,
 )
 
 # Recurrent layers
 from .rnn import (
-    LSTM,
-    LSTMCell,
     GRU,
+    LSTM,
     GRUCell,
+    LSTMCell,
 )
-
-# Autograd utilities
-from .autograd import (
-    Variable,
-    GradFn,
-    Function,
-    FunctionCtx,
-    # Arithmetic
-    add,
-    sub,
-    mul,
-    div,
-    neg,
-    pow,
-    matmul,
-    # Reductions
-    sum,
-    mean,
-    max,
-    min,
-    var,
-    std,
-    norm,
-    # Activations
-    relu,
-    sigmoid,
-    tanh,
-    exp,
-    log,
-    sqrt,
-    abs,
-    clamp,
-    gelu,
-    silu,
-    leaky_relu,
-    elu,
-    softplus,
-    softmax,
-    # Trigonometric
-    sin,
-    cos,
-    tan,
-    asin,
-    acos,
-    atan,
-    atan2,
-    # Shapes
-    reshape,
-    transpose,
-    squeeze,
-    unsqueeze,
-    index,
-    flatten,
-    view,
-    expand,
-    repeat,
-    permute,
-    contiguous,
-    clone,
-    concat,
-    stack,
-    where,
-    # Comparisons
-    eq,
-    ne,
-    lt,
-    le,
-    gt,
-    ge,
-    # Loss functions
-    cross_entropy,
-    mse_loss,
-    l1_loss,
-    smooth_l1_loss,
-    bce_loss,
-    bce_with_logits_loss,
-    nll_loss,
-    kl_div_loss,
-    # Context managers
-    enable_grad,
-    no_grad,
-    is_grad_enabled,
-    # Factory functions
-    tensor,
-    zeros,
-    ones,
-    randn,
-    rand,
-    linspace,
-    arange,
-    eye,
-    full,
+from .routing import (
+    DomainClassifier,
+    DomainPredictor,
+    DomainRouter,
+    ExpertCombiner,
+)
+from .snn import (
+    GIFNeuron,
+    HebbianLayer,
+    LIFNeuron,
+    SNNLayer,
+    SNNMatMul,
+    SNNReadout,
+    SNNRMSNorm,
+    SNNSoftmax,
+    STDPLayer,
+    Synapse,
+)
+from .transformer import (
+    ProsodyModulatedAttention,
+    RoPE,
+    TransformerDecoderLayer,
+    TransformerEncoderLayer,
 )
 
 # Backend autograd integration
 try:
     from ..backend.autograd_core import (
-        GradientTape,
         ComputationNode,
+        GradientTape,
         ModuleTracer,
         TrainingContext,
-        backward_ops,
-        no_grad as autograd_no_grad,
-        enable_grad as autograd_enable_grad,
-        is_grad_enabled,
         backward,
+        backward_ops,
+        is_grad_enabled,
+    )
+    from ..backend.autograd_core import (
+        enable_grad as autograd_enable_grad,
+    )
+    from ..backend.autograd_core import (
+        no_grad as autograd_no_grad,
     )
     AUTOGRAD_CORE_AVAILABLE = True
 except ImportError:
@@ -236,11 +231,11 @@ except ImportError:
 # Multimodal techniques
 from .multimodal import (
     BottleneckFusion,
-    PerceiverIO,
     CrossModalAttentionFusion,
-    ImageBindFusion,
-    PerceiverResampler,
     FlamingoFusion,
+    ImageBindFusion,
+    PerceiverIO,
+    PerceiverResampler,
     VisionLanguageModel,
     VLMLayer,
 )
@@ -248,7 +243,7 @@ from .multimodal import (
 __all__ = [
     # Base class
     'Module',
-    
+
     # Standard layers
     'Linear',
     'LayerNorm',
@@ -266,7 +261,7 @@ __all__ = [
     'Embedding',
     'Sequential',
     'Residual',
-    
+
     # SNN layers
     'LIFNeuron',
     'SNNLayer',
@@ -278,7 +273,7 @@ __all__ = [
     'SNNRMSNorm',
     'SNNReadout',
     'Synapse',
-    
+
     # Memory layers (when implemented)
     'MemoryRead',
     'MemoryWrite',
@@ -288,41 +283,41 @@ __all__ = [
     'MemoryInjectConcat',
     'MemoryInjectGate',
     'MemoryInjectResidual',
-    
+
     # Cell layers (when implemented)
     'PlaceCell',
     'TimeCell',
     'ThetaGammaEncoder',
-    
+
     # Transformer layers (when implemented)
     'TransformerEncoderLayer',
     'TransformerDecoderLayer',
     'RoPE',
     'ProsodyModulatedAttention',
-    
+
     # Hippocampal transformer (when implemented)
     'HippocampalTransformerLayer',
-    
+
     # Routing layers (when implemented)
     'DomainRouter',
     'DomainPredictor',
     'DomainClassifier',
     'ExpertCombiner',
-    
+
     # Affect layers (when implemented)
     'AffectMLP',
-    
+
     # Capsule layers
     'CapsuleProject',
     'SemanticEncoder',
     'DentateGyrus',
     'CapsuleEmbedding',
     'ContrastiveLoss',
-    
+
     # Decoding layers (when implemented)
     'GreedyDecoder',
     'SampleDecoder',
-    
+
     # Loss functions
     'MSELoss',
     'CrossEntropyLoss',
@@ -466,10 +461,10 @@ __all__.extend([
 
 # LoRA (Low-Rank Adaptation) for efficient fine-tuning
 from .lora import (
-    LoRAConfig,
-    LoRALinear,
-    LoRAEmbedding,
     LoRAAttention,
+    LoRAConfig,
+    LoRAEmbedding,
+    LoRALinear,
     LoRAModel,
     apply_lora_to_linear,
     calculate_lora_params,

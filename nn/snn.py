@@ -3,6 +3,7 @@ Spiking Neural Network Modules
 Uses: lif-neuron.glsl, hebbian-learning.glsl, stdp-learning.glsl, gif-neuron.glsl
 """
 import numpy as np
+
 from .module import Module
 
 
@@ -11,7 +12,7 @@ class LIFNeuron(Module):
     Leaky Integrate-and-Fire neuron
     Uses: lif-neuron.glsl
     """
-    
+
     def __init__(self, n_neurons: int, dt: float = 0.001, tau_mem: float = 20.0, v_thresh: float = 1.0):
         """Initialize the instance."""
 
@@ -20,13 +21,13 @@ class LIFNeuron(Module):
         self.dt = dt
         self.tau_mem = tau_mem
         self.v_thresh = v_thresh
-        
+
         # Neuron state
         self.membrane = np.zeros(n_neurons, dtype=np.float32)
         self.refractory = np.zeros(n_neurons, dtype=np.float32)
         self._buffers['membrane'] = self.membrane
         self._buffers['refractory'] = self.refractory
-    
+
     def forward(self, input_current: np.ndarray) -> np.ndarray:
         """Forward pass using lif-neuron.glsl"""
         backend = self._get_backend()
@@ -35,12 +36,12 @@ class LIFNeuron(Module):
             dt=self.dt, tau_mem=self.tau_mem, v_thresh=self.v_thresh
         )
         return spikes
-    
+
     def reset(self):
         """Reset neuron state"""
         self.membrane.fill(0)
         self.refractory.fill(0)
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -52,7 +53,7 @@ class SNNLayer(Module):
     Spiking Neural Network layer with LIF neurons
     Uses: lif-neuron.glsl, snn-matmul.glsl, snn-softmax.glsl, snn-rmsnorm.glsl
     """
-    
+
     def __init__(self, in_features: int, out_features: int, n_neurons: int = None):
         """Initialize the instance."""
 
@@ -60,28 +61,28 @@ class SNNLayer(Module):
         self.in_features = in_features
         self.out_features = out_features
         self.n_neurons = n_neurons or out_features
-        
+
         # Weight matrix
         limit = np.sqrt(6.0 / (in_features + out_features))
         self.weight = np.random.uniform(-limit, limit, (out_features, in_features)).astype(np.float32)
         self._parameters['weight'] = self.weight
-        
+
         # LIF neurons
         self.neurons = LIFNeuron(self.n_neurons)
         self._modules['neurons'] = self.neurons
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass"""
         backend = self._get_backend()
-        
+
         # Linear transformation (snn-matmul.glsl)
         # Note: May need to implement snn_matmul in backend
         output = x @ self.weight.T
-        
+
         # Pass through LIF neurons
         spikes = self.neurons(output)
         return spikes
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -93,29 +94,29 @@ class HebbianLayer(Module):
     Hebbian learning layer
     Uses: hebbian-learning.glsl
     """
-    
+
     def __init__(self, in_features: int, out_features: int):
         """Initialize the instance."""
 
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        
+
         # Initialize weights
         self.weight = np.random.randn(out_features, in_features).astype(np.float32) * 0.1
         self._parameters['weight'] = self.weight
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass"""
         return x @ self.weight.T
-    
+
     def update_weights(self, pre: np.ndarray, post: np.ndarray, learning_rate: float = 0.01):
         """Update weights using Hebbian learning (hebbian-learning.glsl)"""
         backend = self._get_backend()
         self.weight = backend.hebbian_learning(
             self.weight, pre, post, learning_rate=learning_rate
         )
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -127,22 +128,22 @@ class STDPLayer(Module):
     Spike-Timing-Dependent Plasticity layer
     Uses: stdp-learning.glsl, synapsis-stdp-trace.glsl, synapsis-stdp-update.glsl
     """
-    
+
     def __init__(self, in_features: int, out_features: int):
         """Initialize the instance."""
 
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        
+
         # Initialize weights
         self.weight = np.random.randn(out_features, in_features).astype(np.float32) * 0.1
         self._parameters['weight'] = self.weight
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass"""
         return x @ self.weight.T
-    
+
     def update_weights(self, pre_spikes: np.ndarray, post_spikes: np.ndarray,
                       tau_plus: float = 20.0, tau_minus: float = 20.0,
                       a_plus: float = 0.01, a_minus: float = 0.01):
@@ -153,7 +154,7 @@ class STDPLayer(Module):
             tau_plus=tau_plus, tau_minus=tau_minus,
             a_plus=a_plus, a_minus=a_minus
         )
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -166,7 +167,7 @@ class GIFNeuron(Module):
     
     Uses: gif-neuron.glsl
     """
-    
+
     def __init__(
         self,
         n_neurons: int,
@@ -194,7 +195,7 @@ class GIFNeuron(Module):
         self.tau_adapt = tau_adapt
         self.v_thresh = v_thresh
         self.adaptation_strength = adaptation_strength
-        
+
         # Neuron state
         self.membrane = np.zeros(n_neurons, dtype=np.float32)
         self.adaptation = np.zeros(n_neurons, dtype=np.float32)
@@ -202,7 +203,7 @@ class GIFNeuron(Module):
         self._buffers['membrane'] = self.membrane
         self._buffers['adaptation'] = self.adaptation
         self._buffers['refractory'] = self.refractory
-    
+
     def forward(self, input_current: np.ndarray) -> np.ndarray:
         """Forward pass using gif-neuron.glsl"""
         backend = self._get_backend()
@@ -219,7 +220,7 @@ class GIFNeuron(Module):
                 # Simplified GIF dynamics
                 self.membrane[i] += (input_current[i] - self.membrane[i] - self.adaptation[i]) / self.tau_mem * self.dt
                 self.adaptation[i] += (-self.adaptation[i] / self.tau_adapt) * self.dt
-                
+
                 if self.membrane[i] >= self.v_thresh:
                     spikes[i] = 1.0
                     self.membrane[i] = 0.0
@@ -228,15 +229,15 @@ class GIFNeuron(Module):
                 else:
                     spikes[i] = 0.0
                     self.refractory[i] = max(0, self.refractory[i] - self.dt)
-        
+
         return spikes
-    
+
     def reset(self):
         """Reset neuron state"""
         self.membrane.fill(0)
         self.adaptation.fill(0)
         self.refractory.fill(0)
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -249,7 +250,7 @@ class SNNMatMul(Module):
     
     Uses: snn-matmul.glsl
     """
-    
+
     def __init__(self, in_features: int, out_features: int):
         """
         Initialize SNNMatMul layer.
@@ -261,12 +262,12 @@ class SNNMatMul(Module):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        
+
         # Weight matrix
         limit = np.sqrt(6.0 / (in_features + out_features))
         self.weight = np.random.uniform(-limit, limit, (out_features, in_features)).astype(np.float32)
         self._parameters['weight'] = self.weight
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - matrix multiplication for SNN.
@@ -278,7 +279,7 @@ class SNNMatMul(Module):
             Output (batch, out_features)
         """
         backend = self._get_backend()
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'snn-matmul' in backend.shaders:
             try:
@@ -287,10 +288,10 @@ class SNNMatMul(Module):
                 pass
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         return x @ self.weight.T
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -303,7 +304,7 @@ class SNNSoftmax(Module):
     
     Uses: snn-softmax.glsl
     """
-    
+
     def __init__(self, dim: int = -1, temperature: float = 1.0):
         """
         Initialize SNNSoftmax layer.
@@ -315,7 +316,7 @@ class SNNSoftmax(Module):
         super().__init__()
         self.dim = dim
         self.temperature = temperature
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - softmax for SNN.
@@ -327,7 +328,7 @@ class SNNSoftmax(Module):
             Softmax output
         """
         backend = self._get_backend()
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'snn-softmax' in backend.shaders:
             try:
@@ -336,13 +337,13 @@ class SNNSoftmax(Module):
                 pass
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         x_scaled = x / self.temperature
         x_max = np.max(x_scaled, axis=self.dim, keepdims=True)
         x_exp = np.exp(x_scaled - x_max)
         return x_exp / np.sum(x_exp, axis=self.dim, keepdims=True)
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -355,7 +356,7 @@ class SNNRMSNorm(Module):
     
     Uses: snn-rmsnorm.glsl
     """
-    
+
     def __init__(self, normalized_shape: int, eps: float = 1e-5):
         """
         Initialize SNNRMSNorm layer.
@@ -367,10 +368,10 @@ class SNNRMSNorm(Module):
         super().__init__()
         self.normalized_shape = normalized_shape
         self.eps = eps
-        
+
         self.weight = np.ones(normalized_shape, dtype=np.float32)
         self._parameters['weight'] = self.weight
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - RMS normalization for SNN.
@@ -382,7 +383,7 @@ class SNNRMSNorm(Module):
             Normalized tensor
         """
         backend = self._get_backend()
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'snn-rmsnorm' in backend.shaders:
             try:
@@ -391,11 +392,11 @@ class SNNRMSNorm(Module):
                 pass
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         rms = np.sqrt(np.mean(x ** 2, axis=-1, keepdims=True) + self.eps)
         return (x / rms) * self.weight
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -408,7 +409,7 @@ class SNNReadout(Module):
     
     Uses: snn-readout.glsl
     """
-    
+
     def __init__(self, in_features: int, out_features: int):
         """
         Initialize SNNReadout layer.
@@ -420,12 +421,12 @@ class SNNReadout(Module):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        
+
         # Readout weights
         limit = np.sqrt(6.0 / (in_features + out_features))
         self.weight = np.random.uniform(-limit, limit, (out_features, in_features)).astype(np.float32)
         self._parameters['weight'] = self.weight
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - readout from SNN.
@@ -437,7 +438,7 @@ class SNNReadout(Module):
             Readout output (batch, out_features)
         """
         backend = self._get_backend()
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'snn-readout' in backend.shaders:
             try:
@@ -446,13 +447,13 @@ class SNNReadout(Module):
                 pass
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         if x.ndim == 3:
             # Average over time dimension
             x = x.mean(axis=1)
         return x @ self.weight.T
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -465,7 +466,7 @@ class Synapse(Module):
     
     Uses: synapsis-forward.glsl
     """
-    
+
     def __init__(self, in_features: int, out_features: int, delay: int = 1):
         """
         Initialize Synapse layer.
@@ -479,16 +480,16 @@ class Synapse(Module):
         self.in_features = in_features
         self.out_features = out_features
         self.delay = delay
-        
+
         # Synaptic weights
         limit = np.sqrt(6.0 / (in_features + out_features))
         self.weight = np.random.uniform(-limit, limit, (out_features, in_features)).astype(np.float32)
         self._parameters['weight'] = self.weight
-        
+
         # Delay buffer
         self.delay_buffer = [np.zeros((out_features,), dtype=np.float32) for _ in range(delay)]
         self._buffers['delay_buffer'] = np.array(self.delay_buffer)
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - synaptic transmission with delay.
@@ -500,7 +501,7 @@ class Synapse(Module):
             Output (batch, out_features)
         """
         backend = self._get_backend()
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'synapsis-forward' in backend.shaders:
             try:
@@ -509,19 +510,19 @@ class Synapse(Module):
                 pass
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         output = x @ self.weight.T
-        
+
         # Apply delay (simplified - full implementation would use delay buffer)
         if self.delay > 1:
             # Store in delay buffer and return delayed output
             self.delay_buffer.append(output)
             if len(self.delay_buffer) > self.delay:
                 output = self.delay_buffer.pop(0)
-        
+
         return output
-    
+
     def __repr__(self):
         """Return a debug representation."""
 

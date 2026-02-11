@@ -3,15 +3,15 @@ GPU Top-K tests (GEMM -> argmax rows -> mask).
 
 Validates that similarity_topk_gemm returns the same top-1 as CPU argmax.
 """
-import pytest
 import numpy as np
+import pytest
 
 
 @pytest.mark.gpu
 class TestVulkanVSATopK:
     def test_top1_matches_cpu(self, small_dim, rng):
-        from grilly.backend.experimental.vsa import VulkanVSA
         from grilly.backend.core import VulkanCore
+        from grilly.backend.experimental.vsa import VulkanVSA
 
         try:
             core = VulkanCore()
@@ -41,8 +41,8 @@ class TestVulkanVSATopK:
             pytest.skip("Vulkan not available")
 
     def test_topk_shape(self, small_dim, rng):
-        from grilly.backend.experimental.vsa import VulkanVSA
         from grilly.backend.core import VulkanCore
+        from grilly.backend.experimental.vsa import VulkanVSA
 
         try:
             core = VulkanCore()

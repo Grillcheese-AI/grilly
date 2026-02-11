@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-import importlib.metadata
 import importlib.machinery
+import importlib.metadata
 import sys
 import types
-
+from pathlib import Path
 
 DOCS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = DOCS_DIR.parent

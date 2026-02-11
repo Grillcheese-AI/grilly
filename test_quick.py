@@ -1,8 +1,10 @@
 """Quick test to verify basic functionality"""
 import sys
+
 print(f"Python: {sys.version}")
 
 import numpy as np
+
 print(f"Numpy: {np.__version__}")
 
 # Test basic numpy
@@ -11,6 +13,7 @@ print(f"Created array: {x.shape}")
 
 # Test VulkanTensor
 from grilly.utils.tensor_conversion import VulkanTensor
+
 vt = VulkanTensor(x)
 print(f"VulkanTensor: {vt}")
 

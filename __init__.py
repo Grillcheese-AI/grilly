@@ -19,35 +19,44 @@ This package provides GPU acceleration for:
 - Hippocampal transformer with capsule memory
 """
 
+import grilly.functional as functional
+import grilly.nn as nn
+import grilly.optim as optim
+import grilly.utils as utils
 from grilly.backend.base import VULKAN_AVAILABLE
-from grilly.backend.compute import VulkanCompute
-from grilly.backend.snn_compute import SNNCompute
-from grilly.backend.learning import VulkanLearning
 from grilly.backend.capsule_transformer import (
     CapsuleMemory,
     CapsuleTransformerConfig,
     CognitiveFeatures,
     MemoryType,
 )
+from grilly.backend.compute import VulkanCompute
+from grilly.backend.learning import VulkanLearning
+from grilly.backend.snn_compute import SNNCompute
 
 # Main API exports
 Compute = VulkanCompute
 Learning = VulkanLearning
 
-# Import submodules for easy access
-import grilly.nn as nn
-import grilly.functional as functional
-import grilly.optim as optim
-import grilly.utils as utils
-
 # Import utilities for HuggingFace and PyTorch compatibility
 try:
-    from grilly.utils.device_manager import get_device_manager, get_vulkan_backend, get_cuda_backend
+    from grilly.utils.device_manager import get_cuda_backend, get_device_manager, get_vulkan_backend
     from grilly.utils.huggingface_bridge import HuggingFaceBridge, get_huggingface_bridge
-    from grilly.utils.pytorch_compat import Tensor, tensor, zeros, ones, randn
+    from grilly.utils.pytorch_compat import Tensor, ones, randn, tensor, zeros
     from grilly.utils.pytorch_ops import (
-        add, mul, matmul, relu, gelu, softmax, layer_norm, dropout,
-        conv2d, max_pool2d, avg_pool2d, mse_loss, cross_entropy_loss
+        add,
+        avg_pool2d,
+        conv2d,
+        cross_entropy_loss,
+        dropout,
+        gelu,
+        layer_norm,
+        matmul,
+        max_pool2d,
+        mse_loss,
+        mul,
+        relu,
+        softmax,
     )
     COMPAT_AVAILABLE = True
 except Exception:
@@ -102,8 +111,12 @@ if COMPAT_AVAILABLE:
 # Tensor conversion utilities
 try:
     from grilly.utils.tensor_conversion import (
-        to_vulkan, to_vulkan_batch, to_vulkan_gpu, from_vulkan,
-        ensure_vulkan_compatible, VulkanTensor
+        VulkanTensor,
+        ensure_vulkan_compatible,
+        from_vulkan,
+        to_vulkan,
+        to_vulkan_batch,
+        to_vulkan_gpu,
     )
     if 'to_vulkan' not in __all__:
         __all__.extend([
@@ -119,9 +132,9 @@ except Exception:
 
 # ONNX utilities
 try:
-    from grilly.utils.onnx_loader import OnnxModelLoader, GrillyOnnxModel
     from grilly.utils.onnx_exporter import OnnxExporter
     from grilly.utils.onnx_finetune import OnnxFineTuner
+    from grilly.utils.onnx_loader import GrillyOnnxModel, OnnxModelLoader
     ONNX_AVAILABLE = True
 except Exception:
     ONNX_AVAILABLE = False

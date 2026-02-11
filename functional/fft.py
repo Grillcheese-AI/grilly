@@ -1,6 +1,6 @@
 """Functional FFT helpers backed by Grilly compute kernels."""
+
 import numpy as np
-from typing import Optional
 
 
 def _get_backend():

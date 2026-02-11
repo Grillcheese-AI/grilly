@@ -8,10 +8,10 @@ Demonstrates manual gradient computation and weight updates.
 This shows how Grilly can work alongside numpy for training loops.
 """
 
-import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
-
-import numpy as np
 import math
+
+import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
+import numpy as np
 
 # Grilly for GPU-accelerated operations
 from grilly import Compute
@@ -63,7 +63,7 @@ print(f"Result: y = {a:.4f} + {b:.4f}x + {c:.4f}x^2 + {d:.4f}x^3")
 
 # Verify with Taylor series of sin(x) around 0:
 # sin(x) ≈ x - x^3/6 = 0 + 1*x + 0*x^2 - 0.1667*x^3
-print(f"\nExpected (Taylor): y ≈ 0 + 1.0x + 0x^2 - 0.1667x^3")
+print("\nExpected (Taylor): y ≈ 0 + 1.0x + 0x^2 - 0.1667x^3")
 
 # Test GPU operations on the result
 print("\n--- GPU Acceleration Demo ---")

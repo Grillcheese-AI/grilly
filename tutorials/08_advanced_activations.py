@@ -9,10 +9,12 @@ This tutorial demonstrates the new high-performance activation functions:
 All activations are GPU-accelerated with Vulkan compute shaders.
 """
 
+import time
+
+import numpy as np
+
 import grilly
 import grilly.nn as nn
-import numpy as np
-import time
 
 
 def benchmark_activation(name, activation_fn, x=None, num_iterations=100):
@@ -47,7 +49,7 @@ def demo_basic_activations():
     x = np.array([-2.0, -1.0, 0.0, 1.0, 2.0], dtype=np.float32)
 
     print(f"\nInput: {x}")
-    print(f"\nActivation outputs:")
+    print("\nActivation outputs:")
     print(f"  ReLU:    {compute.activation_relu(x)}")
     print(f"  GELU:    {compute.activation_gelu(x)}")
     print(f"  SiLU:    {compute.activation_silu(x)}")
@@ -71,13 +73,13 @@ def demo_gcu_oscillatory():
     gcu_output = compute.activation_gcu(x)
     relu_output = compute.activation_relu(x)
 
-    print(f"\nGCU formula: f(x) = x * cos(x)")
+    print("\nGCU formula: f(x) = x * cos(x)")
     print(f"Input range: [{x.min():.2f}, {x.max():.2f}]")
     print(f"GCU output range: [{gcu_output.min():.2f}, {gcu_output.max():.2f}]")
     print(f"ReLU output range: [{relu_output.min():.2f}, {relu_output.max():.2f}]")
-    print(f"\nGCU creates multiple decision boundaries (oscillations)")
-    print(f"ReLU creates single decision boundary at x=0")
-    print(f"\nUse case: Neuromorphic CNNs, complex pattern recognition")
+    print("\nGCU creates multiple decision boundaries (oscillations)")
+    print("ReLU creates single decision boundary at x=0")
+    print("\nUse case: Neuromorphic CNNs, complex pattern recognition")
 
     compute.cleanup()
 
@@ -93,9 +95,9 @@ def demo_roswish_learnable():
 
     compute = grilly.Compute()
 
-    print(f"\nRoSwish formula: f(x) = (x + alpha) * sigmoid(beta * x) - 0.5 * alpha")
+    print("\nRoSwish formula: f(x) = (x + alpha) * sigmoid(beta * x) - 0.5 * alpha")
     print(f"Input: {x}")
-    print(f"\nTesting different parameters:")
+    print("\nTesting different parameters:")
 
     params = [
         (1.0, 1.0, "Default"),
@@ -108,12 +110,12 @@ def demo_roswish_learnable():
         print(f"  alpha={alpha:.1f}, beta={beta:.1f} ({desc}): {output}")
 
     # Demo with nn.RoSwish module (learnable)
-    print(f"\nUsing nn.RoSwish module with learnable parameters:")
+    print("\nUsing nn.RoSwish module with learnable parameters:")
     roswish = nn.RoSwish(alpha_init=1.0, beta_init=1.0, learnable=True)
     output = roswish(x)
     print(f"  Output: {output}")
     print(f"  Parameters: {roswish}")
-    print(f"\nUse case: General CNNs/MLPs, 6-30% improvement over ReLU")
+    print("\nUse case: General CNNs/MLPs, 6-30% improvement over ReLU")
 
     compute.cleanup()
 
@@ -132,7 +134,7 @@ def demo_swiglu_transformer():
     batch_size = 4
     seq_len = 128
 
-    print(f"\nTransformer FFN layer:")
+    print("\nTransformer FFN layer:")
     print(f"  d_model: {d_model}")
     print(f"  d_ff: {d_ff}")
     print(f"  Input shape: (batch={batch_size}, seq={seq_len}, d={d_model})")
@@ -143,20 +145,20 @@ def demo_swiglu_transformer():
     # SwiGLU requires input of 2*d_ff (splits into x1, x2)
     x_ffn = np.random.randn(batch_size, seq_len, 2*d_ff).astype(np.float32)
 
-    print(f"\nSwiGLU formula: f([x1, x2]) = x1 * silu(x2)")
+    print("\nSwiGLU formula: f([x1, x2]) = x1 * silu(x2)")
     print(f"  FFN input (after Linear): {x_ffn.shape}")
 
     output = compute.activation_swiglu(x_ffn)
     print(f"  FFN output (after SwiGLU): {output.shape}")
 
     # Using nn.SwiGLU module
-    print(f"\nUsing nn.SwiGLU module:")
+    print("\nUsing nn.SwiGLU module:")
     swiglu = nn.SwiGLU()
     output_nn = swiglu(x_ffn)
     print(f"  Output shape: {output_nn.shape}")
 
-    print(f"\nUse case: LLaMA, PaLM, Mistral transformers")
-    print(f"Performance: 5-15% perplexity improvement over GELU")
+    print("\nUse case: LLaMA, PaLM, Mistral transformers")
+    print("Performance: 5-15% perplexity improvement over GELU")
 
     compute.cleanup()
 
@@ -182,7 +184,7 @@ def demo_fused_operations():
     print(f"Batch size: {batch_size}")
 
     # Benchmark separate operations
-    print(f"\nSeparate operations (2 GPU dispatches):")
+    print("\nSeparate operations (2 GPU dispatches):")
 
     def separate_gelu():
         linear_out = compute.fnn.linear(x, weights, bias)
@@ -201,7 +203,7 @@ def demo_fused_operations():
     benchmark_activation("  RoSwish (separate)", separate_roswish, None, 50)
 
     # Benchmark fused operations
-    print(f"\nFused operations (1 GPU dispatch):")
+    print("\nFused operations (1 GPU dispatch):")
 
     def fused_gelu():
         return compute.fnn.fused_linear_gelu(x, weights, bias)
@@ -216,8 +218,8 @@ def demo_fused_operations():
     benchmark_activation("  GCU (fused)", fused_gcu, None, 50)
     benchmark_activation("  RoSwish (fused)", fused_roswish, None, 50)
 
-    print(f"\nFused operations avoid intermediate memory writes,")
-    print(f"reducing latency and improving throughput.")
+    print("\nFused operations avoid intermediate memory writes,")
+    print("reducing latency and improving throughput.")
 
     compute.cleanup()
 
@@ -249,8 +251,8 @@ def demo_performance_comparison():
     for name, fn in activations:
         benchmark_activation(name, fn, None, 100)
 
-    print(f"\nAll activations run on AMD RX 6750 XT via Vulkan compute shaders.")
-    print(f"Buffer pool hit rate: >95%")
+    print("\nAll activations run on AMD RX 6750 XT via Vulkan compute shaders.")
+    print("Buffer pool hit rate: >95%")
 
     compute.cleanup()
 

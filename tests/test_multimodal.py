@@ -9,18 +9,18 @@ Tests all multimodal fusion architectures:
 5. Perceiver Resampler (Flamingo)
 6. Complete VLM
 """
-import pytest
 import numpy as np
+import pytest
 
 try:
     from grilly import nn
     from grilly.nn.multimodal import (
         BottleneckFusion,
-        PerceiverIO,
         CrossModalAttentionFusion,
-        ImageBindFusion,
-        PerceiverResampler,
         FlamingoFusion,
+        ImageBindFusion,
+        PerceiverIO,
+        PerceiverResampler,
         VisionLanguageModel,
         VLMLayer,
     )

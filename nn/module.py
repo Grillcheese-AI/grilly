@@ -1,12 +1,13 @@
 """
 Base Module class (PyTorch-like)
 """
+from typing import Any
+
 import numpy as np
-from typing import Dict, Any, Optional, Union
 
 # Try to import tensor conversion utilities
 try:
-    from ..utils.tensor_conversion import to_vulkan, ensure_vulkan_compatible
+    from ..utils.tensor_conversion import ensure_vulkan_compatible, to_vulkan
     TENSOR_CONVERSION_AVAILABLE = True
 except ImportError:
     TENSOR_CONVERSION_AVAILABLE = False
@@ -55,7 +56,7 @@ class Module:
         self._device = 'vulkan'
         self._grad_enabled = True  # Enable gradients by default
         self._return_gpu_tensor = False  # GPU-resident output mode
-    
+
     def _get_backend(self):
         """Execute get backend."""
 
@@ -63,8 +64,8 @@ class Module:
             from grilly import Compute
             self._backend = Compute()
         return self._backend
-    
-    def _convert_input(self, x: Union[np.ndarray, Any]):
+
+    def _convert_input(self, x: np.ndarray | Any):
         """
         Convert input to Vulkan-compatible format.
 
@@ -107,22 +108,22 @@ class Module:
                 return result.astype(np.float32) if result.dtype != np.float32 else result
             else:
                 return np.array(x, dtype=np.float32)
-    
+
     def forward(self, *args, **kwargs):
         """Execute forward."""
 
         raise NotImplementedError
-    
+
     def __call__(self, *args, **kwargs):
         # Automatically convert PyTorch tensor inputs to numpy
         """Invoke the callable instance."""
 
         converted_args = tuple(self._convert_input(arg) for arg in args)
         # Convert keyword arguments that might be tensors
-        converted_kwargs = {k: self._convert_input(v) if self._is_tensor_like(v) else v 
+        converted_kwargs = {k: self._convert_input(v) if self._is_tensor_like(v) else v
                            for k, v in kwargs.items()}
         return self.forward(*converted_args, **converted_kwargs)
-    
+
     def _is_tensor_like(self, obj: Any) -> bool:
         """Check if object is tensor-like and needs conversion"""
         if isinstance(obj, np.ndarray):
@@ -132,7 +133,7 @@ class Module:
         if hasattr(obj, 'numpy') and not isinstance(obj, np.ndarray):  # TensorFlow
             return True
         return False
-    
+
     def train(self, mode: bool = True):
         """Execute train."""
 
@@ -140,19 +141,19 @@ class Module:
         for module in self._modules.values():
             module.train(mode)
         return self
-    
+
     def eval(self):
         """Execute eval."""
 
         return self.train(False)
-    
+
     def parameters(self):
         """Return iterator over all parameters"""
         for name, param in self._parameters.items():
             yield param
         for module in self._modules.values():
             yield from module.parameters()
-    
+
     def named_parameters(self):
         """Return iterator over all named parameters"""
         for name, param in self._parameters.items():
@@ -160,7 +161,7 @@ class Module:
         for prefix, module in self._modules.items():
             for name, param in module.named_parameters():
                 yield f"{prefix}.{name}", param
-    
+
     def zero_grad(self):
         """Clear gradients for all parameters"""
         for param in self.parameters():
@@ -169,7 +170,7 @@ class Module:
             elif hasattr(param, 'grad'):
                 # Initialize grad if it doesn't exist
                 param.grad = np.zeros_like(param, dtype=np.float32)
-    
+
     def backward(self, loss: np.ndarray):
         """
         Backward pass - compute gradients for all parameters.
@@ -185,22 +186,22 @@ class Module:
         # 1. Compute gradients through the computation graph
         # 2. Store gradients in param.grad for each parameter
         # 3. Use backward shaders from the backend
-        
+
         # Basic implementation: if loss is a scalar, we need to start backprop
         # For now, we'll just ensure gradients are initialized
         if not self._grad_enabled:
             return
-        
+
         # Initialize gradients for all parameters
         for param in self.parameters():
             if hasattr(param, 'requires_grad') and param.requires_grad:
                 if not hasattr(param, 'grad') or param.grad is None:
                     param.grad = np.zeros_like(param, dtype=np.float32)
-        
+
         # Note: Actual gradient computation should be implemented by specific modules
         # or through an autograd system. This is a framework for it.
-    
-    def register_parameter(self, name: str, param: Optional[np.ndarray]):
+
+    def register_parameter(self, name: str, param: np.ndarray | None):
         """
         Register a parameter with the module.
         
@@ -211,14 +212,14 @@ class Module:
         if param is None:
             self._parameters.pop(name, None)
             return
-        
+
         # Convert to Parameter if not already
         if not isinstance(param, Parameter):
             param = Parameter(param, requires_grad=True)
-        
+
         self._parameters[name] = param
-    
-    def state_dict(self) -> Dict[str, Any]:
+
+    def state_dict(self) -> dict[str, Any]:
         """Execute state dict."""
 
         state = {}
@@ -231,8 +232,8 @@ class Module:
         for name, module in self._modules.items():
             state[name] = module.state_dict()
         return state
-    
-    def load_state_dict(self, state_dict: Dict[str, Any]):
+
+    def load_state_dict(self, state_dict: dict[str, Any]):
         """Execute load state dict."""
 
         for name, param in self._parameters.items():
@@ -244,7 +245,7 @@ class Module:
         for name, module in self._modules.items():
             if name in state_dict:
                 module.load_state_dict(state_dict[name])
-    
+
     def gpu_mode(self, enable=True):
         """Enable GPU-resident output (returns VulkanTensor instead of numpy).
 
@@ -273,27 +274,27 @@ class Module:
         if device in ('cuda', 'vulkan', 'llama-cpp', 'cpu'):
             self._device = device
         return self
-    
+
     def cpu(self):
         """Execute cpu."""
 
         return self.to('cpu')
-    
+
     def cuda(self):
         """Execute cuda."""
 
         return self.to('cuda')
-    
+
     def vulkan(self):
         """Execute vulkan."""
 
         return self.to('vulkan')
-    
+
     def llama_cpp(self):
         """Execute llama cpp."""
 
         return self.to('llama-cpp')
-    
+
     def __repr__(self):
         """Return a debug representation."""
 

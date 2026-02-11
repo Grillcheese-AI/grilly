@@ -1,8 +1,8 @@
 """
 Pytest configuration and fixtures for Grilly tests
 """
-import pytest
 import numpy as np
+import pytest
 
 try:
     import grilly

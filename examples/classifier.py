@@ -18,18 +18,18 @@ Usage:
 
 import sys
 import time
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 
 # Ensure grilly is importable when running from repo root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from grilly.nn import CrossEntropyLoss, Dropout, Linear, ReLU, Sequential
+from grilly.optim import Adam
+from grilly.utils.data import DataLoader, TensorDataset
 from sklearn.datasets import load_digits
 from sklearn.model_selection import train_test_split
-
-from grilly.nn import Sequential, Linear, ReLU, Dropout, CrossEntropyLoss
-from grilly.optim import Adam
-from grilly.utils.data import TensorDataset, DataLoader
 
 
 def load_data(test_size=0.2, seed=42):
@@ -142,7 +142,7 @@ def main():
     final_train_acc = evaluate(model, X_train, y_train)
     final_test_acc = evaluate(model, X_test, y_test)
 
-    print(f"\nFinal results:")
+    print("\nFinal results:")
     print(f"  Train accuracy: {final_train_acc:.4f}")
     print(f"  Test accuracy:  {final_test_acc:.4f}")
     print(f"  Total time:     {t_total:.2f}s  ({t_total / epochs * 1000:.1f} ms/epoch)")
@@ -152,14 +152,14 @@ def main():
     logits = model(X_test)
     preds = np.argmax(logits, axis=-1)
 
-    print(f"\nPer-class accuracy:")
+    print("\nPer-class accuracy:")
     for c in range(10):
         mask = y_test == c
         if mask.sum() > 0:
             acc = np.mean(preds[mask] == c)
             print(f"  digit {c}: {acc:.3f}  ({mask.sum()} samples)")
 
-    print(f"\nDone.")
+    print("\nDone.")
 
 
 if __name__ == "__main__":

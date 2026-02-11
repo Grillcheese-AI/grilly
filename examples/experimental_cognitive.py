@@ -6,8 +6,11 @@ and cognitive control for understanding and generating responses.
 """
 
 from grilly.experimental.cognitive import (
-    WorkingMemory, WorkingMemorySlot, WorldModel,
-    InternalSimulator, CognitiveController
+    CognitiveController,
+    InternalSimulator,
+    WorkingMemory,
+    WorkingMemorySlot,
+    WorldModel,
 )
 
 print("=" * 60)
@@ -54,7 +57,8 @@ print(f"Added {len(world.facts)} facts to world model")
 found = world.query_fact("dog", "is", "animal")
 print(f"Query 'dog is animal': {found}")
 
-from grilly.experimental.language import WordEncoder, SentenceEncoder
+from grilly.experimental.language import SentenceEncoder, WordEncoder
+
 word_encoder = WordEncoder(dim=dim)
 sentence_encoder = SentenceEncoder(word_encoder)
 
@@ -62,7 +66,7 @@ contradiction_words = ["dog", "is", "not", "animal"]
 contradiction_vec = sentence_encoder.encode_sentence(contradiction_words)
 
 is_coherent, confidence, reason = world.check_coherence(contradiction_vec)
-print(f"\nCoherence check for contradiction:")
+print("\nCoherence check for contradiction:")
 print(f"Coherent: {is_coherent}, Confidence: {confidence:.4f}")
 print(f"Reason: {reason}")
 
@@ -111,7 +115,7 @@ print("-" * 60)
 
 understanding = controller.understand("The cat sat on the mat")
 
-print(f"Input: 'The cat sat on the mat'")
+print("Input: 'The cat sat on the mat'")
 print(f"Words: {understanding.words}")
 print(f"Parsed roles: {list(understanding.parsed_roles.items())[:3]}")
 print(f"Inferences: {len(understanding.inferences)}")

@@ -8,9 +8,10 @@ Performance hierarchy:
 3. Pure numpy (baseline fallback)
 """
 
-import numpy as np
 import struct
-from typing import Optional, Tuple
+
+import numpy as np
+
 from .base import VULKAN_AVAILABLE, BufferMixin
 
 if VULKAN_AVAILABLE:
@@ -31,13 +32,13 @@ class VulkanConv(BufferMixin):
     self,
     input_data: np.ndarray,
     weight: np.ndarray,
-    bias: Optional[np.ndarray],
-    stride: Tuple[int, int],
-    padding: Tuple[int, int],
-    dilation: Tuple[int, int],
+    bias: np.ndarray | None,
+    stride: tuple[int, int],
+    padding: tuple[int, int],
+    dilation: tuple[int, int],
     groups: int,
 ) -> np.ndarray:
-        
+
         # 1) Extract shapes and check assumptions
         """Execute conv2d gemm."""
 
@@ -157,10 +158,10 @@ class VulkanConv(BufferMixin):
         self,
         input_data: np.ndarray,  # (batch, in_channels, height, width)
         weight: np.ndarray,      # (out_channels, in_channels/groups, kernel_h, kernel_w)
-        bias: Optional[np.ndarray] = None,  # (out_channels,)
-        stride: Tuple[int, int] = (1, 1),
-        padding: Tuple[int, int] = (0, 0),
-        dilation: Tuple[int, int] = (1, 1),
+        bias: np.ndarray | None = None,  # (out_channels,)
+        stride: tuple[int, int] = (1, 1),
+        padding: tuple[int, int] = (0, 0),
+        dilation: tuple[int, int] = (1, 1),
         groups: int = 1
     ) -> np.ndarray:
         """
@@ -215,9 +216,9 @@ class VulkanConv(BufferMixin):
         # Allocate buffers
         buf_input = self._acquire_buffer(input_data.nbytes)
         buf_weight = self._acquire_buffer(weight.nbytes)
-        buf_bias = self._acquire_buffer((bias.nbytes if bias is not None else 4))  # Dummy buffer if no bias
-        
-        
+        buf_bias = self._acquire_buffer(bias.nbytes if bias is not None else 4)  # Dummy buffer if no bias
+
+
 
         try:
             # Upload data
@@ -284,10 +285,10 @@ class VulkanConv(BufferMixin):
         self,
         grad_output: np.ndarray,  # (batch, out_channels, out_h, out_w)
         weight: np.ndarray,       # (out_channels, in_channels, kernel_h, kernel_w)
-        input_shape: Tuple[int, int, int, int],
-        stride: Tuple[int, int],
-        padding: Tuple[int, int],
-        dilation: Tuple[int, int],
+        input_shape: tuple[int, int, int, int],
+        stride: tuple[int, int],
+        padding: tuple[int, int],
+        dilation: tuple[int, int],
         groups: int
     ) -> np.ndarray:
         """
@@ -375,10 +376,10 @@ class VulkanConv(BufferMixin):
         self,
         grad_output: np.ndarray,  # (batch, out_channels, out_h, out_w)
         weight: np.ndarray,       # (out_channels, in_channels/groups, kernel_h, kernel_w)
-        input_shape: Tuple[int, int, int, int],  # (batch, in_channels, in_h, in_w)
-        stride: Tuple[int, int] = (1, 1),
-        padding: Tuple[int, int] = (0, 0),
-        dilation: Tuple[int, int] = (1, 1),
+        input_shape: tuple[int, int, int, int],  # (batch, in_channels, in_h, in_w)
+        stride: tuple[int, int] = (1, 1),
+        padding: tuple[int, int] = (0, 0),
+        dilation: tuple[int, int] = (1, 1),
         groups: int = 1
     ) -> np.ndarray:
         """
@@ -500,13 +501,13 @@ class VulkanConv(BufferMixin):
         self,
         grad_output: np.ndarray,  # (batch, out_channels, out_h, out_w)
         input_data: np.ndarray,   # (batch, in_channels, in_h, in_w)
-        kernel_size: Tuple[int, int],
-        stride: Tuple[int, int],
-        padding: Tuple[int, int],
-        dilation: Tuple[int, int],
+        kernel_size: tuple[int, int],
+        stride: tuple[int, int],
+        padding: tuple[int, int],
+        dilation: tuple[int, int],
         groups: int,
         has_bias: bool
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, np.ndarray | None]:
         """
         Conv2d backward weight using im2col + GEMM.
 
@@ -595,13 +596,13 @@ class VulkanConv(BufferMixin):
         self,
         grad_output: np.ndarray,  # (batch, out_channels, out_h, out_w)
         input_data: np.ndarray,   # (batch, in_channels, in_h, in_w)
-        kernel_size: Tuple[int, int],
-        stride: Tuple[int, int] = (1, 1),
-        padding: Tuple[int, int] = (0, 0),
-        dilation: Tuple[int, int] = (1, 1),
+        kernel_size: tuple[int, int],
+        stride: tuple[int, int] = (1, 1),
+        padding: tuple[int, int] = (0, 0),
+        dilation: tuple[int, int] = (1, 1),
         groups: int = 1,
         has_bias: bool = True
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, np.ndarray | None]:
         """
         2D Convolution backward pass - gradient w.r.t. weights and bias.
 

@@ -7,8 +7,9 @@ Uses: memory-read.glsl, memory-write.glsl, memory-context-aggregate.glsl,
 
 Reference: ref/core/ca3_memory_store.py, ref/core/memory_store.py
 """
+
 import numpy as np
-from typing import Optional, Tuple
+
 from .module import Module
 
 
@@ -20,8 +21,8 @@ class MemoryRead(Module):
     
     Implements key-value memory retrieval with attention-based similarity.
     """
-    
-    def __init__(self, key_dim: int, value_dim: int, num_memories: int, temperature: Optional[float] = None):
+
+    def __init__(self, key_dim: int, value_dim: int, num_memories: int, temperature: float | None = None):
         """
         Initialize MemoryRead layer.
         
@@ -36,14 +37,14 @@ class MemoryRead(Module):
         self.value_dim = value_dim
         self.num_memories = num_memories
         self.temperature = temperature if temperature is not None else np.sqrt(key_dim)
-        
+
         # Initialize memory buffers
         self.memory_keys = np.random.randn(num_memories, key_dim).astype(np.float32) * 0.01
         self.memory_values = np.zeros((num_memories, value_dim), dtype=np.float32)
-        
+
         self._parameters['memory_keys'] = self.memory_keys
         self._parameters['memory_values'] = self.memory_values
-    
+
     def forward(self, queries: np.ndarray) -> np.ndarray:
         """
         Forward pass - retrieve memories.
@@ -59,7 +60,7 @@ class MemoryRead(Module):
             queries, self.memory_keys, self.memory_values,
             temperature=self.temperature
         )
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -72,7 +73,7 @@ class MemoryWrite(Module):
     
     Uses: memory-write.glsl
     """
-    
+
     def __init__(self, key_dim: int, value_dim: int, num_memories: int, write_mode: int = 0, blend_factor: float = 0.5):
         """
         Initialize MemoryWrite layer.
@@ -90,17 +91,17 @@ class MemoryWrite(Module):
         self.num_memories = num_memories
         self.write_mode = write_mode
         self.blend_factor = blend_factor
-        
+
         # Initialize memory buffers
         self.memory_keys = np.random.randn(num_memories, key_dim).astype(np.float32) * 0.01
         self.memory_values = np.zeros((num_memories, value_dim), dtype=np.float32)
         self.write_index = 0
-        
+
         self._parameters['memory_keys'] = self.memory_keys
         self._parameters['memory_values'] = self.memory_values
         self._buffers['write_index'] = np.array([self.write_index], dtype=np.int32)
-    
-    def forward(self, new_key: np.ndarray, new_value: np.ndarray, write_index: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
+
+    def forward(self, new_key: np.ndarray, new_value: np.ndarray, write_index: int | None = None) -> tuple[np.ndarray, np.ndarray]:
         """
         Forward pass - write to memory.
         
@@ -115,15 +116,15 @@ class MemoryWrite(Module):
         if write_index is None:
             write_index = self.write_index
             self.write_index = (self.write_index + 1) % self.num_memories
-        
+
         backend = self._get_backend()
         self.memory_keys, self.memory_values = backend.memory_write(
             new_key, new_value, self.memory_keys, self.memory_values,
             write_index, self.write_mode, self.blend_factor
         )
-        
+
         return self.memory_keys, self.memory_values
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -136,7 +137,7 @@ class MemoryContextAggregate(Module):
     
     Uses: memory-context-aggregate.glsl
     """
-    
+
     def __init__(self, dim: int):
         """
         Initialize MemoryContextAggregate layer.
@@ -146,7 +147,7 @@ class MemoryContextAggregate(Module):
         """
         super().__init__()
         self.dim = dim
-    
+
     def forward(self, memory_contexts: np.ndarray) -> np.ndarray:
         """
         Forward pass - aggregate memory contexts.
@@ -158,7 +159,7 @@ class MemoryContextAggregate(Module):
             Aggregated context (batch, dim)
         """
         backend = self._get_backend()
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'memory-context-aggregate' in backend.shaders:
             try:
@@ -167,10 +168,10 @@ class MemoryContextAggregate(Module):
                 pass
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback (mean pooling)
         return memory_contexts.mean(axis=1)
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -183,7 +184,7 @@ class MemoryQueryPooling(Module):
     
     Uses: memory-query-pooling.glsl
     """
-    
+
     def __init__(self, in_dim: int, out_dim: int):
         """
         Initialize MemoryQueryPooling layer.
@@ -195,15 +196,15 @@ class MemoryQueryPooling(Module):
         super().__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
-        
+
         # Query projection weights
         limit = np.sqrt(6.0 / (in_dim + out_dim))
         self.weight = np.random.uniform(-limit, limit, (out_dim, in_dim)).astype(np.float32)
         self.bias = np.zeros(out_dim, dtype=np.float32)
-        
+
         self._parameters['weight'] = self.weight
         self._parameters['bias'] = self.bias
-    
+
     def forward(self, x: np.ndarray) -> np.ndarray:
         """
         Forward pass - pool sequence and project to queries.
@@ -216,7 +217,7 @@ class MemoryQueryPooling(Module):
         """
         backend = self._get_backend()
         return backend.memory_query_pooling(x, self.weight, self.bias)
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -227,7 +228,7 @@ class MemoryInject(Module):
     """
     Base class for memory injection layers.
     """
-    
+
     def __init__(self, dim: int):
         """
         Initialize MemoryInject layer.
@@ -245,7 +246,7 @@ class MemoryInjectConcat(MemoryInject):
     
     Uses: memory-inject-concat.glsl
     """
-    
+
     def __init__(self, dim: int):
         """
         Initialize MemoryInjectConcat layer.
@@ -257,7 +258,7 @@ class MemoryInjectConcat(MemoryInject):
         # Projection for concatenated output
         self.proj = Linear(dim * 2, dim)
         self._modules['proj'] = self.proj
-    
+
     def forward(self, x: np.ndarray, memory_context: np.ndarray) -> np.ndarray:
         """
         Forward pass - concatenate and project.
@@ -270,7 +271,7 @@ class MemoryInjectConcat(MemoryInject):
             Output (batch, seq_len, dim)
         """
         backend = self._get_backend()
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'memory-inject-concat' in backend.shaders:
             try:
@@ -279,14 +280,14 @@ class MemoryInjectConcat(MemoryInject):
                 pass
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         batch_size, seq_len, dim = x.shape
         mem_expanded = memory_context[:, None, :]  # (batch, 1, dim)
         mem_expanded = np.broadcast_to(mem_expanded, (batch_size, seq_len, dim))
         concat = np.concatenate([x, mem_expanded], axis=-1)  # (batch, seq_len, dim*2)
         return self.proj(concat)
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -299,7 +300,7 @@ class MemoryInjectGate(MemoryInject):
     
     Uses: memory-inject-gate.glsl
     """
-    
+
     def __init__(self, dim: int):
         """
         Initialize MemoryInjectGate layer.
@@ -308,17 +309,17 @@ class MemoryInjectGate(MemoryInject):
             dim: Dimension of vectors
         """
         super().__init__(dim)
-        
+
         # Gate weights
         limit = np.sqrt(6.0 / (dim * 2 + dim))
         self.W_gate = np.random.uniform(-limit, limit, (dim, dim * 2)).astype(np.float32)
         self.b_gate = np.zeros(dim, dtype=np.float32)
         self.W_mem_proj = np.random.uniform(-limit, limit, (dim, dim)).astype(np.float32)
-        
+
         self._parameters['W_gate'] = self.W_gate
         self._parameters['b_gate'] = self.b_gate
         self._parameters['W_mem_proj'] = self.W_mem_proj
-    
+
     def forward(self, x: np.ndarray, memory_context: np.ndarray) -> np.ndarray:
         """
         Forward pass - gated memory injection.
@@ -334,7 +335,7 @@ class MemoryInjectGate(MemoryInject):
         return backend.memory_inject_gate(
             x, memory_context, self.W_gate, self.b_gate, self.W_mem_proj
         )
-    
+
     def __repr__(self):
         """Return a debug representation."""
 
@@ -347,7 +348,7 @@ class MemoryInjectResidual(MemoryInject):
     
     Uses: memory-inject-residual.glsl
     """
-    
+
     def __init__(self, dim: int):
         """
         Initialize MemoryInjectResidual layer.
@@ -359,7 +360,7 @@ class MemoryInjectResidual(MemoryInject):
         # Projection for memory context
         self.mem_proj = Linear(dim, dim)
         self._modules['mem_proj'] = self.mem_proj
-    
+
     def forward(self, x: np.ndarray, memory_context: np.ndarray) -> np.ndarray:
         """
         Forward pass - residual memory injection.
@@ -372,7 +373,7 @@ class MemoryInjectResidual(MemoryInject):
             Output (batch, seq_len, dim)
         """
         backend = self._get_backend()
-        
+
         # Try GPU shader if available
         if hasattr(backend, 'shaders') and 'memory-inject-residual' in backend.shaders:
             try:
@@ -381,14 +382,14 @@ class MemoryInjectResidual(MemoryInject):
                 pass
             except Exception:
                 pass  # Fall back to CPU
-        
+
         # CPU fallback
         batch_size, seq_len, dim = x.shape
         mem_proj = self.mem_proj(memory_context)  # (batch, dim)
         mem_expanded = mem_proj[:, None, :]  # (batch, 1, dim)
         mem_expanded = np.broadcast_to(mem_expanded, (batch_size, seq_len, dim))
         return x + mem_expanded
-    
+
     def __repr__(self):
         """Return a debug representation."""
 

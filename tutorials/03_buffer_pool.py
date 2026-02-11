@@ -10,8 +10,8 @@ by default for stability. The legacy BufferPool works reliably on all GPUs.
 """
 
 import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
-
 import numpy as np
+
 from grilly import Compute
 from grilly.backend.buffer_pool import is_vma_available
 

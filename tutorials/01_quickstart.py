@@ -6,8 +6,8 @@ Basic usage of GPU-accelerated neural network operations on AMD/NVIDIA/Intel GPU
 """
 
 import _path_setup  # noqa: F401 - must be first to ensure grilly is importable
-
 import numpy as np
+
 from grilly import Compute
 
 # Initialize Vulkan compute backend

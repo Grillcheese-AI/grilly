@@ -2,12 +2,12 @@
 Real-time SNN (Spiking Neural Network) Visualization
 Provides WebSocket-based real-time visualization of SNN activity
 """
-import numpy as np
-import logging
-from typing import Dict, List, Optional, Any
 import json
-import asyncio
-from dataclasses import dataclass, asdict
+import logging
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +16,12 @@ logger = logging.getLogger(__name__)
 class SNNState:
     """Snapshot of SNN state at a point in time"""
     timestamp: float
-    neuron_potentials: List[float]
-    spike_events: List[int]  # Indices of neurons that spiked
-    synaptic_weights: Optional[List[List[float]]] = None
-    stdp_trace: Optional[List[float]] = None
+    neuron_potentials: list[float]
+    spike_events: list[int]  # Indices of neurons that spiked
+    synaptic_weights: list[list[float]] | None = None
+    stdp_trace: list[float] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         return {
             'timestamp': self.timestamp,
@@ -48,7 +48,7 @@ class SNNVisualizer:
             max_history: Maximum number of state snapshots to keep
         """
         self.max_history = max_history
-        self.state_history: List[SNNState] = []
+        self.state_history: list[SNNState] = []
         self.active_clients = set()
         self.enabled = False
 
@@ -58,8 +58,8 @@ class SNNVisualizer:
         self,
         neuron_potentials: np.ndarray,
         spike_events: np.ndarray,
-        synaptic_weights: Optional[np.ndarray] = None,
-        stdp_trace: Optional[np.ndarray] = None
+        synaptic_weights: np.ndarray | None = None,
+        stdp_trace: np.ndarray | None = None
     ) -> SNNState:
         """
         Capture current SNN state
@@ -139,7 +139,7 @@ class SNNVisualizer:
         self.enabled = False
         logger.info("SNN visualization disabled")
 
-    def get_history(self, n: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_history(self, n: int | None = None) -> list[dict[str, Any]]:
         """
         Get recent state history
 
@@ -152,7 +152,7 @@ class SNNVisualizer:
         history = self.state_history[-n:] if n else self.state_history
         return [state.to_dict() for state in history]
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """
         Get aggregated statistics from history
 
@@ -177,7 +177,7 @@ class SNNVisualizer:
 
 
 # Global instance
-_visualizer: Optional[SNNVisualizer] = None
+_visualizer: SNNVisualizer | None = None
 
 
 def get_visualizer() -> SNNVisualizer:

@@ -5,7 +5,6 @@ Demonstrates CPU and GPU batch bind, bundle, and similarity.
 """
 
 import numpy as np
-
 from grilly.experimental.vsa.ops import BinaryOps
 
 

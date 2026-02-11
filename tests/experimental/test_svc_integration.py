@@ -11,17 +11,18 @@ Uses inline test data mirroring the real SVC schema (10 fields).
 
 import json
 import re
-import pytest
+
 import numpy as np
 
-from grilly.experimental.vsa import BinaryOps, HolographicOps
-from grilly.experimental.language import WordEncoder, SentenceEncoder, InstantLanguage
 from grilly.experimental.cognitive import (
-    WorldModel, CognitiveController, UnderstandingResult,
+    CognitiveController,
+    UnderstandingResult,
+    WorldModel,
 )
+from grilly.experimental.language import SentenceEncoder, WordEncoder
 from grilly.experimental.moe import ResonatorMoE
-from grilly.experimental.temporal import TemporalEncoder, CausalChain
-
+from grilly.experimental.temporal import CausalChain, TemporalEncoder
+from grilly.experimental.vsa import BinaryOps, HolographicOps
 
 # =============================================================================
 # Inline SVC Test Data

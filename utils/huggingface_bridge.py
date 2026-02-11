@@ -10,10 +10,11 @@ Also provides LoRA (Low-Rank Adaptation) support for efficient fine-tuning:
 - Save/load LoRA adapters independently
 - Apply LoRA to specific model layers
 """
-from typing import Optional, Union, Dict, Any, List, Tuple
-from pathlib import Path
-import numpy as np
 import json
+from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 try:
     import torch
@@ -24,9 +25,12 @@ except ImportError:
 
 try:
     from transformers import (
-        AutoTokenizer, AutoModel, AutoModelForCausalLM,
-        AutoModelForSequenceClassification, PreTrainedTokenizer,
-        PreTrainedModel
+        AutoModel,
+        AutoModelForCausalLM,
+        AutoModelForSequenceClassification,
+        AutoTokenizer,
+        PreTrainedModel,
+        PreTrainedTokenizer,
     )
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
@@ -45,8 +49,9 @@ except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
     SentenceTransformer = None
 
-from .device_manager import get_device_manager
 import logging
+
+from .device_manager import get_device_manager
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +67,8 @@ class HuggingFaceBridge:
     - Tensor conversion between PyTorch and numpy
     - Embedding extraction for Vulkan operations
     """
-    
-    def __init__(self, cuda_device: Optional[Union[str, int]] = None):
+
+    def __init__(self, cuda_device: str | int | None = None):
         """
         Initialize HuggingFace bridge.
         
@@ -74,9 +79,9 @@ class HuggingFaceBridge:
             raise RuntimeError("PyTorch is required for HuggingFace bridge. Install with: pip install torch")
         if not TRANSFORMERS_AVAILABLE:
             raise RuntimeError("Transformers is required. Install with: pip install transformers")
-        
+
         self.device_manager = get_device_manager()
-        
+
         # Set CUDA device (only if CUDA is available)
         try:
             torch = self.device_manager.torch
@@ -89,7 +94,7 @@ class HuggingFaceBridge:
                         self.device_manager._cuda_device = torch.device(cuda_device)
                 else:
                     self.device_manager.set_device('cuda')
-                
+
                 self.cuda_device = self.device_manager.get_cuda_device()
             else:
                 # CUDA not available - use CPU/Vulkan fallback for AMD systems
@@ -104,14 +109,14 @@ class HuggingFaceBridge:
                 self.cuda_device = None
             else:
                 raise
-        
+
         self.torch = self.device_manager.torch
-        
+
         # Cache for loaded models
-        self._tokenizers: Dict[str, PreTrainedTokenizer] = {}
-        self._models: Dict[str, PreTrainedModel] = {}
-        self._sentence_models: Dict[str, Any] = {}  # Cache for sentence-transformers models
-    
+        self._tokenizers: dict[str, PreTrainedTokenizer] = {}
+        self._models: dict[str, PreTrainedModel] = {}
+        self._sentence_models: dict[str, Any] = {}  # Cache for sentence-transformers models
+
     def load_tokenizer(self, model_name: str, **kwargs) -> PreTrainedTokenizer:
         """
         Load a HuggingFace tokenizer.
@@ -125,11 +130,11 @@ class HuggingFaceBridge:
         """
         if model_name in self._tokenizers:
             return self._tokenizers[model_name]
-        
+
         tokenizer = AutoTokenizer.from_pretrained(model_name, **kwargs)
         self._tokenizers[model_name] = tokenizer
         return tokenizer
-    
+
     def load_model(
         self,
         model_name: str,
@@ -150,7 +155,7 @@ class HuggingFaceBridge:
         cache_key = f"{model_name}_{model_type}"
         if cache_key in self._models:
             return self._models[cache_key]
-        
+
         # Load model based on type
         if model_type == 'causal_lm':
             model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
@@ -158,21 +163,21 @@ class HuggingFaceBridge:
             model = AutoModelForSequenceClassification.from_pretrained(model_name, **kwargs)
         else:
             model = AutoModel.from_pretrained(model_name, **kwargs)
-        
+
         # Move to CUDA
         model = model.to(self.cuda_device)
         model.eval()  # Set to evaluation mode
-        
+
         self._models[cache_key] = model
         return model
-    
+
     def tokenize(
         self,
-        text: Union[str, List[str]],
-        tokenizer: Union[str, PreTrainedTokenizer],
+        text: str | list[str],
+        tokenizer: str | PreTrainedTokenizer,
         return_tensors: str = 'pt',
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Tokenize text using HuggingFace tokenizer.
         
@@ -187,24 +192,24 @@ class HuggingFaceBridge:
         """
         if isinstance(tokenizer, str):
             tokenizer = self.load_tokenizer(tokenizer)
-        
+
         encoded = tokenizer(text, return_tensors=return_tensors, **kwargs)
-        
+
         # Convert to numpy if requested
         if return_tensors == 'np':
             encoded = {
                 k: v.numpy() if isinstance(v, torch.Tensor) else v
                 for k, v in encoded.items()
             }
-        
+
         return encoded
-    
+
     def encode(
         self,
-        text: Union[str, List[str]],
+        text: str | list[str],
         model_name: str,
-        tokenizer_name: Optional[str] = None,
-        extract_layer: Optional[int] = None,
+        tokenizer_name: str | None = None,
+        extract_layer: int | None = None,
         pool_method: str = 'mean'
     ) -> np.ndarray:
         """
@@ -223,17 +228,17 @@ class HuggingFaceBridge:
         # Load tokenizer and model
         tokenizer = self.load_tokenizer(tokenizer_name or model_name)
         model = self.load_model(model_name)
-        
+
         # Tokenize
         encoded = self.tokenize(text, tokenizer, return_tensors='pt')
-        
+
         # Move inputs to CUDA
         inputs = {k: v.to(self.cuda_device) for k, v in encoded.items()}
-        
+
         # Get embeddings
         with torch.no_grad():
             outputs = model(**inputs, output_hidden_states=True)
-            
+
             # Extract embeddings
             if extract_layer is not None:
                 hidden_states = outputs.hidden_states[extract_layer]
@@ -246,7 +251,7 @@ class HuggingFaceBridge:
                 else:
                     # Fallback to pooler output if available
                     hidden_states = outputs.pooler_output.unsqueeze(1)
-            
+
             # Pool embeddings
             if pool_method == 'mean':
                 # Mean pooling (excluding padding)
@@ -266,14 +271,14 @@ class HuggingFaceBridge:
                 embeddings = hidden_states.max(dim=1)[0]
             else:
                 embeddings = hidden_states.mean(dim=1)
-        
+
         # Convert to numpy for Vulkan
         return embeddings.cpu().numpy().astype(np.float32)
-    
+
     def load_sentence_transformer(
         self,
         model_name: str,
-        device: Optional[str] = None,
+        device: str | None = None,
         **kwargs
     ) -> Any:
         """
@@ -291,12 +296,12 @@ class HuggingFaceBridge:
             raise RuntimeError(
                 "sentence-transformers is required. Install with: pip install sentence-transformers"
             )
-        
+
         # Check cache
         cache_key = f"{model_name}_{device}"
         if cache_key in self._sentence_models:
             return self._sentence_models[cache_key]
-        
+
         # Determine device
         if device is None:
             # Auto-select: CUDA if available, otherwise CPU (works on AMD)
@@ -304,24 +309,24 @@ class HuggingFaceBridge:
                 device = 'cuda'
             else:
                 device = 'cpu'
-        
+
         # Load model
         model = SentenceTransformer(model_name, device=device, **kwargs)
-        
+
         # Cache it
         self._sentence_models[cache_key] = model
-        
+
         return model
-    
+
     def encode_sentence_transformer(
         self,
-        texts: Union[str, List[str]],
+        texts: str | list[str],
         model_name: str = 'all-MiniLM-L6-v2',
         convert_to_numpy: bool = True,
         normalize_embeddings: bool = True,
         show_progress_bar: bool = False,
         batch_size: int = 32,
-        use_gpu: Optional[bool] = None,
+        use_gpu: bool | None = None,
         **kwargs
     ) -> np.ndarray:
         """
@@ -353,7 +358,7 @@ class HuggingFaceBridge:
             raise RuntimeError(
                 "sentence-transformers is required. Install with: pip install sentence-transformers"
             )
-        
+
         # Load model
         if use_gpu is None:
             # Auto-detect: use CUDA if available, otherwise CPU (AMD compatible)
@@ -362,9 +367,9 @@ class HuggingFaceBridge:
             device = 'cuda' if self.cuda_device is not None else 'cpu'
         else:
             device = 'cpu'
-        
+
         model = self.load_sentence_transformer(model_name, device=device)
-        
+
         # Encode
         embeddings = model.encode(
             texts,
@@ -374,19 +379,19 @@ class HuggingFaceBridge:
             batch_size=batch_size,
             **kwargs
         )
-        
+
         # Ensure numpy and float32 for Vulkan
         if not isinstance(embeddings, np.ndarray):
             embeddings = np.array(embeddings)
-        
+
         if embeddings.dtype != np.float32:
             embeddings = embeddings.astype(np.float32)
-        
+
         return embeddings
-    
+
     def encode_sentence_transformer_vulkan(
         self,
-        texts: Union[str, List[str]],
+        texts: str | list[str],
         model_name: str = 'all-MiniLM-L6-v2',
         use_vulkan: bool = True,
         **kwargs
@@ -414,7 +419,7 @@ class HuggingFaceBridge:
         if use_vulkan:
             try:
                 from .vulkan_sentence_transformer import VulkanSentenceTransformer
-                
+
                 # Create or get cached Vulkan model
                 cache_key = f"vulkan_{model_name}"
                 if cache_key not in self._sentence_models:
@@ -423,11 +428,11 @@ class HuggingFaceBridge:
                     self._sentence_models[cache_key] = vulkan_model
                 else:
                     vulkan_model = self._sentence_models[cache_key]
-                
+
                 # Encode using Vulkan
                 embeddings = vulkan_model.encode(texts, **kwargs)
                 return embeddings
-                
+
             except Exception as e:
                 logger.warning(f"Vulkan sentence-transformer failed: {e}, falling back to CPU")
                 # Fall back to regular encoding
@@ -435,10 +440,10 @@ class HuggingFaceBridge:
         else:
             # Use regular encoding (CPU or CUDA)
             return self.encode_sentence_transformer(texts, model_name=model_name, **kwargs)
-    
+
     def encode_sentence_transformer_gpu(
         self,
-        texts: Union[str, List[str]],
+        texts: str | list[str],
         model_name: str = 'all-MiniLM-L6-v2',
         use_vulkan_postprocessing: bool = True,
         use_vulkan_model: bool = False,
@@ -473,14 +478,14 @@ class HuggingFaceBridge:
                 )
             except Exception as e:
                 logger.warning(f"Vulkan model failed: {e}, falling back")
-        
+
         # Encode with sentence-transformers (CPU or CUDA)
         embeddings = self.encode_sentence_transformer(
             texts,
             model_name=model_name,
             **kwargs
         )
-        
+
         # Optional Vulkan post-processing (normalization, etc.)
         if use_vulkan_postprocessing:
             try:
@@ -489,10 +494,10 @@ class HuggingFaceBridge:
                 original_shape = embeddings.shape
                 if embeddings.ndim == 1:
                     embeddings = embeddings.reshape(1, -1)
-                
+
                 # L2 normalize using Vulkan
                 embeddings = functional.embedding_normalize(embeddings)
-                
+
                 # Restore original shape
                 if len(original_shape) == 1:
                     embeddings = embeddings[0]  # Back to 1D for single text
@@ -500,17 +505,17 @@ class HuggingFaceBridge:
                 # Vulkan post-processing not available, use numpy normalization
                 # (normalization is already done by sentence-transformers if normalize_embeddings=True)
                 pass
-        
+
         return embeddings
-    
+
     def generate(
         self,
-        text: Union[str, List[str]],
+        text: str | list[str],
         model_name: str,
-        tokenizer_name: Optional[str] = None,
+        tokenizer_name: str | None = None,
         max_length: int = 512,
         **kwargs
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Generate text using a causal language model.
         
@@ -527,11 +532,11 @@ class HuggingFaceBridge:
         # Load tokenizer and model
         tokenizer = self.load_tokenizer(tokenizer_name or model_name)
         model = self.load_model(model_name, model_type='causal_lm')
-        
+
         # Tokenize
         encoded = self.tokenize(text, tokenizer, return_tensors='pt')
         inputs = {k: v.to(self.cuda_device) for k, v in encoded.items()}
-        
+
         # Generate
         with torch.no_grad():
             outputs = model.generate(
@@ -539,18 +544,18 @@ class HuggingFaceBridge:
                 max_length=max_length,
                 **kwargs
             )
-        
+
         # Decode
         generated_texts = tokenizer.batch_decode(outputs, skip_special_tokens=True)
         return generated_texts
-    
+
     def classify(
         self,
-        text: Union[str, List[str]],
+        text: str | list[str],
         model_name: str,
-        tokenizer_name: Optional[str] = None,
+        tokenizer_name: str | None = None,
         return_probs: bool = False
-    ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """
         Classify text using a sequence classification model.
         
@@ -566,47 +571,47 @@ class HuggingFaceBridge:
         # Load tokenizer and model
         tokenizer = self.load_tokenizer(tokenizer_name or model_name)
         model = self.load_model(model_name, model_type='sequence_classification')
-        
+
         # Tokenize
         encoded = self.tokenize(text, tokenizer, return_tensors='pt')
         inputs = {k: v.to(self.cuda_device) for k, v in encoded.items()}
-        
+
         # Classify
         with torch.no_grad():
             outputs = model(**inputs)
             logits = outputs.logits
             probs = torch.softmax(logits, dim=-1)
             predictions = torch.argmax(logits, dim=-1)
-        
+
         # Convert to numpy
         predictions_np = predictions.cpu().numpy()
         probs_np = probs.cpu().numpy().astype(np.float32)
-        
+
         if return_probs:
             return predictions_np, probs_np
         return predictions_np
-    
+
     def to_vulkan(self, tensor: torch.Tensor) -> np.ndarray:
         """Convert PyTorch tensor to numpy for Vulkan operations"""
         return self.device_manager.to_vulkan(tensor)
-    
-    def to_cuda(self, array: np.ndarray, dtype: Optional[torch.dtype] = None) -> torch.Tensor:
+
+    def to_cuda(self, array: np.ndarray, dtype: torch.dtype | None = None) -> torch.Tensor:
         """Convert numpy array to PyTorch CUDA tensor"""
         return self.device_manager.to_cuda(array, dtype)
-    
+
     # ============== LoRA Support ==============
-    
+
     def load_model_with_lora(
         self,
         model_name: str,
-        lora_config: Optional[Dict[str, Any]] = None,
-        lora_path: Optional[Union[str, Path]] = None,
+        lora_config: dict[str, Any] | None = None,
+        lora_path: str | Path | None = None,
         model_type: str = 'causal_lm',
-        target_modules: Optional[List[str]] = None,
+        target_modules: list[str] | None = None,
         rank: int = 8,
         alpha: float = 16.0,
         **kwargs
-    ) -> Tuple[Any, 'LoRAModel']:
+    ) -> tuple[Any, 'LoRAModel']:
         """
         Load a HuggingFace model with LoRA adapters for fine-tuning.
         
@@ -642,15 +647,15 @@ class HuggingFaceBridge:
             >>> # Train with lora.parameters()
             >>> # Save with bridge.save_lora_adapters(lora, "path/to/lora")
         """
-        from grilly.nn.lora import LoRAConfig, LoRAModel, LoRALinear
-        
+        from grilly.nn.lora import LoRAConfig, LoRAModel
+
         # Load base model
         base_model = self.load_model(model_name, model_type=model_type, **kwargs)
-        
+
         # Freeze base model
         for param in base_model.parameters():
             param.requires_grad = False
-        
+
         # Create LoRA config
         if lora_config is not None:
             config = LoRAConfig.from_dict(lora_config)
@@ -663,29 +668,29 @@ class HuggingFaceBridge:
                 alpha=alpha,
                 target_modules=target_modules,
             )
-        
+
         # Create LoRA model
         lora_model = LoRAModel(config)
-        
+
         # Find and wrap target modules
         self._apply_lora_to_model(base_model, lora_model, config)
-        
+
         # Load pre-trained LoRA weights if provided
         if lora_path is not None:
             lora_path = Path(lora_path)
             if lora_path.exists():
                 logger.info(f"Loading LoRA weights from {lora_path}")
                 lora_model = LoRAModel.load_checkpoint(lora_path)
-        
+
         # Print parameter summary
         lora_model.print_trainable_parameters()
-        
+
         return base_model, lora_model
-    
-    def _get_default_target_modules(self, model: Any) -> List[str]:
+
+    def _get_default_target_modules(self, model: Any) -> list[str]:
         """Get default target modules for LoRA based on model architecture."""
         model_name = model.__class__.__name__.lower()
-        
+
         # Common attention projection names
         if 'llama' in model_name or 'mistral' in model_name:
             return ['q_proj', 'v_proj']
@@ -698,7 +703,7 @@ class HuggingFaceBridge:
         else:
             # Default: try common projection names
             return ['q_proj', 'v_proj', 'query', 'value']
-    
+
     def _apply_lora_to_model(
         self,
         model: Any,
@@ -711,8 +716,7 @@ class HuggingFaceBridge:
         Extracts weights from PyTorch layers and creates corresponding
         Grilly LoRA layers.
         """
-        from grilly.nn.lora import LoRALinear
-        
+
         for name, module in model.named_modules():
             # Check if this module should have LoRA
             module_name = name.split('.')[-1]
@@ -723,7 +727,7 @@ class HuggingFaceBridge:
                     weight = module.weight.data.cpu().numpy()
                     in_features = module.in_features
                     out_features = module.out_features
-                    
+
                     # Create LoRA layer
                     lora_layer = lora_model.add_lora_layer(
                         name=name,
@@ -731,14 +735,14 @@ class HuggingFaceBridge:
                         out_features=out_features,
                         base_weights=weight,
                     )
-                    
+
                     logger.debug(f"Added LoRA to {name}: {in_features} -> {out_features}")
-    
+
     def save_lora_adapters(
         self,
         lora_model: 'LoRAModel',
-        save_path: Union[str, Path],
-        model_name: Optional[str] = None,
+        save_path: str | Path,
+        model_name: str | None = None,
     ) -> None:
         """
         Save LoRA adapters to disk.
@@ -759,29 +763,29 @@ class HuggingFaceBridge:
         """
         save_path = Path(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
-        
+
         # Save using LoRAModel's method
         lora_model.save_checkpoint(save_path)
-        
+
         # Add model reference if provided
         if model_name is not None:
             meta_path = save_path / 'metadata.json'
             if meta_path.exists():
-                with open(meta_path, 'r') as f:
+                with open(meta_path) as f:
                     metadata = json.load(f)
             else:
                 metadata = {}
-            
+
             metadata['base_model'] = model_name
-            
+
             with open(meta_path, 'w') as f:
                 json.dump(metadata, f, indent=2)
-        
+
         logger.info(f"LoRA adapters saved to {save_path}")
-    
+
     def load_lora_adapters(
         self,
-        load_path: Union[str, Path],
+        load_path: str | Path,
     ) -> 'LoRAModel':
         """
         Load LoRA adapters from disk.
@@ -797,23 +801,23 @@ class HuggingFaceBridge:
             >>> # Use lora layers for inference
         """
         from grilly.nn.lora import LoRAModel
-        
+
         load_path = Path(load_path)
-        
+
         if not load_path.exists():
             raise FileNotFoundError(f"LoRA checkpoint not found: {load_path}")
-        
+
         lora_model = LoRAModel.load_checkpoint(load_path)
         logger.info(f"LoRA adapters loaded from {load_path}")
-        
+
         return lora_model
-    
+
     def extract_model_weights(
         self,
         model_name: str,
-        layer_names: Optional[List[str]] = None,
+        layer_names: list[str] | None = None,
         model_type: str = 'causal_lm',
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """
         Extract weights from a HuggingFace model for Vulkan inference.
         
@@ -831,31 +835,31 @@ class HuggingFaceBridge:
             >>> # Use weights with Vulkan compute backend
         """
         model = self.load_model(model_name, model_type=model_type)
-        
+
         weights = {}
-        
+
         for name, module in model.named_modules():
             # Filter by layer names if specified
             if layer_names is not None:
                 if not any(ln in name for ln in layer_names):
                     continue
-            
+
             # Extract linear layer weights
             if hasattr(module, 'weight'):
                 weight = module.weight.data.cpu().numpy().astype(np.float32)
                 weights[name] = weight
-                
+
                 # Also extract bias if present
                 if hasattr(module, 'bias') and module.bias is not None:
                     bias = module.bias.data.cpu().numpy().astype(np.float32)
                     weights[f"{name}.bias"] = bias
-        
+
         return weights
-    
+
     def create_lora_from_weights(
         self,
-        weights: Dict[str, np.ndarray],
-        target_modules: List[str],
+        weights: dict[str, np.ndarray],
+        target_modules: list[str],
         rank: int = 8,
         alpha: float = 16.0,
     ) -> 'LoRAModel':
@@ -883,20 +887,20 @@ class HuggingFaceBridge:
             ... )
         """
         from grilly.nn.lora import LoRAConfig, LoRAModel
-        
+
         config = LoRAConfig(
             rank=rank,
             alpha=alpha,
             target_modules=target_modules,
         )
-        
+
         lora_model = LoRAModel(config)
-        
+
         for name, weight in weights.items():
             # Skip bias weights
             if name.endswith('.bias'):
                 continue
-            
+
             # Check if this layer should have LoRA
             layer_name = name.split('.')[-1]
             if any(tm in layer_name for tm in target_modules):
@@ -908,9 +912,9 @@ class HuggingFaceBridge:
                         out_features=out_features,
                         base_weights=weight,
                     )
-        
+
         return lora_model
-    
+
     def merge_lora_to_model(
         self,
         model: Any,
@@ -932,19 +936,19 @@ class HuggingFaceBridge:
         for name, module in model.named_modules():
             if name in lora_model.lora_layers:
                 lora_layer = lora_model.lora_layers[name]
-                
+
                 # Merge LoRA into base weights
                 lora_layer.merge_weights()
-                
+
                 # Update PyTorch module weight
                 if hasattr(module, 'weight'):
                     merged_weight = self.torch.from_numpy(lora_layer.W.data)
                     module.weight.data = merged_weight.to(module.weight.device)
-        
+
         return model
 
 
-def get_huggingface_bridge(cuda_device: Optional[Union[str, int]] = None) -> HuggingFaceBridge:
+def get_huggingface_bridge(cuda_device: str | int | None = None) -> HuggingFaceBridge:
     """
     Get or create HuggingFace bridge instance.
     

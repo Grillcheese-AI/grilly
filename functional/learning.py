@@ -6,8 +6,8 @@ Uses: fisher-info.glsl, fisher-ewc-penalty.glsl, fisher-natural-gradient.glsl,
       nlms-metrics.glsl, whitening-transform.glsl, whitening-apply.glsl,
       whitening-batch-stats.glsl
 """
+
 import numpy as np
-from typing import Optional, Tuple
 
 
 def _get_backend():
@@ -111,7 +111,7 @@ def fisher_normalize(fisher: np.ndarray) -> np.ndarray:
         Normalized Fisher information
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'fisher-normalize' in backend.shaders:
         try:
@@ -120,7 +120,7 @@ def fisher_normalize(fisher: np.ndarray) -> np.ndarray:
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback
     fisher_sum = np.sum(fisher)
     if fisher_sum > 0:
@@ -154,7 +154,7 @@ def nlms_update(
     bias: float,
     mu: float = 0.5,
     eps: float = 1e-6
-) -> Tuple[np.ndarray, float]:
+) -> tuple[np.ndarray, float]:
     """
     NLMS weight update.
     
@@ -195,7 +195,7 @@ def nlms_ensemble(
         Ensemble predictions (num_experts,)
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'nlms-ensemble' in backend.shaders:
         try:
@@ -204,7 +204,7 @@ def nlms_ensemble(
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback
     predictions = []
     for w, b in zip(weights_list, biases_list):
@@ -230,7 +230,7 @@ def nlms_metrics(
         Dictionary with metrics (rmse, mae, etc.)
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'nlms-metrics' in backend.shaders:
         try:
@@ -239,7 +239,7 @@ def nlms_metrics(
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback
     rmse = np.sqrt(np.mean(errors ** 2))
     mae = np.mean(np.abs(errors))
@@ -252,9 +252,9 @@ def nlms_metrics(
 
 def whitening_transform(
     data: np.ndarray,
-    mean: Optional[np.ndarray] = None,
-    std: Optional[np.ndarray] = None
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    mean: np.ndarray | None = None,
+    std: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Apply whitening transform to data.
     
@@ -292,7 +292,7 @@ def whitening_apply(
         Whitened data
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'whitening-apply' in backend.shaders:
         try:
@@ -301,12 +301,12 @@ def whitening_apply(
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback
     return (data - mean) / (std + 1e-8)
 
 
-def whitening_batch_stats(data: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def whitening_batch_stats(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute batch statistics for whitening.
     
@@ -319,7 +319,7 @@ def whitening_batch_stats(data: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         (mean, std)
     """
     backend = _get_backend()
-    
+
     # Try GPU shader if available
     if backend and hasattr(backend, 'shaders') and 'whitening-batch-stats' in backend.shaders:
         try:
@@ -328,7 +328,7 @@ def whitening_batch_stats(data: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
             pass
         except Exception:
             pass  # Fall back to CPU
-    
+
     # CPU fallback
     mean = np.mean(data, axis=0)
     std = np.std(data, axis=0)

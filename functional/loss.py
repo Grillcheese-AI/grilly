@@ -2,8 +2,8 @@
 Loss functions (functional API)
 Uses: loss-cross-entropy.glsl, loss-fn-bce.glsl
 """
+
 import numpy as np
-from typing import Optional
 
 
 def _get_backend():
@@ -12,8 +12,8 @@ def _get_backend():
     return Compute()
 
 
-def cross_entropy(input: np.ndarray, target: np.ndarray, 
-                  weight: Optional[np.ndarray] = None,
+def cross_entropy(input: np.ndarray, target: np.ndarray,
+                  weight: np.ndarray | None = None,
                   reduction: str = 'mean') -> np.ndarray:
     """
     Cross-entropy loss
@@ -33,19 +33,19 @@ def cross_entropy(input: np.ndarray, target: np.ndarray,
     # CPU fallback for now
     input_softmax = np.exp(input - np.max(input, axis=-1, keepdims=True))
     input_softmax = input_softmax / np.sum(input_softmax, axis=-1, keepdims=True)
-    
+
     # One-hot encode targets
     if target.ndim < input.ndim:
         target_onehot = np.zeros_like(input)
         target_onehot[np.arange(len(target)), target] = 1
     else:
         target_onehot = target
-    
+
     loss = -np.sum(target_onehot * np.log(input_softmax + 1e-8), axis=-1)
-    
+
     if weight is not None:
         loss = loss * weight[target]
-    
+
     if reduction == 'mean':
         return np.mean(loss)
     elif reduction == 'sum':
@@ -55,7 +55,7 @@ def cross_entropy(input: np.ndarray, target: np.ndarray,
 
 
 def binary_cross_entropy(input: np.ndarray, target: np.ndarray,
-                         weight: Optional[np.ndarray] = None,
+                         weight: np.ndarray | None = None,
                          reduction: str = 'mean') -> np.ndarray:
     """
     Binary cross-entropy loss
@@ -75,10 +75,10 @@ def binary_cross_entropy(input: np.ndarray, target: np.ndarray,
     # CPU fallback for now
     input_clamped = np.clip(input, 1e-8, 1 - 1e-8)
     loss = -(target * np.log(input_clamped) + (1 - target) * np.log(1 - input_clamped))
-    
+
     if weight is not None:
         loss = loss * weight
-    
+
     if reduction == 'mean':
         return np.mean(loss)
     elif reduction == 'sum':

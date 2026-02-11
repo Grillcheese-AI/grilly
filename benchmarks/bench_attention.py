@@ -2,13 +2,20 @@
 Benchmark: Multi-head attention at various shapes.
 """
 
-import numpy as np
 import sys
+
+import numpy as np
+
 sys.path.insert(0, '.')
 
 from benchmarks.utils import (
-    time_fn, time_cpu, print_header, print_row, print_summary_table,
-    get_gpu_backend, format_size,
+    format_size,
+    get_gpu_backend,
+    print_header,
+    print_row,
+    print_summary_table,
+    time_cpu,
+    time_fn,
 )
 
 

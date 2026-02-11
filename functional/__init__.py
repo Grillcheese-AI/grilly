@@ -3,93 +3,81 @@ Functional API (PyTorch-like)
 Similar to torch.nn.functional
 """
 from .activations import (
-    relu,
     gelu,
+    relu,
     silu,
     softmax,
     softplus,
 )
-
-from .linear import (
-    linear,
-)
-
-from .normalization import (
-    layer_norm,
-)
-
-from .dropout import (
-    dropout,
-)
-
 from .attention import (
     attention,
     flash_attention2,
 )
-
-from .loss import (
-    cross_entropy,
-    binary_cross_entropy,
-)
-
-from .fft import (
-    fft,
-    ifft,
-    fft_magnitude,
-    fft_power_spectrum,
-)
-
-from .memory import (
-    memory_read,
-    memory_write,
-    memory_context_aggregate,
-    memory_query_pooling,
-    memory_inject_concat,
-    memory_inject_gate,
-    memory_inject_residual,
-)
-
-from .cells import (
-    place_cell,
-    time_cell,
-    theta_gamma_encoding,
-)
-
-from .learning import (
-    fisher_info,
-    ewc_penalty,
-    natural_gradient,
-    fisher_normalize,
-    nlms_predict,
-    nlms_update,
-    nlms_ensemble,
-    nlms_metrics,
-    whitening_transform,
-    whitening_apply,
-    whitening_batch_stats,
-)
-
 from .bridge import (
+    bridge_temporal_weights,
     continuous_to_spikes,
     spikes_to_continuous,
-    bridge_temporal_weights,
 )
-
+from .cells import (
+    place_cell,
+    theta_gamma_encoding,
+    time_cell,
+)
+from .dropout import (
+    dropout,
+)
 from .embedding import (
+    embedding_attention,
+    embedding_ffn,
     embedding_lookup,
     embedding_normalize,
-    embedding_position,
     embedding_pool,
-    embedding_ffn,
-    embedding_attention,
+    embedding_position,
 )
-
 from .faiss import (
     faiss_distance,
-    faiss_topk,
     faiss_ivf_filter,
     faiss_kmeans_update,
     faiss_quantize,
+    faiss_topk,
+)
+from .fft import (
+    fft,
+    fft_magnitude,
+    fft_power_spectrum,
+    ifft,
+)
+from .learning import (
+    ewc_penalty,
+    fisher_info,
+    fisher_normalize,
+    natural_gradient,
+    nlms_ensemble,
+    nlms_metrics,
+    nlms_predict,
+    nlms_update,
+    whitening_apply,
+    whitening_batch_stats,
+    whitening_transform,
+)
+from .linear import (
+    linear,
+)
+from .loss import (
+    binary_cross_entropy,
+    cross_entropy,
+)
+from .memory import (
+    memory_context_aggregate,
+    memory_inject_concat,
+    memory_inject_gate,
+    memory_inject_residual,
+    memory_query_pooling,
+    memory_read,
+    memory_write,
+)
+from .normalization import (
+    layer_norm,
 )
 
 __all__ = [

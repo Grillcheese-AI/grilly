@@ -1,10 +1,8 @@
 """
 Device Management Utilities
 """
-from typing import Optional
 
-
-_current_device: Optional[str] = 'vulkan'
+_current_device: str | None = 'vulkan'
 
 
 def get_device() -> str:
@@ -41,7 +39,7 @@ def device_count() -> int:
     """
     try:
         device = get_device()
-        
+
         if device == 'vulkan':
             try:
                 from ..backend.base import VULKAN_AVAILABLE
@@ -57,7 +55,7 @@ def device_count() -> int:
                 return torch.cuda.device_count()
             except Exception:
                 pass
-        
+
         return 1
     except Exception:
         return 1

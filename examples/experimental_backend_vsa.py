@@ -7,10 +7,10 @@ Demonstrates Vulkan-accelerated VSA operations with CPU fallback.
 import numpy as np
 
 try:
-    from grilly.backend.experimental.vsa import VulkanVSA
-    from grilly.backend.core import VulkanCore
     from grilly.backend.base import VULKAN_AVAILABLE
-    
+    from grilly.backend.core import VulkanCore
+    from grilly.backend.experimental.vsa import VulkanVSA
+
     if not VULKAN_AVAILABLE:
         raise ImportError("Vulkan not available")
 except ImportError:
@@ -31,8 +31,8 @@ print("-" * 60)
 core = VulkanCore()
 vsa = VulkanVSA(core)
 
-print(f"VulkanCore initialized")
-print(f"VulkanVSA initialized")
+print("VulkanCore initialized")
+print("VulkanVSA initialized")
 
 available_shaders = [k for k in core.shaders.keys() if k.startswith('vsa-')]
 print(f"Available VSA shaders: {available_shaders}")

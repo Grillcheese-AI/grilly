@@ -12,9 +12,9 @@ Usage:
     ... )
 """
 
-import numpy as np
-from typing import Tuple, Optional
 import logging
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ class GPUBackwardOps:
         compute_input_grad: bool = True,
         compute_weight_grad: bool = True,
         compute_bias_grad: bool = True
-    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
         """
         Compute gradients for linear layer using GPU shader.
 
@@ -154,7 +154,7 @@ class GPUBackwardOps:
         compute_input_grad: bool,
         compute_weight_grad: bool,
         compute_bias_grad: bool
-    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
         """CPU fallback for linear backward."""
         grad_input = None
         grad_weights = None
@@ -277,7 +277,7 @@ class GPUBackwardOps:
         grad_output: np.ndarray,
         input_data: np.ndarray,
         gate_data: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         SwiGLU backward: d/dx(SiLU(gate) * value)
 
@@ -424,7 +424,7 @@ class GPUBackwardOps:
         normalized: np.ndarray,
         gamma: np.ndarray,
         eps: float = 1e-5
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         LayerNorm backward.
 

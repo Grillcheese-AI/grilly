@@ -5,12 +5,12 @@ This module provides tape-based automatic differentiation that integrates with
 the grilly nn.Module system and dispatches backward passes to GPU shaders.
 """
 
-import numpy as np
-from typing import Optional, List, Dict, Any, Callable, Tuple, Union
-from collections import OrderedDict
 import threading
+from collections.abc import Callable
 from contextlib import contextmanager
+from typing import Any, Optional
 
+import numpy as np
 
 # Thread-local storage for gradient tape
 _local = threading.local()
@@ -40,15 +40,15 @@ class GradientTape:
     You can also construct it with `watch=...` for convenience.
     """
 
-    def __init__(self, persistent: bool = False, watch: List = None):
+    def __init__(self, persistent: bool = False, watch: list = None):
         """
         Args:
             persistent: If True, tape can be used for multiple gradient calls
             watch: Optional list of parameters to watch from the start
         """
         self.persistent = persistent
-        self._operations: List[Tuple[Any, Callable, List[Any]]] = []
-        self._watched: Dict[int, np.ndarray] = {}  # id -> array mapping
+        self._operations: list[tuple[Any, Callable, list[Any]]] = []
+        self._watched: dict[int, np.ndarray] = {}  # id -> array mapping
         self._enabled = True
 
         if watch:
@@ -75,7 +75,7 @@ class GradientTape:
         elif hasattr(tensor, 'data'):
             self._watched[id(tensor.data)] = tensor
 
-    def record(self, output: np.ndarray, backward_fn: Callable, inputs: List[Any]):
+    def record(self, output: np.ndarray, backward_fn: Callable, inputs: list[Any]):
         """
         Record an operation for later backward pass.
 
@@ -87,7 +87,7 @@ class GradientTape:
         if self._enabled:
             self._operations.append((output, backward_fn, inputs))
 
-    def gradient(self, target: np.ndarray, sources: List, output_gradients: np.ndarray = None) -> List[np.ndarray]:
+    def gradient(self, target: np.ndarray, sources: list, output_gradients: np.ndarray = None) -> list[np.ndarray]:
         """
         Compute gradients of target w.r.t. sources.
 
@@ -171,7 +171,7 @@ class ComputationNode:
         data: np.ndarray,
         requires_grad: bool = False,
         grad_fn: Callable = None,
-        inputs: List['ComputationNode'] = None,
+        inputs: list['ComputationNode'] = None,
         name: str = None
     ):
         """Initialize the instance."""
@@ -271,8 +271,8 @@ class ModuleTracer:
         """
         self.module = module
         self.backend = backend
-        self._forward_cache: Dict[int, Dict] = {}  # module_id -> {input, output}
-        self._backward_order: List = []  # Modules in backward order
+        self._forward_cache: dict[int, dict] = {}  # module_id -> {input, output}
+        self._backward_order: list = []  # Modules in backward order
 
     def __call__(self, *args, **kwargs):
         """
@@ -404,8 +404,8 @@ class AutogradEngine:
 
     def backward(
         self,
-        tensors: Union[np.ndarray, List[np.ndarray]],
-        grad_tensors: Union[np.ndarray, List[np.ndarray]] = None,
+        tensors: np.ndarray | list[np.ndarray],
+        grad_tensors: np.ndarray | list[np.ndarray] = None,
         retain_graph: bool = False,
         create_graph: bool = False
     ):
@@ -487,7 +487,7 @@ class VulkanBackwardOps:
         x: np.ndarray,
         weight: np.ndarray,
         bias: np.ndarray = None
-    ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
         """
         GPU-accelerated linear layer backward pass.
 
@@ -577,7 +577,7 @@ class VulkanBackwardOps:
         mean: np.ndarray,
         var: np.ndarray,
         eps: float = 1e-5
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         LayerNorm backward pass.
 
@@ -620,7 +620,7 @@ class VulkanBackwardOps:
         v: np.ndarray,
         attn_weights: np.ndarray,
         scale: float
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Multi-head attention backward pass.
 

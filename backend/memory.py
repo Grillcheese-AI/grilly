@@ -3,13 +3,16 @@ Memory operations for Vulkan backend.
 GPU-accelerated memory read/write operations for episodic memory.
 """
 
-import numpy as np
 import struct
+
+import numpy as np
+
 from .base import BufferMixin
+
 
 class VulkanMemory(BufferMixin):
     """Memory operations: read, write, inject gate"""
-    
+
     def __init__(self, core, pipelines, shaders, fnn_module=None):
         """Initialize the instance."""
 
@@ -17,7 +20,7 @@ class VulkanMemory(BufferMixin):
         self.pipelines = pipelines
         self.shaders = shaders
         self.fnn = fnn_module  # For activation_softmax in memory_read
-    
+
     def memory_write(self, new_key, new_value, memory_keys, memory_values, write_index, write_mode=0, blend_factor=0.5):
         """
         Write key-value pair to memory
@@ -92,7 +95,7 @@ class VulkanMemory(BufferMixin):
             return updated_keys, updated_values
         finally:
             self._release_buffers([buf_key, buf_value, buf_keys, buf_values])
-    
+
     def memory_read(self, queries, memory_keys, memory_values, temperature=None):
         """
         Retrieve memories using attention mechanism
