@@ -271,12 +271,28 @@ make build
 grilly/
 ├── .github/workflows/  # CI (lint, test, build) and CD (PyPI publish)
 ├── backend/            # Vulkan backend implementation
+├── mcp-servers/        # MCP servers for AI coders
+│   ├── grilly/         # TypeScript MCP server (grilly_docs, grilly_example, etc.)
+│   └── elephant-coder/ # Codebase memory (Python)
 ├── nn/                 # High-level neural network modules
 ├── shaders/            # GLSL compute shaders
 │   └── spv/            # Compiled SPIR-V bytecode
 ├── tests/              # Test suite
 ├── utils/              # HuggingFace bridge, utilities
 └── Makefile            # Build automation
+```
+
+### MCP Server for AI Coders
+
+The **grilly** MCP server (`mcp-servers/grilly/`) helps AI assistants use Grilly:
+
+- `grilly_docs` — API docs (overview, quickstart, snn, fnn, attention, faiss)
+- `grilly_example` — Example code snippets
+- `grilly_list_ops` — List backend operations
+- `grilly_run_python` — Execute Python snippets
+
+```bash
+cd mcp-servers/grilly && npm install && npm run build
 ```
 
 ### Makefile Commands

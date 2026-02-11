@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "grilly": {
+      "command": "node",
+      "args": ["ABSOLUTE_PATH_TO_grilly/mcp-servers/grilly/dist/index.js"],
+      "env": {}
+    }
+  }
+}

@@ -5,8 +5,8 @@ import pytest
 
 try:
     from grilly import Compute
-    from grilly.functional import dropout, linear
     from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.functional import dropout, linear
 except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
