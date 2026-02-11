@@ -1,18 +1,20 @@
 # Grilly
 
+[![CI](https://github.com/grillcheese-ai/grilly/actions/workflows/ci.yml/badge.svg)](https://github.com/grillcheese-ai/grilly/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/grilly)](https://pypi.org/project/grilly/)
+
 GPU-accelerated neural network framework using Vulkan compute shaders. Supports AMD, NVIDIA, and Intel GPUs.
 
-Documentation: https://grilly.readthedocs.io/
+**Documentation:** <https://grilly.readthedocs.io/>
 
 ## Release Status
 
-- Current release line: **v0.3.0**
+- Current release line: **v0.3.1**
 - Package name: `grilly`
-- Python support: `>=3.10`
+- Python support: `>=3.12`
 - Release channel: PyPI
 
-Versioning note:
-- The repository may publish timestamped patch builds within the `0.3.0` line (for example `0.3.0.<build>`), while keeping documentation and release notes aligned to `v0.3.0`.
+Versioning is automated via [setuptools-scm](https://github.com/pypa/setuptools_scm) from git tags (e.g. `v0.3.1` → `0.3.1`).
 
 ## Features
 
@@ -87,9 +89,9 @@ pip install -e .
 
 ## Requirements
 
-- Python >= 3.10
+- Python >= 3.12
 - Vulkan drivers
-- NumPy >= 1.24.0
+- NumPy
 - Supported GPUs: AMD (tested on RX 6750 XT), NVIDIA, Intel Arc
 
 ## Quick Start
@@ -193,10 +195,10 @@ export ALLOW_CPU_VULKAN=1
 ## Testing
 
 ```bash
-# All tests
+# All tests (requires Vulkan)
 make test
 
-# CPU-only tests (skip GPU)
+# CPU-only tests (no GPU required - for CI)
 make test-cpu
 
 # GPU tests only
@@ -206,7 +208,9 @@ make test-gpu
 make test-coverage
 
 # Or use pytest directly
-pytest grilly/tests/ -v
+pytest tests/ -v                    # all tests
+pytest tests/ -m "not gpu" -v       # CPU-only
+pytest tests/ -m "gpu" -v          # GPU-only
 ```
 
 ## Architecture
@@ -265,13 +269,14 @@ make build
 
 ```
 grilly/
+├── .github/workflows/  # CI (lint, test, build) and CD (PyPI publish)
 ├── backend/            # Vulkan backend implementation
 ├── nn/                 # High-level neural network modules
 ├── shaders/            # GLSL compute shaders
-│   └── spv/           # Compiled SPIR-V bytecode
-├── tests/             # Test suite
-├── utils/             # HuggingFace bridge, utilities
-└── Makefile           # Build automation
+│   └── spv/            # Compiled SPIR-V bytecode
+├── tests/              # Test suite
+├── utils/              # HuggingFace bridge, utilities
+└── Makefile            # Build automation
 ```
 
 ### Makefile Commands
@@ -285,25 +290,24 @@ Run `make help` to see all available commands:
 - `make lint` - Run linters
 - `make clean` - Clean build artifacts
 
-## Publishing to PyPI
+## CI/CD
 
-Use the release script:
+- **CI** (on push/PR): Lint (ruff), test (CPU-only), build
+- **CD** (on release): Build, attest provenance, publish to PyPI
+
+Releases are published automatically when you create a GitHub Release with a tag (e.g. `v0.3.1`). Configure `PYPI_API_TOKEN` in repository Secrets.
+
+Build artifacts are [attested](https://github.com/actions/attest-build-provenance) with Sigstore for provenance verification.
+
+### Manual publish (local)
 
 ```bash
-# from repository root
-powershell -ExecutionPolicy Bypass -File .\scripts\publish_pypi.ps1
+make build
+twine upload dist/*
+# Requires PYPI_API_TOKEN
 ```
 
-TestPyPI dry run:
-
-```bash
-powershell -ExecutionPolicy Bypass -File .\scripts\publish_pypi.ps1 -TestPyPI
-```
-
-Required environment variable:
-
-- `PYPI_API_TOKEN` (for PyPI)
-- `TEST_PYPI_API_TOKEN` (optional, if using `-TestPyPI`)
+For Test PyPI: `twine upload --repository testpypi dist/*`
 
 ### Contributing
 
