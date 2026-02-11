@@ -6,13 +6,28 @@ This changelog follows the spirit of **Keep a Changelog** and uses the terms **A
 
 ---
 
+## [0.3.1] - 2026-02-10
+
+### Added
+- **CI/CD**: GitHub Actions workflows for CI (lint, test, build) and CD (PyPI publish on release)
+- **Build provenance**: Sigstore attestation for release artifacts via `actions/attest-build-provenance`
+- **Versioning**: setuptools-scm from git tags (e.g. `v0.3.1` → `0.3.1`)
+
+### Changed
+- **Python**: Requires Python >= 3.12 (was >= 3.10)
+- **Ruff**: Config moved to `[tool.ruff.lint]`, rule ignores for N806, F403, F405, etc., per-file ignores for `__init__.py`, `tests/**`, `utils/numba_ops.py`, `scripts/*`, `tutorials/*`
+- **Tests**: Registered `gpu` marker in `conftest.py`; Vulkan-dependent tests use `@pytest.mark.gpu` so CPU-only runs (`pytest -m "not gpu"`) skip them in CI
+- **README**: Updated release status, badges (CI, PyPI), requirements, testing commands, CI/CD docs, project structure
+
+### Fixed
+- Ruff deprecation warnings and import/sorting issues across backend, utils, nn, experimental
+- Missing imports (e.g. `numpy`, `struct` in `backend/_glu_append.py`)
+- `up_out` → `input_out` in `utils/vulkan_sentence_transformer.py`
+- `TYPE_CHECKING` imports for `SimulationResult`, `LoRAModel`, `VulkanCore`, etc.
+
+---
+
 ## [0.3.0] - 2026-02-07
-
-# Changelog
-
-All notable changes to this repository are documented here.
-
-## Unreleased
 
 ### Added
 - `scripts/ingest_svc.py`: streaming SVC ingestion to avoid double-encoding (ingest once through `CognitiveController`) and support chunked processing for large JSONL files.
