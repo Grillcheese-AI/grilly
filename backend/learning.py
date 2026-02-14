@@ -10,6 +10,7 @@ GPU-accelerated learning operations:
 - Optimizer updates (Adam, SGD, etc.)
 """
 
+import os
 import struct
 
 import numpy as np
@@ -842,26 +843,39 @@ class VulkanLearning(BufferMixin):
         if token_ids.ndim == 1:
             token_ids = token_ids.reshape(1, -1)
 
+        # Preserve identity for weight-cache hits whenever possible.
+        if embedding_table.dtype != np.float32 or not embedding_table.flags.c_contiguous:
+            embedding_table = np.ascontiguousarray(embedding_table, dtype=np.float32)
+
         batch_size, seq_len = token_ids.shape
         vocab_size, embedding_dim = embedding_table.shape
 
-        tokens = token_ids.astype(np.uint32).flatten()
-        embeddings = embedding_table.astype(np.float32).flatten()
+        tokens = np.ascontiguousarray(token_ids.astype(np.uint32, copy=False)).reshape(-1)
         output = np.zeros(batch_size * seq_len * embedding_dim, dtype=np.float32)
 
         # Acquire buffers
         buf_tokens = self._acquire_buffer(tokens.nbytes)
-        buf_emb = self._acquire_buffer(embeddings.nbytes)
         buf_out = self._acquire_buffer(output.nbytes)
+        # Cache embedding tables on GPU to avoid re-uploading full vocabulary each step.
+        buf_emb, _ = self._get_or_upload_weight(embedding_table)
 
         try:
             # Upload
             self._upload_buffer(buf_tokens, tokens)
-            self._upload_buffer(buf_emb, embeddings)
+
+            shader_name = "embedding-lookup"
+            tiled_min_bytes = int(
+                os.getenv("GRILLY_EMBEDDING_TILED_MIN_BYTES", str(64 * 1024 * 1024))
+            )
+            if (
+                "embedding-lookup-tiled" in self.shaders
+                and embedding_table.nbytes >= tiled_min_bytes
+            ):
+                shader_name = "embedding-lookup-tiled"
 
             # Get pipeline
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                "embedding-lookup", 3, push_constant_size=16
+                shader_name, 3, push_constant_size=16
             )
 
             # Create descriptor set
@@ -869,7 +883,7 @@ class VulkanLearning(BufferMixin):
                 desc_layout,
                 [
                     (self._get_buffer_handle(buf_tokens), tokens.nbytes),
-                    (self._get_buffer_handle(buf_emb), embeddings.nbytes),
+                    (self._get_buffer_handle(buf_emb), embedding_table.nbytes),
                     (self._get_buffer_handle(buf_out), output.nbytes),
                 ],
             )
@@ -878,17 +892,30 @@ class VulkanLearning(BufferMixin):
             push_constants = struct.pack("IIII", batch_size, seq_len, vocab_size, embedding_dim)
 
             # Dispatch
-            workgroups = (batch_size * seq_len + 255) // 256
-            self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
-            )
+            total_tokens = batch_size * seq_len
+            if shader_name == "embedding-lookup-tiled":
+                workgroups_x = (total_tokens + 15) // 16
+                workgroups_y = (embedding_dim + 15) // 16
+                self.core._dispatch_compute(
+                    pipeline,
+                    pipeline_layout,
+                    descriptor_set,
+                    workgroups_x,
+                    push_constants,
+                    workgroup_y=workgroups_y,
+                )
+            else:
+                workgroups = (total_tokens + 255) // 256
+                self.core._dispatch_compute(
+                    pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+                )
 
             # Download
             result = self._download_buffer(buf_out, output.nbytes, np.float32)
 
             return result.reshape(batch_size, seq_len, embedding_dim)
         finally:
-            self._release_buffers([buf_tokens, buf_emb, buf_out])
+            self._release_buffers([buf_tokens, buf_out])
 
     def embedding_backward(
         self, grad_output: np.ndarray, token_ids: np.ndarray, vocab_size: int, embedding_dim: int

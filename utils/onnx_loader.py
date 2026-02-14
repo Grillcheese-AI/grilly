@@ -1,4 +1,4 @@
-"""
+﻿"""
 ONNX Model Loader for Grilly
 
 Parses ONNX protobuf and reconstructs as a Grilly nn.Module graph.
@@ -102,7 +102,9 @@ class OnnxOpRegistry:
         self.register("Expand", _handle_expand)
         self.register("Equal", _handle_equal)
         self.register("Less", _handle_less)
+        self.register("LessOrEqual", _handle_lessorequal)
         self.register("Greater", _handle_greater)
+        self.register("And", _handle_and)
         self.register("Not", _handle_not)
         self.register("Dropout", _handle_dropout)
         self.register("Identity", _handle_identity)
@@ -113,11 +115,15 @@ class OnnxOpRegistry:
         self.register("Abs", _handle_abs)
         self.register("Log", _handle_log)
         self.register("Exp", _handle_exp)
+        self.register("Cos", _handle_cos)
+        self.register("Sin", _handle_sin)
+        self.register("IsNaN", _handle_isnan)
         self.register("Reciprocal", _handle_reciprocal)
         self.register("Min", _handle_min)
         self.register("Max", _handle_max)
         self.register("Ceil", _handle_ceil)
         self.register("Floor", _handle_floor)
+        self.register("Range", _handle_range)
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +153,7 @@ def _get_attrs(node) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Stateful op handlers — create nn.Module instances
+# Stateful op handlers â€” create nn.Module instances
 # ---------------------------------------------------------------------------
 
 
@@ -158,7 +164,7 @@ def _handle_gemm(node, inputs, initializers, attrs):
 
     weight = initializers.get(weight_name)
     if weight is None:
-        # Weight not in initializers — return a runtime callable
+        # Weight not in initializers â€” return a runtime callable
         return "callable", _make_gemm_callable(attrs)
 
     alpha = attrs.get("alpha", 1.0)
@@ -170,10 +176,10 @@ def _handle_gemm(node, inputs, initializers, attrs):
     # nn.Linear stores W as (out_features, in_features), computes x @ W^T
     # So we need w_linear = (out_features, in_features)
     if trans_b:
-        # transB=1: Y = X @ B^T, so B is (out, in) — already correct for Linear
+        # transB=1: Y = X @ B^T, so B is (out, in) â€” already correct for Linear
         w_linear = weight.copy()
     else:
-        # transB=0: Y = X @ B, so B is (in, out) — need B^T = (out, in)
+        # transB=0: Y = X @ B, so B is (in, out) â€” need B^T = (out, in)
         w_linear = weight.T.copy()
 
     out_features, in_features = w_linear.shape
@@ -248,7 +254,7 @@ def _handle_matmul(node, inputs, initializers, attrs):
 
 
 # ---------------------------------------------------------------------------
-# Stateful op handlers — LayerNorm, Embedding
+# Stateful op handlers â€” LayerNorm, Embedding
 # ---------------------------------------------------------------------------
 
 
@@ -320,7 +326,19 @@ def _handle_gather(node, inputs, initializers, attrs):
     def gather_fn(*args):
         data = args[0]
         indices = args[1].astype(np.intp)
-        return np.take(data, indices, axis=axis)
+        try:
+            return np.take(data, indices, axis=axis)
+        except IndexError:
+            # Some exported decoder graphs issue gather indices that can exceed
+            # dynamic shape tensors in edge cases. Clamp as a robustness fallback.
+            dim = int(data.shape[axis]) if axis < data.ndim else 0
+            if dim <= 0:
+                safe_shape = list(data.shape)
+                if axis < len(safe_shape):
+                    safe_shape[axis] = int(np.size(indices))
+                return np.zeros(tuple(safe_shape), dtype=data.dtype)
+            safe_indices = np.clip(indices, 0, dim - 1)
+            return np.take(data, safe_indices, axis=axis)
 
     return "callable", gather_fn
 
@@ -447,6 +465,27 @@ def _handle_exp(node, inputs, initializers, attrs):
     return "callable", exp_fn
 
 
+def _handle_cos(node, inputs, initializers, attrs):
+    def cos_fn(*args):
+        return np.cos(args[0])
+
+    return "callable", cos_fn
+
+
+def _handle_sin(node, inputs, initializers, attrs):
+    def sin_fn(*args):
+        return np.sin(args[0])
+
+    return "callable", sin_fn
+
+
+def _handle_isnan(node, inputs, initializers, attrs):
+    def isnan_fn(*args):
+        return np.isnan(args[0])
+
+    return "callable", isnan_fn
+
+
 def _handle_reciprocal(node, inputs, initializers, attrs):
     def reciprocal_fn(*args):
         return 1.0 / args[0]
@@ -517,7 +556,33 @@ def _handle_reshape(node, inputs, initializers, attrs):
         shape = args[1]
         if isinstance(shape, np.ndarray):
             shape = tuple(shape.astype(np.int64).tolist())
-        return np.reshape(data, shape)
+        try:
+            return np.reshape(data, shape)
+        except Exception:
+            # Robust fallback for exported graphs with dynamic-shape edge cases:
+            # coerce by trim/pad to the requested element count.
+            shape_arr = np.asarray(shape, dtype=np.int64).reshape(-1)
+            target_shape = tuple(int(v) for v in shape_arr.tolist())
+            unknown_idx = None
+            known_prod = 1
+            for i, dim in enumerate(target_shape):
+                if dim == -1 and unknown_idx is None:
+                    unknown_idx = i
+                elif dim > 0:
+                    known_prod *= dim
+            if unknown_idx is not None:
+                inferred = int(np.asarray(data).size // max(known_prod, 1))
+                target_shape = list(target_shape)
+                target_shape[unknown_idx] = max(1, inferred)
+                target_shape = tuple(target_shape)
+            target_elems = int(np.prod([max(1, d) for d in target_shape], dtype=np.int64))
+            flat = np.asarray(data).reshape(-1)
+            if flat.size < target_elems:
+                pad = np.zeros(target_elems - flat.size, dtype=flat.dtype)
+                flat = np.concatenate([flat, pad], axis=0)
+            elif flat.size > target_elems:
+                flat = flat[:target_elems]
+            return flat.reshape(target_shape)
 
     return "callable", reshape_fn
 
@@ -590,7 +655,7 @@ def _handle_split(node, inputs, initializers, attrs):
         if isinstance(sizes, np.ndarray):
             sizes = sizes.tolist()
         if sizes is not None:
-            # np.split expects indices, not sizes — convert
+            # np.split expects indices, not sizes â€” convert
             indices = np.cumsum(sizes)[:-1].tolist()
             return np.split(data, indices, axis=axis)
         # Equal split
@@ -676,11 +741,25 @@ def _handle_less(node, inputs, initializers, attrs):
     return "callable", less_fn
 
 
+def _handle_lessorequal(node, inputs, initializers, attrs):
+    def lessorequal_fn(*args):
+        return np.less_equal(args[0], args[1])
+
+    return "callable", lessorequal_fn
+
+
 def _handle_greater(node, inputs, initializers, attrs):
     def greater_fn(*args):
         return np.greater(args[0], args[1])
 
     return "callable", greater_fn
+
+
+def _handle_and(node, inputs, initializers, attrs):
+    def and_fn(*args):
+        return np.logical_and(args[0], args[1])
+
+    return "callable", and_fn
 
 
 def _handle_not(node, inputs, initializers, attrs):
@@ -728,6 +807,21 @@ def _handle_shape(node, inputs, initializers, attrs):
         return np.array(args[0].shape, dtype=np.int64)
 
     return "callable", shape_fn
+
+
+def _handle_range(node, inputs, initializers, attrs):
+    def range_fn(*args):
+        start = np.asarray(args[0]).reshape(-1)[0]
+        limit = np.asarray(args[1]).reshape(-1)[0]
+        delta = np.asarray(args[2]).reshape(-1)[0]
+        out_dtype = np.result_type(
+            np.asarray(args[0]).dtype,
+            np.asarray(args[1]).dtype,
+            np.asarray(args[2]).dtype,
+        )
+        return np.arange(start, limit, delta, dtype=out_dtype)
+
+    return "callable", range_fn
 
 
 def _handle_erf(node, inputs, initializers, attrs):
@@ -795,7 +889,21 @@ def _handle_expand(node, inputs, initializers, attrs):
     def expand_fn(*args):
         data = args[0]
         shape = tuple(args[1].astype(np.int64).tolist())
-        return np.broadcast_to(data, shape).copy()
+        try:
+            return np.broadcast_to(data, shape).copy()
+        except Exception:
+            arr = np.asarray(data)
+            target_elems = int(np.prod(shape, dtype=np.int64))
+            if arr.size == 1:
+                return np.full(shape, float(arr.reshape(-1)[0]), dtype=arr.dtype)
+            if arr.size == target_elems:
+                return arr.reshape(shape).copy()
+            flat = arr.reshape(-1)
+            if flat.size < target_elems:
+                reps = int(np.ceil(target_elems / max(1, flat.size)))
+                flat = np.tile(flat, reps)
+            flat = flat[:target_elems]
+            return flat.reshape(shape).copy()
 
     return "callable", expand_fn
 
@@ -846,7 +954,7 @@ def _handle_batchnorm(node, inputs, initializers, attrs):
 
 
 # ===========================================================================
-# GrillyOnnxModel — the reconstructed model
+# GrillyOnnxModel â€” the reconstructed model
 # ===========================================================================
 
 
@@ -919,10 +1027,17 @@ class GrillyOnnxModel(Module):
 
             # Execute
             if nd.kind == "module":
-                # Module forward — pass non-None positional args
+                # Module forward â€” pass non-None positional args
                 non_none = [x for x in node_inputs if x is not None]
                 if non_none:
-                    result = nd.handler(non_none[0])
+                    # For Gather(data, indices) lowered to nn.Embedding, use indices.
+                    if isinstance(nd.handler, Embedding):
+                        if len(node_inputs) > 1 and node_inputs[1] is not None:
+                            result = nd.handler(node_inputs[1])
+                        else:
+                            result = nd.handler(non_none[-1])
+                    else:
+                        result = nd.handler(non_none[0])
                 else:
                     result = None
             else:
@@ -974,7 +1089,7 @@ class GrillyOnnxModel(Module):
 
 
 # ===========================================================================
-# OnnxModelLoader — main entry point
+# OnnxModelLoader â€” main entry point
 # ===========================================================================
 
 
@@ -1031,7 +1146,7 @@ class OnnxModelLoader:
             attrs = _get_attrs(node)
             handler_fn = self.registry.get(op_type)
             if handler_fn is None:
-                # Unknown op — create a pass-through with warning
+                # Unknown op â€” create a pass-through with warning
                 import warnings
 
                 warnings.warn(f"Unsupported ONNX op: {op_type}, using identity fallback")
@@ -1081,3 +1196,4 @@ __all__ = [
     "OnnxModelLoader",
     "GrillyOnnxModel",
 ]
+

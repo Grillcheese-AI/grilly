@@ -3,6 +3,7 @@ Neural Network Modules (PyTorch-like)
 All modules use GPU-accelerated Vulkan shaders
 """
 
+import os
 import numpy as np
 
 from .module import Module
@@ -1006,7 +1007,14 @@ class Embedding(Module):
         backend = self._get_backend()
         weight = _get_param_array(self.weight)
 
-        if hasattr(backend, "learning") and hasattr(backend.learning, "embedding_lookup"):
+        gpu_lookup_enabled = os.getenv("GRILLY_EMBEDDING_GPU_LOOKUP", "1").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+        if gpu_lookup_enabled and hasattr(backend, "learning") and hasattr(
+            backend.learning, "embedding_lookup"
+        ):
             try:
                 return backend.learning.embedding_lookup(x, weight)
             except Exception:

@@ -400,20 +400,44 @@ class VulkanCore:
 
     def _upload_buffer(self, buffer, memory, data: np.ndarray):
         """Upload numpy array to GPU buffer"""
-        data_ptr = vkMapMemory(self.device, memory, 0, data.nbytes, 0)
-        memview = memoryview(data_ptr)
-        memview[: data.nbytes] = data.tobytes()
-        vkUnmapMemory(self.device, memory)
+        arr = np.ascontiguousarray(data)
+        upload_size = int(arr.nbytes)
+        if upload_size == 0:
+            return
+
+        # Guard against out-of-bounds writes when callers provide mismatched
+        # buffer/data sizes.
+        mem_req = vkGetBufferMemoryRequirements(self.device, buffer)
+        if upload_size > int(mem_req.size):
+            raise ValueError(
+                f"Upload size {upload_size} exceeds buffer allocation {int(mem_req.size)}"
+            )
+
+        data_ptr = vkMapMemory(self.device, memory, 0, upload_size, 0)
+        try:
+            dst = memoryview(data_ptr)
+            src = memoryview(arr).cast("B")
+            # Chunked copies are more stable for large uploads on some drivers.
+            chunk_bytes = 16 * 1024 * 1024
+            for offset in range(0, upload_size, chunk_bytes):
+                end = min(offset + chunk_bytes, upload_size)
+                dst[offset:end] = src[offset:end]
+        finally:
+            vkUnmapMemory(self.device, memory)
 
     def _download_buffer(self, memory, size: int, dtype=np.float32) -> np.ndarray:
         """Download GPU buffer to numpy array"""
+        if size <= 0:
+            return np.empty(0, dtype=dtype)
+
         data_ptr = vkMapMemory(self.device, memory, 0, size, 0)
-        memview = memoryview(data_ptr)
-        element_size = np.dtype(dtype).itemsize
-        count = size // element_size
-        result = np.frombuffer(memview, dtype=dtype, count=count).copy()
-        vkUnmapMemory(self.device, memory)
-        return result
+        try:
+            memview = memoryview(data_ptr)[:size]
+            element_size = np.dtype(dtype).itemsize
+            count = size // element_size
+            return np.frombuffer(memview, dtype=dtype, count=count).copy()
+        finally:
+            vkUnmapMemory(self.device, memory)
 
     def _dispatch_compute(
         self,

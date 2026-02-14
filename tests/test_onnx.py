@@ -374,6 +374,76 @@ class TestOnnxOpCoverage:
         expected = np.array([[10, 20, 10, 20]], dtype=np.float32)
         np.testing.assert_array_equal(out, expected)
 
+    def test_less_or_equal(self):
+        proto = self._make_single_op_model("LessOrEqual", [(1, 4), (1, 4)], (1, 4))
+        model = OnnxModelLoader.load_from_proto(proto)
+        a = np.array([[1, 2, 3, 4]], dtype=np.float32)
+        b = np.array([[1, 3, 2, 4]], dtype=np.float32)
+        out = model(a, b)
+        expected = np.array([[True, True, False, True]])
+        np.testing.assert_array_equal(out, expected)
+
+    def test_and(self):
+        a_vi = helper.make_tensor_value_info("a", TensorProto.BOOL, [1, 4])
+        b_vi = helper.make_tensor_value_info("b", TensorProto.BOOL, [1, 4])
+        y_info = helper.make_tensor_value_info("Y", TensorProto.BOOL, [1, 4])
+        node = helper.make_node("And", ["a", "b"], ["Y"])
+        graph = helper.make_graph([node], "test_and", [a_vi, b_vi], [y_info])
+        proto = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+        proto.ir_version = 8
+
+        model = OnnxModelLoader.load_from_proto(proto)
+        a = np.array([[True, True, False, False]])
+        b = np.array([[True, False, True, False]])
+        out = model(a, b)
+        expected = np.array([[True, False, False, False]])
+        np.testing.assert_array_equal(out, expected)
+
+    def test_cos(self):
+        proto = self._make_single_op_model("Cos", [(1, 4)], (1, 4))
+        model = OnnxModelLoader.load_from_proto(proto)
+        x = np.array([[0.0, np.pi / 2, np.pi, 3 * np.pi / 2]], dtype=np.float32)
+        out = model(x)
+        expected = np.array([[1.0, 0.0, -1.0, 0.0]], dtype=np.float32)
+        np.testing.assert_allclose(out, expected, atol=1e-5)
+
+    def test_sin(self):
+        proto = self._make_single_op_model("Sin", [(1, 4)], (1, 4))
+        model = OnnxModelLoader.load_from_proto(proto)
+        x = np.array([[0.0, np.pi / 2, np.pi, 3 * np.pi / 2]], dtype=np.float32)
+        out = model(x)
+        expected = np.array([[0.0, 1.0, 0.0, -1.0]], dtype=np.float32)
+        np.testing.assert_allclose(out, expected, atol=1e-5)
+
+    def test_isnan(self):
+        x_vi = helper.make_tensor_value_info("X", TensorProto.FLOAT, [1, 4])
+        y_info = helper.make_tensor_value_info("Y", TensorProto.BOOL, [1, 4])
+        node = helper.make_node("IsNaN", ["X"], ["Y"])
+        graph = helper.make_graph([node], "test_isnan", [x_vi], [y_info])
+        proto = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+        proto.ir_version = 8
+
+        model = OnnxModelLoader.load_from_proto(proto)
+        x = np.array([[0.0, np.nan, 2.0, np.nan]], dtype=np.float32)
+        out = model(x)
+        expected = np.array([[False, True, False, True]])
+        np.testing.assert_array_equal(out, expected)
+
+    def test_range(self):
+        start_vi = helper.make_tensor_value_info("start", TensorProto.INT64, [])
+        limit_vi = helper.make_tensor_value_info("limit", TensorProto.INT64, [])
+        delta_vi = helper.make_tensor_value_info("delta", TensorProto.INT64, [])
+        y_info = helper.make_tensor_value_info("Y", TensorProto.INT64, [None])
+        node = helper.make_node("Range", ["start", "limit", "delta"], ["Y"])
+        graph = helper.make_graph([node], "test_range", [start_vi, limit_vi, delta_vi], [y_info])
+        proto = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+        proto.ir_version = 8
+
+        model = OnnxModelLoader.load_from_proto(proto)
+        out = model(np.array(1, dtype=np.int64), np.array(7, dtype=np.int64), np.array(2, dtype=np.int64))
+        expected = np.array([1, 3, 5], dtype=np.int64)
+        np.testing.assert_array_equal(out, expected)
+
 
 # ===========================================================================
 # Export tests
@@ -565,8 +635,14 @@ class TestOnnxOpRegistry:
             "Expand",
             "Equal",
             "Less",
+            "LessOrEqual",
             "Greater",
+            "And",
             "Not",
+            "Cos",
+            "Sin",
+            "IsNaN",
+            "Range",
             "Dropout",
             "Identity",
         ]

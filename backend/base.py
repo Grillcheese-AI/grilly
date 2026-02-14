@@ -143,6 +143,14 @@ class BufferMixin:
             usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
         pool = self.buffer_pool
         if pool is not None:
+            max_bucket_power = getattr(pool, "MAX_BUCKET_POWER", None)
+            if max_bucket_power is not None:
+                max_bucket_size = 1 << int(max_bucket_power)
+                if size > max_bucket_size:
+                    # Oversized allocations must bypass power-of-two pool bucketing.
+                    # Otherwise a capped bucket can under-allocate and overflow on upload.
+                    handle, memory = self.core._create_buffer(size, usage)
+                    return _DirectBuffer(handle, memory, size)
             return pool.acquire(size, usage)
         handle, memory = self.core._create_buffer(size, usage)
         return _DirectBuffer(handle, memory, size)
@@ -215,7 +223,7 @@ class BufferMixin:
             return self._weight_cache[key][0], False
 
         # Cache miss: upload
-        flat = np.ascontiguousarray(data, dtype=np.float32).flatten()
+        flat = np.ascontiguousarray(data, dtype=np.float32).reshape(-1)
         buf = self._acquire_buffer(flat.nbytes)
         self._upload_buffer(buf, flat)
 

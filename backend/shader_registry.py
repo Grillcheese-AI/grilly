@@ -127,6 +127,7 @@ def _initialize_registry():
         "attention-output",
         "attention-concat-heads",
         "embedding-lookup",
+        "embedding-lookup-tiled",
         "embedding-pool-mask",
         "fnn-linear",
         "fnn-layernorm",
