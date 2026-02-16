@@ -30,6 +30,19 @@ class VulkanLearning(BufferMixin):
         self.pipelines = pipelines
         self.shaders = shaders
 
+    def _free_descriptor_set(self, descriptor_set) -> None:
+        if descriptor_set is None or not VULKAN_AVAILABLE:
+            return
+        try:
+            vkFreeDescriptorSets(
+                self.core.device,
+                self.core.descriptor_pool,
+                1,
+                [descriptor_set],
+            )
+        except Exception:
+            pass
+
     # ==================== Fisher / EWC ====================
 
     def fisher_info_update(
@@ -62,6 +75,7 @@ class VulkanLearning(BufferMixin):
         # Acquire buffers
         buf_grads = self._acquire_buffer(grads_flat.nbytes)
         buf_fisher = self._acquire_buffer(fisher_flat.nbytes)
+        descriptor_set = None
 
         try:
             # Upload
@@ -98,6 +112,7 @@ class VulkanLearning(BufferMixin):
 
             return result[:num_params]
         finally:
+            self._free_descriptor_set(descriptor_set)
             self._release_buffers([buf_grads, buf_fisher])
 
     def ewc_penalty(
@@ -132,6 +147,7 @@ class VulkanLearning(BufferMixin):
         buf_optimal = self._acquire_buffer(optimal.nbytes)
         buf_fisher = self._acquire_buffer(fisher_flat.nbytes)
         buf_penalty = self._acquire_buffer(penalty.nbytes)
+        descriptor_set = None
 
         try:
             # Upload
@@ -169,6 +185,7 @@ class VulkanLearning(BufferMixin):
 
             return result[:num_params]
         finally:
+            self._free_descriptor_set(descriptor_set)
             self._release_buffers([buf_current, buf_optimal, buf_fisher, buf_penalty])
 
     def natural_gradient(
@@ -201,6 +218,7 @@ class VulkanLearning(BufferMixin):
         buf_grads = self._acquire_buffer(grads.nbytes)
         buf_fisher = self._acquire_buffer(fisher_flat.nbytes)
         buf_scaled = self._acquire_buffer(scaled.nbytes)
+        descriptor_set = None
 
         try:
             # Upload
@@ -236,6 +254,7 @@ class VulkanLearning(BufferMixin):
 
             return result[:num_params]
         finally:
+            self._free_descriptor_set(descriptor_set)
             self._release_buffers([buf_grads, buf_fisher, buf_scaled])
 
     # ==================== NLMS Adaptive Filtering ====================
@@ -268,6 +287,7 @@ class VulkanLearning(BufferMixin):
         buf_w = self._acquire_buffer(w.nbytes)
         buf_b = self._acquire_buffer(b.nbytes)
         buf_pred = self._acquire_buffer(preds.nbytes)
+        descriptor_set = None
 
         try:
             # Upload
@@ -305,6 +325,7 @@ class VulkanLearning(BufferMixin):
 
             return result[0] if batch_size == 1 else result[:batch_size]
         finally:
+            self._free_descriptor_set(descriptor_set)
             self._release_buffers([buf_x, buf_w, buf_b, buf_pred])
 
     def nlms_update(
@@ -355,6 +376,7 @@ class VulkanLearning(BufferMixin):
         buf_b = self._acquire_buffer(b.nbytes)
         buf_mu = self._acquire_buffer(mu.nbytes)
         buf_err = self._acquire_buffer(error_out.nbytes)
+        descriptor_set = None
 
         try:
             # Upload
@@ -401,6 +423,7 @@ class VulkanLearning(BufferMixin):
 
             return w_out, b_out, mu_out, err_out
         finally:
+            self._free_descriptor_set(descriptor_set)
             self._release_buffers([buf_x, buf_pred, buf_true, buf_w, buf_b, buf_mu, buf_err])
 
     # ==================== Whitening Transform ====================
@@ -442,6 +465,7 @@ class VulkanLearning(BufferMixin):
         buf_mu = self._acquire_buffer(mu.nbytes)
         buf_var = self._acquire_buffer(var.nbytes)
         buf_out = self._acquire_buffer(output.nbytes)
+        descriptor_set = None
 
         try:
             # Upload
@@ -482,6 +506,7 @@ class VulkanLearning(BufferMixin):
             result = result.reshape(batch_size, dim)
             return result, mu_out[:dim], var_out[:dim]
         finally:
+            self._free_descriptor_set(descriptor_set)
             self._release_buffers([buf_x, buf_mu, buf_var, buf_out])
 
     # ==================== Bridge Operations ====================
@@ -549,6 +574,7 @@ class VulkanLearning(BufferMixin):
         buf_b = self._acquire_buffer(b.nbytes)
         buf_rand = self._acquire_buffer(random_nums.nbytes)
         buf_temp = self._acquire_buffer(temp.nbytes)
+        descriptor_set = None
 
         try:
             # Upload
@@ -612,6 +638,7 @@ class VulkanLearning(BufferMixin):
 
             return result.reshape(batch_size, num_timesteps, spike_dim)
         finally:
+            self._free_descriptor_set(descriptor_set)
             self._release_buffers([buf_x, buf_spikes, buf_W, buf_b, buf_rand, buf_temp])
 
     def spikes_to_continuous(
@@ -677,6 +704,7 @@ class VulkanLearning(BufferMixin):
         buf_W = self._acquire_buffer(W.nbytes)
         buf_b = self._acquire_buffer(b.nbytes)
         buf_temp = self._acquire_buffer(temp.nbytes)
+        descriptor_set = None
 
         try:
             # Upload
@@ -744,6 +772,7 @@ class VulkanLearning(BufferMixin):
             output_dim_actual = output_dim if use_projection else spike_dim
             return result[: batch_size * output_dim_actual].reshape(batch_size, output_dim_actual)
         finally:
+            self._free_descriptor_set(descriptor_set)
             self._release_buffers([buf_spikes, buf_out, buf_tw, buf_W, buf_b, buf_temp])
 
     # ==================== Domain Routing ====================
@@ -783,6 +812,7 @@ class VulkanLearning(BufferMixin):
         buf_weights = self._acquire_buffer(weights.nbytes)
         buf_routing = self._acquire_buffer(routing.nbytes)
         buf_selected = self._acquire_buffer(selected.nbytes)
+        descriptor_set = None
 
         try:
             # Upload
@@ -825,6 +855,7 @@ class VulkanLearning(BufferMixin):
                 selected_out.reshape(batch_size, top_k),
             )
         finally:
+            self._free_descriptor_set(descriptor_set)
             self._release_buffers([buf_probs, buf_weights, buf_routing, buf_selected])
 
     # ==================== Embedding Operations ====================
@@ -858,6 +889,7 @@ class VulkanLearning(BufferMixin):
         buf_out = self._acquire_buffer(output.nbytes)
         # Cache embedding tables on GPU to avoid re-uploading full vocabulary each step.
         buf_emb, _ = self._get_or_upload_weight(embedding_table)
+        descriptor_set = None
 
         try:
             # Upload
@@ -915,6 +947,7 @@ class VulkanLearning(BufferMixin):
 
             return result.reshape(batch_size, seq_len, embedding_dim)
         finally:
+            self._free_descriptor_set(descriptor_set)
             self._release_buffers([buf_tokens, buf_out])
 
     def embedding_backward(
@@ -961,6 +994,7 @@ class VulkanLearning(BufferMixin):
         buf_tokens = self._acquire_buffer(tokens.nbytes)
         buf_grad = self._acquire_buffer(grad_flat.nbytes)
         buf_grad_weight = self._acquire_buffer(grad_weight.nbytes)
+        descriptor_set = None
 
         try:
             # Upload
@@ -997,6 +1031,7 @@ class VulkanLearning(BufferMixin):
 
             return result.reshape(vocab_size, embedding_dim)
         finally:
+            self._free_descriptor_set(descriptor_set)
             self._release_buffers([buf_tokens, buf_grad, buf_grad_weight])
 
     # ==================== Optimizer Updates ====================

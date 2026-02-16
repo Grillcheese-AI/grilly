@@ -893,6 +893,21 @@ def _handle_expand(node, inputs, initializers, attrs):
             return np.broadcast_to(data, shape).copy()
         except Exception:
             arr = np.asarray(data)
+            if arr.ndim == len(shape):
+                # Torch-exported graphs often encode "keep dim" as 1 in Expand
+                # after normalizing -1 placeholders; preserve non-unit source dims.
+                adjusted_shape = list(shape)
+                changed = False
+                for dim_idx, (src_dim, tgt_dim) in enumerate(zip(arr.shape, adjusted_shape, strict=False)):
+                    if int(tgt_dim) == 1 and int(src_dim) > 1:
+                        adjusted_shape[dim_idx] = int(src_dim)
+                        changed = True
+                if changed:
+                    try:
+                        return np.broadcast_to(arr, tuple(adjusted_shape)).copy()
+                    except Exception:
+                        pass
+
             target_elems = int(np.prod(shape, dtype=np.int64))
             if arr.size == 1:
                 return np.full(shape, float(arr.reshape(-1)[0]), dtype=arr.dtype)
