@@ -313,8 +313,9 @@ class DentateGyrus(Module):
         # Try GPU shader if available
         if hasattr(backend, "shaders") and "dg-sparse-expand" in backend.shaders:
             try:
-                # For now, use linear projection (full DG shader would do top-k sparsification)
-                activations = backend.linear(x, weight_data.T, None)
+                # backend.linear computes x @ W.T + b, and weight_data is (out_dim, in_dim),
+                # so pass weight_data directly to get activations = x @ weight_data.T
+                activations = backend.linear(x, weight_data, None)
 
                 # Apply top-k sparsification (CPU for now, would be in shader)
                 k = max(1, int(self.out_dim * self.sparsity))
