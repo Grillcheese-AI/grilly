@@ -222,8 +222,11 @@ class VulkanTensor:
                 # Fallback to direct allocation
                 self._gpu_buffer, self._gpu_memory = backend.create_buffer(size, usage="storage")
 
-            # Upload to GPU
-            backend.upload_buffer(self._gpu_buffer, self._gpu_memory, self._cpu_data)
+            # Upload to GPU — use VMA path if pooled buffer
+            if self._pooled_buffer is not None and hasattr(self._pooled_buffer, "pool") and self._pooled_buffer.pool is not None:
+                self._pooled_buffer.pool.upload_data(self._pooled_buffer, self._cpu_data)
+            else:
+                backend.upload_buffer(self._gpu_buffer, self._gpu_memory, self._cpu_data)
             self._gpu_valid = True
             self._uploaded = True  # Backwards compatibility
 
@@ -240,7 +243,18 @@ class VulkanTensor:
             raise RuntimeError("Cannot download: no valid GPU data")
 
         try:
-            # Fast path: use cached core reference (avoids full Compute() re-init)
+            size = self._cpu_data.nbytes
+
+            # VMA path: use pool's vmaMapMemory (not vkMapMemory)
+            pooled = getattr(self, "_pooled_buffer", None)
+            if pooled is not None and hasattr(pooled, "pool") and pooled.pool is not None:
+                self._cpu_data = pooled.pool.download_data(
+                    pooled, size, dtype=self._dtype
+                ).reshape(self._shape)
+                self._cpu_valid = True
+                return
+
+            # Legacy path: use core._download_buffer (vkMapMemory)
             core = self._core
             if core is None:
                 from grilly import Compute
@@ -249,9 +263,8 @@ class VulkanTensor:
                 core = backend.core
                 self._core = core
 
-            # Download from GPU
             self._cpu_data = core._download_buffer(
-                self._gpu_memory, self._cpu_data.nbytes, dtype=self._dtype
+                self._gpu_memory, size, dtype=self._dtype
             ).reshape(self._shape)
             self._cpu_valid = True
 
