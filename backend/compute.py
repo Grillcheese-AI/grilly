@@ -241,6 +241,50 @@ class VulkanCompute:
         """GPU-accelerated cross-entropy loss"""
         return self.fnn.cross_entropy_loss(*args, **kwargs)
 
+    def activation_gelu_backward(self, *args, **kwargs):
+        """GPU-accelerated GELU backward pass"""
+        return self.fnn.activation_gelu_backward(*args, **kwargs)
+
+    def activation_gcu_backward(self, *args, **kwargs):
+        """GPU-accelerated GCU backward pass"""
+        return self.fnn.activation_gcu_backward(*args, **kwargs)
+
+    def activation_roswish_backward(self, *args, **kwargs):
+        """GPU-accelerated RoSwish backward pass"""
+        return self.fnn.activation_roswish_backward(*args, **kwargs)
+
+    def activation_swiglu_backward(self, *args, **kwargs):
+        """GPU-accelerated SwiGLU backward pass"""
+        return self.fnn.activation_swiglu_backward(*args, **kwargs)
+
+    def layernorm_backward(self, *args, **kwargs):
+        """GPU-accelerated LayerNorm backward pass"""
+        return self.fnn.layernorm_backward(*args, **kwargs)
+
+    def softmax_backward(self, *args, **kwargs):
+        """GPU-accelerated Softmax backward pass"""
+        return self.fnn.softmax_backward(*args, **kwargs)
+
+    def residual(self, *args, **kwargs):
+        """GPU-accelerated residual addition"""
+        return self.fnn.residual(*args, **kwargs)
+
+    def dropout(self, *args, **kwargs):
+        """GPU-accelerated dropout"""
+        return self.fnn.dropout(*args, **kwargs)
+
+    def flash_attention2(self, *args, **kwargs):
+        """GPU-accelerated Flash Attention 2"""
+        return self.attention.flash_attention2(*args, **kwargs)
+
+    def adam_update(self, *args, **kwargs):
+        """GPU-accelerated Adam optimizer step"""
+        return self.learning.adam_update(*args, **kwargs)
+
+    def get_tiling_info(self):
+        """Get GPU tiling support info"""
+        return self.core.get_tiling_info()
+
     def ssm_fused_math(self, *args, **kwargs):
         """GPU-accelerated fused selective-scan math for SSM blocks."""
         return self.learning.ssm_fused_math(*args, **kwargs)
