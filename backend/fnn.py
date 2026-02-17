@@ -1168,12 +1168,13 @@ class VulkanFNN(BufferMixin):
         cross-entropy gradients separately.
 
         Args:
-            logits: Raw logits (batch_size, num_classes). May be VulkanTensor.
-            targets: Target class indices (batch_size,) as integers or floats
+            logits: Raw logits (batch_size, num_classes) or (B, S, num_classes).
+                    May be VulkanTensor (zero-copy on GPU).
+            targets: Target class indices as integers or floats.
             return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
 
         Returns:
-            Gradient w.r.t. logits (batch_size, num_classes)
+            Gradient w.r.t. logits, same shape as input logits.
         """
         from ..utils.tensor_conversion import VulkanTensor
 
@@ -1185,6 +1186,9 @@ class VulkanFNN(BufferMixin):
 
         if logits.ndim == 1:
             batch_size, num_classes = 1, logits.shape[0]
+        elif logits.ndim == 3:
+            b, s, num_classes = logits.shape
+            batch_size = b * s
         else:
             batch_size, num_classes = logits.shape
 
@@ -1196,9 +1200,11 @@ class VulkanFNN(BufferMixin):
             logits_np = logits.numpy() if is_vt else logits
             if logits_np.ndim == 1:
                 logits_np = logits_np.reshape(1, -1)
+            elif logits_np.ndim == 3:
+                logits_np = logits_np.reshape(-1, logits_np.shape[-1])
             logits_max = np.max(logits_np, axis=1, keepdims=True)
-            exp_logits = np.exp(logits_np - logits_max)
-            softmax = exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
+            exp_logits = np.exp(np.clip(logits_np - logits_max, -60.0, 60.0))
+            softmax = exp_logits / np.maximum(np.sum(exp_logits, axis=1, keepdims=True), 1e-12)
 
             one_hot = np.zeros_like(softmax)
             for i in range(batch_size):
