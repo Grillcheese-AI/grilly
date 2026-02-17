@@ -1157,7 +1157,7 @@ class VulkanFNN(BufferMixin):
 
         return result
 
-    def cross_entropy_backward(self, logits, targets):
+    def cross_entropy_backward(self, logits, targets, *, return_gpu_tensor=False):
         """
         GPU-accelerated cross-entropy backward pass (combined with softmax)
 
@@ -1168,18 +1168,23 @@ class VulkanFNN(BufferMixin):
         cross-entropy gradients separately.
 
         Args:
-            logits: Raw logits (batch_size, num_classes)
+            logits: Raw logits (batch_size, num_classes). May be VulkanTensor.
             targets: Target class indices (batch_size,) as integers or floats
+            return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
 
         Returns:
             Gradient w.r.t. logits (batch_size, num_classes)
         """
-        logits = logits.astype(np.float32)
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(logits, VulkanTensor)
+
+        if not is_vt:
+            logits = np.asarray(logits, dtype=np.float32)
         original_shape = logits.shape
 
         if logits.ndim == 1:
             batch_size, num_classes = 1, logits.shape[0]
-            logits = logits.reshape(1, -1)
         else:
             batch_size, num_classes = logits.shape
 
@@ -1188,11 +1193,13 @@ class VulkanFNN(BufferMixin):
         # Check if shader is available
         if "cross-entropy-backward" not in self.shaders:
             # CPU fallback: softmax - one_hot
-            logits_max = np.max(logits, axis=1, keepdims=True)
-            exp_logits = np.exp(logits - logits_max)
+            logits_np = logits.numpy() if is_vt else logits
+            if logits_np.ndim == 1:
+                logits_np = logits_np.reshape(1, -1)
+            logits_max = np.max(logits_np, axis=1, keepdims=True)
+            exp_logits = np.exp(logits_np - logits_max)
             softmax = exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
 
-            # Create one-hot encoding
             one_hot = np.zeros_like(softmax)
             for i in range(batch_size):
                 target_idx = int(targets[i])
@@ -1202,17 +1209,21 @@ class VulkanFNN(BufferMixin):
             grad = softmax - one_hot
             return grad.reshape(original_shape)
 
-        # Flatten logits
-        logits_flat = logits.flatten()
-        grad_size = batch_size * num_classes * 4
+        logits_nbytes = int(batch_size * num_classes * 4)
+        grad_size = logits_nbytes
 
-        # Acquire buffers from pool
-        buf_logits = self._acquire_buffer(logits_flat.nbytes)
+        # Accept VulkanTensor logits zero-copy via _prepare_input
+        if is_vt:
+            buf_logits, release_logits = self._prepare_input(logits, size=logits_nbytes)
+        else:
+            logits_flat = logits.flatten() if logits.ndim > 1 else logits.reshape(1, -1).flatten()
+            buf_logits = self._acquire_buffer(logits_flat.nbytes)
+            self._upload_buffer(buf_logits, logits_flat)
+            release_logits = True
+
         buf_targets = self._acquire_buffer(targets.nbytes)
         buf_grad = self._acquire_buffer(grad_size)
 
-        # Upload data
-        self._upload_buffer(buf_logits, logits_flat)
         self._upload_buffer(buf_targets, targets)
 
         # Get or create pipeline (3 buffers, push constants: 2 uints = 8 bytes)
@@ -1220,31 +1231,37 @@ class VulkanFNN(BufferMixin):
             "cross-entropy-backward", 3, push_constant_size=8
         )
 
-        # Get cached descriptor set
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             "cross-entropy-backward",
             [
-                (self._get_buffer_handle(buf_logits), logits_flat.nbytes),
+                (self._get_buffer_handle(buf_logits), logits_nbytes),
                 (self._get_buffer_handle(buf_targets), targets.nbytes),
                 (self._get_buffer_handle(buf_grad), grad_size),
             ],
         )
 
-        # Pack push constants: batch_size, num_classes
         push_constants = struct.pack("II", batch_size, num_classes)
 
-        # Dispatch: one workgroup per batch element
         workgroups = batch_size
         self.core._dispatch_compute(
             pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
-        # Download results
+        if return_gpu_tensor:
+            result = self._wrap_output_tensor(buf_grad, (batch_size, num_classes))
+            release_bufs = [buf_targets]
+            if release_logits:
+                release_bufs.append(buf_logits)
+            self._release_buffers(release_bufs)
+            return result
+
         result = self._download_buffer(buf_grad, grad_size, np.float32)
         result = result[: batch_size * num_classes].reshape(original_shape)
 
-        # Release buffers back to pool
-        self._release_buffers([buf_logits, buf_targets, buf_grad])
+        release_bufs = [buf_targets, buf_grad]
+        if release_logits:
+            release_bufs.append(buf_logits)
+        self._release_buffers(release_bufs)
 
         return result
 
@@ -1253,7 +1270,8 @@ class VulkanFNN(BufferMixin):
         GPU-accelerated cross-entropy loss using loss-cross-entropy.glsl.
 
         Args:
-            logits: (batch, num_classes) or (batch, seq_len, num_classes)
+            logits: (batch, num_classes) or (batch, seq_len, num_classes).
+                    May be VulkanTensor (zero-copy on GPU).
             targets: (batch,) or (batch, seq_len) target class indices
             label_smoothing: Optional smoothing factor in [0, 1)
             reduction: "mean", "sum", or "none"
@@ -1261,15 +1279,17 @@ class VulkanFNN(BufferMixin):
         Returns:
             Scalar float for mean/sum, or per-position loss array for "none".
         """
-        logits = np.asarray(logits, dtype=np.float32)
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(logits, VulkanTensor)
+        if not is_vt:
+            logits = np.asarray(logits, dtype=np.float32)
         original_ndim = logits.ndim
         if original_ndim == 2:
             batch_size, vocab_size = logits.shape
             seq_len = 1
-            logits_3d = logits.reshape(batch_size, 1, vocab_size)
         elif original_ndim == 3:
             batch_size, seq_len, vocab_size = logits.shape
-            logits_3d = logits
         else:
             raise ValueError("cross_entropy_loss expects logits shape (B,V) or (B,S,V)")
 
@@ -1293,6 +1313,8 @@ class VulkanFNN(BufferMixin):
 
         if "loss-cross-entropy" not in self.shaders:
             # CPU fallback
+            logits_np = logits.numpy() if is_vt else logits
+            logits_3d = logits_np.reshape(batch_size, seq_len, vocab_size) if original_ndim != 3 else logits_np
             row_logits = logits_3d.reshape(-1, vocab_size).astype(np.float32, copy=False)
             row_targets = targets_u32.reshape(-1).astype(np.int64, copy=False)
             row_max = np.max(row_logits, axis=1, keepdims=True)
@@ -1307,14 +1329,23 @@ class VulkanFNN(BufferMixin):
                 return float(np.sum(losses))
             return float(np.mean(losses))
 
-        logits_flat = np.ascontiguousarray(logits_3d, dtype=np.float32).reshape(-1)
-        targets_flat = np.ascontiguousarray(targets_u32, dtype=np.uint32).reshape(-1)
         total_positions = int(batch_size * seq_len)
+        logits_nbytes = int(batch_size * seq_len * vocab_size * 4)
         losses_nbytes = int(total_positions * 4)
-        logits_nbytes = int(logits_flat.nbytes)
+
+        # Accept VulkanTensor logits zero-copy via _prepare_input
+        if is_vt:
+            buf_logits, release_logits = self._prepare_input(logits, size=logits_nbytes)
+        else:
+            logits_3d = logits.reshape(batch_size, seq_len, vocab_size) if original_ndim != 3 else logits
+            logits_flat = np.ascontiguousarray(logits_3d, dtype=np.float32).reshape(-1)
+            buf_logits = self._acquire_buffer(logits_flat.nbytes)
+            self._upload_buffer(buf_logits, logits_flat)
+            release_logits = True
+
+        targets_flat = np.ascontiguousarray(targets_u32, dtype=np.uint32).reshape(-1)
         targets_nbytes = int(targets_flat.nbytes)
 
-        buf_logits = self._acquire_buffer(logits_nbytes)
         buf_targets = self._acquire_buffer(targets_nbytes)
         buf_losses = self._acquire_buffer(losses_nbytes)
         buf_max = self._acquire_buffer(losses_nbytes)
@@ -1322,7 +1353,6 @@ class VulkanFNN(BufferMixin):
 
         descriptor_set = None
         try:
-            self._upload_buffer(buf_logits, logits_flat)
             self._upload_buffer(buf_targets, targets_flat)
 
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -1373,7 +1403,10 @@ class VulkanFNN(BufferMixin):
                     )
                 except Exception:
                     pass
-            self._release_buffers([buf_logits, buf_targets, buf_losses, buf_max, buf_sum])
+            release_bufs = [buf_targets, buf_losses, buf_max, buf_sum]
+            if release_logits:
+                release_bufs.append(buf_logits)
+            self._release_buffers(release_bufs)
 
     # ------------------------------------------------------------------
     # Layer normalization (GPU accelerated with 3-pass shader)
