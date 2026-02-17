@@ -247,7 +247,12 @@ class VulkanTensor:
 
             # VMA path: use pool's vmaMapMemory (not vkMapMemory)
             pooled = getattr(self, "_pooled_buffer", None)
-            if pooled is not None and hasattr(pooled, "pool") and pooled.pool is not None:
+            if (
+                pooled is not None
+                and hasattr(pooled, "pool")
+                and pooled.pool is not None
+                and hasattr(pooled.pool, "download_data")
+            ):
                 self._cpu_data = pooled.pool.download_data(
                     pooled, size, dtype=self._dtype
                 ).reshape(self._shape)
