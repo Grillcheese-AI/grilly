@@ -4,6 +4,7 @@ All modules use GPU-accelerated Vulkan shaders
 """
 
 import os
+
 import numpy as np
 
 from .module import Module

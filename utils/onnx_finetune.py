@@ -57,7 +57,7 @@ class OnnxFineTuner:
     # LoRA application
     # ------------------------------------------------------------------
 
-    def apply_lora(self) -> "OnnxFineTuner":
+    def apply_lora(self) -> OnnxFineTuner:
         """Freeze base weights and add LoRA adapters to matching Linear layers."""
         if self._applied:
             return self
@@ -293,7 +293,7 @@ class OnnxFineTuner:
         """Create a Module-compatible wrapper around LoRA forward."""
 
         class _LoRAWrapper(Module):
-            def __init__(self, fine_tuner: "OnnxFineTuner", name: str, lora_layer: LoRALinear):
+            def __init__(self, fine_tuner: OnnxFineTuner, name: str, lora_layer: LoRALinear):
                 super().__init__()
                 self._fine_tuner = fine_tuner
                 self._name = name

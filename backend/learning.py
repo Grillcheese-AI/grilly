@@ -133,7 +133,7 @@ class VulkanLearning(BufferMixin):
                 int(batch_size),
                 int(seq_len),
                 int(features),
-                float(1e-4),
+                1e-4,
                 float(1.0 - 1e-4),
             )
 
@@ -246,7 +246,7 @@ class VulkanLearning(BufferMixin):
                 int(seq_len),
                 int(features),
                 int(has_mask),
-                float(1e-4),
+                1e-4,
                 float(1.0 - 1e-4),
             )
             total_lanes = int(batch_size * features)
