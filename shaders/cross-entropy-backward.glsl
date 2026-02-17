@@ -23,60 +23,63 @@ layout(push_constant) uniform PushConsts {
     uint num_classes;
 };
 
-// Shared memory for softmax computation
-shared float s_max;
-shared float s_sum;
+// Shared memory for parallel reduction
+shared float s_data[256];
 
 void main() {
     uint batch_idx = gl_WorkGroupID.x;
-    uint class_idx = gl_LocalInvocationID.x;
+    uint tid = gl_LocalInvocationID.x;
 
-    if (batch_idx >= batch_size) {
-        return;
-    }
+    if (batch_idx >= batch_size) return;
 
     uint base_idx = batch_idx * num_classes;
 
-    // Step 1: Find max for numerical stability (reduction)
+    // Step 1: Parallel max reduction — all 256 threads participate
     float local_max = -1e30;
-    for (uint i = class_idx; i < num_classes; i += gl_WorkGroupSize.x) {
-        float val = logits[base_idx + i];
-        local_max = max(local_max, val);
+    for (uint i = tid; i < num_classes; i += 256) {
+        local_max = max(local_max, logits[base_idx + i]);
     }
-
-    // Reduce to find global max (simplified - assumes workgroup size >= num_classes)
-    if (class_idx == 0) {
-        float max_val = -1e30;
-        for (uint i = 0; i < num_classes; i++) {
-            max_val = max(max_val, logits[base_idx + i]);
-        }
-        s_max = max_val;
-    }
+    s_data[tid] = local_max;
     barrier();
 
-    // Step 2: Compute exp(x - max) and sum
-    if (class_idx == 0) {
-        float sum_exp = 0.0;
-        for (uint i = 0; i < num_classes; i++) {
-            sum_exp += exp(logits[base_idx + i] - s_max);
+    // Tree reduction for max (log2(256) = 8 steps)
+    for (uint s = 128; s > 0; s >>= 1) {
+        if (tid < s) {
+            s_data[tid] = max(s_data[tid], s_data[tid + s]);
         }
-        s_sum = sum_exp;
+        barrier();
     }
+    float max_val = s_data[0];
     barrier();
 
-    // Step 3: Compute softmax and gradient
-    // Gradient of cross-entropy with softmax: softmax - one_hot(target)
+    // Step 2: Parallel sum of exp(x - max)
+    float local_sum = 0.0;
+    for (uint i = tid; i < num_classes; i += 256) {
+        local_sum += exp(logits[base_idx + i] - max_val);
+    }
+    s_data[tid] = local_sum;
+    barrier();
+
+    // Tree reduction for sum
+    for (uint s = 128; s > 0; s >>= 1) {
+        if (tid < s) {
+            s_data[tid] += s_data[tid + s];
+        }
+        barrier();
+    }
+    float sum_exp = s_data[0];
+    barrier();
+
+    // Step 3: Compute gradient = softmax - one_hot (all threads)
     uint target_class = uint(targets[batch_idx]);
+    float inv_sum = 1.0 / max(sum_exp, 1e-12);
 
-    for (uint i = class_idx; i < num_classes; i += gl_WorkGroupSize.x) {
-        float softmax_val = exp(logits[base_idx + i] - s_max) / s_sum;
-
-        // Gradient: softmax - (1 if i == target else 0)
+    for (uint i = tid; i < num_classes; i += 256) {
+        float softmax_val = exp(logits[base_idx + i] - max_val) * inv_sum;
         float grad = softmax_val;
         if (i == target_class) {
             grad -= 1.0;
         }
-
         grad_logits[base_idx + i] = grad;
     }
 }
