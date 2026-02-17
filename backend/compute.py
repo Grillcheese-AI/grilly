@@ -293,6 +293,10 @@ class VulkanCompute:
         """GPU-accelerated fused UV->scan selective recurrence for SSM blocks."""
         return self.learning.ssm_fused_uv(*args, **kwargs)
 
+    def ssd_chunk_scan(self, *args, **kwargs):
+        """SSD within-chunk bidirectional scan for training mode."""
+        return self.learning.ssd_chunk_scan(*args, **kwargs)
+
     # Memory operations - delegate to memory module
     def memory_read(self, *args, **kwargs):
         """Retrieve memories using attention mechanism"""

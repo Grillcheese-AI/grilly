@@ -68,6 +68,8 @@ class VulkanCore:
             # LoRA training/inference shaders
             "lora-forward",
             "lora-backward",
+            # SSD chunked scan for training mode
+            "ssd-scan-chunks",
         ]
         self._ensure_required_shaders(required_shaders, spv_dir)
 

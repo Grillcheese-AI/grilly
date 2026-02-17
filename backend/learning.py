@@ -268,6 +268,136 @@ class VulkanLearning(BufferMixin):
             if not return_gpu_tensor:
                 self._release_buffer(buf_out)
 
+    # ==================== SSD Chunk Scan ====================
+
+    def ssd_chunk_scan(
+        self,
+        input_data,
+        decay: np.ndarray,
+        init_state,
+        chunk_size: int,
+        *,
+        is_backward: bool = False,
+        return_gpu_tensor: bool = False,
+    ):
+        """
+        SSD within-chunk scan (bidirectional linear recurrence).
+
+        Forward:  s[j] = decay * s[j-1] + u[j],  j = 0..C-1
+        Backward: g[j] = decay * g[j+1] + gs[j], j = C-1..0
+
+        Args:
+            input_data: (batch_chunks, chunk_size, features) - scan input
+                        Accepts numpy array or VulkanTensor.
+            decay: (features,) - per-feature decay
+            init_state: (batch_chunks, features) - initial state per chunk
+                        Accepts numpy array or VulkanTensor.
+            chunk_size: C - timesteps per chunk
+            is_backward: if True, reverse scan direction
+            return_gpu_tensor: return VulkanTensor if True
+
+        Returns:
+            output: (batch_chunks, chunk_size, features) - scan output
+            carry_out: (batch_chunks, features) - final state per chunk
+        """
+        input_shape = tuple(int(x) for x in input_data.shape)
+        if len(input_shape) != 3:
+            raise ValueError(f"ssd_chunk_scan expects 3D input, got shape {input_shape}")
+        batch_chunks, cs, features = input_shape
+        if cs != chunk_size:
+            raise ValueError(f"chunk_size mismatch: input has {cs}, expected {chunk_size}")
+
+        decay_np = np.asarray(decay, dtype=np.float32).reshape(-1)
+        if decay_np.size != features:
+            raise ValueError(f"decay size {decay_np.size} != features {features}")
+        decay_np = np.clip(decay_np, 1e-4, 1.0 - 1e-4).astype(np.float32, copy=False)
+
+        # CPU fallback if shader is missing
+        if "ssd-scan-chunks" not in self.shaders:
+            inp = np.asarray(input_data, dtype=np.float32)
+            init = np.asarray(init_state, dtype=np.float32)
+            d = decay_np.reshape(1, features)
+            out = np.zeros_like(inp, dtype=np.float32)
+            carry = np.zeros((batch_chunks, features), dtype=np.float32)
+            if not is_backward:
+                for bc in range(batch_chunks):
+                    state = init[bc].copy()
+                    for j in range(chunk_size):
+                        state = d[0] * state + inp[bc, j]
+                        out[bc, j] = state
+                    carry[bc] = state
+            else:
+                for bc in range(batch_chunks):
+                    state = init[bc].copy()
+                    for j in range(chunk_size - 1, -1, -1):
+                        state = d[0] * state + inp[bc, j]
+                        out[bc, j] = state
+                    carry[bc] = state
+            return out, carry
+
+        out_nbytes = int(batch_chunks * chunk_size * features * 4)
+        carry_nbytes = int(batch_chunks * features * 4)
+
+        buf_input, release_input = self._prepare_input(input_data, size=out_nbytes)
+        buf_decay = self._acquire_buffer(decay_np.nbytes)
+        buf_init, release_init = self._prepare_input(init_state, size=carry_nbytes)
+        buf_out = self._acquire_buffer(out_nbytes)
+        buf_carry = self._acquire_buffer(carry_nbytes)
+        descriptor_set = None
+
+        try:
+            self._upload_buffer(buf_decay, np.ascontiguousarray(decay_np))
+
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                "ssd-scan-chunks", 5, push_constant_size=16
+            )
+            descriptor_set = self.pipelines._create_descriptor_set(
+                desc_layout,
+                [
+                    (self._get_buffer_handle(buf_input), out_nbytes),
+                    (self._get_buffer_handle(buf_decay), decay_np.nbytes),
+                    (self._get_buffer_handle(buf_init), carry_nbytes),
+                    (self._get_buffer_handle(buf_out), out_nbytes),
+                    (self._get_buffer_handle(buf_carry), carry_nbytes),
+                ],
+            )
+
+            push_constants = struct.pack(
+                "IIII",
+                int(batch_chunks),
+                int(chunk_size),
+                int(features),
+                int(1 if is_backward else 0),
+            )
+
+            total_lanes = int(batch_chunks * features)
+            workgroups = (total_lanes + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
+
+            if return_gpu_tensor:
+                out_vt = self._wrap_output_tensor(buf_out, (batch_chunks, chunk_size, features))
+                carry_np = self._download_buffer(buf_carry, carry_nbytes, np.float32)
+                carry_np = carry_np.reshape(batch_chunks, features)
+                return out_vt, carry_np
+
+            out = self._download_buffer(buf_out, out_nbytes, np.float32)
+            out = out.reshape(batch_chunks, chunk_size, features)
+            carry = self._download_buffer(buf_carry, carry_nbytes, np.float32)
+            carry = carry.reshape(batch_chunks, features)
+            return out, carry
+        finally:
+            self._free_descriptor_set(descriptor_set)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_init:
+                self._release_buffer(buf_init)
+            self._release_buffers([buf_decay])
+            if not return_gpu_tensor:
+                self._release_buffer(buf_out)
+            self._release_buffer(buf_carry)
+
     # ==================== Fisher / EWC ====================
 
     def fisher_info_update(
