@@ -67,6 +67,8 @@ class AdamW(Optimizer):
         self.use_gpu = use_gpu
         self._backend = None
         self._step_count = 0
+        self.last_backend = "uninitialized"
+        self.last_error = None
 
     def _get_backend(self):
         """Get or create backend instance"""
@@ -108,6 +110,8 @@ class AdamW(Optimizer):
 
         backend = self._get_backend()
         use_gpu = self.use_gpu and backend is not None
+        used_gpu_shader = False
+        used_cpu_fallback = False
 
         for group in self.param_groups:
             for p in group["params"]:
@@ -160,7 +164,10 @@ class AdamW(Optimizer):
                         shaders_available = hasattr(backend, "core") and hasattr(
                             backend.core, "shaders"
                         )
-                        if shaders_available and "adamw-update" in backend.core.shaders:
+                        if shaders_available and (
+                            "adamw-update" in backend.core.shaders
+                            or "adam-update" in backend.core.shaders
+                        ):
                             p_data, exp_avg, exp_avg_sq = self._adamw_update_gpu(
                                 backend,
                                 p_data,
@@ -176,12 +183,13 @@ class AdamW(Optimizer):
                                 beta2_t,
                                 amsgrad,
                             )
-                            if hasattr(p, "data"):
+                            if hasattr(p, "data") and not isinstance(p, np.ndarray):
                                 p.data = p_data
                             else:
                                 p[:] = p_data
                             state["exp_avg"] = exp_avg
                             state["exp_avg_sq"] = exp_avg_sq
+                            used_gpu_shader = True
                             if hasattr(p, "grad") and p.grad is not None:
                                 if hasattr(p, "zero_grad"):
                                     p.zero_grad()
@@ -193,6 +201,7 @@ class AdamW(Optimizer):
 
                         logger = logging.getLogger(__name__)
                         logger.debug(f"GPU AdamW update failed: {e}, falling back to CPU")
+                        self.last_error = str(e)
                         pass
 
                 # CPU fallback
@@ -227,6 +236,7 @@ class AdamW(Optimizer):
 
                 state["exp_avg"] = exp_avg
                 state["exp_avg_sq"] = exp_avg_sq
+                used_cpu_fallback = True
 
                 # Clear gradient
                 if hasattr(p, "grad") and p.grad is not None:
@@ -234,6 +244,13 @@ class AdamW(Optimizer):
                         p.zero_grad()
                     else:
                         p.grad = None
+
+        if used_gpu_shader and not used_cpu_fallback:
+            self.last_backend = "gpu_shader"
+        elif used_gpu_shader and used_cpu_fallback:
+            self.last_backend = "mixed_gpu_cpu"
+        else:
+            self.last_backend = "cpu_fallback"
 
         return loss
 
@@ -272,6 +289,23 @@ class AdamW(Optimizer):
                     beta2_t=beta2_t,
                     clear_grad=False,
                 )
+                return param, exp_avg, exp_avg_sq
+            if hasattr(backend, "learning") and hasattr(backend.learning, "adam_update"):
+                param, exp_avg, exp_avg_sq = backend.learning.adam_update(
+                    weights=param,
+                    gradients=grad,
+                    moment1=exp_avg,
+                    moment2=exp_avg_sq,
+                    learning_rate=lr,
+                    beta1=beta1,
+                    beta2=beta2,
+                    epsilon=eps,
+                    beta1_t=beta1_t,
+                    beta2_t=beta2_t,
+                    clear_grad=False,
+                )
+                if weight_decay != 0:
+                    param = param * (1 - lr * weight_decay)
                 return param, exp_avg, exp_avg_sq
         except Exception:
             pass

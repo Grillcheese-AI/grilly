@@ -1248,11 +1248,143 @@ class VulkanFNN(BufferMixin):
 
         return result
 
+    def cross_entropy_loss(self, logits, targets, label_smoothing=0.0, reduction="mean"):
+        """
+        GPU-accelerated cross-entropy loss using loss-cross-entropy.glsl.
+
+        Args:
+            logits: (batch, num_classes) or (batch, seq_len, num_classes)
+            targets: (batch,) or (batch, seq_len) target class indices
+            label_smoothing: Optional smoothing factor in [0, 1)
+            reduction: "mean", "sum", or "none"
+
+        Returns:
+            Scalar float for mean/sum, or per-position loss array for "none".
+        """
+        logits = np.asarray(logits, dtype=np.float32)
+        original_ndim = logits.ndim
+        if original_ndim == 2:
+            batch_size, vocab_size = logits.shape
+            seq_len = 1
+            logits_3d = logits.reshape(batch_size, 1, vocab_size)
+        elif original_ndim == 3:
+            batch_size, seq_len, vocab_size = logits.shape
+            logits_3d = logits
+        else:
+            raise ValueError("cross_entropy_loss expects logits shape (B,V) or (B,S,V)")
+
+        if batch_size <= 0 or seq_len <= 0 or vocab_size <= 0:
+            if reduction == "none":
+                return np.zeros((batch_size, seq_len), dtype=np.float32)
+            return 0.0
+
+        tgt = np.asarray(targets)
+        if tgt.ndim == 1:
+            if tgt.shape[0] != batch_size:
+                raise ValueError("targets shape mismatch for 2D logits")
+            targets_2d = tgt.reshape(batch_size, 1)
+        elif tgt.ndim == 2:
+            if tgt.shape[0] != batch_size or tgt.shape[1] != seq_len:
+                raise ValueError("targets shape mismatch for 3D logits")
+            targets_2d = tgt
+        else:
+            raise ValueError("targets must be 1D or 2D")
+        targets_u32 = np.asarray(np.clip(targets_2d, 0, max(0, vocab_size - 1)), dtype=np.uint32)
+
+        if "loss-cross-entropy" not in self.shaders:
+            # CPU fallback
+            row_logits = logits_3d.reshape(-1, vocab_size).astype(np.float32, copy=False)
+            row_targets = targets_u32.reshape(-1).astype(np.int64, copy=False)
+            row_max = np.max(row_logits, axis=1, keepdims=True)
+            shifted = np.clip(row_logits - row_max, -60.0, 60.0)
+            with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+                lse = row_max.reshape(-1) + np.log(np.maximum(np.sum(np.exp(shifted), axis=1), 1e-12))
+            tlog = row_logits[np.arange(row_logits.shape[0]), row_targets]
+            losses = (lse - tlog).astype(np.float32, copy=False).reshape(batch_size, seq_len)
+            if reduction == "none":
+                return losses if original_ndim == 3 else losses.reshape(batch_size)
+            if reduction == "sum":
+                return float(np.sum(losses))
+            return float(np.mean(losses))
+
+        logits_flat = np.ascontiguousarray(logits_3d, dtype=np.float32).reshape(-1)
+        targets_flat = np.ascontiguousarray(targets_u32, dtype=np.uint32).reshape(-1)
+        total_positions = int(batch_size * seq_len)
+        losses_nbytes = int(total_positions * 4)
+        logits_nbytes = int(logits_flat.nbytes)
+        targets_nbytes = int(targets_flat.nbytes)
+
+        buf_logits = self._acquire_buffer(logits_nbytes)
+        buf_targets = self._acquire_buffer(targets_nbytes)
+        buf_losses = self._acquire_buffer(losses_nbytes)
+        buf_max = self._acquire_buffer(losses_nbytes)
+        buf_sum = self._acquire_buffer(losses_nbytes)
+
+        descriptor_set = None
+        try:
+            self._upload_buffer(buf_logits, logits_flat)
+            self._upload_buffer(buf_targets, targets_flat)
+
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                "loss-cross-entropy", 5, push_constant_size=20
+            )
+            descriptor_set = self.pipelines._create_descriptor_set(
+                desc_layout,
+                [
+                    (self._get_buffer_handle(buf_logits), logits_nbytes),
+                    (self._get_buffer_handle(buf_targets), targets_nbytes),
+                    (self._get_buffer_handle(buf_losses), losses_nbytes),
+                    (self._get_buffer_handle(buf_max), losses_nbytes),
+                    (self._get_buffer_handle(buf_sum), losses_nbytes),
+                ],
+            )
+
+            workgroups = (total_positions + 255) // 256
+            ls = float(np.clip(float(label_smoothing), 0.0, 0.999))
+            for pass_type in (0, 1, 2):
+                push_constants = struct.pack(
+                    "IIIIf",
+                    int(batch_size),
+                    int(seq_len),
+                    int(vocab_size),
+                    int(pass_type),
+                    ls,
+                )
+                self.core._dispatch_compute(
+                    pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+                )
+
+            losses = self._download_buffer(buf_losses, losses_nbytes, np.float32).reshape(
+                batch_size, seq_len
+            )
+            if reduction == "none":
+                return losses if original_ndim == 3 else losses.reshape(batch_size)
+            if reduction == "sum":
+                return float(np.sum(losses, dtype=np.float64))
+            return float(np.mean(losses, dtype=np.float64))
+        finally:
+            if descriptor_set is not None:
+                try:
+                    vkFreeDescriptorSets(
+                        self.core.device,
+                        self.core.descriptor_pool,
+                        1,
+                        [descriptor_set],
+                    )
+                except Exception:
+                    pass
+            self._release_buffers([buf_logits, buf_targets, buf_losses, buf_max, buf_sum])
+
     # ------------------------------------------------------------------
     # Layer normalization (GPU accelerated with 3-pass shader)
     # ------------------------------------------------------------------
     def layernorm(
-        self, x: np.ndarray, gamma: np.ndarray = None, beta: np.ndarray = None, eps: float = 1e-5
+        self,
+        x: np.ndarray,
+        gamma: np.ndarray = None,
+        beta: np.ndarray = None,
+        eps: float = 1e-5,
+        return_gpu_tensor: bool = False,
     ) -> np.ndarray:
         """
         GPU-accelerated LayerNorm using fnn-layernorm.glsl shader.
@@ -1263,6 +1395,9 @@ class VulkanFNN(BufferMixin):
         - Pass 1: Compute variance
         - Pass 2: Normalize and apply affine transformation
         """
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(x, VulkanTensor)
         original_shape = x.shape
         features = original_shape[-1]
 
@@ -1275,27 +1410,39 @@ class VulkanFNN(BufferMixin):
         # Check if shader is available
         if "fnn-layernorm" not in self.shaders:
             # CPU fallback (numba-accelerated if available)
+            x_np = x.numpy() if is_vt else np.asarray(x, dtype=np.float32)
             if NUMBA_AVAILABLE and numba_layernorm is not None:
-                return numba_layernorm(x, gamma, beta, eps)
+                return numba_layernorm(x_np, gamma, beta, eps)
             else:
-                mean = x.mean(axis=-1, keepdims=True)
-                var = x.var(axis=-1, keepdims=True)
-                normalized = (x - mean) / np.sqrt(var + eps)
+                mean = x_np.mean(axis=-1, keepdims=True)
+                var = x_np.var(axis=-1, keepdims=True)
+                normalized = (x_np - mean) / np.sqrt(var + eps)
                 return normalized * gamma + beta
 
         # Handle different input shapes: (features,) or (batch, features) or (batch, seq, features)
         if len(original_shape) == 1:
             batch_size, seq_len = 1, 1
-            x = x.reshape(1, 1, features)
         elif len(original_shape) == 2:
             batch_size, features = original_shape
             seq_len = 1
-            x = x.reshape(batch_size, 1, features)
         else:
             batch_size, seq_len, features = original_shape
 
-        # Flatten to 1D arrays
-        x_flat = x.astype(np.float32).flatten()
+        x_nbytes = int(batch_size * seq_len * features * 4)
+        if is_vt:
+            buf_input, release_input = self._prepare_input(x, size=x_nbytes)
+        else:
+            x_np = np.asarray(x, dtype=np.float32)
+            if len(original_shape) == 1:
+                x_np = x_np.reshape(1, 1, features)
+            elif len(original_shape) == 2:
+                x_np = x_np.reshape(batch_size, 1, features)
+            x_flat = x_np.astype(np.float32).reshape(-1)
+            x_nbytes = x_flat.nbytes
+            buf_input = self._acquire_buffer(x_nbytes)
+            self._upload_buffer(buf_input, x_flat)
+            release_input = True
+
         gamma_flat = gamma.astype(np.float32).flatten()
         beta_flat = beta.astype(np.float32).flatten()
 
@@ -1303,15 +1450,13 @@ class VulkanFNN(BufferMixin):
         total_elements = batch_size * seq_len * features
 
         # Acquire buffers from pool
-        buf_input = self._acquire_buffer(x_flat.nbytes)
-        buf_output = self._acquire_buffer(x_flat.nbytes)
+        buf_output = self._acquire_buffer(x_nbytes)
         buf_gamma = self._acquire_buffer(gamma_flat.nbytes)
         buf_beta = self._acquire_buffer(beta_flat.nbytes)
         buf_mean = self._acquire_buffer(total_positions * 4)
         buf_var = self._acquire_buffer(total_positions * 4)
 
         # Upload data
-        self._upload_buffer(buf_input, x_flat)
         self._upload_buffer(buf_gamma, gamma_flat)
         self._upload_buffer(buf_beta, beta_flat)
 
@@ -1324,8 +1469,8 @@ class VulkanFNN(BufferMixin):
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             "fnn-layernorm",
             [
-                (self._get_buffer_handle(buf_input), x_flat.nbytes),
-                (self._get_buffer_handle(buf_output), x_flat.nbytes),
+                (self._get_buffer_handle(buf_input), x_nbytes),
+                (self._get_buffer_handle(buf_output), x_nbytes),
                 (self._get_buffer_handle(buf_gamma), gamma_flat.nbytes),
                 (self._get_buffer_handle(buf_beta), beta_flat.nbytes),
                 (self._get_buffer_handle(buf_mean), total_positions * 4),
@@ -1350,11 +1495,19 @@ class VulkanFNN(BufferMixin):
                 pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
             )
 
+        if return_gpu_tensor:
+            if release_input:
+                self._release_buffer(buf_input)
+            self._release_buffers([buf_gamma, buf_beta, buf_mean, buf_var])
+            return self._wrap_output_tensor(buf_output, original_shape)
+
         # Download result
-        result = self._download_buffer(buf_output, x_flat.nbytes, np.float32)
+        result = self._download_buffer(buf_output, x_nbytes, np.float32)
 
         # Release buffers back to pool
-        self._release_buffers([buf_input, buf_output, buf_gamma, buf_beta, buf_mean, buf_var])
+        if release_input:
+            self._release_buffer(buf_input)
+        self._release_buffers([buf_output, buf_gamma, buf_beta, buf_mean, buf_var])
 
         return result.reshape(original_shape)
 
@@ -1994,7 +2147,7 @@ class VulkanFNN(BufferMixin):
     # ------------------------------------------------------------------
     # Residual connection
     # ------------------------------------------------------------------
-    def residual(self, x: np.ndarray, module_output: np.ndarray) -> np.ndarray:
+    def residual(self, x: np.ndarray, module_output: np.ndarray, return_gpu_tensor: bool = False) -> np.ndarray:
         """
         Residual connection: output = x + module_output
 
@@ -2007,24 +2160,40 @@ class VulkanFNN(BufferMixin):
         Returns:
             x + module_output
         """
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt_x = isinstance(x, VulkanTensor)
+        is_vt_m = isinstance(module_output, VulkanTensor)
+        x_shape = tuple(int(d) for d in x.shape)
+        total_elements = int(np.prod(x_shape))
+        x_nbytes = int(total_elements * 4)
+
         # Check if shader is available
         if "fnn-residual" not in self.shaders:
             # CPU fallback
-            return (x + module_output).astype(np.float32)
+            x_np = x.numpy() if is_vt_x else np.asarray(x, dtype=np.float32)
+            m_np = module_output.numpy() if is_vt_m else np.asarray(module_output, dtype=np.float32)
+            return (x_np + m_np).astype(np.float32)
 
         # GPU implementation
-        x_flat = x.astype(np.float32).flatten()
-        module_flat = module_output.astype(np.float32).flatten()
-        total_elements = len(x_flat)
+        if is_vt_x:
+            buf_x, release_x = self._prepare_input(x, size=x_nbytes)
+        else:
+            x_np = np.ascontiguousarray(np.asarray(x, dtype=np.float32)).reshape(-1)
+            buf_x = self._acquire_buffer(x_nbytes)
+            self._upload_buffer(buf_x, x_np)
+            release_x = True
+
+        if is_vt_m:
+            buf_module, release_module = self._prepare_input(module_output, size=x_nbytes)
+        else:
+            module_np = np.ascontiguousarray(np.asarray(module_output, dtype=np.float32)).reshape(-1)
+            buf_module = self._acquire_buffer(x_nbytes)
+            self._upload_buffer(buf_module, module_np)
+            release_module = True
 
         # Acquire buffers from pool
-        buf_x = self._acquire_buffer(x_flat.nbytes)
-        buf_module = self._acquire_buffer(module_flat.nbytes)
-        buf_out = self._acquire_buffer(x_flat.nbytes)
-
-        # Upload data
-        self._upload_buffer(buf_x, x_flat)
-        self._upload_buffer(buf_module, module_flat)
+        buf_out = self._acquire_buffer(x_nbytes)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -2035,9 +2204,9 @@ class VulkanFNN(BufferMixin):
         descriptor_set = self.pipelines.get_cached_descriptor_set(
             "fnn-residual",
             [
-                (self._get_buffer_handle(buf_x), x_flat.nbytes),
-                (self._get_buffer_handle(buf_module), module_flat.nbytes),
-                (self._get_buffer_handle(buf_out), x_flat.nbytes),
+                (self._get_buffer_handle(buf_x), x_nbytes),
+                (self._get_buffer_handle(buf_module), x_nbytes),
+                (self._get_buffer_handle(buf_out), x_nbytes),
             ],
         )
 
@@ -2050,12 +2219,24 @@ class VulkanFNN(BufferMixin):
             pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
         )
 
+        if return_gpu_tensor:
+            # Caller takes ownership of output pooled buffer through VulkanTensor wrapper.
+            if release_x:
+                self._release_buffer(buf_x)
+            if release_module:
+                self._release_buffer(buf_module)
+            return self._wrap_output_tensor(buf_out, x_shape)
+
         # Download results
-        result = self._download_buffer(buf_out, x_flat.nbytes, np.float32)
-        result = result[:total_elements].reshape(x.shape)
+        result = self._download_buffer(buf_out, x_nbytes, np.float32)
+        result = result[:total_elements].reshape(x_shape)
 
         # Release buffers back to pool
-        self._release_buffers([buf_x, buf_module, buf_out])
+        if release_x:
+            self._release_buffer(buf_x)
+        if release_module:
+            self._release_buffer(buf_module)
+        self._release_buffer(buf_out)
 
         return result
 

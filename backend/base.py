@@ -1,4 +1,4 @@
-"""
+﻿"""
 Base constants and utilities for Vulkan backend.
 """
 
@@ -208,11 +208,11 @@ class BufferMixin:
     def _get_or_upload_weight(self, data):
         """Return cached GPU buffer for weight data. Upload only on cache miss.
 
-        Cache key uses (id, shape, ctypes.data pointer) — the pointer changes
+        Cache key uses (id, shape, ctypes.data pointer) â€” the pointer changes
         when the optimizer modifies weights in-place, forcing a re-upload.
 
         Returns:
-            (buffer, release: bool) — release is always False (cache owns buffer)
+            (buffer, release: bool) â€” release is always False (cache owns buffer)
         """
         if self._weight_cache is None:
             self._weight_cache = {}
@@ -250,19 +250,26 @@ class BufferMixin:
         """Accept numpy array or VulkanTensor, return (buffer, needs_release).
 
         When *data* is a VulkanTensor already on GPU, returns its existing
-        buffer without copying.  Otherwise allocates a pooled buffer and
-        uploads.
+        buffer without copying. Otherwise allocates a pooled buffer and uploads.
         """
-        # Avoid hard import at module level – VulkanTensor lives in utils
+        # Avoid hard import at module level - VulkanTensor lives in utils
         from ..utils.tensor_conversion import VulkanTensor
 
-        if isinstance(data, VulkanTensor) and data.on_gpu:
-            buf = data._pooled_buffer if data._pooled_buffer is not None else None
-            if buf is not None:
-                return buf, False
-            # Has raw GPU buffer but not pooled – wrap for API compat
-            return _DirectBuffer(data._gpu_buffer, data._gpu_memory, data.nbytes), False
-        arr = np.asarray(data, dtype=np.float32).flatten()
+        if isinstance(data, VulkanTensor):
+            if data.on_gpu:
+                buf = data._pooled_buffer if data._pooled_buffer is not None else None
+                if buf is not None:
+                    return buf, False
+                # Has raw GPU buffer but not pooled - wrap for API compat
+                return _DirectBuffer(data._gpu_buffer, data._gpu_memory, data.nbytes), False
+            # CPU-backed lazy VulkanTensor
+            arr = np.asarray(data.numpy(), dtype=np.float32).reshape(-1)
+        else:
+            arr = np.asarray(data)
+            if arr.dtype != np.float32:
+                arr = arr.astype(np.float32, copy=False)
+            arr = np.ascontiguousarray(arr).reshape(-1)
+
         buf = self._acquire_buffer(arr.nbytes if size is None else size)
         self._upload_buffer(buf, arr)
         return buf, True
@@ -286,3 +293,4 @@ class BufferMixin:
 
 
 __all__ = ["VULKAN_AVAILABLE", "BufferMixin", "_DirectBuffer", "BUFFER_POOL_AVAILABLE"]
+

@@ -77,12 +77,18 @@ class HuggingFaceBridge:
     - Embedding extraction for Vulkan operations
     """
 
-    def __init__(self, cuda_device: str | int | None = None):
+    def __init__(
+        self,
+        cuda_device: str | int | None = None,
+        model_name: str | None = None,
+        **_kwargs,
+    ):
         """
         Initialize HuggingFace bridge.
 
         Args:
             cuda_device: CUDA device ('cuda:0', 'cuda:1', or device index)
+            model_name: Optional default model identifier.
         """
         if not TORCH_AVAILABLE:
             raise RuntimeError(
@@ -122,6 +128,7 @@ class HuggingFaceBridge:
                 raise
 
         self.torch = self.device_manager.torch
+        self.default_model_name = model_name
 
         # Cache for loaded models
         self._tokenizers: dict[str, PreTrainedTokenizer] = {}
@@ -715,8 +722,11 @@ class HuggingFaceBridge:
             if module_name in config.target_modules:
                 # Check if it's a Linear layer
                 if hasattr(module, "weight") and hasattr(module, "in_features"):
-                    # Extract weight
-                    weight = module.weight.data.cpu().numpy()
+                    # Extract weight as float32 (NumPy does not support BF16 tensors directly).
+                    weight_tensor = module.weight.data
+                    if hasattr(self.torch, "bfloat16") and weight_tensor.dtype == self.torch.bfloat16:
+                        weight_tensor = weight_tensor.to(dtype=self.torch.float32)
+                    weight = weight_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
                     in_features = module.in_features
                     out_features = module.out_features
 

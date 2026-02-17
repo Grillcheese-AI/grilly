@@ -3,6 +3,9 @@ Core Vulkan initialization, buffer management, and dispatch operations.
 """
 
 import ctypes
+import logging
+import shutil
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +14,8 @@ from .base import VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VULKAN_AVAILABLE
 
 if VULKAN_AVAILABLE:
     from vulkan import *
+
+logger = logging.getLogger(__name__)
 
 
 class VulkanCore:
@@ -46,6 +51,26 @@ class VulkanCore:
         if not spv_dir.exists():
             spv_dir = Path(self.shader_dir)
 
+        required_shaders = [
+            "fnn-xavier-init",
+            "convd_im2col",
+            "conv2d-backward-weight",
+            "conv2d-backward-input",
+            "conv2d-forward",
+            "gemm_mnk",
+            "loss-cross-entropy",
+            # Optimizer kernels required for native training throughput.
+            "adam-update",
+            "adamw-update",
+            # Native SSM fused recurrence path
+            "ssm-fused-math",
+            "ssm-fused-uv",
+            # LoRA training/inference shaders
+            "lora-forward",
+            "lora-backward",
+        ]
+        self._ensure_required_shaders(required_shaders, spv_dir)
+
         for spv_file in spv_dir.glob("*.spv"):
             name = spv_file.stem
             with open(spv_file, "rb") as f:
@@ -62,14 +87,6 @@ class VulkanCore:
                         shaders[name] = f.read()
 
         # Check for missing shaders and warn
-        required_shaders = [
-            "fnn-xavier-init",
-            "convd_im2col",
-            "conv2d-backward-weight",
-            "conv2d-backward-input",
-            "conv2d-forward",
-            "gemm_mnk",
-        ]
         for shader_name in required_shaders:
             if shader_name not in shaders:
                 print(
@@ -78,6 +95,42 @@ class VulkanCore:
                 print(f"  To compile: glslc {shader_name}.glsl -o spv/{shader_name}.spv")
 
         return shaders
+
+    def _ensure_required_shaders(self, shader_names: list[str], spv_dir: Path) -> None:
+        """Best-effort compile of missing shader binaries from GLSL sources."""
+        missing = [name for name in shader_names if not (spv_dir / f"{name}.spv").exists()]
+        if not missing:
+            return
+
+        glslc = shutil.which("glslc")
+        if glslc is None:
+            logger.debug("glslc not found; missing shaders will use CPU fallback: %s", missing)
+            return
+
+        for shader_name in missing:
+            src_path = Path(self.shader_dir) / f"{shader_name}.glsl"
+            out_path = spv_dir / f"{shader_name}.spv"
+            if not src_path.exists():
+                continue
+
+            try:
+                spv_dir.mkdir(parents=True, exist_ok=True)
+                subprocess.run(
+                    [
+                        glslc,
+                        "-fshader-stage=compute",
+                        str(src_path),
+                        "-o",
+                        str(out_path),
+                        "--target-env=vulkan1.0",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                logger.info("Compiled missing shader %s -> %s", src_path.name, out_path.name)
+            except Exception as exc:
+                logger.warning("Failed to compile shader %s: %s", src_path.name, exc)
 
     def _init_vulkan(self):
         """Initialize Vulkan instance, device, queue"""
@@ -432,10 +485,26 @@ class VulkanCore:
 
         data_ptr = vkMapMemory(self.device, memory, 0, size, 0)
         try:
-            memview = memoryview(data_ptr)[:size]
             element_size = np.dtype(dtype).itemsize
             count = size // element_size
-            return np.frombuffer(memview, dtype=dtype, count=count).copy()
+            if count <= 0:
+                return np.empty(0, dtype=dtype)
+
+            requested_bytes = int(count * element_size)
+            try:
+                memview = memoryview(data_ptr)
+                available = int(len(memview))
+            except Exception:
+                memview = None
+                available = 0
+
+            if memview is not None and available >= requested_bytes:
+                return np.frombuffer(memview[:requested_bytes], dtype=dtype, count=count).copy()
+
+            # Fallback path for drivers/bindings where mapped pointers expose an
+            # undersized or non-buffer-compatible memoryview.
+            raw = ctypes.string_at(data_ptr, requested_bytes)
+            return np.frombuffer(raw, dtype=dtype, count=count).copy()
         finally:
             vkUnmapMemory(self.device, memory)
 

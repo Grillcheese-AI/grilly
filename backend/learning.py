@@ -43,6 +43,231 @@ class VulkanLearning(BufferMixin):
         except Exception:
             pass
 
+    # ==================== SSM Fused Math ====================
+
+    def ssm_fused_math(
+        self,
+        gate: np.ndarray,
+        value: np.ndarray,
+        decay: np.ndarray,
+        *,
+        return_gpu_tensor: bool = False,
+    ) -> np.ndarray:
+        """
+        Fused selective-scan recurrence for SSM blocks.
+
+        Computes, per feature lane:
+            state_t = decay * state_{t-1} + (1 - decay) * value_t
+            out_t = state_t * gate_t
+
+        Args:
+            gate:  [batch, seq_len, features]
+            value: [batch, seq_len, features]
+            decay: [features] or broadcastable shape
+            return_gpu_tensor: Return VulkanTensor without download
+
+        Returns:
+            scan output with shape [batch, seq_len, features]
+        """
+        gate_np = np.asarray(gate, dtype=np.float32)
+        value_np = np.asarray(value, dtype=np.float32)
+        if gate_np.shape != value_np.shape or gate_np.ndim != 3:
+            raise ValueError("ssm_fused_math expects gate/value with shape [batch, seq_len, features]")
+
+        batch_size, seq_len, features = gate_np.shape
+        if batch_size <= 0 or seq_len <= 0 or features <= 0:
+            return np.zeros_like(gate_np, dtype=np.float32)
+
+        decay_np = np.asarray(decay, dtype=np.float32).reshape(-1)
+        if decay_np.size != features:
+            if decay_np.size == 1:
+                decay_np = np.full((features,), float(decay_np[0]), dtype=np.float32)
+            else:
+                raise ValueError(
+                    f"ssm_fused_math decay size mismatch: got {decay_np.size}, expected {features}"
+                )
+        decay_np = np.clip(decay_np, 1e-4, 1.0 - 1e-4).astype(np.float32, copy=False)
+
+        # CPU fallback if shader is missing.
+        if "ssm-fused-math" not in self.shaders:
+            d = decay_np.reshape(1, 1, features)
+            keep = (1.0 - d).astype(np.float32, copy=False)
+            state = np.zeros((batch_size, features), dtype=np.float32)
+            out = np.zeros_like(gate_np, dtype=np.float32)
+            for t in range(seq_len):
+                state = (d[:, 0, :] * state) + (keep[:, 0, :] * value_np[:, t, :])
+                out[:, t, :] = state * gate_np[:, t, :]
+            return out
+
+        gate_flat = np.ascontiguousarray(gate_np.reshape(-1), dtype=np.float32)
+        value_flat = np.ascontiguousarray(value_np.reshape(-1), dtype=np.float32)
+        decay_flat = np.ascontiguousarray(decay_np.reshape(-1), dtype=np.float32)
+        out_nbytes = gate_flat.nbytes
+
+        buf_gate = self._acquire_buffer(gate_flat.nbytes)
+        buf_value = self._acquire_buffer(value_flat.nbytes)
+        buf_decay = self._acquire_buffer(decay_flat.nbytes)
+        buf_out = self._acquire_buffer(out_nbytes)
+        descriptor_set = None
+
+        try:
+            self._upload_buffer(buf_gate, gate_flat)
+            self._upload_buffer(buf_value, value_flat)
+            self._upload_buffer(buf_decay, decay_flat)
+
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                "ssm-fused-math", 4, push_constant_size=20
+            )
+            descriptor_set = self.pipelines._create_descriptor_set(
+                desc_layout,
+                [
+                    (self._get_buffer_handle(buf_gate), gate_flat.nbytes),
+                    (self._get_buffer_handle(buf_value), value_flat.nbytes),
+                    (self._get_buffer_handle(buf_decay), decay_flat.nbytes),
+                    (self._get_buffer_handle(buf_out), out_nbytes),
+                ],
+            )
+
+            push_constants = struct.pack(
+                "IIIff",
+                int(batch_size),
+                int(seq_len),
+                int(features),
+                float(1e-4),
+                float(1.0 - 1e-4),
+            )
+
+            total_lanes = int(batch_size * features)
+            workgroups = (total_lanes + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
+
+            if return_gpu_tensor:
+                return self._wrap_output_tensor(buf_out, (batch_size, seq_len, features))
+
+            out = self._download_buffer(buf_out, out_nbytes, np.float32)
+            return out.reshape(batch_size, seq_len, features)
+        finally:
+            self._free_descriptor_set(descriptor_set)
+            self._release_buffers([buf_gate, buf_value, buf_decay])
+            if not return_gpu_tensor:
+                self._release_buffer(buf_out)
+
+    def ssm_fused_uv(
+        self,
+        uv: np.ndarray,
+        decay: np.ndarray,
+        *,
+        attention_mask: np.ndarray | None = None,
+        return_gpu_tensor: bool = False,
+    ) -> np.ndarray:
+        """
+        Fused selective scan from projected UV tensor.
+
+        Args:
+            uv: [batch, seq_len, 2 * features] (numpy or VulkanTensor)
+            decay: [features]
+            attention_mask: optional [batch, seq_len]
+            return_gpu_tensor: return VulkanTensor if True
+        """
+        uv_shape = tuple(int(x) for x in uv.shape)
+        if len(uv_shape) != 3 or uv_shape[2] % 2 != 0:
+            raise ValueError("ssm_fused_uv expects uv shape [batch, seq_len, 2 * features]")
+        batch_size, seq_len, uv_dim = uv_shape
+        features = uv_dim // 2
+        if batch_size <= 0 or seq_len <= 0 or features <= 0:
+            return np.zeros((batch_size, seq_len, features), dtype=np.float32)
+
+        decay_np = np.asarray(decay, dtype=np.float32).reshape(-1)
+        if decay_np.size != features:
+            if decay_np.size == 1:
+                decay_np = np.full((features,), float(decay_np[0]), dtype=np.float32)
+            else:
+                raise ValueError(f"ssm_fused_uv decay mismatch: got {decay_np.size}, expected {features}")
+        decay_np = np.clip(decay_np, 1e-4, 1.0 - 1e-4).astype(np.float32, copy=False)
+
+        if "ssm-fused-uv" not in self.shaders:
+            # CPU fallback path.
+            uv_np = np.asarray(uv, dtype=np.float32)
+            gate_raw, value_raw = np.split(uv_np, 2, axis=-1)
+            gate = 1.0 / (1.0 + np.exp(-np.clip(gate_raw, -20.0, 20.0)))
+            value_act = np.tanh(np.clip(value_raw, -20.0, 20.0))
+            if attention_mask is not None:
+                m = np.asarray(attention_mask, dtype=np.float32)
+                if m.ndim == 2:
+                    m = m[:, :, None]
+                gate = gate * m
+                value_act = value_act * m
+            d = decay_np.reshape(1, 1, features)
+            keep = (1.0 - d).astype(np.float32, copy=False)
+            state = np.zeros((batch_size, features), dtype=np.float32)
+            out = np.zeros((batch_size, seq_len, features), dtype=np.float32)
+            for t in range(seq_len):
+                state = (d[:, 0, :] * state) + (keep[:, 0, :] * value_act[:, t, :])
+                out[:, t, :] = state * gate[:, t, :]
+            return out
+
+        uv_nbytes = int(batch_size * seq_len * uv_dim * 4)
+        out_nbytes = int(batch_size * seq_len * features * 4)
+        mask_arr = None
+        has_mask = 0
+        if attention_mask is not None:
+            mask_arr = np.asarray(attention_mask, dtype=np.float32).reshape(batch_size, seq_len)
+            has_mask = 1
+        else:
+            mask_arr = np.ones((1,), dtype=np.float32)
+
+        buf_uv, release_uv = self._prepare_input(uv, size=uv_nbytes)
+        buf_decay = self._acquire_buffer(decay_np.nbytes)
+        buf_mask = self._acquire_buffer(mask_arr.nbytes)
+        buf_out = self._acquire_buffer(out_nbytes)
+        descriptor_set = None
+
+        try:
+            self._upload_buffer(buf_decay, decay_np)
+            self._upload_buffer(buf_mask, np.ascontiguousarray(mask_arr, dtype=np.float32).reshape(-1))
+
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                "ssm-fused-uv", 4, push_constant_size=24
+            )
+            descriptor_set = self.pipelines._create_descriptor_set(
+                desc_layout,
+                [
+                    (self._get_buffer_handle(buf_uv), uv_nbytes),
+                    (self._get_buffer_handle(buf_decay), decay_np.nbytes),
+                    (self._get_buffer_handle(buf_mask), mask_arr.nbytes),
+                    (self._get_buffer_handle(buf_out), out_nbytes),
+                ],
+            )
+            push_constants = struct.pack(
+                "IIIIff",
+                int(batch_size),
+                int(seq_len),
+                int(features),
+                int(has_mask),
+                float(1e-4),
+                float(1.0 - 1e-4),
+            )
+            total_lanes = int(batch_size * features)
+            workgroups = (total_lanes + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
+
+            if return_gpu_tensor:
+                return self._wrap_output_tensor(buf_out, (batch_size, seq_len, features))
+
+            out = self._download_buffer(buf_out, out_nbytes, np.float32)
+            return out.reshape(batch_size, seq_len, features)
+        finally:
+            self._free_descriptor_set(descriptor_set)
+            if release_uv:
+                self._release_buffer(buf_uv)
+            self._release_buffers([buf_decay, buf_mask])
+            if not return_gpu_tensor:
+                self._release_buffer(buf_out)
+
     # ==================== Fisher / EWC ====================
 
     def fisher_info_update(
@@ -860,7 +1085,13 @@ class VulkanLearning(BufferMixin):
 
     # ==================== Embedding Operations ====================
 
-    def embedding_lookup(self, token_ids: np.ndarray, embedding_table: np.ndarray) -> np.ndarray:
+    def embedding_lookup(
+        self,
+        token_ids: np.ndarray,
+        embedding_table: np.ndarray,
+        *,
+        return_gpu_tensor: bool = False,
+    ) -> np.ndarray:
         """
         GPU-accelerated embedding lookup.
 
@@ -942,13 +1173,17 @@ class VulkanLearning(BufferMixin):
                     pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
                 )
 
+            if return_gpu_tensor:
+                return self._wrap_output_tensor(buf_out, (batch_size, seq_len, embedding_dim))
+
             # Download
             result = self._download_buffer(buf_out, output.nbytes, np.float32)
-
             return result.reshape(batch_size, seq_len, embedding_dim)
         finally:
             self._free_descriptor_set(descriptor_set)
-            self._release_buffers([buf_tokens, buf_out])
+            self._release_buffer(buf_tokens)
+            if not return_gpu_tensor:
+                self._release_buffer(buf_out)
 
     def embedding_backward(
         self, grad_output: np.ndarray, token_ids: np.ndarray, vocab_size: int, embedding_dim: int
@@ -1109,9 +1344,9 @@ class VulkanLearning(BufferMixin):
             # Get or create pipeline
             # Push constants: total_weights(uint), lr(float), beta1(float), beta2(float),
             # epsilon(float), beta1_t(float), beta2_t(float), clear_grad(uint)
-            # Total: 4 + 4*5 + 4 = 28 bytes
+            # Total: 4 + 6*4 + 4 = 32 bytes.
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
-                "adam-update", 4, push_constant_size=28
+                "adam-update", 4, push_constant_size=32
             )
 
             # Get cached descriptor set
@@ -1129,7 +1364,7 @@ class VulkanLearning(BufferMixin):
             # Order in shader: total_weights(uint), lr(float), beta1(float), beta2(float),
             # epsilon(float), beta1_t(float), beta2_t(float), clear_grad(uint)
             push_constants = struct.pack(
-                "IfffffIf",
+                "IffffffI",
                 total_weights,
                 learning_rate,
                 beta1,
@@ -1157,5 +1392,114 @@ class VulkanLearning(BufferMixin):
             m2_updated = m2_updated[:total_weights].reshape(moment2.shape)
 
             return weights_updated, m1_updated, m2_updated
+        finally:
+            self._release_buffers([buf_weights, buf_grad, buf_m1, buf_m2])
+
+    def adamw_update(
+        self,
+        weights: np.ndarray,
+        gradients: np.ndarray,
+        moment1: np.ndarray,
+        moment2: np.ndarray,
+        learning_rate: float,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
+        epsilon: float = 1e-8,
+        weight_decay: float = 0.01,
+        beta1_t: float = 0.0,
+        beta2_t: float = 0.0,
+        clear_grad: bool = False,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        GPU-accelerated AdamW optimizer update.
+
+        Uses: adamw-update.glsl
+
+        Args:
+            weights: Parameter weights (any shape)
+            gradients: Parameter gradients (same shape as weights)
+            moment1: First moment estimate
+            moment2: Second moment estimate
+            learning_rate: Learning rate
+            beta1: Exponential decay for first moment
+            beta2: Exponential decay for second moment
+            epsilon: Numerical stability epsilon
+            weight_decay: Decoupled weight decay coefficient
+            beta1_t: beta1**t for bias correction
+            beta2_t: beta2**t for bias correction
+            clear_grad: Whether to clear gradients in shader
+
+        Returns:
+            (updated_weights, updated_moment1, updated_moment2)
+        """
+        if "adamw-update" not in self.shaders:
+            # CPU fallback
+            moment1_new = beta1 * moment1 + (1.0 - beta1) * gradients
+            moment2_new = beta2 * moment2 + (1.0 - beta2) * gradients * gradients
+            m_hat = moment1_new / (1.0 - beta1_t) if beta1_t < 1.0 else moment1_new
+            v_hat = moment2_new / (1.0 - beta2_t) if beta2_t < 1.0 else moment2_new
+            decayed = weights * (1.0 - learning_rate * weight_decay)
+            weights_new = decayed - learning_rate * m_hat / (np.sqrt(v_hat) + epsilon)
+            return weights_new, moment1_new, moment2_new
+
+        weights_flat = np.asarray(weights, dtype=np.float32).reshape(-1)
+        grad_flat = np.asarray(gradients, dtype=np.float32).reshape(-1)
+        m1_flat = np.asarray(moment1, dtype=np.float32).reshape(-1)
+        m2_flat = np.asarray(moment2, dtype=np.float32).reshape(-1)
+
+        total_weights = int(weights_flat.size)
+        if not (grad_flat.size == m1_flat.size == m2_flat.size == total_weights):
+            raise ValueError("All arrays must have the same size")
+
+        buf_weights = self._acquire_buffer(weights_flat.nbytes)
+        buf_grad = self._acquire_buffer(grad_flat.nbytes)
+        buf_m1 = self._acquire_buffer(m1_flat.nbytes)
+        buf_m2 = self._acquire_buffer(m2_flat.nbytes)
+
+        try:
+            self._upload_buffer(buf_weights, weights_flat)
+            self._upload_buffer(buf_grad, grad_flat)
+            self._upload_buffer(buf_m1, m1_flat)
+            self._upload_buffer(buf_m2, m2_flat)
+
+            # Push constants: uint + 7 floats + uint = 36 bytes.
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                "adamw-update", 4, push_constant_size=36
+            )
+            descriptor_set = self.pipelines.get_cached_descriptor_set(
+                "adamw-update",
+                [
+                    (self._get_buffer_handle(buf_weights), weights_flat.nbytes),
+                    (self._get_buffer_handle(buf_grad), grad_flat.nbytes),
+                    (self._get_buffer_handle(buf_m1), m1_flat.nbytes),
+                    (self._get_buffer_handle(buf_m2), m2_flat.nbytes),
+                ],
+            )
+            push_constants = struct.pack(
+                "IfffffffI",
+                total_weights,
+                float(learning_rate),
+                float(beta1),
+                float(beta2),
+                float(epsilon),
+                float(weight_decay),
+                float(beta1_t),
+                float(beta2_t),
+                1 if clear_grad else 0,
+            )
+            workgroups = (total_weights + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
+
+            weights_updated = self._download_buffer(buf_weights, weights_flat.nbytes, np.float32)
+            m1_updated = self._download_buffer(buf_m1, m1_flat.nbytes, np.float32)
+            m2_updated = self._download_buffer(buf_m2, m2_flat.nbytes, np.float32)
+
+            return (
+                weights_updated[:total_weights].reshape(weights.shape),
+                m1_updated[:total_weights].reshape(moment1.shape),
+                m2_updated[:total_weights].reshape(moment2.shape),
+            )
         finally:
             self._release_buffers([buf_weights, buf_grad, buf_m1, buf_m2])

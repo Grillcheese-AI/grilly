@@ -41,13 +41,16 @@ mcp = FastMCP("elephant-coder")
 # Lazy-initialized store (needs project root at first tool call)
 _store: MemoryStore | None = None
 
+# Redis URL from CLI arg or env var
+_redis_url: str | None = None
+
 
 def _get_store() -> MemoryStore:
     """Get or initialize the memory store for the current project."""
     global _store
     if _store is None:
         project_root = _detect_project_root()
-        _store = MemoryStore(project_root)
+        _store = MemoryStore(project_root, redis_url=_redis_url)
         logger.info("Memory store initialized for project: %s", project_root)
     return _store
 
@@ -296,6 +299,58 @@ def _walk_tree(
 
 
 @mcp.tool()
+def search_symbols(name: str, kind: str | None = None) -> str:
+    """Search for symbols by name (faster than FTS for exact matches).
+
+    Direct symbol lookup by name with optional kind filter. Tries exact
+    match first, then prefix match.
+
+    Args:
+        name: Symbol name to search for (function, class, module name)
+        kind: Optional filter by kind ("function", "class", "module", etc.)
+    """
+    store = _get_store()
+    results = store.search_by_symbol(name, kind=kind)
+    if not results:
+        return f"No symbols found matching '{name}'."
+    return format_results(results)
+
+
+@mcp.tool()
+def get_dependencies(file_path: str) -> str:
+    """Show what a file imports and what imports it.
+
+    Returns the import relationships for a file: what modules it depends on,
+    and what other indexed files depend on it.
+
+    Args:
+        file_path: Path to the file to analyze dependencies for
+    """
+    store = _get_store()
+    fp = _normalize_path(file_path)
+    deps = store.get_dependencies(fp)
+
+    lines = [f"Dependencies for {Path(fp).name}:"]
+    lines.append("")
+    if deps["imports"]:
+        lines.append("  Imports:")
+        for imp in deps["imports"]:
+            lines.append(f"    - {imp}")
+    else:
+        lines.append("  Imports: (none indexed)")
+
+    lines.append("")
+    if deps["imported_by"]:
+        lines.append("  Imported by:")
+        for f in deps["imported_by"]:
+            lines.append(f"    - {Path(f).name}  ({f})")
+    else:
+        lines.append("  Imported by: (none found)")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def forget(
     query: str | None = None,
     file_path: str | None = None,
@@ -348,6 +403,7 @@ def memory_status() -> str:
         "Memory Store Status",
         f"  Total: {s['total']}/{s['max_capacity']} ({s['utilization_pct']}% utilized)",
         f"  Stale: {s['stale']}",
+        f"  Redis: {'connected' if s['redis_connected'] else 'not connected'}",
         "",
         "  By kind:",
     ]
@@ -368,4 +424,13 @@ def memory_status() -> str:
 # ------------------------------------------------------------------
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Elephant-Coder MCP Server")
+    parser.add_argument("--redis-url", default=None, help="Redis URL (default: redis://localhost:6380)")
+    args = parser.parse_args()
+
+    if args.redis_url:
+        _redis_url = args.redis_url
+
     mcp.run(transport="stdio")

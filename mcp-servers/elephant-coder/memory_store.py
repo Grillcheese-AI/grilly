@@ -1,5 +1,5 @@
 """
-SQLite-backed memory store for elephant-coder.
+SQLite-backed memory store for elephant-coder with optional Redis cache.
 
 Inspired by CapsuleMemory (backend/capsule_transformer.py:91-155) and the
 hippocampal circular buffer pattern from nn/memory.py MemoryWrite.
@@ -11,9 +11,10 @@ for relevance-based retrieval and lifecycle management.
 import hashlib
 import json
 import logging
+import os
 import sqlite3
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger("elephant-coder.store")
@@ -62,14 +63,180 @@ def _db_dir(project_root: str) -> Path:
     return base
 
 
+def _project_hash(project_root: str) -> str:
+    return hashlib.sha256(project_root.encode()).hexdigest()[:12]
+
+
+def _entry_to_dict(entry: MemoryEntry) -> dict:
+    """Serialize a MemoryEntry to a JSON-safe dict."""
+    d = asdict(entry)
+    return d
+
+
+def _dict_to_entry(d: dict) -> MemoryEntry:
+    """Deserialize a dict to a MemoryEntry."""
+    return MemoryEntry(**d)
+
+
+# ------------------------------------------------------------------
+# Redis Cache
+# ------------------------------------------------------------------
+
+
+class RedisCache:
+    """Write-through Redis cache for MemoryStore.
+
+    Key schema:
+        ec:{project_hash}:mem:{memory_id}     — individual entry (JSON)
+        ec:{project_hash}:file:{file_path_hash} — set of memory_ids for a file
+        ec:{project_hash}:fts:{query_hash}     — cached FTS result (JSON list)
+    """
+
+    def __init__(self, redis_url: str, project_hash: str, ttl: int = 86400):
+        self._available = False
+        self._warned = False
+        self._prefix = f"ec:{project_hash}"
+        self._ttl = ttl
+        self._fts_ttl = 300  # 5 minutes for FTS results
+        try:
+            import redis as redis_lib
+            self._r = redis_lib.from_url(redis_url, decode_responses=True)
+            self._r.ping()
+            self._available = True
+            logger.info("Redis cache connected: %s", redis_url)
+        except Exception as exc:
+            if not self._warned:
+                logger.warning("Redis unavailable, falling back to SQLite-only: %s", exc)
+                self._warned = True
+            self._r = None
+
+    @property
+    def available(self) -> bool:
+        return self._available
+
+    def _key(self, kind: str, id_part: str) -> str:
+        return f"{self._prefix}:{kind}:{id_part}"
+
+    def _file_hash(self, file_path: str) -> str:
+        return hashlib.sha256(file_path.encode()).hexdigest()[:16]
+
+    def _query_hash(self, query: str) -> str:
+        return hashlib.sha256(query.encode()).hexdigest()[:16]
+
+    # --- Entry operations ---
+
+    def put_entry(self, entry: MemoryEntry) -> None:
+        if not self._available:
+            return
+        try:
+            key = self._key("mem", entry.memory_id)
+            self._r.setex(key, self._ttl, json.dumps(_entry_to_dict(entry)))
+            # Add to file set
+            fkey = self._key("file", self._file_hash(entry.file_path))
+            self._r.sadd(fkey, entry.memory_id)
+            self._r.expire(fkey, self._ttl)
+        except Exception:
+            pass
+
+    def get_entry(self, memory_id: str) -> MemoryEntry | None:
+        if not self._available:
+            return None
+        try:
+            data = self._r.get(self._key("mem", memory_id))
+            if data:
+                return _dict_to_entry(json.loads(data))
+        except Exception:
+            pass
+        return None
+
+    def delete_entry(self, memory_id: str, file_path: str | None = None) -> None:
+        if not self._available:
+            return
+        try:
+            self._r.delete(self._key("mem", memory_id))
+            if file_path:
+                fkey = self._key("file", self._file_hash(file_path))
+                self._r.srem(fkey, memory_id)
+        except Exception:
+            pass
+
+    # --- File set operations ---
+
+    def get_file_entries(self, file_path: str) -> list[str] | None:
+        """Return memory_ids for a file, or None if not cached."""
+        if not self._available:
+            return None
+        try:
+            fkey = self._key("file", self._file_hash(file_path))
+            members = self._r.smembers(fkey)
+            return list(members) if members else None
+        except Exception:
+            return None
+
+    def invalidate_file(self, file_path: str) -> None:
+        """Remove all cached entries for a file."""
+        if not self._available:
+            return
+        try:
+            fkey = self._key("file", self._file_hash(file_path))
+            mem_ids = self._r.smembers(fkey)
+            if mem_ids:
+                pipe = self._r.pipeline()
+                for mid in mem_ids:
+                    pipe.delete(self._key("mem", mid))
+                pipe.delete(fkey)
+                pipe.execute()
+        except Exception:
+            pass
+
+    # --- FTS cache ---
+
+    def put_fts(self, query: str, entries: list[MemoryEntry]) -> None:
+        if not self._available:
+            return
+        try:
+            key = self._key("fts", self._query_hash(query))
+            data = json.dumps([_entry_to_dict(e) for e in entries])
+            self._r.setex(key, self._fts_ttl, data)
+        except Exception:
+            pass
+
+    def get_fts(self, query: str) -> list[MemoryEntry] | None:
+        if not self._available:
+            return None
+        try:
+            data = self._r.get(self._key("fts", self._query_hash(query)))
+            if data:
+                return [_dict_to_entry(d) for d in json.loads(data)]
+        except Exception:
+            pass
+        return None
+
+    def flush_fts(self) -> None:
+        """Invalidate all cached FTS results."""
+        if not self._available:
+            return
+        try:
+            pattern = self._key("fts", "*")
+            cursor = 0
+            while True:
+                cursor, keys = self._r.scan(cursor, match=pattern, count=100)
+                if keys:
+                    self._r.delete(*keys)
+                if cursor == 0:
+                    break
+        except Exception:
+            pass
+
+
 class MemoryStore:
-    """SQLite storage with FTS5 full-text search.
+    """SQLite storage with FTS5 full-text search and optional Redis cache.
 
     Capacity-limited circular buffer: when count exceeds max_memories,
     lowest-relevance entries are evicted (like MemoryWrite overwrite mode).
     """
 
-    def __init__(self, project_root: str, max_memories: int = 10_000):
+    def __init__(self, project_root: str, max_memories: int = 10_000, redis_url: str | None = None):
         self.project_root = project_root
         self.max_memories = max_memories
         db_path = _db_dir(project_root) / "memories.db"
@@ -78,6 +245,15 @@ class MemoryStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._init_schema()
+
+        # Redis cache (optional)
+        r_url = redis_url or os.environ.get("ELEPHANT_CODER_REDIS_URL", "redis://localhost:6380")
+        ttl = int(os.environ.get("ELEPHANT_CODER_REDIS_TTL", "86400"))
+        self._cache = RedisCache(r_url, _project_hash(project_root), ttl=ttl)
+
+    @property
+    def cache(self) -> RedisCache:
+        return self._cache
 
     def _init_schema(self) -> None:
         cur = self._conn.cursor()
@@ -177,17 +353,33 @@ class MemoryStore:
         )
         self._conn.commit()
 
+        # Write-through to Redis
+        self._cache.put_entry(entry)
+
     def get(self, memory_id: str) -> MemoryEntry | None:
         """Fetch a single memory by ID."""
+        # Check Redis first
+        cached = self._cache.get_entry(memory_id)
+        if cached is not None:
+            return cached
+
         row = self._conn.execute(
             "SELECT * FROM memories WHERE memory_id = ?", (memory_id,)
         ).fetchone()
         if row is None:
             return None
-        return self._row_to_entry(row)
+        entry = self._row_to_entry(row)
+        # Backfill cache
+        self._cache.put_entry(entry)
+        return entry
 
     def search_fts(self, query: str, limit: int = 10) -> list[MemoryEntry]:
-        """Full-text search with BM25 ranking."""
+        """Full-text search with BM25 ranking. Checks Redis cache first."""
+        # Check Redis FTS cache
+        cached = self._cache.get_fts(query)
+        if cached is not None:
+            return cached[:limit]
+
         # Escape special FTS5 characters
         safe_query = query.replace('"', '""')
         try:
@@ -213,15 +405,35 @@ class MemoryStore:
                 """,
                 (like, like, like, limit),
             ).fetchall()
-        return [self._row_to_entry(r) for r in rows]
+        results = [self._row_to_entry(r) for r in rows]
+
+        # Cache results in Redis
+        self._cache.put_fts(query, results)
+        return results
 
     def search_by_file(self, file_path: str) -> list[MemoryEntry]:
         """Get all memories for a specific file."""
+        # Check Redis file set for cached entries
+        cached_ids = self._cache.get_file_entries(file_path)
+        if cached_ids:
+            entries = []
+            for mid in cached_ids:
+                e = self._cache.get_entry(mid)
+                if e is not None:
+                    entries.append(e)
+            if entries:
+                entries.sort(key=lambda e: (e.kind, e.symbol_name))
+                return entries
+
         rows = self._conn.execute(
             "SELECT * FROM memories WHERE file_path = ? ORDER BY kind, symbol_name",
             (file_path,),
         ).fetchall()
-        return [self._row_to_entry(r) for r in rows]
+        results = [self._row_to_entry(r) for r in rows]
+        # Backfill cache
+        for e in results:
+            self._cache.put_entry(e)
+        return results
 
     def search_by_kind(self, kind: str, limit: int = 50) -> list[MemoryEntry]:
         """Get memories filtered by kind."""
@@ -230,6 +442,49 @@ class MemoryStore:
             (kind, limit),
         ).fetchall()
         return [self._row_to_entry(r) for r in rows]
+
+    def search_by_symbol(self, name: str, kind: str | None = None) -> list[MemoryEntry]:
+        """Direct symbol lookup by name (exact or prefix match)."""
+        if kind:
+            rows = self._conn.execute(
+                "SELECT * FROM memories WHERE symbol_name = ? AND kind = ? ORDER BY relevance_score DESC",
+                (name, kind),
+            ).fetchall()
+            if not rows:
+                rows = self._conn.execute(
+                    "SELECT * FROM memories WHERE symbol_name LIKE ? AND kind = ? ORDER BY relevance_score DESC LIMIT 20",
+                    (f"{name}%", kind),
+                ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM memories WHERE symbol_name = ? ORDER BY relevance_score DESC",
+                (name,),
+            ).fetchall()
+            if not rows:
+                rows = self._conn.execute(
+                    "SELECT * FROM memories WHERE symbol_name LIKE ? ORDER BY relevance_score DESC LIMIT 20",
+                    (f"{name}%",),
+                ).fetchall()
+        return [self._row_to_entry(r) for r in rows]
+
+    def get_dependencies(self, file_path: str) -> dict:
+        """Get what a file imports and what imports it."""
+        # What this file imports
+        row = self._conn.execute(
+            "SELECT dependencies FROM memories WHERE file_path = ? AND kind = 'module'",
+            (file_path,),
+        ).fetchone()
+        imports = json.loads(row["dependencies"]) if row else []
+
+        # What imports this file (search dependencies that mention this file's module name)
+        module_name = Path(file_path).stem
+        rows = self._conn.execute(
+            "SELECT DISTINCT file_path FROM memories WHERE kind = 'module' AND dependencies LIKE ? AND file_path != ?",
+            (f"%{module_name}%", file_path),
+        ).fetchall()
+        imported_by = [r["file_path"] for r in rows]
+
+        return {"imports": imports, "imported_by": imported_by}
 
     def touch(self, memory_id: str) -> None:
         """Increment access_count and update freshness on retrieval (Hebbian)."""
@@ -244,12 +499,39 @@ class MemoryStore:
         )
         self._conn.commit()
 
+    def touch_batch(self, memory_ids: list[str]) -> None:
+        """Batch touch: increment access_count and update freshness for multiple entries."""
+        if not memory_ids:
+            return
+        now = time.time()
+        self._conn.executemany(
+            "UPDATE memories SET access_count = access_count + 1, freshness = ? WHERE memory_id = ?",
+            [(now, mid) for mid in memory_ids],
+        )
+        self._conn.commit()
+
+    def update_relevance(self, memory_id: str, relevance_score: float) -> None:
+        """Lightweight relevance update without full upsert (avoids FTS5 delete+insert)."""
+        self._conn.execute(
+            "UPDATE memories SET relevance_score = ? WHERE memory_id = ?",
+            (relevance_score, memory_id),
+        )
+        self._conn.commit()
+
     def delete(self, memory_id: str) -> bool:
         """Delete a memory and its FTS entry."""
+        # Get file_path for cache invalidation
+        row = self._conn.execute(
+            "SELECT file_path FROM memories WHERE memory_id = ?", (memory_id,)
+        ).fetchone()
+        file_path = row["file_path"] if row else None
+
         cur = self._conn.cursor()
         cur.execute("DELETE FROM memories_fts WHERE memory_id = ?", (memory_id,))
         cur.execute("DELETE FROM memories WHERE memory_id = ?", (memory_id,))
         self._conn.commit()
+
+        self._cache.delete_entry(memory_id, file_path)
         return cur.rowcount > 0
 
     def delete_by_file(self, file_path: str) -> int:
@@ -262,6 +544,7 @@ class MemoryStore:
         ]
         for mid in ids:
             self.delete(mid)
+        self._cache.invalidate_file(file_path)
         return len(ids)
 
     def delete_stale(self) -> int:
@@ -317,7 +600,7 @@ class MemoryStore:
             "ORDER BY access_count DESC LIMIT 5"
         ).fetchall()
 
-        return {
+        result = {
             "total": total,
             "max_capacity": self.max_memories,
             "utilization_pct": round(total / self.max_memories * 100, 1)
@@ -329,7 +612,9 @@ class MemoryStore:
                 {"symbol": r["symbol_name"], "file": r["file_path"], "count": r["access_count"]}
                 for r in top_accessed
             ],
+            "redis_connected": self._cache.available,
         }
+        return result
 
     def close(self) -> None:
         self._conn.close()

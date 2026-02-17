@@ -1,25 +1,14 @@
 """
-ONNX Fine-Tuning with LoRA for Grilly
+ONNX LoRA fine-tuning utilities for Grilly.
 
-Orchestrates LoRA-based fine-tuning of ONNX models loaded via OnnxModelLoader.
-Wraps Linear layers with LoRA adapters, provides a training loop, and supports
-saving/loading LoRA weights and exporting merged models to ONNX.
-
-Usage:
-    from grilly.utils.onnx_loader import OnnxModelLoader
-    from grilly.utils.onnx_finetune import OnnxFineTuner
-    from grilly.nn.lora import LoRAConfig
-
-    model = OnnxModelLoader.load("model.onnx")
-    config = LoRAConfig(rank=8, alpha=16, target_modules=["q_proj", "v_proj"])
-    tuner = OnnxFineTuner(model, config)
-    tuner.apply_lora()
-    tuner.train(train_data, epochs=3, lr=1e-4, loss_fn="cross_entropy")
-    tuner.save_lora("lora_adapters/")
-    tuner.save_onnx("finetuned_model.onnx")
+This module wraps Linear layers in ONNX-loaded Grilly models with LoRA adapters
+and provides a training loop with Vulkan-backed LoRA gradients when available.
 """
 
+from __future__ import annotations
+
 import json
+import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -30,25 +19,38 @@ from ..nn.lora import LoRAConfig, LoRALinear
 from ..nn.module import Module
 from ..nn.modules import Linear, _get_param_array
 
+logger = logging.getLogger(__name__)
+
 
 class OnnxFineTuner:
-    """High-level LoRA fine-tuning API for ONNX models loaded into Grilly.
+    """High-level LoRA fine-tuning API for ONNX models loaded into Grilly."""
 
-    Wraps target Linear layers with ``LoRALinear`` adapters, freezes base
-    weights, and provides ``train()`` / ``save_lora()`` / ``save_onnx()``
-    helpers.
-    """
-
-    def __init__(self, model: Module, config: LoRAConfig):
+    def __init__(
+        self,
+        model: Module,
+        config: LoRAConfig,
+        gradient_mode: str = "vulkan",
+        feedback_alignment: bool = True,
+    ):
         """
         Args:
-            model: A Grilly Module (typically a ``GrillyOnnxModel``).
-            config: LoRA configuration specifying rank, alpha, and target modules.
+            model: A Grilly Module (typically ``GrillyOnnxModel``).
+            config: LoRA configuration.
+            gradient_mode: ``"vulkan"`` (default) or ``"finite_diff"``.
+            feedback_alignment: Use direct feedback alignment when logits dim
+                and adapted layer output dim differ.
         """
         self.model = model
         self.config = config
+        self.gradient_mode = gradient_mode
+        self.feedback_alignment = feedback_alignment
         self._lora_layers: dict[str, LoRALinear] = {}
         self._original_layers: dict[str, Linear] = {}
+        self._forward_cache: dict[str, dict[str, np.ndarray]] = {}
+        self._feedback_matrices: dict[str, np.ndarray] = {}
+        self._loss_name: str | None = None
+        self._compute_backend = None
+        self._compute_backend_init = False
         self._applied = False
 
     # ------------------------------------------------------------------
@@ -56,37 +58,21 @@ class OnnxFineTuner:
     # ------------------------------------------------------------------
 
     def apply_lora(self) -> "OnnxFineTuner":
-        """Freeze base weights and add LoRA adapters to matching Linear layers.
-
-        Walks ``model._modules`` recursively. Any ``Linear`` whose name
-        contains a substring from ``config.target_modules`` gets wrapped
-        with a ``LoRALinear``.
-
-        Returns:
-            self (for chaining)
-        """
+        """Freeze base weights and add LoRA adapters to matching Linear layers."""
         if self._applied:
             return self
 
         targets = self.config.target_modules
-
-        # Collect (name, Linear) pairs
         linear_layers = self._find_linear_layers(self.model, prefix="")
 
         for name, layer in linear_layers:
-            # Check if any target module pattern matches this name
             if not self._matches_target(name, targets):
                 continue
 
-            # Extract base weight
             weight = _get_param_array(layer.weight).copy()
-            in_features = layer.in_features
-            out_features = layer.out_features
-
-            # Create LoRA wrapper
             lora = LoRALinear(
-                in_features=in_features,
-                out_features=out_features,
+                in_features=layer.in_features,
+                out_features=layer.out_features,
                 rank=self.config.rank,
                 alpha=self.config.alpha,
                 dropout=self.config.dropout,
@@ -95,17 +81,15 @@ class OnnxFineTuner:
                 base_weights=weight,
             )
 
-            # If bias exists, copy it
             if layer.bias is not None:
-                bias_data = _get_param_array(layer.bias).copy()
                 from ..nn.autograd import Variable
 
+                bias_data = _get_param_array(layer.bias).copy()
                 lora.bias = Variable(bias_data.astype(np.float32), requires_grad=True)
 
             self._lora_layers[name] = lora
             self._original_layers[name] = layer
 
-        # Freeze all non-LoRA parameters
         for param in self.model.parameters():
             if hasattr(param, "requires_grad"):
                 param.requires_grad = False
@@ -115,7 +99,7 @@ class OnnxFineTuner:
 
     def _find_linear_layers(self, module: Module, prefix: str) -> list[tuple[str, Linear]]:
         """Recursively find all Linear layers in the module tree."""
-        results = []
+        results: list[tuple[str, Linear]] = []
         for key, child in module._modules.items():
             full_name = f"{prefix}.{key}" if prefix else key
             if isinstance(child, Linear):
@@ -128,7 +112,6 @@ class OnnxFineTuner:
     def _matches_target(name: str, targets: list[str]) -> bool:
         """Check if *name* contains any of the target substrings."""
         if not targets:
-            # If no targets specified, match all Linear layers
             return True
         return any(t in name for t in targets)
 
@@ -148,76 +131,42 @@ class OnnxFineTuner:
         scheduler: str | None = None,
         max_grad_norm: float | None = 1.0,
     ) -> dict[str, list[float]]:
-        """Run a LoRA training loop.
-
-        Args:
-            train_data: Training data.  Accepts:
-                - A list of ``(input, target)`` tuples
-                - A ``grilly.utils.DataLoader`` instance
-                - Any iterable yielding ``(input, target)`` batches
-            epochs: Number of training epochs.
-            lr: Learning rate.
-            loss_fn: ``"cross_entropy"``, ``"mse"``, or a callable
-                ``(predictions, targets) -> scalar``.
-            optimizer: ``"adam"`` or ``"adamw"``.
-            batch_size: Batch size (used when *train_data* is a list).
-            log_interval: Print loss every *log_interval* steps.
-            scheduler: Optional LR scheduler (``"cosine"`` or ``None``).
-            max_grad_norm: Maximum gradient norm for clipping (``None`` to
-                disable).
-
-        Returns:
-            Dict with ``"losses"`` list and ``"epoch_losses"`` list.
-        """
+        """Run LoRA training."""
         if not self._applied:
             raise RuntimeError("Call apply_lora() before train()")
 
-        # Collect trainable parameters (LoRA A, B, and optional bias)
         trainable_params = list(self.trainable_parameters())
         if not trainable_params:
             raise RuntimeError("No trainable LoRA parameters found")
 
-        # Build loss function
         loss_callable = self._resolve_loss_fn(loss_fn)
-
-        # Build optimizer
+        self._loss_name = loss_fn if isinstance(loss_fn, str) else None
         opt = self._build_optimizer(optimizer, trainable_params, lr)
-
-        # Build scheduler
         sched = self._build_scheduler(scheduler, opt, epochs)
 
-        # Wrap data
-        batches = self._prepare_batches(train_data, batch_size)
-
         history: dict[str, list[float]] = {"losses": [], "epoch_losses": []}
-
         step = 0
+
         for epoch in range(epochs):
             epoch_loss = 0.0
             n_batches = 0
 
-            for batch_input, batch_target in batches:
-                # Forward pass through model with LoRA
+            for batch_input, batch_target in self._prepare_batches(train_data, batch_size):
                 predictions = self._forward_with_lora(batch_input)
 
-                # Compute loss
                 loss_val = loss_callable(predictions, batch_target)
                 loss_scalar = float(np.mean(loss_val))
                 history["losses"].append(loss_scalar)
                 epoch_loss += loss_scalar
                 n_batches += 1
 
-                # Backward pass — compute gradients for LoRA params
-                self._backward_lora(predictions, batch_target, loss_callable)
+                self._backward_lora(batch_input, predictions, batch_target, loss_callable)
 
-                # Gradient clipping
                 if max_grad_norm is not None:
                     self._clip_grad_norm(trainable_params, max_grad_norm)
 
-                # Optimizer step
                 opt.step()
 
-                # Zero gradients
                 for p in trainable_params:
                     if hasattr(p, "grad") and p.grad is not None:
                         p.grad = np.zeros_like(p.data)
@@ -235,71 +184,301 @@ class OnnxFineTuner:
 
         return history
 
-    def _forward_with_lora(self, x: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _normalize_model_inputs(x: Any) -> tuple[Any, ...]:
+        if isinstance(x, tuple):
+            return x
+        if isinstance(x, list):
+            return tuple(x)
+        return (x,)
+
+    @staticmethod
+    def _flatten_last_dim(x: Any) -> tuple[np.ndarray, np.ndarray, tuple[int, ...]]:
+        arr = np.asarray(x, dtype=np.float32)
+        if arr.ndim == 1:
+            return arr, arr.reshape(1, arr.shape[0]), ()
+        if arr.ndim == 0:
+            arr = arr.reshape(1, 1)
+            return arr, arr, ()
+        prefix = arr.shape[:-1]
+        return arr, arr.reshape(-1, arr.shape[-1]), prefix
+
+    @staticmethod
+    def _restore_last_dim(x_2d: np.ndarray, prefix: tuple[int, ...], out_features: int) -> np.ndarray:
+        if not prefix:
+            return x_2d.reshape(out_features)
+        return x_2d.reshape(*prefix, out_features)
+
+    def _get_compute_backend(self):
+        if self.gradient_mode != "vulkan":
+            return None
+        if self._compute_backend_init:
+            return self._compute_backend
+
+        self._compute_backend_init = True
+        try:
+            from ..backend.compute import VulkanCompute
+
+            self._compute_backend = VulkanCompute()
+            logger.info("ONNX LoRA fine-tuner using Vulkan backend")
+        except Exception as exc:
+            logger.warning("Vulkan LoRA backend unavailable, using CPU LoRA path: %s", exc)
+            self._compute_backend = None
+        return self._compute_backend
+
+    def _lora_forward_with_cache(self, layer_name: str, lora: LoRALinear, x: Any) -> np.ndarray:
+        _, x_2d, prefix = self._flatten_last_dim(x)
+        bias_data = _get_param_array(lora.bias) if lora.bias is not None else None
+
+        h = np.matmul(x_2d, lora.lora_A.data.T)
+        out_2d = None
+
+        backend = self._get_compute_backend()
+        if backend is not None and hasattr(backend, "lora"):
+            try:
+                out_2d, h = backend.lora.forward_with_intermediate(
+                    x_2d,
+                    lora.W.data,
+                    lora.lora_A.data,
+                    lora.lora_B.data,
+                    scale=lora.scaling,
+                    bias=bias_data,
+                )
+            except Exception as exc:
+                logger.debug("Vulkan LoRA forward failed, falling back to CPU path: %s", exc)
+                out_2d = None
+
+        if out_2d is None:
+            base = np.matmul(x_2d, lora.W.data.T)
+            lora_out = np.matmul(h, lora.lora_B.data.T)
+            out_2d = base + lora.scaling * lora_out
+            if bias_data is not None:
+                out_2d = out_2d + bias_data
+
+        self._forward_cache[layer_name] = {
+            "x_2d": np.asarray(x_2d, dtype=np.float32),
+            "h": np.asarray(h, dtype=np.float32),
+        }
+        return self._restore_last_dim(np.asarray(out_2d, dtype=np.float32), prefix, lora.out_features)
+
+    def _forward_with_lora(self, x: Any) -> np.ndarray:
         """Run forward pass, substituting LoRA layers for originals."""
         from .onnx_loader import GrillyOnnxModel
 
+        model_inputs = self._normalize_model_inputs(x)
+        self._forward_cache = {}
+
         if isinstance(self.model, GrillyOnnxModel):
-            # Replace module handlers temporarily
             old_handlers = {}
             for nd in self.model._exec_nodes:
                 if nd.kind == "module" and isinstance(nd.handler, Linear):
-                    # Find the matching LoRA layer
                     for lora_name, orig in self._original_layers.items():
                         if orig is nd.handler and lora_name in self._lora_layers:
                             old_handlers[id(nd)] = nd.handler
-                            lora = self._lora_layers[lora_name]
-                            # We need a wrapper that accepts numpy and returns numpy
-                            nd.handler = self._make_lora_forward_wrapper(lora)
+                            nd.handler = self._make_lora_forward_wrapper(
+                                lora_name, self._lora_layers[lora_name]
+                            )
                             break
 
-            result = self.model(x)
+            result = self.model(*model_inputs)
 
-            # Restore original handlers
             for nd in self.model._exec_nodes:
                 if id(nd) in old_handlers:
                     nd.handler = old_handlers[id(nd)]
-
             return result
 
-        # Non-ONNX model — just do a forward pass
-        return self.model(x)
+        return self.model(*model_inputs)
 
-    @staticmethod
-    def _make_lora_forward_wrapper(lora: LoRALinear):
-        """Create a Module-compatible wrapper around LoRALinear.forward()."""
-        from ..nn.autograd import Variable
+    def _make_lora_forward_wrapper(self, layer_name: str, lora: LoRALinear):
+        """Create a Module-compatible wrapper around LoRA forward."""
 
         class _LoRAWrapper(Module):
-            def __init__(self, lora_layer):
+            def __init__(self, fine_tuner: "OnnxFineTuner", name: str, lora_layer: LoRALinear):
                 super().__init__()
+                self._fine_tuner = fine_tuner
+                self._name = name
                 self._lora = lora_layer
 
             def forward(self, x):
-                if not isinstance(x, Variable):
-                    x_var = Variable(x.astype(np.float32), requires_grad=False)
+                return self._fine_tuner._lora_forward_with_cache(self._name, self._lora, x)
+
+        return _LoRAWrapper(self, layer_name, lora)
+
+    def _loss_gradient(self, predictions: Any, targets: Any) -> np.ndarray | None:
+        if isinstance(predictions, (tuple, list)):
+            if not predictions:
+                return None
+            predictions = predictions[0]
+
+        pred = np.asarray(predictions, dtype=np.float32)
+        target = np.asarray(targets)
+
+        if self._loss_name == "mse":
+            grad = (2.0 / max(pred.size, 1)) * (pred - target.astype(np.float32))
+            return grad.astype(np.float32)
+
+        if self._loss_name == "cross_entropy":
+            logits_2d = pred.reshape(-1, pred.shape[-1]).astype(np.float64)
+            shifted = logits_2d - np.max(logits_2d, axis=-1, keepdims=True)
+            probs = np.exp(shifted)
+            probs /= np.sum(probs, axis=-1, keepdims=True)
+
+            if target.ndim < pred.ndim:
+                target_idx = target.astype(np.int64).reshape(-1)
+                if target_idx.size == 0:
+                    return None
+                if target_idx.size != logits_2d.shape[0]:
+                    target_idx = np.resize(target_idx, logits_2d.shape[0])
+                grad = probs
+                grad[np.arange(logits_2d.shape[0]), target_idx] -= 1.0
+                grad /= logits_2d.shape[0]
+                return grad.astype(np.float32).reshape(pred.shape)
+
+            target_2d = target.reshape(-1, target.shape[-1]).astype(np.float64)
+            if target_2d.shape != logits_2d.shape:
+                target_2d = np.resize(target_2d, logits_2d.shape)
+            grad = (probs - target_2d) / logits_2d.shape[0]
+            return grad.astype(np.float32).reshape(pred.shape)
+
+        return None
+
+    @staticmethod
+    def _align_rows(matrix: np.ndarray, rows: int) -> np.ndarray:
+        if matrix.shape[0] == rows:
+            return matrix
+        if matrix.shape[0] == 1:
+            return np.repeat(matrix, rows, axis=0)
+        if rows % matrix.shape[0] == 0:
+            return np.repeat(matrix, rows // matrix.shape[0], axis=0)
+        if matrix.shape[0] % rows == 0:
+            return matrix.reshape(rows, matrix.shape[0] // rows, matrix.shape[1]).mean(axis=1)
+        idx = np.linspace(0, matrix.shape[0] - 1, rows).astype(np.int64)
+        return matrix[idx]
+
+    def _get_feedback_matrix(self, layer_name: str, in_dim: int, out_dim: int) -> np.ndarray:
+        key = f"{layer_name}:{in_dim}->{out_dim}"
+        if key not in self._feedback_matrices:
+            seed = abs(hash(key)) % (2**32)
+            rng = np.random.default_rng(seed)
+            mat = rng.standard_normal((in_dim, out_dim), dtype=np.float32)
+            mat /= np.sqrt(max(in_dim, 1))
+            self._feedback_matrices[key] = mat.astype(np.float32)
+        return self._feedback_matrices[key]
+
+    def _prepare_layer_gradients(
+        self,
+        layer_name: str,
+        grad_logits_2d: np.ndarray,
+        layer_batch_rows: int,
+        layer_out_features: int,
+    ) -> np.ndarray | None:
+        grad_rows = self._align_rows(grad_logits_2d, layer_batch_rows)
+        if grad_rows.shape[1] == layer_out_features:
+            return grad_rows.astype(np.float32, copy=False)
+        if not self.feedback_alignment:
+            return None
+        feedback = self._get_feedback_matrix(layer_name, grad_rows.shape[1], layer_out_features)
+        projected = np.matmul(grad_rows, feedback)
+        return projected.astype(np.float32, copy=False)
+
+    def _compute_lora_grads(
+        self,
+        grad_output: np.ndarray,
+        x_2d: np.ndarray,
+        lora: LoRALinear,
+        h: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        backend = self._get_compute_backend()
+        if backend is not None and hasattr(backend, "lora"):
+            try:
+                return backend.lora.backward(
+                    grad_output=grad_output,
+                    x=x_2d,
+                    A=lora.lora_A.data,
+                    B=lora.lora_B.data,
+                    h=h,
+                    scale=lora.scaling,
+                )
+            except Exception as exc:
+                logger.debug("Vulkan LoRA backward failed, falling back to CPU path: %s", exc)
+
+        grad_B = lora.scaling * np.matmul(h.T, grad_output).T
+        temp = np.matmul(grad_output, lora.lora_B.data)
+        grad_A = lora.scaling * np.matmul(temp.T, x_2d)
+        return grad_A.astype(np.float32), grad_B.astype(np.float32)
+
+    def _backward_lora(
+        self, batch_input: Any, predictions: np.ndarray, targets: np.ndarray, loss_fn: Callable
+    ) -> None:
+        if self.gradient_mode == "finite_diff":
+            self._backward_lora_finite_diff(batch_input, predictions, targets, loss_fn)
+            return
+
+        grad_logits = self._loss_gradient(predictions, targets)
+        if grad_logits is None:
+            self._backward_lora_finite_diff(batch_input, predictions, targets, loss_fn)
+            return
+
+        grad_logits = np.asarray(grad_logits, dtype=np.float32)
+        grad_logits_2d = (
+            grad_logits.reshape(1, -1)
+            if grad_logits.ndim == 1
+            else grad_logits.reshape(-1, grad_logits.shape[-1])
+        )
+
+        updated_layers = 0
+        for layer_name, lora in self._lora_layers.items():
+            cache = self._forward_cache.get(layer_name)
+            if not cache:
+                continue
+
+            x_2d = np.asarray(cache["x_2d"], dtype=np.float32)
+            h = np.asarray(cache["h"], dtype=np.float32)
+
+            grad_out = self._prepare_layer_gradients(
+                layer_name=layer_name,
+                grad_logits_2d=grad_logits_2d,
+                layer_batch_rows=x_2d.shape[0],
+                layer_out_features=lora.out_features,
+            )
+            if grad_out is None:
+                continue
+
+            grad_A, grad_B = self._compute_lora_grads(grad_out, x_2d, lora, h)
+
+            if getattr(lora.lora_A, "grad", None) is None:
+                lora.lora_A.grad = grad_A
+            else:
+                lora.lora_A.grad = lora.lora_A.grad + grad_A
+
+            if getattr(lora.lora_B, "grad", None) is None:
+                lora.lora_B.grad = grad_B
+            else:
+                lora.lora_B.grad = lora.lora_B.grad + grad_B
+
+            if lora.bias is not None:
+                bias_grad = np.sum(grad_out, axis=0).astype(np.float32)
+                if getattr(lora.bias, "grad", None) is None:
+                    lora.bias.grad = bias_grad
                 else:
-                    x_var = x
-                out = self._lora.forward(x_var)
-                return out.data if hasattr(out, "data") else np.asarray(out)
+                    lora.bias.grad = lora.bias.grad + bias_grad
 
-        return _LoRAWrapper(lora)
+            updated_layers += 1
 
-    def _backward_lora(self, predictions: np.ndarray, targets: np.ndarray, loss_fn: Callable):
-        """Simple gradient estimation for LoRA parameters.
+        if updated_layers == 0:
+            self._backward_lora_finite_diff(batch_input, predictions, targets, loss_fn)
 
-        Uses numerical differentiation (parameter perturbation) since the
-        full autograd graph may not be connected through the ONNX model.
-        """
+    def _backward_lora_finite_diff(
+        self, batch_input: Any, predictions: np.ndarray, targets: np.ndarray, loss_fn: Callable
+    ) -> None:
+        """Fallback finite-difference gradient estimation for LoRA parameters."""
         eps = 1e-4
         base_loss = float(np.mean(loss_fn(predictions, targets)))
 
         for lora in self._lora_layers.values():
             for param in lora.parameters():
                 grad = np.zeros_like(param.data)
-                # Approximate gradient via forward differences on a sample
                 flat = param.data.flatten()
-                # Sample a subset of indices for efficiency
                 n = len(flat)
                 n_sample = min(n, max(64, n // 4))
                 indices = np.random.choice(n, size=n_sample, replace=False)
@@ -308,18 +487,15 @@ class OnnxFineTuner:
                     old_val = flat[idx]
                     flat[idx] = old_val + eps
                     param.data = flat.reshape(param.data.shape)
-                    new_pred = self._forward_with_lora(predictions)
-                    # Reuse the same targets
+                    new_pred = self._forward_with_lora(batch_input)
                     new_loss = float(np.mean(loss_fn(new_pred, targets)))
-                    grad_val = (new_loss - base_loss) / eps
-                    grad.flat[idx] = grad_val
+                    grad.flat[idx] = (new_loss - base_loss) / eps
                     flat[idx] = old_val
 
                 param.data = flat.reshape(param.data.shape)
                 param.grad = grad
 
-    def _clip_grad_norm(self, params, max_norm: float):
-        """Clip gradient norm across all parameters."""
+    def _clip_grad_norm(self, params, max_norm: float) -> None:
         total_norm_sq = 0.0
         for p in params:
             if hasattr(p, "grad") and p.grad is not None:
@@ -342,20 +518,25 @@ class OnnxFineTuner:
         if loss_fn == "cross_entropy":
 
             def ce_loss(pred, target):
-                # Numerically stable cross-entropy
                 pred = np.asarray(pred, dtype=np.float64)
+                target_arr = np.asarray(target)
                 shifted = pred - np.max(pred, axis=-1, keepdims=True)
                 log_sum_exp = np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True))
                 log_probs = shifted - log_sum_exp
-                if target.ndim < pred.ndim:
-                    # target is class indices
-                    target_int = target.astype(np.intp).flatten()
-                    batch_size = target_int.shape[0]
-                    log_probs_2d = log_probs.reshape(batch_size, -1)
-                    loss = -log_probs_2d[np.arange(batch_size), target_int]
+
+                if target_arr.ndim < pred.ndim:
+                    target_int = target_arr.astype(np.intp).flatten()
+                    if target_int.size != np.prod(pred.shape[:-1]):
+                        target_int = np.resize(target_int, int(np.prod(pred.shape[:-1])))
+                    log_probs_2d = log_probs.reshape(-1, log_probs.shape[-1])
+                    loss = -log_probs_2d[np.arange(log_probs_2d.shape[0]), target_int]
                     return np.mean(loss).astype(np.float32)
-                # target is one-hot or soft labels
-                return np.float32(-np.mean(np.sum(target * log_probs, axis=-1)))
+
+                target_2d = target_arr.reshape(-1, target_arr.shape[-1])
+                log_probs_2d = log_probs.reshape(-1, log_probs.shape[-1])
+                if target_2d.shape != log_probs_2d.shape:
+                    target_2d = np.resize(target_2d, log_probs_2d.shape)
+                return np.float32(-np.mean(np.sum(target_2d * log_probs_2d, axis=-1)))
 
             return ce_loss
         if loss_fn == "mse":
@@ -389,15 +570,49 @@ class OnnxFineTuner:
         raise ValueError(f"Unknown scheduler: {name}")
 
     @staticmethod
+    def _stack_model_inputs(inputs: list[Any]) -> Any:
+        first = inputs[0]
+        if isinstance(first, (tuple, list)):
+            cols = list(zip(*inputs, strict=False))
+            stacked = []
+            for col in cols:
+                stacked.append(np.stack([np.asarray(v) for v in col], axis=0))
+            return tuple(stacked)
+        return np.stack([np.asarray(v) for v in inputs], axis=0)
+
+    @staticmethod
+    def _stack_targets(targets: list[Any]) -> np.ndarray:
+        return np.asarray(targets)
+
+    @staticmethod
     def _prepare_batches(data, batch_size):
-        """Normalise training data into list of (input, target) batches."""
-        # Already an iterable of (input, target) — just return as list
+        """Normalize training data into (input, target) batches."""
+        if isinstance(data, list):
+            if not data:
+                return
+            if not (isinstance(data[0], (list, tuple)) and len(data[0]) == 2):
+                raise TypeError("List train_data must contain (input, target) pairs")
+
+            actual_bs = max(int(batch_size), 1)
+            for start in range(0, len(data), actual_bs):
+                chunk = data[start : start + actual_bs]
+                inputs = [item[0] for item in chunk]
+                targets = [item[1] for item in chunk]
+                yield OnnxFineTuner._stack_model_inputs(inputs), OnnxFineTuner._stack_targets(
+                    targets
+                )
+            return
+
         if hasattr(data, "__iter__"):
-            batches = list(data)
-            if batches and isinstance(batches[0], (list, tuple)) and len(batches[0]) == 2:
-                return batches
-            # Might be a DataLoader — try iterating
-            return batches
+            for item in data:
+                if isinstance(item, (list, tuple)) and len(item) == 2:
+                    yield item[0], item[1]
+                else:
+                    raise TypeError(
+                        f"Iterable train_data must yield (input, target), got {type(item)}"
+                    )
+            return
+
         raise TypeError(f"Unsupported train_data type: {type(data)}")
 
     # ------------------------------------------------------------------
@@ -429,20 +644,11 @@ class OnnxFineTuner:
     # ------------------------------------------------------------------
 
     def save_lora(self, path: str | Path) -> None:
-        """Save only LoRA adapter weights and config.
-
-        Creates a directory at *path* containing:
-        - ``config.json`` — LoRA configuration
-        - ``adapters.npz`` — A/B matrices for each adapted layer
-        - ``metadata.json`` — layer dimensions
-        """
+        """Save only LoRA adapter weights and config."""
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-
-        # Save config
         self.config.save(path / "config.json")
 
-        # Save adapter weights
         arrays = {}
         metadata = {}
         for name, lora in self._lora_layers.items():
@@ -461,17 +667,13 @@ class OnnxFineTuner:
             json.dump(metadata, f, indent=2)
 
     def load_lora(self, path: str | Path) -> None:
-        """Load LoRA adapter weights from a saved checkpoint.
-
-        The model must have had ``apply_lora()`` called first so that
-        LoRA layers exist.
-        """
+        """Load LoRA adapter weights from a saved checkpoint."""
         path = Path(path)
         adapters = np.load(path / "adapters.npz")
         with open(path / "metadata.json") as f:
             metadata = json.load(f)
 
-        for name, meta in metadata.items():
+        for name, _meta in metadata.items():
             if name not in self._lora_layers:
                 continue
             lora = self._lora_layers[name]
@@ -483,12 +685,7 @@ class OnnxFineTuner:
             lora.load_state_dict(state)
 
     def save_onnx(self, path: str, **export_kwargs) -> None:
-        """Merge LoRA weights into base model and export to ONNX.
-
-        After export, LoRA weights are **unmerged** so the tuner can
-        continue training if desired.
-        """
-        # Merge LoRA into base weights
+        """Merge LoRA weights into base model and export to ONNX."""
         self._merge_lora_into_model()
 
         from .onnx_exporter import OnnxExporter
@@ -496,7 +693,6 @@ class OnnxFineTuner:
         exporter = OnnxExporter()
         exporter.export(self.model, path, **export_kwargs)
 
-        # Unmerge to allow continued training
         self._unmerge_lora_from_model()
 
     # ------------------------------------------------------------------
@@ -516,7 +712,7 @@ class OnnxFineTuner:
             orig.register_parameter("weight", orig.weight)
 
     def _unmerge_lora_from_model(self):
-        """Undo merge — subtract LoRA delta from base weights."""
+        """Undo merge by subtracting LoRA delta from base weights."""
         from ..nn.modules import _create_param_wrapper
 
         for name, lora in self._lora_layers.items():
@@ -531,3 +727,4 @@ class OnnxFineTuner:
 __all__ = [
     "OnnxFineTuner",
 ]
+

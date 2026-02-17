@@ -21,7 +21,7 @@ def detect_stale(store: MemoryStore) -> int:
     """Mark memories as stale if their source file has been modified.
 
     Checks file_mtime against actual disk mtime. Returns count of
-    newly stale memories.
+    newly stale memories. Invalidates Redis cache for stale files.
     """
     # Get all distinct file paths
     rows = store._conn.execute(
@@ -29,6 +29,7 @@ def detect_stale(store: MemoryStore) -> int:
     ).fetchall()
 
     stale_count = 0
+    stale_files: list[str] = []
     for row in rows:
         fp = row["file_path"]
         try:
@@ -51,10 +52,14 @@ def detect_stale(store: MemoryStore) -> int:
                 ids,
             )
             stale_count += len(ids)
+            stale_files.append(fp)
 
     if stale_count:
         store._conn.commit()
         logger.info("Marked %d memories as stale", stale_count)
+        # Invalidate Redis cache for stale files
+        invalidate_redis_cache(store, stale_files)
+
     return stale_count
 
 
@@ -80,6 +85,7 @@ def consolidate(store: MemoryStore) -> dict:
     1. Detect stale memories
     2. Recompute all relevance scores
     3. Evict if over capacity (bottom 10%)
+    4. Flush cached FTS results (may reference evicted entries)
 
     Returns stats about what happened.
     """
@@ -97,9 +103,20 @@ def consolidate(store: MemoryStore) -> dict:
             "Evicted %d memories (was %d, max %d)", stats["evicted"], total, store.max_memories
         )
 
+    # Flush FTS cache after consolidation (results may reference evicted/stale entries)
+    store.cache.flush_fts()
+
     return stats
 
 
 def should_consolidate(store: MemoryStore) -> bool:
     """Check if consolidation should run (>90% capacity)."""
     return store.count() > store.max_memories * 0.9
+
+
+def invalidate_redis_cache(store: MemoryStore, file_paths: list[str]) -> None:
+    """Invalidate Redis cache entries for the given file paths."""
+    for fp in file_paths:
+        store.cache.invalidate_file(fp)
+    # Also flush FTS cache since results may include entries from these files
+    store.cache.flush_fts()

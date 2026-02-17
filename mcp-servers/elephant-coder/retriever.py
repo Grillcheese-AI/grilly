@@ -38,8 +38,9 @@ def recall(
 ) -> list[MemoryEntry]:
     """Search memories and return ranked results.
 
-    Performs FTS5 search, optionally filters by kind, updates access stats
-    for every hit (Hebbian strengthening), and recomputes relevance scores.
+    Performs FTS5 search (with Redis cache), optionally filters by kind,
+    batch-updates access stats (Hebbian strengthening), and uses lightweight
+    relevance updates instead of full upserts.
     """
     results = store.search_fts(query, limit=limit * 3)
 
@@ -48,16 +49,19 @@ def recall(
 
     results = results[:limit]
 
-    # Hebbian strengthening: touch each accessed memory
+    # Batch Hebbian strengthening
+    now = time.time()
+    ids_to_touch = [entry.memory_id for entry in results]
+    store.touch_batch(ids_to_touch)
+
     for entry in results:
-        store.touch(entry.memory_id)
         entry.access_count += 1
-        entry.freshness = time.time()
+        entry.freshness = now
         entry.relevance_score = compute_relevance(
             entry.access_count, entry.freshness, entry.created
         )
-        # Persist updated relevance
-        store.upsert(entry)
+        # Lightweight relevance update (avoids FTS5 delete+insert)
+        store.update_relevance(entry.memory_id, entry.relevance_score)
 
     return results
 
@@ -65,8 +69,8 @@ def recall(
 def recall_file(store: MemoryStore, file_path: str) -> list[MemoryEntry]:
     """Retrieve all memories for a specific file, touching each."""
     results = store.search_by_file(file_path)
-    for entry in results:
-        store.touch(entry.memory_id)
+    ids_to_touch = [entry.memory_id for entry in results]
+    store.touch_batch(ids_to_touch)
     return results
 
 

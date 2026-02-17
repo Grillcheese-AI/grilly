@@ -362,9 +362,12 @@ class VulkanTensor:
         self._gpu_valid = False
         self._uploaded = False
 
-    def __array__(self):
-        """Numpy array interface"""
-        return self.numpy()
+    def __array__(self, dtype=None):
+        """NumPy array interface (supports optional dtype coercion)."""
+        arr = self.numpy()
+        if dtype is not None:
+            return arr.astype(dtype, copy=False)
+        return arr
 
     def __len__(self):
         """Length (first dimension)"""

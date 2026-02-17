@@ -459,7 +459,13 @@ class LayerNorm(Module):
         backend = self._get_backend()
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias)
-        return backend.fnn.layernorm(x, weight, bias, eps=self.eps)
+        return backend.fnn.layernorm(
+            x,
+            weight,
+            bias,
+            eps=self.eps,
+            return_gpu_tensor=self._return_gpu_tensor,
+        )
 
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
@@ -1016,7 +1022,11 @@ class Embedding(Module):
             backend.learning, "embedding_lookup"
         ):
             try:
-                return backend.learning.embedding_lookup(x, weight)
+                return backend.learning.embedding_lookup(
+                    x,
+                    weight,
+                    return_gpu_tensor=self._return_gpu_tensor,
+                )
             except Exception:
                 pass  # Fall back to CPU
 

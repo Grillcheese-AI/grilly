@@ -233,6 +233,22 @@ class VulkanCompute:
         """GPU-accelerated linear backward pass"""
         return self.fnn.linear_backward(*args, **kwargs)
 
+    def cross_entropy_backward(self, *args, **kwargs):
+        """GPU-accelerated cross-entropy backward pass"""
+        return self.fnn.cross_entropy_backward(*args, **kwargs)
+
+    def cross_entropy_loss(self, *args, **kwargs):
+        """GPU-accelerated cross-entropy loss"""
+        return self.fnn.cross_entropy_loss(*args, **kwargs)
+
+    def ssm_fused_math(self, *args, **kwargs):
+        """GPU-accelerated fused selective-scan math for SSM blocks."""
+        return self.learning.ssm_fused_math(*args, **kwargs)
+
+    def ssm_fused_uv(self, *args, **kwargs):
+        """GPU-accelerated fused UV->scan selective recurrence for SSM blocks."""
+        return self.learning.ssm_fused_uv(*args, **kwargs)
+
     # Memory operations - delegate to memory module
     def memory_read(self, *args, **kwargs):
         """Retrieve memories using attention mechanism"""

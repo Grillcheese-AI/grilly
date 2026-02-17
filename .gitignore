@@ -179,3 +179,4 @@ codegraph.html
 /private
 Makefile
 /mcp-servers/grilly/node_modules
+mcp-servers/elephant-coder/=5.0.0
