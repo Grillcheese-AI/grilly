@@ -1,7 +1,7 @@
 # Grilly
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/grillcheese-ai/grilly/main/assets/3x/dark-logo-text%403x-100.jpg" alt="Grilly" width="400">
+  <img src="https://raw.githubusercontent.com/grillcheese-ai/grilly/main/assets/grilly_mascott_github.png" alt="Grilly" width="400">
 </p>
 
 *Deep learning, well done.*
