@@ -73,25 +73,39 @@ class VulkanFNN(BufferMixin):
         self.shaders = shaders
         self._pool = None  # Lazy initialization
 
-    def gemm(self, A, B, return_gpu_tensor=False, cache_B=False):
+    def gemm(self, A, B, return_gpu_tensor=False, cache_B=False, force_fp32=False):
         """
         GEMM: C = A @ B
         A: (M, K), B: (K, N) -> C: (M, N)
-        Uses gemm_tiled (4x4 register blocking) with gemm_mnk fallback.
+
+        Shader priority:
+        1. gemm_coopmat — cooperative matrix (fp16 in, fp32 out, hardware WMMA)
+        2. gemm_tiled   — tiled fp32 (4x4 register blocking)
+        3. gemm_mnk     — basic fp32
 
         Args:
             A: Left matrix, numpy array or VulkanTensor
             B: Right matrix, numpy array or VulkanTensor
             return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
             cache_B: If True, keep B (weight matrix) GPU-resident across calls
+            force_fp32: If True, skip cooperative matrix and use fp32 shader
         """
+        import os as _os
+
         from ..utils.tensor_conversion import VulkanTensor
 
-        # Select shader: prefer optimized tiled version
+        # Select shader: prefer cooperative matrix → tiled → basic
+        use_coopmat = (
+            not force_fp32
+            and "gemm_coopmat" in self.shaders
+            and self.core.has_cooperative_matrix
+            and self.core.has_float16
+            and _os.environ.get("GRILLY_DISABLE_COOPMAT", "0") != "1"
+        )
         use_tiled = "gemm_tiled" in self.shaders
         use_basic = "gemm_mnk" in self.shaders
 
-        if not use_tiled and not use_basic:
+        if not use_coopmat and not use_tiled and not use_basic:
             A_np = A.numpy() if isinstance(A, VulkanTensor) else np.asarray(A, dtype=np.float32)
             B_np = B.numpy() if isinstance(B, VulkanTensor) else np.asarray(B, dtype=np.float32)
             return A_np @ B_np  # CPU fallback
@@ -101,12 +115,101 @@ class VulkanFNN(BufferMixin):
         K2, N = B.shape
         assert K == K2
 
-        # Bytes
+        if use_coopmat:
+            return self._gemm_coopmat(A, B, M, K, N, return_gpu_tensor, cache_B)
+        else:
+            return self._gemm_scalar(A, B, M, K, N, return_gpu_tensor, cache_B,
+                                     use_tiled)
+
+    def _gemm_coopmat(self, A, B, M, K, N, return_gpu_tensor, cache_B):
+        """Cooperative matrix GEMM: fp16 inputs, fp32 accumulation."""
+        from ..utils.tensor_conversion import VulkanTensor
+
+        # Pad dimensions for cooperative matrix workgroup tiling:
+        # M, K → multiple of 16 (single 16x16 tile per subgroup row)
+        # N → multiple of 64 (4 subgroups × 16 cols per workgroup)
+        M_pad = (M + 15) & ~15
+        K_pad = (K + 15) & ~15
+        N_pad = (N + 63) & ~63
+
+        # Convert to fp16 and pad
+        A_np = A.numpy() if isinstance(A, VulkanTensor) else np.asarray(A, dtype=np.float32)
+        B_np = B.numpy() if isinstance(B, VulkanTensor) else np.asarray(B, dtype=np.float32)
+
+        if M_pad != M or K_pad != K:
+            A_f16 = np.zeros((M_pad, K_pad), dtype=np.float16)
+            A_f16[:M, :K] = A_np
+        else:
+            A_f16 = A_np.astype(np.float16)
+
+        if K_pad != K or N_pad != N:
+            B_f16 = np.zeros((K_pad, N_pad), dtype=np.float16)
+            B_f16[:K, :N] = B_np
+        else:
+            B_f16 = B_np.astype(np.float16)
+
+        A_bytes = M_pad * K_pad * 2  # fp16
+        B_bytes = K_pad * N_pad * 2
+        C_bytes = M_pad * N_pad * 4  # fp32 output
+
+        buf_A = self._acquire_buffer(A_bytes)
+        self._upload_buffer_raw(buf_A, A_f16)
+        release_A = True
+
+        buf_B = self._acquire_buffer(B_bytes)
+        self._upload_buffer_raw(buf_B, B_f16)
+        release_B = True
+
+        buf_C = self._acquire_buffer(C_bytes)
+
+        try:
+            shader_name = "gemm_coopmat"
+            # 4 subgroups per workgroup: 16 rows × 64 cols per workgroup
+            group_x = (N_pad + 63) // 64
+            group_y = (M_pad + 15) // 16
+
+            pipeline, layout, _ = self.pipelines.get_or_create_pipeline(
+                shader_name, 3, push_constant_size=12
+            )
+
+            A_handle = self._get_buffer_handle(buf_A)
+            B_handle = self._get_buffer_handle(buf_B)
+            C_handle = self._get_buffer_handle(buf_C)
+
+            desc = self.pipelines.get_cached_descriptor_set(
+                shader_name,
+                [
+                    (A_handle, A_bytes),
+                    (B_handle, B_bytes),
+                    (C_handle, C_bytes),
+                ],
+            )
+
+            push = struct.pack("3I", M_pad, K_pad, N_pad)
+            self.core._dispatch_compute(pipeline, layout, desc, group_x, push, group_y, 1)
+
+            if return_gpu_tensor:
+                # TODO: trim padding on download for gpu tensors
+                return self._wrap_output_tensor(buf_C, (M_pad, N_pad))
+            else:
+                C_flat = self._download_buffer(buf_C, C_bytes, np.float32)
+                C_full = C_flat.reshape(M_pad, N_pad)
+                return C_full[:M, :N]  # Trim padding
+
+        finally:
+            if release_A:
+                self._release_buffer(buf_A)
+            if release_B:
+                self._release_buffer(buf_B)
+            if not return_gpu_tensor:
+                self._release_buffer(buf_C)
+
+    def _gemm_scalar(self, A, B, M, K, N, return_gpu_tensor, cache_B, use_tiled):
+        """Scalar tiled/basic GEMM: fp32 inputs and outputs."""
         A_bytes = M * K * 4
         B_bytes = K * N * 4
         C_bytes = M * N * 4
 
-        # Use _prepare_input for zero-copy when VulkanTensor
         buf_A, release_A = self._prepare_input(A, size=A_bytes)
         if cache_B and isinstance(B, np.ndarray):
             buf_B, release_B = self._get_or_upload_weight(B)
@@ -117,12 +220,10 @@ class VulkanFNN(BufferMixin):
         try:
             if use_tiled:
                 shader_name = "gemm_tiled"
-                # 64x64 output tile per workgroup (16x16 threads, 4x4 per thread)
                 group_x = (N + 63) // 64
                 group_y = (M + 63) // 64
             else:
                 shader_name = "gemm_mnk"
-                # 16x16 output tile per workgroup
                 group_x = (N + 15) // 16
                 group_y = (M + 15) // 16
 
@@ -144,7 +245,6 @@ class VulkanFNN(BufferMixin):
             )
 
             push = struct.pack("3I", M, K, N)
-
             self.core._dispatch_compute(pipeline, layout, desc, group_x, push, group_y, 1)
 
             if return_gpu_tensor:
@@ -1870,11 +1970,11 @@ class VulkanFNN(BufferMixin):
 
             # 1) grad_input = grad_output @ weights
             #    (batch*seq, out_features) @ (out_features, in_features) = (batch*seq, in_features)
-            grad_input_2d = self.gemm(grad_output_2d, weights)
+            grad_input_2d = self.gemm(grad_output_2d, weights, force_fp32=True)
 
             # 2) grad_weight = grad_output.T @ x
             #    (out_features, batch*seq) @ (batch*seq, in_features) = (out_features, in_features)
-            grad_weight = self.gemm(grad_output_2d.T.copy(), x_2d)
+            grad_weight = self.gemm(grad_output_2d.T.copy(), x_2d, force_fp32=True)
 
             # 3) grad_bias = sum over batch dimension
             grad_bias = (

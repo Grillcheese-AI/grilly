@@ -43,15 +43,15 @@ pyvma = None
 pyvma_lib = None
 
 try:
-    import pyvma
+    import pyvma2 as pyvma
 
-    # PyVMA exports: ffi, vma (which is the lib)
+    # pyvma2 exports: ffi, lib, vma (lib alias)
     pyvma_lib = getattr(pyvma, "vma", None) or getattr(pyvma, "lib", None)
     PYVMA_AVAILABLE = pyvma_lib is not None and hasattr(pyvma_lib, "vmaCreateAllocator")
     if PYVMA_AVAILABLE:
-        logger.debug("PyVMA available - using VMA for buffer allocation")
+        logger.debug("PyVMA2 (VMA 3.4) available - using VMA for buffer allocation")
 except ImportError:
-    logger.debug("PyVMA not available - using direct Vulkan allocation")
+    logger.debug("PyVMA2 not available - using direct Vulkan allocation")
 
 if VULKAN_AVAILABLE:
     from vulkan import (
@@ -206,15 +206,18 @@ class VMABufferPool:
         try:
             import vulkan as vk
 
-            # Create Vulkan functions struct manually (without KHR extensions)
-            # This avoids the ProcedureNotFoundError for optional extensions
+            # VMA 3.x requires a full set of Vulkan function pointers
             core_functions = [
+                "vkGetInstanceProcAddr",
+                "vkGetDeviceProcAddr",
                 "vkGetPhysicalDeviceProperties",
                 "vkGetPhysicalDeviceMemoryProperties",
                 "vkAllocateMemory",
                 "vkFreeMemory",
                 "vkMapMemory",
                 "vkUnmapMemory",
+                "vkFlushMappedMemoryRanges",
+                "vkInvalidateMappedMemoryRanges",
                 "vkBindBufferMemory",
                 "vkBindImageMemory",
                 "vkGetBufferMemoryRequirements",
@@ -223,37 +226,42 @@ class VMABufferPool:
                 "vkDestroyBuffer",
                 "vkCreateImage",
                 "vkDestroyImage",
+                "vkCmdCopyBuffer",
             ]
 
             init_functions = {
                 fn: pyvma.ffi.cast("PFN_" + fn, getattr(vk.lib, fn)) for fn in core_functions
             }
 
-            # Try to add KHR extension functions if available (optional)
-            khr_functions = [
-                "vkGetBufferMemoryRequirements2KHR",
-                "vkGetImageMemoryRequirements2KHR",
-            ]
-            for fn_name in khr_functions:
+            # Vulkan 1.1 core promotes KHR functions (drop the suffix).
+            # VMA's struct uses the KHR-suffixed field names, so map core→KHR.
+            khr_from_core = {
+                "vkGetBufferMemoryRequirements2KHR": "vkGetBufferMemoryRequirements2",
+                "vkGetImageMemoryRequirements2KHR": "vkGetImageMemoryRequirements2",
+                "vkBindBufferMemory2KHR": "vkBindBufferMemory2",
+                "vkBindImageMemory2KHR": "vkBindImageMemory2",
+                "vkGetPhysicalDeviceMemoryProperties2KHR": "vkGetPhysicalDeviceMemoryProperties2",
+            }
+            for khr_name, core_name in khr_from_core.items():
                 try:
-                    fn_ptr = vk.lib.vkGetDeviceProcAddr(
-                        self.core.device, pyvma.ffi.new("char[]", fn_name.encode("ascii"))
-                    )
-                    if fn_ptr != pyvma.ffi.NULL:
-                        init_functions[fn_name] = pyvma.ffi.cast("PFN_" + fn_name, fn_ptr)
-                        logger.debug(f"KHR extension {fn_name} available")
+                    fn_ptr = getattr(vk.lib, core_name, None)
+                    if fn_ptr is not None:
+                        init_functions[khr_name] = pyvma.ffi.cast("PFN_" + khr_name, fn_ptr)
+                        logger.debug(f"{khr_name} (via core {core_name})")
                 except Exception:
-                    logger.debug(f"KHR extension {fn_name} not available (optional)")
+                    logger.debug(f"{khr_name} not available")
 
             vulkan_functions = pyvma.ffi.new("VmaVulkanFunctions*", init_functions)
 
-            # Create allocator with custom Vulkan functions
-            # Note: older VMA versions don't have 'instance' field
+            # VMA 3.x requires instance + vulkanApiVersion
+            VK_API_VERSION_1_1 = (1 << 22) | (1 << 12) | 0  # VK_MAKE_VERSION(1,1,0)
             create_info = pyvma.ffi.new(
                 "VmaAllocatorCreateInfo*",
                 {
                     "physicalDevice": pyvma.ffi.cast("void*", self.core.physical_device),
                     "device": pyvma.ffi.cast("void*", self.core.device),
+                    "instance": pyvma.ffi.cast("void*", self.core.instance),
+                    "vulkanApiVersion": VK_API_VERSION_1_1,
                     "pVulkanFunctions": vulkan_functions,
                 },
             )
@@ -451,6 +459,25 @@ class VMABufferPool:
 
         pyvma.ffi.memmove(ppData[0], pyvma.ffi.from_buffer(flat), flat.nbytes)
 
+        pyvma_lib.vmaUnmapMemory(self._allocator, buffer.allocation)
+
+    def upload_data_raw(self, buffer: VMABuffer, data: np.ndarray):
+        """Upload data without dtype conversion (for fp16, int8, etc.)."""
+        if self._allocator is None:
+            raise RuntimeError("VMA allocator not initialized")
+
+        flat = np.ascontiguousarray(data).ravel()
+
+        if buffer.mapped_ptr is not None:
+            pyvma.ffi.memmove(buffer.mapped_ptr, pyvma.ffi.from_buffer(flat), flat.nbytes)
+            pyvma_lib.vmaFlushAllocation(self._allocator, buffer.allocation, 0, flat.nbytes)
+            return
+
+        ppData = pyvma.ffi.new("void**")
+        result = pyvma_lib.vmaMapMemory(self._allocator, buffer.allocation, ppData)
+        if result != 0:
+            raise RuntimeError(f"vmaMapMemory failed with code {result}")
+        pyvma.ffi.memmove(ppData[0], pyvma.ffi.from_buffer(flat), flat.nbytes)
         pyvma_lib.vmaUnmapMemory(self._allocator, buffer.allocation)
 
     def download_data(self, buffer: VMABuffer, size: int, dtype=np.float32) -> np.ndarray:

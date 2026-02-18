@@ -21,6 +21,9 @@ import os as _os
 
 _DEBUG_UPLOAD = _os.getenv("GRILLY_DEBUG_UPLOAD", "0") == "1"
 
+# Enable provisional Vulkan extensions (required since spec 1.2.171)
+_os.environ.setdefault("VK_ENABLE_BETA_EXTENSIONS", "1")
+
 
 class VulkanCore:
     """Core Vulkan operations: initialization, buffers, and dispatch"""
@@ -138,20 +141,33 @@ class VulkanCore:
             except Exception as exc:
                 logger.warning("Failed to compile shader %s: %s", src_path.name, exc)
 
+    # Extensions we want to enable when available
+    _DESIRED_EXTENSIONS = [
+        "VK_KHR_cooperative_matrix",
+        "VK_KHR_shader_atomic_int64",
+        "VK_EXT_shader_atomic_float",
+        "VK_EXT_shader_atomic_float2",
+        "VK_KHR_shader_float16_int8",
+        "VK_KHR_16bit_storage",
+        "VK_KHR_8bit_storage",
+        "VK_KHR_storage_buffer_storage_class",
+        "VK_KHR_vulkan_memory_model",
+    ]
+
     def _init_vulkan(self):
         """Initialize Vulkan instance, device, queue"""
-        # Create instance
+        # Create instance (Vulkan 1.1 for subgroup ops + cooperative matrix)
         app_info = VkApplicationInfo(
             sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,
             pApplicationName="GrillCheese",
             applicationVersion=VK_MAKE_VERSION(1, 0, 0),
             pEngineName="SNN-Compute",
             engineVersion=VK_MAKE_VERSION(1, 0, 0),
-            apiVersion=VK_API_VERSION_1_0,
+            apiVersion=VK_MAKE_VERSION(1, 1, 0),
         )
 
         create_info = VkInstanceCreateInfo(
-            sType=VK_STRUCTURE_TYPE_APPLICATION_INFO, pApplicationInfo=app_info
+            sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, pApplicationInfo=app_info
         )
 
         self.instance = vkCreateInstance(create_info, None)
@@ -175,6 +191,22 @@ class VulkanCore:
         # Check for tiling-related capabilities
         self.tiling_support = self._check_tiling_support()
 
+        # ── Enumerate and enable device extensions ──
+        available_exts = set()
+        for e in vkEnumerateDeviceExtensionProperties(self.physical_device, None):
+            name = e.extensionName
+            if isinstance(name, bytes):
+                name = name.decode("utf-8")
+            available_exts.add(name.rstrip("\x00"))
+
+        enabled_extensions = [e for e in self._DESIRED_EXTENSIONS if e in available_exts]
+        self.enabled_extensions = set(enabled_extensions)
+
+        if not hasattr(VulkanCore, "_logged_exts"):
+            if enabled_extensions:
+                print(f"[OK] Vulkan extensions: {', '.join(enabled_extensions)}")
+            VulkanCore._logged_exts = True
+
         # Find compute queue family
         queue_families = vkGetPhysicalDeviceQueueFamilyProperties(self.physical_device)
         compute_queue_family = None
@@ -194,22 +226,113 @@ class VulkanCore:
             pQueuePriorities=[1.0],
         )
 
-        # Request sparse features if available (for tiling support)
+        # Base features (sparse binding for tiling)
         device_features = VkPhysicalDeviceFeatures()
         try:
-            # Try to enable sparse features for tiling
             if hasattr(self.device_features, "sparseBinding"):
                 device_features.sparseBinding = self.device_features.sparseBinding
             if hasattr(self.device_features, "sparseResidencyBuffer"):
                 device_features.sparseResidencyBuffer = self.device_features.sparseResidencyBuffer
         except Exception:
-            pass  # Sparse features not available on this device
+            pass
+
+        # ── Build pNext feature chain for enabled extensions ──
+        # Query actual device feature support first, then only request what
+        # the hardware reports.  vulkan-python pNext must be set at
+        # construction time (void* can't be reassigned), so we build the
+        # chain bottom-up.
+        pnext_tail = None
+
+        if "VK_KHR_16bit_storage" in self.enabled_extensions:
+            q = VkPhysicalDevice16BitStorageFeatures(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES,
+            )
+            qf = VkPhysicalDeviceFeatures2(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, pNext=q
+            )
+            vkGetPhysicalDeviceFeatures2(self.physical_device, qf)
+            pnext_tail = VkPhysicalDevice16BitStorageFeatures(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES,
+                storageBuffer16BitAccess=q.storageBuffer16BitAccess,
+                pNext=pnext_tail,
+            )
+
+        if "VK_KHR_shader_float16_int8" in self.enabled_extensions:
+            q = VkPhysicalDeviceShaderFloat16Int8Features(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES,
+            )
+            qf = VkPhysicalDeviceFeatures2(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, pNext=q
+            )
+            vkGetPhysicalDeviceFeatures2(self.physical_device, qf)
+            pnext_tail = VkPhysicalDeviceShaderFloat16Int8Features(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES,
+                shaderFloat16=q.shaderFloat16,
+                shaderInt8=q.shaderInt8,
+                pNext=pnext_tail,
+            )
+
+        if "VK_EXT_shader_atomic_float" in self.enabled_extensions:
+            q = VkPhysicalDeviceShaderAtomicFloatFeaturesEXT(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
+            )
+            qf = VkPhysicalDeviceFeatures2(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, pNext=q
+            )
+            vkGetPhysicalDeviceFeatures2(self.physical_device, qf)
+            pnext_tail = VkPhysicalDeviceShaderAtomicFloatFeaturesEXT(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
+                shaderBufferFloat32Atomics=q.shaderBufferFloat32Atomics,
+                shaderBufferFloat32AtomicAdd=q.shaderBufferFloat32AtomicAdd,
+                shaderSharedFloat32Atomics=q.shaderSharedFloat32Atomics,
+                shaderSharedFloat32AtomicAdd=q.shaderSharedFloat32AtomicAdd,
+                pNext=pnext_tail,
+            )
+
+        if "VK_KHR_shader_atomic_int64" in self.enabled_extensions:
+            q = VkPhysicalDeviceShaderAtomicInt64Features(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES,
+            )
+            qf = VkPhysicalDeviceFeatures2(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, pNext=q
+            )
+            vkGetPhysicalDeviceFeatures2(self.physical_device, qf)
+            pnext_tail = VkPhysicalDeviceShaderAtomicInt64Features(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES,
+                shaderBufferInt64Atomics=q.shaderBufferInt64Atomics,
+                shaderSharedInt64Atomics=q.shaderSharedInt64Atomics,
+                pNext=pnext_tail,
+            )
+
+        if "VK_KHR_cooperative_matrix" in self.enabled_extensions:
+            q = VkPhysicalDeviceCooperativeMatrixFeaturesKHR(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
+            )
+            qf = VkPhysicalDeviceFeatures2(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, pNext=q
+            )
+            vkGetPhysicalDeviceFeatures2(self.physical_device, qf)
+            pnext_tail = VkPhysicalDeviceCooperativeMatrixFeaturesKHR(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
+                cooperativeMatrix=q.cooperativeMatrix,
+                pNext=pnext_tail,
+            )
+
+        # Wrap base features + pNext chain in VkPhysicalDeviceFeatures2
+        features2 = VkPhysicalDeviceFeatures2(
+            sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+            features=device_features,
+            pNext=pnext_tail,
+        )
 
         device_create_info = VkDeviceCreateInfo(
             sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
             queueCreateInfoCount=1,
             pQueueCreateInfos=[queue_create_info],
-            pEnabledFeatures=device_features,
+            enabledExtensionCount=len(enabled_extensions),
+            ppEnabledExtensionNames=enabled_extensions,
+            pEnabledFeatures=None,  # features in pNext chain via features2
+            pNext=features2,
         )
 
         self.device = vkCreateDevice(self.physical_device, device_create_info, None)
@@ -417,6 +540,22 @@ class VulkanCore:
             Dictionary with tiling capabilities
         """
         return getattr(self, "tiling_support", {"available": False})
+
+    def has_extension(self, ext_name: str) -> bool:
+        """Check if a Vulkan device extension is enabled."""
+        return ext_name in getattr(self, "enabled_extensions", set())
+
+    @property
+    def has_cooperative_matrix(self) -> bool:
+        """True when VK_KHR_cooperative_matrix is enabled."""
+        return self.has_extension("VK_KHR_cooperative_matrix")
+
+    @property
+    def has_float16(self) -> bool:
+        """True when fp16 shader arithmetic + storage buffer access are enabled."""
+        return self.has_extension("VK_KHR_shader_float16_int8") and self.has_extension(
+            "VK_KHR_16bit_storage"
+        )
 
     def _create_buffer(self, size: int, usage: int = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT):
         """Create Vulkan buffer and allocate memory.

@@ -188,6 +188,15 @@ class BufferMixin:
                 return
         self.core._upload_buffer(buf.handle, buf.memory, data)
 
+    def _upload_buffer_raw(self, buf, data: np.ndarray):
+        """Upload raw numpy data (any dtype) without fp32 conversion."""
+        if self._is_vma_buffer(buf):
+            pool = self.buffer_pool
+            if pool is not None and isinstance(pool, VMABufferPool):
+                pool.upload_data_raw(buf, data)
+                return
+        self.core._upload_buffer(buf.handle, buf.memory, data)
+
     def _download_buffer(self, buf, size: int, dtype=np.float32) -> np.ndarray:
         """Download data from a buffer."""
         if self._is_vma_buffer(buf):
