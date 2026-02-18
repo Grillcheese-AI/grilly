@@ -18,7 +18,7 @@ GPU-accelerated neural network framework using Vulkan compute shaders. No CUDA r
 
 ## Release Status
 
-- Current release line: **v0.3.1**
+- Current release line: **v0.3.5**
 - Package name: `grilly`
 - Python support: `>=3.12`
 - Release channel: PyPI
