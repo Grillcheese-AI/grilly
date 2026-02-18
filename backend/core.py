@@ -364,6 +364,17 @@ class VulkanCore:
         )
         self._fence = vkCreateFence(self.device, fence_info, None)
 
+        # Batch command buffer + fence for CommandRecorder (multi-dispatch chaining).
+        # Separate from single-shot _cmd_buffer/_fence to avoid conflicts.
+        batch_alloc = VkCommandBufferAllocateInfo(
+            sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            commandPool=self.command_pool,
+            level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            commandBufferCount=1,
+        )
+        self._batch_cmd_buffer = vkAllocateCommandBuffers(self.device, batch_alloc)[0]
+        self._batch_fence = vkCreateFence(self.device, fence_info, None)
+
         # Create descriptor pool (large enough for all shaders)
         pool_sizes = [
             VkDescriptorPoolSize(type=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, descriptorCount=1000)
@@ -740,6 +751,9 @@ class VulkanCore:
         if hasattr(self, "device") and self.device:
             device = self.device
             self.device = None  # Prevent double cleanup
+            if hasattr(self, "_batch_fence") and self._batch_fence:
+                vkDestroyFence(device, self._batch_fence, None)
+                self._batch_fence = None
             if hasattr(self, "_fence") and self._fence:
                 vkDestroyFence(device, self._fence, None)
                 self._fence = None
@@ -747,10 +761,15 @@ class VulkanCore:
                 vkDestroyDescriptorPool(device, self.descriptor_pool, None)
                 self.descriptor_pool = None
             if hasattr(self, "command_pool") and self.command_pool:
-                # Free pre-allocated command buffer before destroying pool
-                if hasattr(self, "_cmd_buffer") and self._cmd_buffer is not None:
-                    vkFreeCommandBuffers(device, self.command_pool, 1, [self._cmd_buffer])
-                    self._cmd_buffer = None
+                # Free pre-allocated command buffers before destroying pool
+                bufs_to_free = []
+                for attr in ("_cmd_buffer", "_batch_cmd_buffer"):
+                    cb = getattr(self, attr, None)
+                    if cb is not None:
+                        bufs_to_free.append(cb)
+                        setattr(self, attr, None)
+                if bufs_to_free:
+                    vkFreeCommandBuffers(device, self.command_pool, len(bufs_to_free), bufs_to_free)
                 vkDestroyCommandPool(device, self.command_pool, None)
                 self.command_pool = None
             vkDestroyDevice(device, None)
@@ -759,3 +778,173 @@ class VulkanCore:
             instance = self.instance
             self.instance = None  # Prevent double cleanup
             vkDestroyInstance(instance, None)
+
+    # ------------------------------------------------------------------
+    # Multi-dispatch command recording
+    # ------------------------------------------------------------------
+    def record_commands(self) -> "CommandRecorder":
+        """Create a CommandRecorder for chaining multiple dispatches.
+
+        Usage::
+
+            with core.record_commands() as rec:
+                rec.dispatch(pipeline, layout, desc, (gx, gy, gz), push)
+                rec.barrier()
+                rec.dispatch(pipeline2, layout2, desc2, (gx2,), push2)
+            # single fence wait on __exit__
+        """
+        return CommandRecorder(self)
+
+
+class CommandRecorder:
+    """Records multiple dispatches into a single command buffer submission.
+
+    Eliminates per-dispatch fence waits by chaining dispatches with
+    pipeline barriers inside one command buffer, then submitting once.
+    """
+
+    def __init__(self, core: VulkanCore):
+        self._core = core
+        self._cmd = core._batch_cmd_buffer
+        self._fence = core._batch_fence
+        self._recording = False
+
+    def begin(self):
+        """Reset and begin recording into the batch command buffer."""
+        vkResetCommandBuffer(self._cmd, 0)
+        begin_info = VkCommandBufferBeginInfo(
+            sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        )
+        vkBeginCommandBuffer(self._cmd, begin_info)
+        self._recording = True
+
+    def dispatch(self, pipeline, pipeline_layout, descriptor_set,
+                 workgroups, push_constants=None):
+        """Record a compute dispatch (no submit).
+
+        Args:
+            workgroups: tuple (x,) or (x, y) or (x, y, z)
+        """
+        if not self._recording:
+            raise RuntimeError("CommandRecorder.begin() not called")
+
+        vkCmdBindPipeline(self._cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline)
+        vkCmdBindDescriptorSets(
+            self._cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+            pipeline_layout, 0, 1, [descriptor_set], 0, None,
+        )
+
+        if push_constants:
+            push_buf = ctypes.create_string_buffer(push_constants)
+            vkCmdPushConstants(
+                self._cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
+                0, len(push_constants), ctypes.addressof(push_buf),
+            )
+
+        if isinstance(workgroups, (tuple, list)):
+            gx = workgroups[0]
+            gy = workgroups[1] if len(workgroups) > 1 else 1
+            gz = workgroups[2] if len(workgroups) > 2 else 1
+        else:
+            gx, gy, gz = workgroups, 1, 1
+
+        vkCmdDispatch(self._cmd, gx, gy, gz)
+
+    def barrier(self):
+        """Insert COMPUTE→COMPUTE memory barrier (SHADER_WRITE→SHADER_READ)."""
+        if not self._recording:
+            return
+        try:
+            # VkMemoryBarrier
+            VK_STRUCTURE_TYPE_MEMORY_BARRIER = 46
+            VK_ACCESS_SHADER_WRITE_BIT = 0x00000040
+            VK_ACCESS_SHADER_READ_BIT = 0x00000020
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT = 0x00000800
+
+            mem_barrier = VkMemoryBarrier(
+                sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT,
+                dstAccessMask=VK_ACCESS_SHADER_READ_BIT,
+            )
+            vkCmdPipelineBarrier(
+                self._cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  # srcStageMask
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  # dstStageMask
+                0,  # dependencyFlags
+                1, [mem_barrier],  # memoryBarriers
+                0, None,  # bufferMemoryBarriers
+                0, None,  # imageMemoryBarriers
+            )
+        except Exception as exc:
+            logger.warning("CommandRecorder.barrier() failed: %s", exc)
+
+    def transfer_barrier(self):
+        """Insert COMPUTE→TRANSFER barrier (SHADER_WRITE→TRANSFER_READ)."""
+        if not self._recording:
+            return
+        try:
+            VK_STRUCTURE_TYPE_MEMORY_BARRIER = 46
+            VK_ACCESS_SHADER_WRITE_BIT = 0x00000040
+            VK_ACCESS_TRANSFER_READ_BIT = 0x00000800
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT = 0x00000800
+            VK_PIPELINE_STAGE_TRANSFER_BIT = 0x00001000
+
+            mem_barrier = VkMemoryBarrier(
+                sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT,
+                dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT,
+            )
+            vkCmdPipelineBarrier(
+                self._cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                1, [mem_barrier],
+                0, None,
+                0, None,
+            )
+        except Exception as exc:
+            logger.warning("CommandRecorder.transfer_barrier() failed: %s", exc)
+
+    def copy_buffer(self, src_handle, dst_handle, size: int):
+        """Record vkCmdCopyBuffer for staging transfers."""
+        if not self._recording:
+            raise RuntimeError("CommandRecorder.begin() not called")
+        region = VkBufferCopy(srcOffset=0, dstOffset=0, size=size)
+        vkCmdCopyBuffer(self._cmd, src_handle, dst_handle, 1, [region])
+
+    def submit_and_wait(self):
+        """End recording, submit, and wait for completion."""
+        if not self._recording:
+            return
+        vkEndCommandBuffer(self._cmd)
+        self._recording = False
+
+        vkWaitForFences(self._core.device, 1, [self._fence], VK_TRUE, 2_000_000_000)
+        vkResetFences(self._core.device, 1, [self._fence])
+
+        submit_info = VkSubmitInfo(
+            sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            commandBufferCount=1,
+            pCommandBuffers=[self._cmd],
+        )
+        vkQueueSubmit(self._core.queue, 1, [submit_info], self._fence)
+        vkWaitForFences(self._core.device, 1, [self._fence], VK_TRUE, 2_000_000_000)
+
+    def __enter__(self):
+        self.begin()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._recording:
+            if exc_type is None:
+                self.submit_and_wait()
+            else:
+                # On exception, end the buffer but don't submit
+                try:
+                    vkEndCommandBuffer(self._cmd)
+                except Exception:
+                    pass
+                self._recording = False
+        return False

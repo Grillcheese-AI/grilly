@@ -210,12 +210,21 @@ class VulkanFNN(BufferMixin):
         B_bytes = K * N * 4
         C_bytes = M * N * 4
 
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
         buf_A, release_A = self._prepare_input(A, size=A_bytes)
         if cache_B and isinstance(B, np.ndarray):
-            buf_B, release_B = self._get_or_upload_weight(B)
+            if use_device_local:
+                buf_B, release_B = self._get_or_upload_weight_device_local(B)
+            else:
+                buf_B, release_B = self._get_or_upload_weight(B)
         else:
             buf_B, release_B = self._prepare_input(B, size=B_bytes)
-        buf_C = self._acquire_buffer(C_bytes)
+
+        if use_device_local:
+            buf_C = self._acquire_device_local_buffer(C_bytes)
+        else:
+            buf_C = self._acquire_buffer(C_bytes)
 
         try:
             if use_tiled:
@@ -248,6 +257,8 @@ class VulkanFNN(BufferMixin):
             self.core._dispatch_compute(pipeline, layout, desc, group_x, push, group_y, 1)
 
             if return_gpu_tensor:
+                if use_device_local and getattr(buf_C, "is_device_local", False):
+                    return self._wrap_output_tensor_device_local(buf_C, (M, N))
                 return self._wrap_output_tensor(buf_C, (M, N))
             else:
                 C_flat = self._download_buffer(buf_C, C_bytes, np.float32)
@@ -279,8 +290,13 @@ class VulkanFNN(BufferMixin):
         total_elements = int(np.prod(original_shape))
         data_nbytes = total_elements * 4
 
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
         buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
-        buf_out = self._acquire_buffer(data_nbytes)
+        if use_device_local:
+            buf_out = self._acquire_device_local_buffer(data_nbytes)
+        else:
+            buf_out = self._acquire_buffer(data_nbytes)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -308,6 +324,8 @@ class VulkanFNN(BufferMixin):
         if return_gpu_tensor:
             if release_in:
                 self._release_buffer(buf_in)
+            if use_device_local and getattr(buf_out, "is_device_local", False):
+                return self._wrap_output_tensor_device_local(buf_out, original_shape)
             return self._wrap_output_tensor(buf_out, original_shape)
         else:
             # Download results (uses VMA memory mapping for VMA buffers)
@@ -341,8 +359,13 @@ class VulkanFNN(BufferMixin):
         total_elements = int(np.prod(original_shape))
         data_nbytes = total_elements * 4
 
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
         buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
-        buf_out = self._acquire_buffer(data_nbytes)
+        if use_device_local:
+            buf_out = self._acquire_device_local_buffer(data_nbytes)
+        else:
+            buf_out = self._acquire_buffer(data_nbytes)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -370,6 +393,8 @@ class VulkanFNN(BufferMixin):
         if return_gpu_tensor:
             if release_in:
                 self._release_buffer(buf_in)
+            if use_device_local and getattr(buf_out, "is_device_local", False):
+                return self._wrap_output_tensor_device_local(buf_out, original_shape)
             return self._wrap_output_tensor(buf_out, original_shape)
         else:
             # Download results
@@ -412,8 +437,13 @@ class VulkanFNN(BufferMixin):
         total_elements = int(np.prod(original_shape))
         data_nbytes = total_elements * 4
 
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
         buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
-        buf_out = self._acquire_buffer(data_nbytes)
+        if use_device_local:
+            buf_out = self._acquire_device_local_buffer(data_nbytes)
+        else:
+            buf_out = self._acquire_buffer(data_nbytes)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -441,6 +471,8 @@ class VulkanFNN(BufferMixin):
         if return_gpu_tensor:
             if release_in:
                 self._release_buffer(buf_in)
+            if use_device_local and getattr(buf_out, "is_device_local", False):
+                return self._wrap_output_tensor_device_local(buf_out, original_shape)
             return self._wrap_output_tensor(buf_out, original_shape)
         else:
             # Download results
@@ -471,8 +503,13 @@ class VulkanFNN(BufferMixin):
         total_elements = int(np.prod(original_shape))
         data_nbytes = total_elements * 4
 
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
         buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
-        buf_out = self._acquire_buffer(data_nbytes)
+        if use_device_local:
+            buf_out = self._acquire_device_local_buffer(data_nbytes)
+        else:
+            buf_out = self._acquire_buffer(data_nbytes)
 
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
             "activation-tanh", 2, push_constant_size=4
@@ -496,6 +533,8 @@ class VulkanFNN(BufferMixin):
         if return_gpu_tensor:
             if release_in:
                 self._release_buffer(buf_in)
+            if use_device_local and getattr(buf_out, "is_device_local", False):
+                return self._wrap_output_tensor_device_local(buf_out, original_shape)
             return self._wrap_output_tensor(buf_out, original_shape)
         else:
             result = self._download_buffer(buf_out, data_nbytes, np.float32)
@@ -1703,8 +1742,12 @@ class VulkanFNN(BufferMixin):
         total_positions = batch_size * seq_len
         total_elements = batch_size * seq_len * features
 
-        # Acquire buffers from pool
-        buf_output = self._acquire_buffer(x_nbytes)
+        # Acquire output buffer — DEVICE_LOCAL when returning GPU tensor
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+        if use_device_local:
+            buf_output = self._acquire_device_local_buffer(x_nbytes)
+        else:
+            buf_output = self._acquire_buffer(x_nbytes)
         buf_gamma = self._acquire_buffer(gamma_flat.nbytes)
         buf_beta = self._acquire_buffer(beta_flat.nbytes)
         buf_mean = self._acquire_buffer(total_positions * 4)
@@ -1732,27 +1775,36 @@ class VulkanFNN(BufferMixin):
             ],
         )
 
-        # Run 3 passes
-        for pass_type in range(3):
-            # Push constants: batch_size, seq_len, features, eps, pass_type
-            push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, pass_type)
-
-            # Workgroups depend on pass type
-            if pass_type < 2:
-                # Passes 0 and 1: one thread per position (batch * seq)
-                workgroups = (total_positions + 255) // 256
-            else:
-                # Pass 2: one thread per element
-                workgroups = (total_elements + 255) // 256
-
-            self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
-            )
+        # Run 3 passes — batch into one command buffer when possible
+        use_batched = return_gpu_tensor and hasattr(self.core, "record_commands")
+        if use_batched:
+            with self.core.record_commands() as rec:
+                for pass_type in range(3):
+                    push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, pass_type)
+                    if pass_type < 2:
+                        workgroups = (total_positions + 255) // 256
+                    else:
+                        workgroups = (total_elements + 255) // 256
+                    rec.dispatch(pipeline, pipeline_layout, descriptor_set, (workgroups, 1, 1), push_constants)
+                    if pass_type < 2:
+                        rec.barrier()
+        else:
+            for pass_type in range(3):
+                push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, pass_type)
+                if pass_type < 2:
+                    workgroups = (total_positions + 255) // 256
+                else:
+                    workgroups = (total_elements + 255) // 256
+                self.core._dispatch_compute(
+                    pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+                )
 
         if return_gpu_tensor:
             if release_input:
                 self._release_buffer(buf_input)
             self._release_buffers([buf_gamma, buf_beta, buf_mean, buf_var])
+            if use_device_local and getattr(buf_output, "is_device_local", False):
+                return self._wrap_output_tensor_device_local(buf_output, original_shape)
             return self._wrap_output_tensor(buf_output, original_shape)
 
         # Download result
@@ -1836,9 +1888,15 @@ class VulkanFNN(BufferMixin):
         # Output size
         output_size = batch_seq * output_dim * 4  # float32
 
-        # Use weight cache (avoids re-upload when weights haven't changed)
-        buf_weights, release_weights = self._get_or_upload_weight(w_np)
-        buf_output = self._acquire_buffer(output_size)
+        # Use DEVICE_LOCAL for weights/output when returning GPU tensor
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
+        if use_device_local:
+            buf_weights, release_weights = self._get_or_upload_weight_device_local(w_np)
+            buf_output = self._acquire_device_local_buffer(output_size)
+        else:
+            buf_weights, release_weights = self._get_or_upload_weight(w_np)
+            buf_output = self._acquire_buffer(output_size)
 
         # Handle bias
         has_bias = 1 if bias is not None else 0
@@ -1890,7 +1948,10 @@ class VulkanFNN(BufferMixin):
             output_shape = (batch_seq, output_dim)
 
         if return_gpu_tensor:
-            result = self._wrap_output_tensor(buf_output, output_shape)
+            if use_device_local and getattr(buf_output, "is_device_local", False):
+                result = self._wrap_output_tensor_device_local(buf_output, output_shape)
+            else:
+                result = self._wrap_output_tensor(buf_output, output_shape)
             # Release only owned buffers (cache-owned buffers are not released)
             if release_input:
                 self._release_buffer(buf_input)
