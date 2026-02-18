@@ -1,9 +1,8 @@
 """Full training loop: 3-layer MLP on synthetic data."""
 
-import numpy as np
-
 import grilly.nn as nn
 import grilly.optim as optim
+import numpy as np
 
 # Model: 3-layer MLP with GELU activations
 model = nn.Sequential(

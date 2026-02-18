@@ -2,9 +2,8 @@
 
 import time
 
-import numpy as np
-
 import grilly
+import numpy as np
 
 backend = grilly.Compute()
 
