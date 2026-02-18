@@ -73,7 +73,7 @@ class VulkanFNN(BufferMixin):
         self.shaders = shaders
         self._pool = None  # Lazy initialization
 
-    def gemm(self, A, B, return_gpu_tensor=False):
+    def gemm(self, A, B, return_gpu_tensor=False, cache_B=False):
         """
         GEMM: C = A @ B
         A: (M, K), B: (K, N) -> C: (M, N)
@@ -83,6 +83,7 @@ class VulkanFNN(BufferMixin):
             A: Left matrix, numpy array or VulkanTensor
             B: Right matrix, numpy array or VulkanTensor
             return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
+            cache_B: If True, keep B (weight matrix) GPU-resident across calls
         """
         from ..utils.tensor_conversion import VulkanTensor
 
@@ -107,7 +108,10 @@ class VulkanFNN(BufferMixin):
 
         # Use _prepare_input for zero-copy when VulkanTensor
         buf_A, release_A = self._prepare_input(A, size=A_bytes)
-        buf_B, release_B = self._prepare_input(B, size=B_bytes)
+        if cache_B and isinstance(B, np.ndarray):
+            buf_B, release_B = self._get_or_upload_weight(B)
+        else:
+            buf_B, release_B = self._prepare_input(B, size=B_bytes)
         buf_C = self._acquire_buffer(C_bytes)
 
         try:

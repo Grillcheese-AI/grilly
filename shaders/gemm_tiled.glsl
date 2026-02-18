@@ -35,7 +35,7 @@ layout(push_constant) uniform PushConstants {
 
 // Shared memory: 64 rows x 16 cols for A tile, 16 rows x 64 cols for B tile
 shared float Asub[64][16];
-shared float Bsub[16][64];
+shared float Bsub[16][65];  // +1 padding to avoid shared memory bank conflicts
 
 void main() {
     uint lx = gl_LocalInvocationID.x; // 0..15

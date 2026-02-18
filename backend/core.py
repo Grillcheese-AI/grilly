@@ -17,6 +17,10 @@ if VULKAN_AVAILABLE:
 
 logger = logging.getLogger(__name__)
 
+import os as _os
+
+_DEBUG_UPLOAD = _os.getenv("GRILLY_DEBUG_UPLOAD", "0") == "1"
+
 
 class VulkanCore:
     """Core Vulkan operations: initialization, buffers, and dispatch"""
@@ -228,6 +232,14 @@ class VulkanCore:
             commandBufferCount=1,
         )
         self._cmd_buffer = vkAllocateCommandBuffers(self.device, cmd_alloc_info)[0]
+
+        # Create a reusable fence for dispatch synchronization.
+        # Starts signaled so the first _dispatch_compute wait is a no-op.
+        fence_info = VkFenceCreateInfo(
+            sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            flags=VK_FENCE_CREATE_SIGNALED_BIT,
+        )
+        self._fence = vkCreateFence(self.device, fence_info, None)
 
         # Create descriptor pool (large enough for all shaders)
         pool_sizes = [
@@ -460,13 +472,13 @@ class VulkanCore:
         if upload_size == 0:
             return
 
-        # Guard against out-of-bounds writes when callers provide mismatched
-        # buffer/data sizes.
-        mem_req = vkGetBufferMemoryRequirements(self.device, buffer)
-        if upload_size > int(mem_req.size):
-            raise ValueError(
-                f"Upload size {upload_size} exceeds buffer allocation {int(mem_req.size)}"
-            )
+        # Synchronous driver query — only pay this cost under debug flag.
+        if _DEBUG_UPLOAD:
+            mem_req = vkGetBufferMemoryRequirements(self.device, buffer)
+            if upload_size > int(mem_req.size):
+                raise ValueError(
+                    f"Upload size {upload_size} exceeds buffer allocation {int(mem_req.size)}"
+                )
 
         data_ptr = vkMapMemory(self.device, memory, 0, upload_size, 0)
         try:
@@ -563,21 +575,35 @@ class VulkanCore:
 
         vkEndCommandBuffer(command_buffer)
 
-        # Submit
+        # Wait for previous dispatch to finish, then reset the fence.
+        vkWaitForFences(self.device, 1, [self._fence], VK_TRUE, 2_000_000_000)
+        vkResetFences(self.device, 1, [self._fence])
+
+        # Submit with fence — avoids the heavier vkQueueWaitIdle drain.
         submit_info = VkSubmitInfo(
             sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,
             commandBufferCount=1,
             pCommandBuffers=[command_buffer],
         )
 
-        vkQueueSubmit(self.queue, 1, [submit_info], None)
-        vkQueueWaitIdle(self.queue)
+        vkQueueSubmit(self.queue, 1, [submit_info], self._fence)
+
+        # Wait immediately so callers can read back results.
+        # This is still faster than vkQueueWaitIdle (no full queue drain).
+        vkWaitForFences(self.device, 1, [self._fence], VK_TRUE, 2_000_000_000)
+
+    def _wait_fence(self, timeout_ns: int = 2_000_000_000):
+        """Wait for the most recent dispatch to complete."""
+        vkWaitForFences(self.device, 1, [self._fence], VK_TRUE, timeout_ns)
 
     def cleanup(self):
         """Cleanup Vulkan resources"""
         if hasattr(self, "device") and self.device:
             device = self.device
             self.device = None  # Prevent double cleanup
+            if hasattr(self, "_fence") and self._fence:
+                vkDestroyFence(device, self._fence, None)
+                self._fence = None
             if hasattr(self, "descriptor_pool") and self.descriptor_pool:
                 vkDestroyDescriptorPool(device, self.descriptor_pool, None)
                 self.descriptor_pool = None

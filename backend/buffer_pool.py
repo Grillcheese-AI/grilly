@@ -107,7 +107,11 @@ class VMABuffer:
         self.in_use = True
         self.last_used = time.time()
         self.usage_flags = usage_flags
-        self.mapped_ptr = None
+        # VMA allocates with MAPPED_BIT — capture the persistent mapping.
+        try:
+            self.mapped_ptr = allocation_info.pMappedData
+        except Exception:
+            self.mapped_ptr = None
 
     @property
     def pool(self):
@@ -430,16 +434,23 @@ class VMABufferPool:
         if self._allocator is None:
             raise RuntimeError("VMA allocator not initialized")
 
-        # Map memory
+        flat = np.ascontiguousarray(data, dtype=np.float32).ravel()
+
+        if buffer.mapped_ptr is not None:
+            # Fast path: persistent mapping — no map/unmap overhead.
+            pyvma.ffi.memmove(buffer.mapped_ptr, pyvma.ffi.from_buffer(flat), flat.nbytes)
+            # Flush for non-HOST_COHERENT heaps (safe no-op on coherent memory).
+            pyvma_lib.vmaFlushAllocation(self._allocator, buffer.allocation, 0, flat.nbytes)
+            return
+
+        # Fallback: explicit map/unmap
         ppData = pyvma.ffi.new("void**")
         result = pyvma_lib.vmaMapMemory(self._allocator, buffer.allocation, ppData)
         if result != 0:
             raise RuntimeError(f"vmaMapMemory failed with code {result}")
 
-        # Copy data
-        pyvma.ffi.memmove(ppData[0], data.tobytes(), data.nbytes)
+        pyvma.ffi.memmove(ppData[0], pyvma.ffi.from_buffer(flat), flat.nbytes)
 
-        # Unmap
         pyvma_lib.vmaUnmapMemory(self._allocator, buffer.allocation)
 
     def download_data(self, buffer: VMABuffer, size: int, dtype=np.float32) -> np.ndarray:
