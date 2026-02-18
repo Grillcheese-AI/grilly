@@ -1,9 +1,18 @@
 # Grilly
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/grillcheese-ai/grilly/main/assets/3x/dark-logo-text%403x-100.jpg" alt="Grilly" width="400">
+</p>
+
+*Deep learning, well done.*
+
 [![CI](https://github.com/grillcheese-ai/grilly/actions/workflows/ci.yml/badge.svg)](https://github.com/grillcheese-ai/grilly/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/grilly)](https://pypi.org/project/grilly/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-GPU-accelerated neural network framework using Vulkan compute shaders. Supports AMD, NVIDIA, and Intel GPUs.
+> **Alpha software.** Not production-ready. APIs may change. We welcome early adopters and feedback.
+
+GPU-accelerated neural network framework using Vulkan compute shaders. No CUDA required. Supports AMD, NVIDIA, and Intel GPUs.
 
 **Documentation:** <https://grilly.readthedocs.io/>
 
@@ -156,8 +165,8 @@ top_k_distances, top_k_indices = backend.faiss.topk(distances, k=10)
 
 ## Shader Statistics
 
-- Total GLSL shaders: 137
-- Compiled SPIR-V shaders: 138
+- Total GLSL shaders: 154
+- Compiled SPIR-V shaders: 154
 - Categories: 12+ operation types
 
 ## Compiling Shaders
@@ -232,13 +241,39 @@ Tested on AMD RX 6750 XT (12GB VRAM):
 - Flash Attention 2: 32 batch, 8 heads, 512 seq length at ~50ms
 - FAISS top-k: 10K vectors, 384D, k=10 at ~5ms
 
+## Built for GrillCheese AI
+
+Grilly powers [GrillCheese AI](https://github.com/grillcheese-ai/grillcheese), a neuromorphic language system that replaces pure transformer stacks with brain-inspired modules — hippocampal memory, thalamic routing, amygdala affect, and Oja-rule online plasticity — all running on Vulkan compute. The research explores four hypotheses:
+
+- **H1 (Architecture)**: Modular neuromorphic design can match transformers while enabling episodic memory, continual learning, and affect-driven routing.
+- **H2 (Efficiency)**: Vulkan-accelerated SSM training can reach >10,000 tok/s on a single consumer GPU — no CUDA or cloud required.
+- **H3 (Memory)**: Capsule encoding (768D to 32D) with dentate gyrus sparse expansion preserves information for hippocampal retrieval via Matryoshka representation learning.
+- **H4 (Plasticity)**: Online Oja-rule weight updates enable continual adaptation without catastrophic forgetting.
+
+Grilly v1.0 will ship alongside the GrillCheese AI public release.
+
 ## Examples
 
-See `examples/` directory for detailed usage:
-- Transformer fine-tuning with LoRA
-- Spiking neural network training
-- FAISS similarity search
-- Continual learning with EWC
+A minimal forward + backward pass:
+
+```python
+import grilly.nn as nn
+
+layer = nn.Linear(128, 10)
+x = nn.randn(32, 128, requires_grad=True)
+
+logits = x @ nn.Variable(layer.weight.T) + nn.Variable(layer.bias)
+loss = logits.sum()
+loss.backward()
+
+print(x.grad.shape)  # (32, 128)
+```
+
+See [`examples/`](examples/) for more:
+- `hello_grilly.py` — Autograd forward + backward
+- `train_mlp.py` — Full training loop with AdamW and cross-entropy
+- `benchmark_gemm.py` — GPU vs CPU GEMM throughput table
+- 14 experimental examples (VSA, MoE, capsules, cognitive control, and more)
 
 ## Development
 
@@ -338,6 +373,16 @@ For Test PyPI: `twine upload --repository testpypi dist/*`
 3. Add tests for new features
 4. Run `make check` to verify
 5. Submit a pull request
+
+## Roadmap and Community
+
+Open an issue. Tell us what to implement or optimize.
+
+Current priorities:
+- Training throughput (GEMM tiling, fused backward shaders)
+- Backward pass coverage for all operations
+- INT8/INT4 quantization kernels
+- Documentation and tutorials
 
 ## License
 

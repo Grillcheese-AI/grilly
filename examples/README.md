@@ -1,8 +1,28 @@
-# Experimental Features Examples
+# Grilly Examples
 
-This directory contains examples demonstrating all experimental features in Grilly.
+## Core Examples
 
-## Examples
+Start here. These show the basics of training and benchmarking with Grilly.
+
+| Script | What it does |
+|--------|-------------|
+| `hello_grilly.py` | Minimal forward + backward pass with autograd |
+| `train_mlp.py` | Full training loop: 3-layer MLP, AdamW, cross-entropy |
+| `benchmark_gemm.py` | GPU vs CPU matrix multiply throughput table |
+
+```bash
+python examples/hello_grilly.py      # Prints shapes + confirms gradients
+python examples/train_mlp.py         # 10 epochs of decreasing loss
+python examples/benchmark_gemm.py    # GEMM timing table (requires Vulkan GPU)
+```
+
+---
+
+## Experimental Features Examples
+
+14 examples demonstrating advanced research features in Grilly.
+
+### Examples
 
 ### VSA Operations
 - `experimental_vsa_ops.py` - Binary and holographic VSA operations

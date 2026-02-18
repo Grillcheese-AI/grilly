@@ -65,3 +65,23 @@ Step 5: Update weights
    optimizer.step()
 
 At this point you have run forward, backward, and optimizer update in the same style as early PyTorch workflows.
+
+Step 6 (Optional): Use autograd Variables
+------------------------------------------
+
+Grilly also supports automatic differentiation via ``Variable`` — no manual gradient computation needed:
+
+.. code-block:: python
+
+   import grilly.nn as nn
+
+   x = nn.randn(32, 128, requires_grad=True)
+   layer = nn.Linear(128, 10)
+
+   logits = x @ nn.Variable(layer.weight.T) + nn.Variable(layer.bias)
+   loss = logits.sum()
+   loss.backward()
+
+   print("Gradient shape:", x.grad.shape)  # (32, 128)
+
+See ``examples/hello_grilly.py`` for the full example.
