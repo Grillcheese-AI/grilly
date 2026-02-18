@@ -350,6 +350,117 @@ class VulkanFNN(BufferMixin):
 
             return result.reshape(original_shape) if len(original_shape) > 1 else result
 
+    def activation_tanh(self, input_data, return_gpu_tensor=False):
+        """Apply tanh activation: tanh(x)
+
+        Uses: activation-tanh.glsl
+        """
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(input_data, VulkanTensor)
+
+        if "activation-tanh" not in self.shaders:
+            data_np = input_data.numpy() if is_vt else np.asarray(input_data, dtype=np.float32)
+            return np.tanh(data_np).astype(np.float32)
+
+        original_shape = input_data.shape
+        total_elements = int(np.prod(original_shape))
+        data_nbytes = total_elements * 4
+
+        buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
+        buf_out = self._acquire_buffer(data_nbytes)
+
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            "activation-tanh", 2, push_constant_size=4
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            "activation-tanh",
+            [
+                (self._get_buffer_handle(buf_in), data_nbytes),
+                (self._get_buffer_handle(buf_out), data_nbytes),
+            ],
+        )
+
+        push_constants = struct.pack("I", total_elements)
+
+        workgroups = (total_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+        )
+
+        if return_gpu_tensor:
+            if release_in:
+                self._release_buffer(buf_in)
+            return self._wrap_output_tensor(buf_out, original_shape)
+        else:
+            result = self._download_buffer(buf_out, data_nbytes, np.float32)
+            result = result[:total_elements]
+
+            if release_in:
+                self._release_buffer(buf_in)
+            self._release_buffer(buf_out)
+
+            return result.reshape(original_shape) if len(original_shape) > 1 else result
+
+    def activation_tanh_backward(self, grad_output, tanh_output):
+        """Backward pass for tanh: grad_input = grad_output * (1 - tanh_output^2)
+
+        Uses: activation-tanh-backward.glsl
+
+        Args:
+            grad_output: Gradient from next layer
+            tanh_output: Cached tanh output from forward pass
+        """
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt_grad = isinstance(grad_output, VulkanTensor)
+        is_vt_tanh = isinstance(tanh_output, VulkanTensor)
+
+        if "activation-tanh-backward" not in self.shaders:
+            g = grad_output.numpy() if is_vt_grad else np.asarray(grad_output, dtype=np.float32)
+            t = tanh_output.numpy() if is_vt_tanh else np.asarray(tanh_output, dtype=np.float32)
+            return (g * (1.0 - t * t)).astype(np.float32)
+
+        original_shape = grad_output.shape
+        total_elements = int(np.prod(original_shape))
+        data_nbytes = total_elements * 4
+
+        buf_grad, release_grad = self._prepare_input(grad_output, size=data_nbytes)
+        buf_tanh, release_tanh = self._prepare_input(tanh_output, size=data_nbytes)
+        buf_out = self._acquire_buffer(data_nbytes)
+
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            "activation-tanh-backward", 3, push_constant_size=4
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            "activation-tanh-backward",
+            [
+                (self._get_buffer_handle(buf_grad), data_nbytes),
+                (self._get_buffer_handle(buf_tanh), data_nbytes),
+                (self._get_buffer_handle(buf_out), data_nbytes),
+            ],
+        )
+
+        push_constants = struct.pack("I", total_elements)
+
+        workgroups = (total_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+        )
+
+        result = self._download_buffer(buf_out, data_nbytes, np.float32)
+        result = result[:total_elements]
+
+        if release_grad:
+            self._release_buffer(buf_grad)
+        if release_tanh:
+            self._release_buffer(buf_tanh)
+        self._release_buffer(buf_out)
+
+        return result.reshape(original_shape) if len(original_shape) > 1 else result
+
     def activation_gcu(self, input_data):
         """Apply GCU (Growing Cosine Unit) activation: x * cos(x)"""
         # Check if shader is available
@@ -2690,6 +2801,113 @@ class VulkanFNN(BufferMixin):
             return result.reshape(output_shape)
         else:
             return result.reshape(batch_seq, output_dim)
+
+    def fused_linear_tanh(
+        self,
+        x,
+        weights: np.ndarray,
+        bias: np.ndarray | None = None,
+        return_gpu_tensor=False,
+    ) -> np.ndarray:
+        """
+        Fused Linear + Tanh: tanh(x @ W.T + b)
+
+        Uses: fused-linear-tanh.glsl
+
+        Used by VSA Reasoning Head to project hidden states to bipolar VSA space.
+
+        Args:
+            x: Input tensor (..., input_dim), numpy array or VulkanTensor
+            weights: Weight matrix (output_dim, input_dim)
+            bias: Optional bias (output_dim,)
+            return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
+
+        Returns:
+            tanh(Linear(x))
+        """
+        if "fused-linear-tanh" not in self.shaders:
+            linear_out = self.linear(x, weights, bias, return_gpu_tensor=return_gpu_tensor)
+            return self.activation_tanh(linear_out, return_gpu_tensor=return_gpu_tensor)
+
+        original_shape = x.shape
+        input_dim = x.shape[-1]
+        output_dim = weights.shape[0]
+
+        if len(original_shape) > 2:
+            batch_seq = int(np.prod(original_shape[:-1]))
+        else:
+            batch_seq = original_shape[0] if len(original_shape) == 2 else 1
+
+        input_nbytes = batch_seq * input_dim * 4
+        output_size = batch_seq * output_dim * 4
+
+        buf_input, release_input = self._prepare_input(x, size=input_nbytes)
+
+        w_np = np.ascontiguousarray(weights, dtype=np.float32)
+        buf_weights, release_weights = self._get_or_upload_weight(w_np)
+
+        if bias is not None:
+            bias_np = np.ascontiguousarray(bias, dtype=np.float32)
+            buf_bias, release_bias = self._get_or_upload_weight(bias_np)
+            b_nbytes = bias_np.size * 4
+            has_bias = 1
+        else:
+            b_flat = np.zeros(output_dim, dtype=np.float32)
+            buf_bias = self._acquire_buffer(b_flat.nbytes)
+            self._upload_buffer(buf_bias, b_flat)
+            b_nbytes = b_flat.nbytes
+            release_bias = True
+            has_bias = 0
+
+        buf_output = self._acquire_buffer(output_size)
+
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            "fused-linear-tanh", 4, push_constant_size=16
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            "fused-linear-tanh",
+            [
+                (self._get_buffer_handle(buf_input), input_nbytes),
+                (self._get_buffer_handle(buf_weights), w_np.size * 4),
+                (self._get_buffer_handle(buf_bias), b_nbytes),
+                (self._get_buffer_handle(buf_output), output_size),
+            ],
+        )
+
+        push_constants = struct.pack("IIII", batch_seq, input_dim, output_dim, has_bias)
+
+        workgroups_x = (output_dim + 15) // 16
+        workgroups_y = (batch_seq + 15) // 16
+
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
+        )
+
+        if len(original_shape) > 2:
+            output_shape = original_shape[:-1] + (output_dim,)
+        else:
+            output_shape = (batch_seq, output_dim)
+
+        if return_gpu_tensor:
+            result = self._wrap_output_tensor(buf_output, output_shape)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            return result
+        else:
+            result = self._download_buffer(buf_output, output_size, np.float32)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            self._release_buffer(buf_output)
+            return result.reshape(output_shape)
 
     def fused_linear_roswish(
         self,
