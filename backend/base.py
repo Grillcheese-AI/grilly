@@ -188,6 +188,15 @@ class BufferMixin:
                 return
         self.core._upload_buffer(buf.handle, buf.memory, data)
 
+    def _upload_buffer_raw(self, buf, data: np.ndarray):
+        """Upload raw numpy data (any dtype) without fp32 conversion."""
+        if self._is_vma_buffer(buf):
+            pool = self.buffer_pool
+            if pool is not None and isinstance(pool, VMABufferPool):
+                pool.upload_data_raw(buf, data)
+                return
+        self.core._upload_buffer(buf.handle, buf.memory, data)
+
     def _download_buffer(self, buf, size: int, dtype=np.float32) -> np.ndarray:
         """Download data from a buffer."""
         if self._is_vma_buffer(buf):
@@ -242,6 +251,121 @@ class BufferMixin:
             for buf, _ in self._weight_cache.values():
                 self._release_buffer(buf)
             self._weight_cache.clear()
+
+    # ------------------------------------------------------------------
+    # DEVICE_LOCAL buffer helpers
+    # ------------------------------------------------------------------
+    def _acquire_device_local_buffer(self, size: int, usage: int = None):
+        """Acquire a DEVICE_LOCAL (VRAM) buffer. Falls back to HOST_VISIBLE."""
+        pool = self.buffer_pool
+        if pool is not None and hasattr(pool, "acquire_device_local"):
+            return pool.acquire_device_local(size, usage)
+        return self._acquire_buffer(size, usage)
+
+    def _upload_to_device_local(self, device_local_buf, data, recorder=None):
+        """Stage-upload *data* into a DEVICE_LOCAL buffer.
+
+        1. Acquire staging buffer (CPU_TO_GPU, mapped).
+        2. memcpy data into staging via persistent mapping.
+        3. Record vkCmdCopyBuffer(staging → device_local).
+        4. If *recorder* is None, submit immediately and release staging.
+           Otherwise the caller owns submit and must release staging later.
+
+        Returns:
+            staging_buf if recorder is provided (caller must release), else None.
+        """
+        flat = np.ascontiguousarray(data, dtype=np.float32).ravel()
+        pool = self.buffer_pool
+
+        staging = pool.acquire_staging(flat.nbytes, for_upload=True)
+        pool.upload_data(staging, flat)
+
+        staging_handle = self._get_buffer_handle(staging)
+        dl_handle = self._get_buffer_handle(device_local_buf)
+
+        if recorder is None:
+            with self.core.record_commands() as rec:
+                rec.copy_buffer(staging_handle, dl_handle, flat.nbytes)
+            self._release_buffer(staging)
+            return None
+        else:
+            recorder.copy_buffer(staging_handle, dl_handle, flat.nbytes)
+            return staging  # caller must release after submit
+
+    def _download_from_device_local(self, device_local_buf, size, dtype=np.float32,
+                                     recorder=None):
+        """Stage-download data from a DEVICE_LOCAL buffer.
+
+        1. Acquire readback buffer (GPU_TO_CPU, mapped).
+        2. Record transfer_barrier + vkCmdCopyBuffer(device_local → readback).
+        3. Submit + wait.
+        4. memcpy from readback → numpy.
+
+        Returns:
+            numpy array with downloaded data.
+        """
+        pool = self.buffer_pool
+        readback = pool.acquire_staging(size, for_upload=False)
+
+        dl_handle = self._get_buffer_handle(device_local_buf)
+        rb_handle = self._get_buffer_handle(readback)
+
+        if recorder is None:
+            with self.core.record_commands() as rec:
+                rec.transfer_barrier()
+                rec.copy_buffer(dl_handle, rb_handle, size)
+        else:
+            recorder.transfer_barrier()
+            recorder.copy_buffer(dl_handle, rb_handle, size)
+            recorder.submit_and_wait()
+
+        result = pool.download_data(readback, size, dtype)
+        self._release_buffer(readback)
+        return result
+
+    def _get_or_upload_weight_device_local(self, data):
+        """Like _get_or_upload_weight but places the weight in DEVICE_LOCAL VRAM.
+
+        Returns:
+            (buffer, release: bool) — release is always False (cache owns buffer).
+        """
+        if self._weight_cache is None:
+            self._weight_cache = {}
+
+        key = (id(data), data.shape, data.ctypes.data)
+
+        if key in self._weight_cache:
+            return self._weight_cache[key][0], False
+
+        flat = np.ascontiguousarray(data, dtype=np.float32).reshape(-1)
+        buf = self._acquire_device_local_buffer(flat.nbytes)
+
+        if getattr(buf, "is_device_local", False):
+            self._upload_to_device_local(buf, flat)
+        else:
+            self._upload_buffer(buf, flat)
+
+        if len(self._weight_cache) >= self._WEIGHT_CACHE_MAX:
+            oldest_key = next(iter(self._weight_cache))
+            old_buf, _ = self._weight_cache.pop(oldest_key)
+            self._release_buffer(old_buf)
+
+        self._weight_cache[key] = (buf, flat.nbytes)
+        return buf, False
+
+    def _wrap_output_tensor_device_local(self, buf, shape):
+        """Wrap a DEVICE_LOCAL buffer in a VulkanTensor."""
+        from ..utils.tensor_conversion import VulkanTensor
+
+        vt = VulkanTensor.empty(shape)
+        vt._pooled_buffer = buf
+        vt._gpu_buffer = self._get_buffer_handle(buf)
+        vt._gpu_memory = getattr(buf, "memory", None)
+        vt._core = self.core
+        vt._gpu_valid = True
+        vt._cpu_valid = False
+        vt._is_device_local = True
+        return vt
 
     # ------------------------------------------------------------------
     # GPU-resident tensor helpers (Phase 3)

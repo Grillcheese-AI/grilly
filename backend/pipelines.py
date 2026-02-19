@@ -2,6 +2,8 @@
 Pipeline creation and management for Vulkan compute shaders.
 """
 
+from collections import OrderedDict
+
 from .base import VULKAN_AVAILABLE
 
 if VULKAN_AVAILABLE:
@@ -17,10 +19,10 @@ class VulkanPipelines:
         self.pipelines = {}
         self.descriptor_set_layouts = {}
         self.pipeline_layouts = {}
-        # Descriptor set caching to prevent pool exhaustion
-        self.descriptor_set_cache = {}
-        self.cache_access_order = []  # LRU tracking
-        self.max_cache_size = 100  # Limit cache to prevent pool exhaustion
+        # Descriptor set caching to prevent pool exhaustion.
+        # OrderedDict provides O(1) LRU via move_to_end / popitem.
+        self.descriptor_set_cache = OrderedDict()
+        self.max_cache_size = 100
         self.cache_hits = 0
         self.cache_misses = 0
 
@@ -164,6 +166,10 @@ class VulkanPipelines:
         Get a cached descriptor set or create a new one.
         Implements LRU eviction to prevent descriptor pool exhaustion.
 
+        The cache key includes buffer *handles* so that a true hit (same
+        shader, same sizes, same buffer objects) skips vkUpdateDescriptorSets
+        entirely.
+
         Args:
             shader_name: Name of the shader
             buffers: List of (buffer, size) tuples
@@ -171,75 +177,41 @@ class VulkanPipelines:
         Returns:
             Descriptor set handle
         """
-        # Create cache key from shader name and buffer sizes
+        buffer_handles = tuple(id(buf) for buf, _ in buffers)
         buffer_sizes = tuple(size for _, size in buffers)
-        cache_key = (shader_name, buffer_sizes)
+        cache_key = (shader_name, buffer_sizes, buffer_handles)
 
-        # Check cache
+        # Check cache — true hit means same buffers, skip descriptor update
         if cache_key in self.descriptor_set_cache:
-            cached_set = self.descriptor_set_cache[cache_key]
-            # Update LRU order (move to end)
-            if cache_key in self.cache_access_order:
-                self.cache_access_order.remove(cache_key)
-            self.cache_access_order.append(cache_key)
-
-            # Update buffer bindings for the cached set
-            writes = []
-            for i, (buffer, size) in enumerate(buffers):
-                buffer_info = VkDescriptorBufferInfo(buffer=buffer, offset=0, range=size)
-                write = VkWriteDescriptorSet(
-                    sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                    dstSet=cached_set,
-                    dstBinding=i,
-                    dstArrayElement=0,
-                    descriptorCount=1,
-                    descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    pBufferInfo=[buffer_info],
-                )
-                writes.append(write)
-            vkUpdateDescriptorSets(self.core.device, len(writes), writes, 0, None)
+            self.descriptor_set_cache.move_to_end(cache_key)
             self.cache_hits += 1
-            return cached_set
+            return self.descriptor_set_cache[cache_key]
 
-        # Cache miss - need to create new descriptor set
-        # First, evict LRU entries if cache is full
+        # Cache miss — evict LRU entries if cache is full
         while len(self.descriptor_set_cache) >= self.max_cache_size:
-            if not self.cache_access_order:
-                break
-            lru_key = self.cache_access_order.pop(0)
-            lru_set = self.descriptor_set_cache.pop(lru_key)
-            # Free the descriptor set back to the pool
+            lru_key, lru_set = self.descriptor_set_cache.popitem(last=False)
             try:
                 vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [lru_set])
             except Exception:
-                # Ignore errors during cleanup (pool might be fragmented)
                 pass
 
         # Get or create descriptor set layout
         desc_layout = self.descriptor_set_layouts.get(shader_name)
         if desc_layout is None:
-            # Get layout from pipeline if available
-            if shader_name in self.descriptor_set_layouts:
-                desc_layout = self.descriptor_set_layouts[shader_name]
-            else:
-                # Create layout on the fly
-                desc_layout = self._create_descriptor_set_layout(len(buffers))
-                self.descriptor_set_layouts[shader_name] = desc_layout
+            desc_layout = self._create_descriptor_set_layout(len(buffers))
+            self.descriptor_set_layouts[shader_name] = desc_layout
 
         # Create new descriptor set
         try:
             descriptor_set = self._create_descriptor_set(desc_layout, buffers)
         except Exception as e:
-            # If allocation fails, try clearing cache and retry once
             if "OUT_OF_POOL_MEMORY" in str(e) or e == -1000069000:
                 self.clear_descriptor_cache()
                 descriptor_set = self._create_descriptor_set(desc_layout, buffers)
             else:
                 raise
 
-        # Add to cache
         self.descriptor_set_cache[cache_key] = descriptor_set
-        self.cache_access_order.append(cache_key)
         self.cache_misses += 1
 
         return descriptor_set
@@ -268,7 +240,6 @@ class VulkanPipelines:
                     # Ignore errors during cleanup
                     pass
         self.descriptor_set_cache.clear()
-        self.cache_access_order.clear()
         self.cache_hits = 0
         self.cache_misses = 0
 

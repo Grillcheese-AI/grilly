@@ -43,15 +43,15 @@ pyvma = None
 pyvma_lib = None
 
 try:
-    import pyvma
+    import pyvma2 as pyvma
 
-    # PyVMA exports: ffi, vma (which is the lib)
+    # pyvma2 exports: ffi, lib, vma (lib alias)
     pyvma_lib = getattr(pyvma, "vma", None) or getattr(pyvma, "lib", None)
     PYVMA_AVAILABLE = pyvma_lib is not None and hasattr(pyvma_lib, "vmaCreateAllocator")
     if PYVMA_AVAILABLE:
-        logger.debug("PyVMA available - using VMA for buffer allocation")
+        logger.debug("PyVMA2 (VMA 3.4) available - using VMA for buffer allocation")
 except ImportError:
-    logger.debug("PyVMA not available - using direct Vulkan allocation")
+    logger.debug("PyVMA2 not available - using direct Vulkan allocation")
 
 if VULKAN_AVAILABLE:
     from vulkan import (
@@ -83,6 +83,7 @@ class VMABuffer:
         "_weak_pool",
         "bucket_size",
         "_vk_handle",
+        "is_device_local",
     )
 
     def __init__(
@@ -107,7 +108,12 @@ class VMABuffer:
         self.in_use = True
         self.last_used = time.time()
         self.usage_flags = usage_flags
-        self.mapped_ptr = None
+        self.is_device_local = False
+        # VMA allocates with MAPPED_BIT — capture the persistent mapping.
+        try:
+            self.mapped_ptr = allocation_info.pMappedData
+        except Exception:
+            self.mapped_ptr = None
 
     @property
     def pool(self):
@@ -179,6 +185,7 @@ class VMABufferPool:
         self.max_memory = max_memory or self.MAX_POOL_MEMORY
         self._allocator = None
         self._buckets: dict[int, list[VMABuffer]] = defaultdict(list)
+        self._device_local_buckets: dict[int, list[VMABuffer]] = defaultdict(list)
         self._total_pooled_memory = 0
         self._lock = threading.Lock()
         self._stats = {
@@ -202,15 +209,18 @@ class VMABufferPool:
         try:
             import vulkan as vk
 
-            # Create Vulkan functions struct manually (without KHR extensions)
-            # This avoids the ProcedureNotFoundError for optional extensions
+            # VMA 3.x requires a full set of Vulkan function pointers
             core_functions = [
+                "vkGetInstanceProcAddr",
+                "vkGetDeviceProcAddr",
                 "vkGetPhysicalDeviceProperties",
                 "vkGetPhysicalDeviceMemoryProperties",
                 "vkAllocateMemory",
                 "vkFreeMemory",
                 "vkMapMemory",
                 "vkUnmapMemory",
+                "vkFlushMappedMemoryRanges",
+                "vkInvalidateMappedMemoryRanges",
                 "vkBindBufferMemory",
                 "vkBindImageMemory",
                 "vkGetBufferMemoryRequirements",
@@ -219,37 +229,42 @@ class VMABufferPool:
                 "vkDestroyBuffer",
                 "vkCreateImage",
                 "vkDestroyImage",
+                "vkCmdCopyBuffer",
             ]
 
             init_functions = {
                 fn: pyvma.ffi.cast("PFN_" + fn, getattr(vk.lib, fn)) for fn in core_functions
             }
 
-            # Try to add KHR extension functions if available (optional)
-            khr_functions = [
-                "vkGetBufferMemoryRequirements2KHR",
-                "vkGetImageMemoryRequirements2KHR",
-            ]
-            for fn_name in khr_functions:
+            # Vulkan 1.1 core promotes KHR functions (drop the suffix).
+            # VMA's struct uses the KHR-suffixed field names, so map core→KHR.
+            khr_from_core = {
+                "vkGetBufferMemoryRequirements2KHR": "vkGetBufferMemoryRequirements2",
+                "vkGetImageMemoryRequirements2KHR": "vkGetImageMemoryRequirements2",
+                "vkBindBufferMemory2KHR": "vkBindBufferMemory2",
+                "vkBindImageMemory2KHR": "vkBindImageMemory2",
+                "vkGetPhysicalDeviceMemoryProperties2KHR": "vkGetPhysicalDeviceMemoryProperties2",
+            }
+            for khr_name, core_name in khr_from_core.items():
                 try:
-                    fn_ptr = vk.lib.vkGetDeviceProcAddr(
-                        self.core.device, pyvma.ffi.new("char[]", fn_name.encode("ascii"))
-                    )
-                    if fn_ptr != pyvma.ffi.NULL:
-                        init_functions[fn_name] = pyvma.ffi.cast("PFN_" + fn_name, fn_ptr)
-                        logger.debug(f"KHR extension {fn_name} available")
+                    fn_ptr = getattr(vk.lib, core_name, None)
+                    if fn_ptr is not None:
+                        init_functions[khr_name] = pyvma.ffi.cast("PFN_" + khr_name, fn_ptr)
+                        logger.debug(f"{khr_name} (via core {core_name})")
                 except Exception:
-                    logger.debug(f"KHR extension {fn_name} not available (optional)")
+                    logger.debug(f"{khr_name} not available")
 
             vulkan_functions = pyvma.ffi.new("VmaVulkanFunctions*", init_functions)
 
-            # Create allocator with custom Vulkan functions
-            # Note: older VMA versions don't have 'instance' field
+            # VMA 3.x requires instance + vulkanApiVersion
+            VK_API_VERSION_1_1 = (1 << 22) | (1 << 12) | 0  # VK_MAKE_VERSION(1,1,0)
             create_info = pyvma.ffi.new(
                 "VmaAllocatorCreateInfo*",
                 {
                     "physicalDevice": pyvma.ffi.cast("void*", self.core.physical_device),
                     "device": pyvma.ffi.cast("void*", self.core.device),
+                    "instance": pyvma.ffi.cast("void*", self.core.instance),
+                    "vulkanApiVersion": VK_API_VERSION_1_1,
                     "pVulkanFunctions": vulkan_functions,
                 },
             )
@@ -360,22 +375,183 @@ class VMABufferPool:
                 usage_flags=usage,
             )
 
+    def acquire_device_local(self, size: int, usage: int = None) -> VMABuffer:
+        """Acquire DEVICE_LOCAL buffer (VRAM only, no CPU mapping).
+
+        Uses VMA_MEMORY_USAGE_GPU_ONLY so the buffer lives in fast GDDR6/HBM
+        rather than the small HOST_VISIBLE BAR.  Transfer bits are added
+        automatically so the buffer can be a staging copy target/source.
+
+        Falls back to HOST_VISIBLE ``acquire()`` if VRAM allocation fails.
+        """
+        if usage is None:
+            usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+        # Ensure transfer bits for staging copies
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT = 0x00000001
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT = 0x00000002
+        usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
+
+        if self._allocator is None:
+            return self.acquire(size, usage)
+
+        bucket_size = self._size_to_bucket(size)
+
+        with self._lock:
+            self._stats["total_acquired"] += 1
+
+            # Check device-local reuse buckets
+            bucket = self._device_local_buckets[bucket_size]
+            for i, buf in enumerate(bucket):
+                if not buf.in_use and buf.usage_flags == usage:
+                    buf.in_use = True
+                    buf.size = size
+                    buf.last_used = time.time()
+                    bucket.pop(i)
+                    self._total_pooled_memory -= bucket_size
+                    self._stats["hits"] += 1
+                    return buf
+
+            self._stats["misses"] += 1
+            self._stats["allocations"] += 1
+            self._evict_if_needed(bucket_size)
+
+        # Allocate DEVICE_LOCAL via VMA (no MAPPED_BIT — can't map VRAM)
+        VMA_MEMORY_USAGE_GPU_ONLY = 1
+
+        buffer_info = pyvma.ffi.new(
+            "VkBufferCreateInfo*",
+            {
+                "sType": VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                "size": bucket_size,
+                "usage": usage,
+                "sharingMode": VK_SHARING_MODE_EXCLUSIVE,
+            },
+        )
+
+        alloc_info = pyvma.ffi.new(
+            "VmaAllocationCreateInfo*",
+            {
+                "usage": VMA_MEMORY_USAGE_GPU_ONLY,
+                "flags": 0,  # No MAPPED_BIT for DEVICE_LOCAL
+            },
+        )
+
+        pBuffer = pyvma.ffi.new("VkBuffer*")
+        pAllocation = pyvma.ffi.new("VmaAllocation*")
+        pAllocationInfo = pyvma.ffi.new("VmaAllocationInfo*")
+
+        try:
+            result = pyvma_lib.vmaCreateBuffer(
+                self._allocator, buffer_info, alloc_info, pBuffer, pAllocation, pAllocationInfo
+            )
+            if result != 0:
+                raise RuntimeError(f"vmaCreateBuffer (DEVICE_LOCAL) failed: {result}")
+
+            buf = VMABuffer(
+                handle=pBuffer[0],
+                allocation=pAllocation[0],
+                allocation_info=pAllocationInfo[0],
+                size=size,
+                bucket_size=bucket_size,
+                pool=self,
+                usage_flags=usage,
+            )
+            buf.is_device_local = True
+            buf.mapped_ptr = None  # DEVICE_LOCAL cannot be mapped
+            return buf
+
+        except Exception as exc:
+            logger.debug("DEVICE_LOCAL alloc failed (%s), falling back to HOST_VISIBLE", exc)
+            return self.acquire(size, usage)
+
+    def acquire_staging(self, size: int, for_upload: bool = True) -> VMABuffer:
+        """Acquire staging buffer for CPU<->GPU copies.
+
+        Args:
+            size: Buffer size in bytes.
+            for_upload: True  = CPU→GPU staging  (CPU_TO_GPU + TRANSFER_SRC)
+                        False = GPU→CPU readback (GPU_TO_CPU + TRANSFER_DST)
+        """
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT = 0x00000001
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT = 0x00000002
+        VMA_MEMORY_USAGE_CPU_TO_GPU = 3
+        VMA_MEMORY_USAGE_GPU_TO_CPU = 4
+        VMA_ALLOCATION_CREATE_MAPPED_BIT = 0x00000004
+
+        if for_upload:
+            vma_usage = VMA_MEMORY_USAGE_CPU_TO_GPU
+            vk_usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+        else:
+            vma_usage = VMA_MEMORY_USAGE_GPU_TO_CPU
+            vk_usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT
+
+        if self._allocator is None:
+            raise RuntimeError("VMA allocator not initialized")
+
+        bucket_size = self._size_to_bucket(size)
+
+        buffer_info = pyvma.ffi.new(
+            "VkBufferCreateInfo*",
+            {
+                "sType": VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                "size": bucket_size,
+                "usage": vk_usage,
+                "sharingMode": VK_SHARING_MODE_EXCLUSIVE,
+            },
+        )
+
+        alloc_ci = pyvma.ffi.new(
+            "VmaAllocationCreateInfo*",
+            {
+                "usage": vma_usage,
+                "flags": VMA_ALLOCATION_CREATE_MAPPED_BIT,
+            },
+        )
+
+        pBuffer = pyvma.ffi.new("VkBuffer*")
+        pAllocation = pyvma.ffi.new("VmaAllocation*")
+        pAllocationInfo = pyvma.ffi.new("VmaAllocationInfo*")
+
+        result = pyvma_lib.vmaCreateBuffer(
+            self._allocator, buffer_info, alloc_ci, pBuffer, pAllocation, pAllocationInfo
+        )
+        if result != 0:
+            raise RuntimeError(f"vmaCreateBuffer (staging) failed: {result}")
+
+        buf = VMABuffer(
+            handle=pBuffer[0],
+            allocation=pAllocation[0],
+            allocation_info=pAllocationInfo[0],
+            size=size,
+            bucket_size=bucket_size,
+            pool=self,
+            usage_flags=vk_usage,
+        )
+        buf.is_device_local = False
+        return buf
+
     def _return_buffer(self, buffer: VMABuffer):
         """Return a buffer to the pool for reuse."""
         # Flush/invalidate VMA memory so the next acquire sees clean state.
         # This prevents stale data from a previous dispatch leaking into a
         # reused buffer (the root cause of the old "backward stability" bug).
-        try:
-            if self._allocator and buffer.allocation:
-                pyvma_lib.vmaInvalidateAllocation(
-                    self._allocator, buffer.allocation, 0, buffer.bucket_size
-                )
-        except Exception:
-            pass  # vmaInvalidateAllocation may not exist in older VMA builds
+        # Skip for DEVICE_LOCAL — they can't be mapped/flushed.
+        if not getattr(buffer, "is_device_local", False):
+            try:
+                if self._allocator and buffer.allocation:
+                    pyvma_lib.vmaInvalidateAllocation(
+                        self._allocator, buffer.allocation, 0, buffer.bucket_size
+                    )
+            except Exception:
+                pass  # vmaInvalidateAllocation may not exist in older VMA builds
 
         with self._lock:
             self._stats["total_released"] += 1
-            bucket = self._buckets[buffer.bucket_size]
+            # Route to correct bucket set
+            if getattr(buffer, "is_device_local", False):
+                bucket = self._device_local_buckets[buffer.bucket_size]
+            else:
+                bucket = self._buckets[buffer.bucket_size]
 
             if len(bucket) >= self.MAX_BUFFERS_PER_BUCKET:
                 oldest = min(bucket, key=lambda b: b.last_used)
@@ -400,18 +576,24 @@ class VMABufferPool:
         oldest_buf = None
         oldest_bucket_size = None
         oldest_time = float("inf")
+        oldest_is_device_local = False
 
-        for bucket_size, bucket in self._buckets.items():
-            for buf in bucket:
-                if buf.last_used < oldest_time:
-                    oldest_time = buf.last_used
-                    oldest_buf = buf
-                    oldest_bucket_size = bucket_size
+        for bucket_dict, is_dl in ((self._buckets, False), (self._device_local_buckets, True)):
+            for bucket_size, bucket in bucket_dict.items():
+                for buf in bucket:
+                    if buf.last_used < oldest_time:
+                        oldest_time = buf.last_used
+                        oldest_buf = buf
+                        oldest_bucket_size = bucket_size
+                        oldest_is_device_local = is_dl
 
         if oldest_buf is None:
             return False
 
-        self._buckets[oldest_bucket_size].remove(oldest_buf)
+        if oldest_is_device_local:
+            self._device_local_buckets[oldest_bucket_size].remove(oldest_buf)
+        else:
+            self._buckets[oldest_bucket_size].remove(oldest_buf)
         self._total_pooled_memory -= oldest_bucket_size
         self._destroy_buffer(oldest_buf)
         self._stats["evictions"] += 1
@@ -430,16 +612,42 @@ class VMABufferPool:
         if self._allocator is None:
             raise RuntimeError("VMA allocator not initialized")
 
-        # Map memory
+        flat = np.ascontiguousarray(data, dtype=np.float32).ravel()
+
+        if buffer.mapped_ptr is not None:
+            # Fast path: persistent mapping — no map/unmap overhead.
+            pyvma.ffi.memmove(buffer.mapped_ptr, pyvma.ffi.from_buffer(flat), flat.nbytes)
+            # Flush for non-HOST_COHERENT heaps (safe no-op on coherent memory).
+            pyvma_lib.vmaFlushAllocation(self._allocator, buffer.allocation, 0, flat.nbytes)
+            return
+
+        # Fallback: explicit map/unmap
         ppData = pyvma.ffi.new("void**")
         result = pyvma_lib.vmaMapMemory(self._allocator, buffer.allocation, ppData)
         if result != 0:
             raise RuntimeError(f"vmaMapMemory failed with code {result}")
 
-        # Copy data
-        pyvma.ffi.memmove(ppData[0], data.tobytes(), data.nbytes)
+        pyvma.ffi.memmove(ppData[0], pyvma.ffi.from_buffer(flat), flat.nbytes)
 
-        # Unmap
+        pyvma_lib.vmaUnmapMemory(self._allocator, buffer.allocation)
+
+    def upload_data_raw(self, buffer: VMABuffer, data: np.ndarray):
+        """Upload data without dtype conversion (for fp16, int8, etc.)."""
+        if self._allocator is None:
+            raise RuntimeError("VMA allocator not initialized")
+
+        flat = np.ascontiguousarray(data).ravel()
+
+        if buffer.mapped_ptr is not None:
+            pyvma.ffi.memmove(buffer.mapped_ptr, pyvma.ffi.from_buffer(flat), flat.nbytes)
+            pyvma_lib.vmaFlushAllocation(self._allocator, buffer.allocation, 0, flat.nbytes)
+            return
+
+        ppData = pyvma.ffi.new("void**")
+        result = pyvma_lib.vmaMapMemory(self._allocator, buffer.allocation, ppData)
+        if result != 0:
+            raise RuntimeError(f"vmaMapMemory failed with code {result}")
+        pyvma.ffi.memmove(ppData[0], pyvma.ffi.from_buffer(flat), flat.nbytes)
         pyvma_lib.vmaUnmapMemory(self._allocator, buffer.allocation)
 
     def download_data(self, buffer: VMABuffer, size: int, dtype=np.float32) -> np.ndarray:
@@ -466,6 +674,10 @@ class VMABufferPool:
         """Clear all pooled buffers"""
         with self._lock:
             for bucket in self._buckets.values():
+                for buf in bucket:
+                    self._destroy_buffer(buf)
+                bucket.clear()
+            for bucket in self._device_local_buckets.values():
                 for buf in bucket:
                     self._destroy_buffer(buf)
                 bucket.clear()

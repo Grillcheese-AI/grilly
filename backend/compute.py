@@ -148,6 +148,8 @@ class VulkanCompute:
         self.activation_gcu = self.fnn.activation_gcu
         self.activation_roswish = self.fnn.activation_roswish
         self.activation_swiglu = self.fnn.activation_swiglu
+        self.activation_tanh = self.fnn.activation_tanh
+        self.activation_tanh_backward = self.fnn.activation_tanh_backward
         self.activation_softmax = self.fnn.activation_softmax
         self.layernorm = self.fnn.layernorm
         self.linear = self.fnn.linear
@@ -209,6 +211,14 @@ class VulkanCompute:
     def activation_silu(self, *args, **kwargs):
         """Apply SiLU (Swish) activation: x * sigmoid(x)"""
         return self.fnn.activation_silu(*args, **kwargs)
+
+    def activation_tanh(self, *args, **kwargs):
+        """Apply tanh activation"""
+        return self.fnn.activation_tanh(*args, **kwargs)
+
+    def activation_tanh_backward(self, *args, **kwargs):
+        """Backward pass for tanh activation"""
+        return self.fnn.activation_tanh_backward(*args, **kwargs)
 
     def activation_softmax(self, *args, **kwargs):
         """Apply softmax activation"""

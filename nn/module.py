@@ -62,6 +62,7 @@ class Module:
         self._device = "vulkan"
         self._grad_enabled = True  # Enable gradients by default
         self._return_gpu_tensor = False  # GPU-resident output mode
+        self._use_device_local = False  # DEVICE_LOCAL VRAM buffers
 
     def _get_backend(self):
         """Execute get backend."""
@@ -255,7 +256,7 @@ class Module:
             if name in state_dict:
                 module.load_state_dict(state_dict[name])
 
-    def gpu_mode(self, enable=True):
+    def gpu_mode(self, enable=True, device_local=True):
         """Enable GPU-resident output (returns VulkanTensor instead of numpy).
 
         When enabled, operations will accept VulkanTensor inputs without
@@ -265,13 +266,19 @@ class Module:
 
         Args:
             enable: True to enable, False to disable
+            device_local: When True (default), intermediate buffers use
+                DEVICE_LOCAL VRAM instead of HOST_VISIBLE memory. This
+                keeps activations in fast GDDR6/HBM (384 GB/s) rather than
+                crossing the PCIe bus (14 GB/s). Only effective when
+                *enable* is also True.
 
         Returns:
             self (for chaining)
         """
         self._return_gpu_tensor = enable
+        self._use_device_local = enable and device_local
         for module in self._modules.values():
-            module.gpu_mode(enable)
+            module.gpu_mode(enable, device_local)
         return self
 
     def to(self, device=None):

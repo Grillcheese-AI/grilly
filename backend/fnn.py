@@ -73,24 +73,39 @@ class VulkanFNN(BufferMixin):
         self.shaders = shaders
         self._pool = None  # Lazy initialization
 
-    def gemm(self, A, B, return_gpu_tensor=False):
+    def gemm(self, A, B, return_gpu_tensor=False, cache_B=False, force_fp32=False):
         """
         GEMM: C = A @ B
         A: (M, K), B: (K, N) -> C: (M, N)
-        Uses gemm_tiled (4x4 register blocking) with gemm_mnk fallback.
+
+        Shader priority:
+        1. gemm_coopmat — cooperative matrix (fp16 in, fp32 out, hardware WMMA)
+        2. gemm_tiled   — tiled fp32 (4x4 register blocking)
+        3. gemm_mnk     — basic fp32
 
         Args:
             A: Left matrix, numpy array or VulkanTensor
             B: Right matrix, numpy array or VulkanTensor
             return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
+            cache_B: If True, keep B (weight matrix) GPU-resident across calls
+            force_fp32: If True, skip cooperative matrix and use fp32 shader
         """
+        import os as _os
+
         from ..utils.tensor_conversion import VulkanTensor
 
-        # Select shader: prefer optimized tiled version
+        # Select shader: prefer cooperative matrix → tiled → basic
+        use_coopmat = (
+            not force_fp32
+            and "gemm_coopmat" in self.shaders
+            and self.core.has_cooperative_matrix
+            and self.core.has_float16
+            and _os.environ.get("GRILLY_DISABLE_COOPMAT", "0") != "1"
+        )
         use_tiled = "gemm_tiled" in self.shaders
         use_basic = "gemm_mnk" in self.shaders
 
-        if not use_tiled and not use_basic:
+        if not use_coopmat and not use_tiled and not use_basic:
             A_np = A.numpy() if isinstance(A, VulkanTensor) else np.asarray(A, dtype=np.float32)
             B_np = B.numpy() if isinstance(B, VulkanTensor) else np.asarray(B, dtype=np.float32)
             return A_np @ B_np  # CPU fallback
@@ -100,25 +115,124 @@ class VulkanFNN(BufferMixin):
         K2, N = B.shape
         assert K == K2
 
-        # Bytes
+        if use_coopmat:
+            return self._gemm_coopmat(A, B, M, K, N, return_gpu_tensor, cache_B)
+        else:
+            return self._gemm_scalar(A, B, M, K, N, return_gpu_tensor, cache_B,
+                                     use_tiled)
+
+    def _gemm_coopmat(self, A, B, M, K, N, return_gpu_tensor, cache_B):
+        """Cooperative matrix GEMM: fp16 inputs, fp32 accumulation."""
+        from ..utils.tensor_conversion import VulkanTensor
+
+        # Pad dimensions for cooperative matrix workgroup tiling:
+        # M, K → multiple of 16 (single 16x16 tile per subgroup row)
+        # N → multiple of 64 (4 subgroups × 16 cols per workgroup)
+        M_pad = (M + 15) & ~15
+        K_pad = (K + 15) & ~15
+        N_pad = (N + 63) & ~63
+
+        # Convert to fp16 and pad
+        A_np = A.numpy() if isinstance(A, VulkanTensor) else np.asarray(A, dtype=np.float32)
+        B_np = B.numpy() if isinstance(B, VulkanTensor) else np.asarray(B, dtype=np.float32)
+
+        if M_pad != M or K_pad != K:
+            A_f16 = np.zeros((M_pad, K_pad), dtype=np.float16)
+            A_f16[:M, :K] = A_np
+        else:
+            A_f16 = A_np.astype(np.float16)
+
+        if K_pad != K or N_pad != N:
+            B_f16 = np.zeros((K_pad, N_pad), dtype=np.float16)
+            B_f16[:K, :N] = B_np
+        else:
+            B_f16 = B_np.astype(np.float16)
+
+        A_bytes = M_pad * K_pad * 2  # fp16
+        B_bytes = K_pad * N_pad * 2
+        C_bytes = M_pad * N_pad * 4  # fp32 output
+
+        buf_A = self._acquire_buffer(A_bytes)
+        self._upload_buffer_raw(buf_A, A_f16)
+        release_A = True
+
+        buf_B = self._acquire_buffer(B_bytes)
+        self._upload_buffer_raw(buf_B, B_f16)
+        release_B = True
+
+        buf_C = self._acquire_buffer(C_bytes)
+
+        try:
+            shader_name = "gemm_coopmat"
+            # 4 subgroups per workgroup: 16 rows × 64 cols per workgroup
+            group_x = (N_pad + 63) // 64
+            group_y = (M_pad + 15) // 16
+
+            pipeline, layout, _ = self.pipelines.get_or_create_pipeline(
+                shader_name, 3, push_constant_size=12
+            )
+
+            A_handle = self._get_buffer_handle(buf_A)
+            B_handle = self._get_buffer_handle(buf_B)
+            C_handle = self._get_buffer_handle(buf_C)
+
+            desc = self.pipelines.get_cached_descriptor_set(
+                shader_name,
+                [
+                    (A_handle, A_bytes),
+                    (B_handle, B_bytes),
+                    (C_handle, C_bytes),
+                ],
+            )
+
+            push = struct.pack("3I", M_pad, K_pad, N_pad)
+            self.core._dispatch_compute(pipeline, layout, desc, group_x, push, group_y, 1)
+
+            if return_gpu_tensor:
+                # TODO: trim padding on download for gpu tensors
+                return self._wrap_output_tensor(buf_C, (M_pad, N_pad))
+            else:
+                C_flat = self._download_buffer(buf_C, C_bytes, np.float32)
+                C_full = C_flat.reshape(M_pad, N_pad)
+                return C_full[:M, :N]  # Trim padding
+
+        finally:
+            if release_A:
+                self._release_buffer(buf_A)
+            if release_B:
+                self._release_buffer(buf_B)
+            if not return_gpu_tensor:
+                self._release_buffer(buf_C)
+
+    def _gemm_scalar(self, A, B, M, K, N, return_gpu_tensor, cache_B, use_tiled):
+        """Scalar tiled/basic GEMM: fp32 inputs and outputs."""
         A_bytes = M * K * 4
         B_bytes = K * N * 4
         C_bytes = M * N * 4
 
-        # Use _prepare_input for zero-copy when VulkanTensor
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
         buf_A, release_A = self._prepare_input(A, size=A_bytes)
-        buf_B, release_B = self._prepare_input(B, size=B_bytes)
-        buf_C = self._acquire_buffer(C_bytes)
+        if cache_B and isinstance(B, np.ndarray):
+            if use_device_local:
+                buf_B, release_B = self._get_or_upload_weight_device_local(B)
+            else:
+                buf_B, release_B = self._get_or_upload_weight(B)
+        else:
+            buf_B, release_B = self._prepare_input(B, size=B_bytes)
+
+        if use_device_local:
+            buf_C = self._acquire_device_local_buffer(C_bytes)
+        else:
+            buf_C = self._acquire_buffer(C_bytes)
 
         try:
             if use_tiled:
                 shader_name = "gemm_tiled"
-                # 64x64 output tile per workgroup (16x16 threads, 4x4 per thread)
                 group_x = (N + 63) // 64
                 group_y = (M + 63) // 64
             else:
                 shader_name = "gemm_mnk"
-                # 16x16 output tile per workgroup
                 group_x = (N + 15) // 16
                 group_y = (M + 15) // 16
 
@@ -140,10 +254,11 @@ class VulkanFNN(BufferMixin):
             )
 
             push = struct.pack("3I", M, K, N)
-
             self.core._dispatch_compute(pipeline, layout, desc, group_x, push, group_y, 1)
 
             if return_gpu_tensor:
+                if use_device_local and getattr(buf_C, "is_device_local", False):
+                    return self._wrap_output_tensor_device_local(buf_C, (M, N))
                 return self._wrap_output_tensor(buf_C, (M, N))
             else:
                 C_flat = self._download_buffer(buf_C, C_bytes, np.float32)
@@ -175,8 +290,13 @@ class VulkanFNN(BufferMixin):
         total_elements = int(np.prod(original_shape))
         data_nbytes = total_elements * 4
 
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
         buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
-        buf_out = self._acquire_buffer(data_nbytes)
+        if use_device_local:
+            buf_out = self._acquire_device_local_buffer(data_nbytes)
+        else:
+            buf_out = self._acquire_buffer(data_nbytes)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -204,6 +324,8 @@ class VulkanFNN(BufferMixin):
         if return_gpu_tensor:
             if release_in:
                 self._release_buffer(buf_in)
+            if use_device_local and getattr(buf_out, "is_device_local", False):
+                return self._wrap_output_tensor_device_local(buf_out, original_shape)
             return self._wrap_output_tensor(buf_out, original_shape)
         else:
             # Download results (uses VMA memory mapping for VMA buffers)
@@ -237,8 +359,13 @@ class VulkanFNN(BufferMixin):
         total_elements = int(np.prod(original_shape))
         data_nbytes = total_elements * 4
 
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
         buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
-        buf_out = self._acquire_buffer(data_nbytes)
+        if use_device_local:
+            buf_out = self._acquire_device_local_buffer(data_nbytes)
+        else:
+            buf_out = self._acquire_buffer(data_nbytes)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -266,6 +393,8 @@ class VulkanFNN(BufferMixin):
         if return_gpu_tensor:
             if release_in:
                 self._release_buffer(buf_in)
+            if use_device_local and getattr(buf_out, "is_device_local", False):
+                return self._wrap_output_tensor_device_local(buf_out, original_shape)
             return self._wrap_output_tensor(buf_out, original_shape)
         else:
             # Download results
@@ -308,8 +437,13 @@ class VulkanFNN(BufferMixin):
         total_elements = int(np.prod(original_shape))
         data_nbytes = total_elements * 4
 
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
         buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
-        buf_out = self._acquire_buffer(data_nbytes)
+        if use_device_local:
+            buf_out = self._acquire_device_local_buffer(data_nbytes)
+        else:
+            buf_out = self._acquire_buffer(data_nbytes)
 
         # Get or create pipeline
         pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
@@ -337,6 +471,8 @@ class VulkanFNN(BufferMixin):
         if return_gpu_tensor:
             if release_in:
                 self._release_buffer(buf_in)
+            if use_device_local and getattr(buf_out, "is_device_local", False):
+                return self._wrap_output_tensor_device_local(buf_out, original_shape)
             return self._wrap_output_tensor(buf_out, original_shape)
         else:
             # Download results
@@ -349,6 +485,124 @@ class VulkanFNN(BufferMixin):
             self._release_buffer(buf_out)
 
             return result.reshape(original_shape) if len(original_shape) > 1 else result
+
+    def activation_tanh(self, input_data, return_gpu_tensor=False):
+        """Apply tanh activation: tanh(x)
+
+        Uses: activation-tanh.glsl
+        """
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(input_data, VulkanTensor)
+
+        if "activation-tanh" not in self.shaders:
+            data_np = input_data.numpy() if is_vt else np.asarray(input_data, dtype=np.float32)
+            return np.tanh(data_np).astype(np.float32)
+
+        original_shape = input_data.shape
+        total_elements = int(np.prod(original_shape))
+        data_nbytes = total_elements * 4
+
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
+        buf_in, release_in = self._prepare_input(input_data, size=data_nbytes)
+        if use_device_local:
+            buf_out = self._acquire_device_local_buffer(data_nbytes)
+        else:
+            buf_out = self._acquire_buffer(data_nbytes)
+
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            "activation-tanh", 2, push_constant_size=4
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            "activation-tanh",
+            [
+                (self._get_buffer_handle(buf_in), data_nbytes),
+                (self._get_buffer_handle(buf_out), data_nbytes),
+            ],
+        )
+
+        push_constants = struct.pack("I", total_elements)
+
+        workgroups = (total_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+        )
+
+        if return_gpu_tensor:
+            if release_in:
+                self._release_buffer(buf_in)
+            if use_device_local and getattr(buf_out, "is_device_local", False):
+                return self._wrap_output_tensor_device_local(buf_out, original_shape)
+            return self._wrap_output_tensor(buf_out, original_shape)
+        else:
+            result = self._download_buffer(buf_out, data_nbytes, np.float32)
+            result = result[:total_elements]
+
+            if release_in:
+                self._release_buffer(buf_in)
+            self._release_buffer(buf_out)
+
+            return result.reshape(original_shape) if len(original_shape) > 1 else result
+
+    def activation_tanh_backward(self, grad_output, tanh_output):
+        """Backward pass for tanh: grad_input = grad_output * (1 - tanh_output^2)
+
+        Uses: activation-tanh-backward.glsl
+
+        Args:
+            grad_output: Gradient from next layer
+            tanh_output: Cached tanh output from forward pass
+        """
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt_grad = isinstance(grad_output, VulkanTensor)
+        is_vt_tanh = isinstance(tanh_output, VulkanTensor)
+
+        if "activation-tanh-backward" not in self.shaders:
+            g = grad_output.numpy() if is_vt_grad else np.asarray(grad_output, dtype=np.float32)
+            t = tanh_output.numpy() if is_vt_tanh else np.asarray(tanh_output, dtype=np.float32)
+            return (g * (1.0 - t * t)).astype(np.float32)
+
+        original_shape = grad_output.shape
+        total_elements = int(np.prod(original_shape))
+        data_nbytes = total_elements * 4
+
+        buf_grad, release_grad = self._prepare_input(grad_output, size=data_nbytes)
+        buf_tanh, release_tanh = self._prepare_input(tanh_output, size=data_nbytes)
+        buf_out = self._acquire_buffer(data_nbytes)
+
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            "activation-tanh-backward", 3, push_constant_size=4
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            "activation-tanh-backward",
+            [
+                (self._get_buffer_handle(buf_grad), data_nbytes),
+                (self._get_buffer_handle(buf_tanh), data_nbytes),
+                (self._get_buffer_handle(buf_out), data_nbytes),
+            ],
+        )
+
+        push_constants = struct.pack("I", total_elements)
+
+        workgroups = (total_elements + 255) // 256
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+        )
+
+        result = self._download_buffer(buf_out, data_nbytes, np.float32)
+        result = result[:total_elements]
+
+        if release_grad:
+            self._release_buffer(buf_grad)
+        if release_tanh:
+            self._release_buffer(buf_tanh)
+        self._release_buffer(buf_out)
+
+        return result.reshape(original_shape) if len(original_shape) > 1 else result
 
     def activation_gcu(self, input_data):
         """Apply GCU (Growing Cosine Unit) activation: x * cos(x)"""
@@ -1488,8 +1742,12 @@ class VulkanFNN(BufferMixin):
         total_positions = batch_size * seq_len
         total_elements = batch_size * seq_len * features
 
-        # Acquire buffers from pool
-        buf_output = self._acquire_buffer(x_nbytes)
+        # Acquire output buffer — DEVICE_LOCAL when returning GPU tensor
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+        if use_device_local:
+            buf_output = self._acquire_device_local_buffer(x_nbytes)
+        else:
+            buf_output = self._acquire_buffer(x_nbytes)
         buf_gamma = self._acquire_buffer(gamma_flat.nbytes)
         buf_beta = self._acquire_buffer(beta_flat.nbytes)
         buf_mean = self._acquire_buffer(total_positions * 4)
@@ -1517,27 +1775,36 @@ class VulkanFNN(BufferMixin):
             ],
         )
 
-        # Run 3 passes
-        for pass_type in range(3):
-            # Push constants: batch_size, seq_len, features, eps, pass_type
-            push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, pass_type)
-
-            # Workgroups depend on pass type
-            if pass_type < 2:
-                # Passes 0 and 1: one thread per position (batch * seq)
-                workgroups = (total_positions + 255) // 256
-            else:
-                # Pass 2: one thread per element
-                workgroups = (total_elements + 255) // 256
-
-            self.core._dispatch_compute(
-                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
-            )
+        # Run 3 passes — batch into one command buffer when possible
+        use_batched = return_gpu_tensor and hasattr(self.core, "record_commands")
+        if use_batched:
+            with self.core.record_commands() as rec:
+                for pass_type in range(3):
+                    push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, pass_type)
+                    if pass_type < 2:
+                        workgroups = (total_positions + 255) // 256
+                    else:
+                        workgroups = (total_elements + 255) // 256
+                    rec.dispatch(pipeline, pipeline_layout, descriptor_set, (workgroups, 1, 1), push_constants)
+                    if pass_type < 2:
+                        rec.barrier()
+        else:
+            for pass_type in range(3):
+                push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, pass_type)
+                if pass_type < 2:
+                    workgroups = (total_positions + 255) // 256
+                else:
+                    workgroups = (total_elements + 255) // 256
+                self.core._dispatch_compute(
+                    pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+                )
 
         if return_gpu_tensor:
             if release_input:
                 self._release_buffer(buf_input)
             self._release_buffers([buf_gamma, buf_beta, buf_mean, buf_var])
+            if use_device_local and getattr(buf_output, "is_device_local", False):
+                return self._wrap_output_tensor_device_local(buf_output, original_shape)
             return self._wrap_output_tensor(buf_output, original_shape)
 
         # Download result
@@ -1621,9 +1888,15 @@ class VulkanFNN(BufferMixin):
         # Output size
         output_size = batch_seq * output_dim * 4  # float32
 
-        # Use weight cache (avoids re-upload when weights haven't changed)
-        buf_weights, release_weights = self._get_or_upload_weight(w_np)
-        buf_output = self._acquire_buffer(output_size)
+        # Use DEVICE_LOCAL for weights/output when returning GPU tensor
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+
+        if use_device_local:
+            buf_weights, release_weights = self._get_or_upload_weight_device_local(w_np)
+            buf_output = self._acquire_device_local_buffer(output_size)
+        else:
+            buf_weights, release_weights = self._get_or_upload_weight(w_np)
+            buf_output = self._acquire_buffer(output_size)
 
         # Handle bias
         has_bias = 1 if bias is not None else 0
@@ -1675,7 +1948,10 @@ class VulkanFNN(BufferMixin):
             output_shape = (batch_seq, output_dim)
 
         if return_gpu_tensor:
-            result = self._wrap_output_tensor(buf_output, output_shape)
+            if use_device_local and getattr(buf_output, "is_device_local", False):
+                result = self._wrap_output_tensor_device_local(buf_output, output_shape)
+            else:
+                result = self._wrap_output_tensor(buf_output, output_shape)
             # Release only owned buffers (cache-owned buffers are not released)
             if release_input:
                 self._release_buffer(buf_input)
@@ -1755,11 +2031,11 @@ class VulkanFNN(BufferMixin):
 
             # 1) grad_input = grad_output @ weights
             #    (batch*seq, out_features) @ (out_features, in_features) = (batch*seq, in_features)
-            grad_input_2d = self.gemm(grad_output_2d, weights)
+            grad_input_2d = self.gemm(grad_output_2d, weights, force_fp32=True)
 
             # 2) grad_weight = grad_output.T @ x
             #    (out_features, batch*seq) @ (batch*seq, in_features) = (out_features, in_features)
-            grad_weight = self.gemm(grad_output_2d.T.copy(), x_2d)
+            grad_weight = self.gemm(grad_output_2d.T.copy(), x_2d, force_fp32=True)
 
             # 3) grad_bias = sum over batch dimension
             grad_bias = (
@@ -2690,6 +2966,113 @@ class VulkanFNN(BufferMixin):
             return result.reshape(output_shape)
         else:
             return result.reshape(batch_seq, output_dim)
+
+    def fused_linear_tanh(
+        self,
+        x,
+        weights: np.ndarray,
+        bias: np.ndarray | None = None,
+        return_gpu_tensor=False,
+    ) -> np.ndarray:
+        """
+        Fused Linear + Tanh: tanh(x @ W.T + b)
+
+        Uses: fused-linear-tanh.glsl
+
+        Used by VSA Reasoning Head to project hidden states to bipolar VSA space.
+
+        Args:
+            x: Input tensor (..., input_dim), numpy array or VulkanTensor
+            weights: Weight matrix (output_dim, input_dim)
+            bias: Optional bias (output_dim,)
+            return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
+
+        Returns:
+            tanh(Linear(x))
+        """
+        if "fused-linear-tanh" not in self.shaders:
+            linear_out = self.linear(x, weights, bias, return_gpu_tensor=return_gpu_tensor)
+            return self.activation_tanh(linear_out, return_gpu_tensor=return_gpu_tensor)
+
+        original_shape = x.shape
+        input_dim = x.shape[-1]
+        output_dim = weights.shape[0]
+
+        if len(original_shape) > 2:
+            batch_seq = int(np.prod(original_shape[:-1]))
+        else:
+            batch_seq = original_shape[0] if len(original_shape) == 2 else 1
+
+        input_nbytes = batch_seq * input_dim * 4
+        output_size = batch_seq * output_dim * 4
+
+        buf_input, release_input = self._prepare_input(x, size=input_nbytes)
+
+        w_np = np.ascontiguousarray(weights, dtype=np.float32)
+        buf_weights, release_weights = self._get_or_upload_weight(w_np)
+
+        if bias is not None:
+            bias_np = np.ascontiguousarray(bias, dtype=np.float32)
+            buf_bias, release_bias = self._get_or_upload_weight(bias_np)
+            b_nbytes = bias_np.size * 4
+            has_bias = 1
+        else:
+            b_flat = np.zeros(output_dim, dtype=np.float32)
+            buf_bias = self._acquire_buffer(b_flat.nbytes)
+            self._upload_buffer(buf_bias, b_flat)
+            b_nbytes = b_flat.nbytes
+            release_bias = True
+            has_bias = 0
+
+        buf_output = self._acquire_buffer(output_size)
+
+        pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+            "fused-linear-tanh", 4, push_constant_size=16
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            "fused-linear-tanh",
+            [
+                (self._get_buffer_handle(buf_input), input_nbytes),
+                (self._get_buffer_handle(buf_weights), w_np.size * 4),
+                (self._get_buffer_handle(buf_bias), b_nbytes),
+                (self._get_buffer_handle(buf_output), output_size),
+            ],
+        )
+
+        push_constants = struct.pack("IIII", batch_seq, input_dim, output_dim, has_bias)
+
+        workgroups_x = (output_dim + 15) // 16
+        workgroups_y = (batch_seq + 15) // 16
+
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
+        )
+
+        if len(original_shape) > 2:
+            output_shape = original_shape[:-1] + (output_dim,)
+        else:
+            output_shape = (batch_seq, output_dim)
+
+        if return_gpu_tensor:
+            result = self._wrap_output_tensor(buf_output, output_shape)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            return result
+        else:
+            result = self._download_buffer(buf_output, output_size, np.float32)
+            if release_input:
+                self._release_buffer(buf_input)
+            if release_weights:
+                self._release_buffer(buf_weights)
+            if release_bias:
+                self._release_buffer(buf_bias)
+            self._release_buffer(buf_output)
+            return result.reshape(output_shape)
 
     def fused_linear_roswish(
         self,

@@ -17,6 +17,13 @@ if VULKAN_AVAILABLE:
 
 logger = logging.getLogger(__name__)
 
+import os as _os
+
+_DEBUG_UPLOAD = _os.getenv("GRILLY_DEBUG_UPLOAD", "0") == "1"
+
+# Enable provisional Vulkan extensions (required since spec 1.2.171)
+_os.environ.setdefault("VK_ENABLE_BETA_EXTENSIONS", "1")
+
 
 class VulkanCore:
     """Core Vulkan operations: initialization, buffers, and dispatch"""
@@ -134,20 +141,33 @@ class VulkanCore:
             except Exception as exc:
                 logger.warning("Failed to compile shader %s: %s", src_path.name, exc)
 
+    # Extensions we want to enable when available
+    _DESIRED_EXTENSIONS = [
+        "VK_KHR_cooperative_matrix",
+        "VK_KHR_shader_atomic_int64",
+        "VK_EXT_shader_atomic_float",
+        "VK_EXT_shader_atomic_float2",
+        "VK_KHR_shader_float16_int8",
+        "VK_KHR_16bit_storage",
+        "VK_KHR_8bit_storage",
+        "VK_KHR_storage_buffer_storage_class",
+        "VK_KHR_vulkan_memory_model",
+    ]
+
     def _init_vulkan(self):
         """Initialize Vulkan instance, device, queue"""
-        # Create instance
+        # Create instance (Vulkan 1.1 for subgroup ops + cooperative matrix)
         app_info = VkApplicationInfo(
             sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,
             pApplicationName="GrillCheese",
             applicationVersion=VK_MAKE_VERSION(1, 0, 0),
             pEngineName="SNN-Compute",
             engineVersion=VK_MAKE_VERSION(1, 0, 0),
-            apiVersion=VK_API_VERSION_1_0,
+            apiVersion=VK_MAKE_VERSION(1, 1, 0),
         )
 
         create_info = VkInstanceCreateInfo(
-            sType=VK_STRUCTURE_TYPE_APPLICATION_INFO, pApplicationInfo=app_info
+            sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, pApplicationInfo=app_info
         )
 
         self.instance = vkCreateInstance(create_info, None)
@@ -171,6 +191,22 @@ class VulkanCore:
         # Check for tiling-related capabilities
         self.tiling_support = self._check_tiling_support()
 
+        # ── Enumerate and enable device extensions ──
+        available_exts = set()
+        for e in vkEnumerateDeviceExtensionProperties(self.physical_device, None):
+            name = e.extensionName
+            if isinstance(name, bytes):
+                name = name.decode("utf-8")
+            available_exts.add(name.rstrip("\x00"))
+
+        enabled_extensions = [e for e in self._DESIRED_EXTENSIONS if e in available_exts]
+        self.enabled_extensions = set(enabled_extensions)
+
+        if not hasattr(VulkanCore, "_logged_exts"):
+            if enabled_extensions:
+                print(f"[OK] Vulkan extensions: {', '.join(enabled_extensions)}")
+            VulkanCore._logged_exts = True
+
         # Find compute queue family
         queue_families = vkGetPhysicalDeviceQueueFamilyProperties(self.physical_device)
         compute_queue_family = None
@@ -190,22 +226,113 @@ class VulkanCore:
             pQueuePriorities=[1.0],
         )
 
-        # Request sparse features if available (for tiling support)
+        # Base features (sparse binding for tiling)
         device_features = VkPhysicalDeviceFeatures()
         try:
-            # Try to enable sparse features for tiling
             if hasattr(self.device_features, "sparseBinding"):
                 device_features.sparseBinding = self.device_features.sparseBinding
             if hasattr(self.device_features, "sparseResidencyBuffer"):
                 device_features.sparseResidencyBuffer = self.device_features.sparseResidencyBuffer
         except Exception:
-            pass  # Sparse features not available on this device
+            pass
+
+        # ── Build pNext feature chain for enabled extensions ──
+        # Query actual device feature support first, then only request what
+        # the hardware reports.  vulkan-python pNext must be set at
+        # construction time (void* can't be reassigned), so we build the
+        # chain bottom-up.
+        pnext_tail = None
+
+        if "VK_KHR_16bit_storage" in self.enabled_extensions:
+            q = VkPhysicalDevice16BitStorageFeatures(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES,
+            )
+            qf = VkPhysicalDeviceFeatures2(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, pNext=q
+            )
+            vkGetPhysicalDeviceFeatures2(self.physical_device, qf)
+            pnext_tail = VkPhysicalDevice16BitStorageFeatures(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES,
+                storageBuffer16BitAccess=q.storageBuffer16BitAccess,
+                pNext=pnext_tail,
+            )
+
+        if "VK_KHR_shader_float16_int8" in self.enabled_extensions:
+            q = VkPhysicalDeviceShaderFloat16Int8Features(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES,
+            )
+            qf = VkPhysicalDeviceFeatures2(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, pNext=q
+            )
+            vkGetPhysicalDeviceFeatures2(self.physical_device, qf)
+            pnext_tail = VkPhysicalDeviceShaderFloat16Int8Features(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES,
+                shaderFloat16=q.shaderFloat16,
+                shaderInt8=q.shaderInt8,
+                pNext=pnext_tail,
+            )
+
+        if "VK_EXT_shader_atomic_float" in self.enabled_extensions:
+            q = VkPhysicalDeviceShaderAtomicFloatFeaturesEXT(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
+            )
+            qf = VkPhysicalDeviceFeatures2(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, pNext=q
+            )
+            vkGetPhysicalDeviceFeatures2(self.physical_device, qf)
+            pnext_tail = VkPhysicalDeviceShaderAtomicFloatFeaturesEXT(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
+                shaderBufferFloat32Atomics=q.shaderBufferFloat32Atomics,
+                shaderBufferFloat32AtomicAdd=q.shaderBufferFloat32AtomicAdd,
+                shaderSharedFloat32Atomics=q.shaderSharedFloat32Atomics,
+                shaderSharedFloat32AtomicAdd=q.shaderSharedFloat32AtomicAdd,
+                pNext=pnext_tail,
+            )
+
+        if "VK_KHR_shader_atomic_int64" in self.enabled_extensions:
+            q = VkPhysicalDeviceShaderAtomicInt64Features(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES,
+            )
+            qf = VkPhysicalDeviceFeatures2(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, pNext=q
+            )
+            vkGetPhysicalDeviceFeatures2(self.physical_device, qf)
+            pnext_tail = VkPhysicalDeviceShaderAtomicInt64Features(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES,
+                shaderBufferInt64Atomics=q.shaderBufferInt64Atomics,
+                shaderSharedInt64Atomics=q.shaderSharedInt64Atomics,
+                pNext=pnext_tail,
+            )
+
+        if "VK_KHR_cooperative_matrix" in self.enabled_extensions:
+            q = VkPhysicalDeviceCooperativeMatrixFeaturesKHR(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
+            )
+            qf = VkPhysicalDeviceFeatures2(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, pNext=q
+            )
+            vkGetPhysicalDeviceFeatures2(self.physical_device, qf)
+            pnext_tail = VkPhysicalDeviceCooperativeMatrixFeaturesKHR(
+                sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
+                cooperativeMatrix=q.cooperativeMatrix,
+                pNext=pnext_tail,
+            )
+
+        # Wrap base features + pNext chain in VkPhysicalDeviceFeatures2
+        features2 = VkPhysicalDeviceFeatures2(
+            sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+            features=device_features,
+            pNext=pnext_tail,
+        )
 
         device_create_info = VkDeviceCreateInfo(
             sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
             queueCreateInfoCount=1,
             pQueueCreateInfos=[queue_create_info],
-            pEnabledFeatures=device_features,
+            enabledExtensionCount=len(enabled_extensions),
+            ppEnabledExtensionNames=enabled_extensions,
+            pEnabledFeatures=None,  # features in pNext chain via features2
+            pNext=features2,
         )
 
         self.device = vkCreateDevice(self.physical_device, device_create_info, None)
@@ -228,6 +355,25 @@ class VulkanCore:
             commandBufferCount=1,
         )
         self._cmd_buffer = vkAllocateCommandBuffers(self.device, cmd_alloc_info)[0]
+
+        # Create a reusable fence for dispatch synchronization.
+        # Starts signaled so the first _dispatch_compute wait is a no-op.
+        fence_info = VkFenceCreateInfo(
+            sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            flags=VK_FENCE_CREATE_SIGNALED_BIT,
+        )
+        self._fence = vkCreateFence(self.device, fence_info, None)
+
+        # Batch command buffer + fence for CommandRecorder (multi-dispatch chaining).
+        # Separate from single-shot _cmd_buffer/_fence to avoid conflicts.
+        batch_alloc = VkCommandBufferAllocateInfo(
+            sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            commandPool=self.command_pool,
+            level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            commandBufferCount=1,
+        )
+        self._batch_cmd_buffer = vkAllocateCommandBuffers(self.device, batch_alloc)[0]
+        self._batch_fence = vkCreateFence(self.device, fence_info, None)
 
         # Create descriptor pool (large enough for all shaders)
         pool_sizes = [
@@ -406,6 +552,22 @@ class VulkanCore:
         """
         return getattr(self, "tiling_support", {"available": False})
 
+    def has_extension(self, ext_name: str) -> bool:
+        """Check if a Vulkan device extension is enabled."""
+        return ext_name in getattr(self, "enabled_extensions", set())
+
+    @property
+    def has_cooperative_matrix(self) -> bool:
+        """True when VK_KHR_cooperative_matrix is enabled."""
+        return self.has_extension("VK_KHR_cooperative_matrix")
+
+    @property
+    def has_float16(self) -> bool:
+        """True when fp16 shader arithmetic + storage buffer access are enabled."""
+        return self.has_extension("VK_KHR_shader_float16_int8") and self.has_extension(
+            "VK_KHR_16bit_storage"
+        )
+
     def _create_buffer(self, size: int, usage: int = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT):
         """Create Vulkan buffer and allocate memory.
 
@@ -460,13 +622,13 @@ class VulkanCore:
         if upload_size == 0:
             return
 
-        # Guard against out-of-bounds writes when callers provide mismatched
-        # buffer/data sizes.
-        mem_req = vkGetBufferMemoryRequirements(self.device, buffer)
-        if upload_size > int(mem_req.size):
-            raise ValueError(
-                f"Upload size {upload_size} exceeds buffer allocation {int(mem_req.size)}"
-            )
+        # Synchronous driver query — only pay this cost under debug flag.
+        if _DEBUG_UPLOAD:
+            mem_req = vkGetBufferMemoryRequirements(self.device, buffer)
+            if upload_size > int(mem_req.size):
+                raise ValueError(
+                    f"Upload size {upload_size} exceeds buffer allocation {int(mem_req.size)}"
+                )
 
         data_ptr = vkMapMemory(self.device, memory, 0, upload_size, 0)
         try:
@@ -563,29 +725,51 @@ class VulkanCore:
 
         vkEndCommandBuffer(command_buffer)
 
-        # Submit
+        # Wait for previous dispatch to finish, then reset the fence.
+        vkWaitForFences(self.device, 1, [self._fence], VK_TRUE, 2_000_000_000)
+        vkResetFences(self.device, 1, [self._fence])
+
+        # Submit with fence — avoids the heavier vkQueueWaitIdle drain.
         submit_info = VkSubmitInfo(
             sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,
             commandBufferCount=1,
             pCommandBuffers=[command_buffer],
         )
 
-        vkQueueSubmit(self.queue, 1, [submit_info], None)
-        vkQueueWaitIdle(self.queue)
+        vkQueueSubmit(self.queue, 1, [submit_info], self._fence)
+
+        # Wait immediately so callers can read back results.
+        # This is still faster than vkQueueWaitIdle (no full queue drain).
+        vkWaitForFences(self.device, 1, [self._fence], VK_TRUE, 2_000_000_000)
+
+    def _wait_fence(self, timeout_ns: int = 2_000_000_000):
+        """Wait for the most recent dispatch to complete."""
+        vkWaitForFences(self.device, 1, [self._fence], VK_TRUE, timeout_ns)
 
     def cleanup(self):
         """Cleanup Vulkan resources"""
         if hasattr(self, "device") and self.device:
             device = self.device
             self.device = None  # Prevent double cleanup
+            if hasattr(self, "_batch_fence") and self._batch_fence:
+                vkDestroyFence(device, self._batch_fence, None)
+                self._batch_fence = None
+            if hasattr(self, "_fence") and self._fence:
+                vkDestroyFence(device, self._fence, None)
+                self._fence = None
             if hasattr(self, "descriptor_pool") and self.descriptor_pool:
                 vkDestroyDescriptorPool(device, self.descriptor_pool, None)
                 self.descriptor_pool = None
             if hasattr(self, "command_pool") and self.command_pool:
-                # Free pre-allocated command buffer before destroying pool
-                if hasattr(self, "_cmd_buffer") and self._cmd_buffer is not None:
-                    vkFreeCommandBuffers(device, self.command_pool, 1, [self._cmd_buffer])
-                    self._cmd_buffer = None
+                # Free pre-allocated command buffers before destroying pool
+                bufs_to_free = []
+                for attr in ("_cmd_buffer", "_batch_cmd_buffer"):
+                    cb = getattr(self, attr, None)
+                    if cb is not None:
+                        bufs_to_free.append(cb)
+                        setattr(self, attr, None)
+                if bufs_to_free:
+                    vkFreeCommandBuffers(device, self.command_pool, len(bufs_to_free), bufs_to_free)
                 vkDestroyCommandPool(device, self.command_pool, None)
                 self.command_pool = None
             vkDestroyDevice(device, None)
@@ -594,3 +778,173 @@ class VulkanCore:
             instance = self.instance
             self.instance = None  # Prevent double cleanup
             vkDestroyInstance(instance, None)
+
+    # ------------------------------------------------------------------
+    # Multi-dispatch command recording
+    # ------------------------------------------------------------------
+    def record_commands(self) -> "CommandRecorder":
+        """Create a CommandRecorder for chaining multiple dispatches.
+
+        Usage::
+
+            with core.record_commands() as rec:
+                rec.dispatch(pipeline, layout, desc, (gx, gy, gz), push)
+                rec.barrier()
+                rec.dispatch(pipeline2, layout2, desc2, (gx2,), push2)
+            # single fence wait on __exit__
+        """
+        return CommandRecorder(self)
+
+
+class CommandRecorder:
+    """Records multiple dispatches into a single command buffer submission.
+
+    Eliminates per-dispatch fence waits by chaining dispatches with
+    pipeline barriers inside one command buffer, then submitting once.
+    """
+
+    def __init__(self, core: VulkanCore):
+        self._core = core
+        self._cmd = core._batch_cmd_buffer
+        self._fence = core._batch_fence
+        self._recording = False
+
+    def begin(self):
+        """Reset and begin recording into the batch command buffer."""
+        vkResetCommandBuffer(self._cmd, 0)
+        begin_info = VkCommandBufferBeginInfo(
+            sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        )
+        vkBeginCommandBuffer(self._cmd, begin_info)
+        self._recording = True
+
+    def dispatch(self, pipeline, pipeline_layout, descriptor_set,
+                 workgroups, push_constants=None):
+        """Record a compute dispatch (no submit).
+
+        Args:
+            workgroups: tuple (x,) or (x, y) or (x, y, z)
+        """
+        if not self._recording:
+            raise RuntimeError("CommandRecorder.begin() not called")
+
+        vkCmdBindPipeline(self._cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline)
+        vkCmdBindDescriptorSets(
+            self._cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+            pipeline_layout, 0, 1, [descriptor_set], 0, None,
+        )
+
+        if push_constants:
+            push_buf = ctypes.create_string_buffer(push_constants)
+            vkCmdPushConstants(
+                self._cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
+                0, len(push_constants), ctypes.addressof(push_buf),
+            )
+
+        if isinstance(workgroups, (tuple, list)):
+            gx = workgroups[0]
+            gy = workgroups[1] if len(workgroups) > 1 else 1
+            gz = workgroups[2] if len(workgroups) > 2 else 1
+        else:
+            gx, gy, gz = workgroups, 1, 1
+
+        vkCmdDispatch(self._cmd, gx, gy, gz)
+
+    def barrier(self):
+        """Insert COMPUTE→COMPUTE memory barrier (SHADER_WRITE→SHADER_READ)."""
+        if not self._recording:
+            return
+        try:
+            # VkMemoryBarrier
+            VK_STRUCTURE_TYPE_MEMORY_BARRIER = 46
+            VK_ACCESS_SHADER_WRITE_BIT = 0x00000040
+            VK_ACCESS_SHADER_READ_BIT = 0x00000020
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT = 0x00000800
+
+            mem_barrier = VkMemoryBarrier(
+                sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT,
+                dstAccessMask=VK_ACCESS_SHADER_READ_BIT,
+            )
+            vkCmdPipelineBarrier(
+                self._cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  # srcStageMask
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  # dstStageMask
+                0,  # dependencyFlags
+                1, [mem_barrier],  # memoryBarriers
+                0, None,  # bufferMemoryBarriers
+                0, None,  # imageMemoryBarriers
+            )
+        except Exception as exc:
+            logger.warning("CommandRecorder.barrier() failed: %s", exc)
+
+    def transfer_barrier(self):
+        """Insert COMPUTE→TRANSFER barrier (SHADER_WRITE→TRANSFER_READ)."""
+        if not self._recording:
+            return
+        try:
+            VK_STRUCTURE_TYPE_MEMORY_BARRIER = 46
+            VK_ACCESS_SHADER_WRITE_BIT = 0x00000040
+            VK_ACCESS_TRANSFER_READ_BIT = 0x00000800
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT = 0x00000800
+            VK_PIPELINE_STAGE_TRANSFER_BIT = 0x00001000
+
+            mem_barrier = VkMemoryBarrier(
+                sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT,
+                dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT,
+            )
+            vkCmdPipelineBarrier(
+                self._cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                1, [mem_barrier],
+                0, None,
+                0, None,
+            )
+        except Exception as exc:
+            logger.warning("CommandRecorder.transfer_barrier() failed: %s", exc)
+
+    def copy_buffer(self, src_handle, dst_handle, size: int):
+        """Record vkCmdCopyBuffer for staging transfers."""
+        if not self._recording:
+            raise RuntimeError("CommandRecorder.begin() not called")
+        region = VkBufferCopy(srcOffset=0, dstOffset=0, size=size)
+        vkCmdCopyBuffer(self._cmd, src_handle, dst_handle, 1, [region])
+
+    def submit_and_wait(self):
+        """End recording, submit, and wait for completion."""
+        if not self._recording:
+            return
+        vkEndCommandBuffer(self._cmd)
+        self._recording = False
+
+        vkWaitForFences(self._core.device, 1, [self._fence], VK_TRUE, 2_000_000_000)
+        vkResetFences(self._core.device, 1, [self._fence])
+
+        submit_info = VkSubmitInfo(
+            sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            commandBufferCount=1,
+            pCommandBuffers=[self._cmd],
+        )
+        vkQueueSubmit(self._core.queue, 1, [submit_info], self._fence)
+        vkWaitForFences(self._core.device, 1, [self._fence], VK_TRUE, 2_000_000_000)
+
+    def __enter__(self):
+        self.begin()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._recording:
+            if exc_type is None:
+                self.submit_and_wait()
+            else:
+                # On exception, end the buffer but don't submit
+                try:
+                    vkEndCommandBuffer(self._cmd)
+                except Exception:
+                    pass
+                self._recording = False
+        return False

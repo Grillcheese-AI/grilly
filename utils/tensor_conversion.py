@@ -126,6 +126,7 @@ class VulkanTensor:
         self._gpu_memory = None
         self._pooled_buffer = None  # For buffer pool integration
         self._core = None  # VulkanCore reference for fast download (avoids re-init)
+        self._is_device_local = False  # True when buffer is DEVICE_LOCAL VRAM
         self._shape = self._cpu_data.shape
         self._dtype = self._cpu_data.dtype
 
@@ -242,6 +243,11 @@ class VulkanTensor:
         if not self._gpu_valid:
             raise RuntimeError("Cannot download: no valid GPU data")
 
+        # DEVICE_LOCAL buffers cannot be mapped — must stage through readback
+        if getattr(self, "_is_device_local", False):
+            self._download_via_staging()
+            return
+
         try:
             size = self._cpu_data.nbytes
 
@@ -275,6 +281,41 @@ class VulkanTensor:
 
         except Exception as e:
             raise RuntimeError(f"Failed to download from GPU: {e}")
+
+    def _download_via_staging(self):
+        """Download DEVICE_LOCAL buffer via staging readback buffer.
+
+        Uses CommandRecorder + transfer barrier + vkCmdCopyBuffer to copy
+        DEVICE_LOCAL VRAM → HOST_VISIBLE readback → numpy.
+        """
+        core = self._core
+        if core is None:
+            from grilly import Compute
+            backend = Compute()
+            core = backend.core
+            self._core = core
+
+        pooled = getattr(self, "_pooled_buffer", None)
+        pool = pooled.pool if pooled is not None and hasattr(pooled, "pool") else None
+
+        if pool is None or not hasattr(pool, "acquire_staging"):
+            raise RuntimeError("Cannot download DEVICE_LOCAL: no pool with staging support")
+
+        size = self._cpu_data.nbytes
+
+        readback = pool.acquire_staging(size, for_upload=False)
+
+        # Get handles
+        dl_handle = self._gpu_buffer
+        rb_handle = readback.get_vulkan_handle() if hasattr(readback, "get_vulkan_handle") else readback.handle
+
+        with core.record_commands() as rec:
+            rec.transfer_barrier()
+            rec.copy_buffer(dl_handle, rb_handle, size)
+
+        self._cpu_data = pool.download_data(readback, size, dtype=self._dtype).reshape(self._shape)
+        self._cpu_valid = True
+        readback.release()
 
     def mark_gpu_modified(self):
         """Mark that GPU data has been modified (CPU copy is now stale)"""
