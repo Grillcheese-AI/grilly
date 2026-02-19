@@ -20,7 +20,6 @@ Usage:
 from __future__ import annotations
 
 import html as html_mod
-import math
 import textwrap
 from dataclasses import dataclass, field
 from io import StringIO
@@ -274,7 +273,7 @@ def _infer_shapes(obj: Any) -> tuple[str, str]:
 
     # Embedding
     if hasattr(obj, "num_embeddings") and hasattr(obj, "embedding_dim"):
-        return f"(B, T) int", f"(B, T, {obj.embedding_dim})"
+        return "(B, T) int", f"(B, T, {obj.embedding_dim})"
 
     # LayerNorm / RMSNorm
     if hasattr(obj, "normalized_shape"):
@@ -829,7 +828,7 @@ def render_ascii(
 
         # First line: type and shape info
         if layer.param_shapes:
-            shapes_str = ", ".join(
+            ", ".join(
                 f"{s[0]}x{s[1]}" if len(s) == 2 else str(s)
                 for _, s in layer.param_shapes[:2]
             )
@@ -1143,9 +1142,9 @@ def render_html(
                             child_text = f"{child.name} ({shape[1]} -> {shape[0]})"
                             break
                 elif child.type_name == "Split":
-                    child_text = f"gate + value split"
+                    child_text = "gate + value split"
                 elif child.type_name == "SelectiveScan":
-                    child_text = f"selective_scan"
+                    child_text = "selective_scan"
                 elif child.type_name == "ResidualAdd":
                     child_text = "residual add"
                 else:
@@ -1201,10 +1200,10 @@ def render_html(
 
             # Horizontal fork line
             if len(branch_positions) > 0:
-                min_bx = min(bp[0] + (branch_box_width if len(branch_layers) > 1 else box_width) / 2
+                min(bp[0] + (branch_box_width if len(branch_layers) > 1 else box_width) / 2
                              for bp, branch_box_width_dummy in
                              [(bp, min(box_width, 240)) for bp in branch_positions])
-                max_bx = max(bp[0] + min(box_width, 240) / 2 for bp in branch_positions)
+                max(bp[0] + min(box_width, 240) / 2 for bp in branch_positions)
                 branch_box_width = min(box_width, 240)
 
                 fork_y2 = branch_y + 10
