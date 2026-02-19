@@ -11,6 +11,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "gpu: marks tests that require Vulkan/GPU (deselect with '-m \"not gpu\"')"
     )
+    config.addinivalue_line(
+        "markers", "benchmark: marks GPU benchmark tests (deselect with '-m \"not benchmark\"')"
+    )
 
 
 try:
