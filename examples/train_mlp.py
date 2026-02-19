@@ -13,16 +13,16 @@ model = nn.Sequential(
     nn.Linear(64, 10),
 )
 
-optimizer = optim.AdamW(model.parameters(), lr=1e-3)
+optimizer = optim.AdamW(model.parameters(), lr=1e-5)
 loss_fn = nn.CrossEntropyLoss()
 
 # Synthetic dataset: 256 samples, 10 classes
 np.random.seed(42)
-X = np.random.randn(256, 64).astype(np.float32)
-y = np.random.randint(0, 10, size=256)
+X = np.random.randn(25600, 64).astype(np.float32)
+y = np.random.randint(0, 10, size=25600)
 
 batch_size = 32
-epochs = 10
+epochs = 100
 
 for epoch in range(epochs):
     epoch_loss = 0.0
