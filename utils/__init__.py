@@ -320,5 +320,19 @@ if ONNX_AVAILABLE:
         ]
     )
 
+# Architecture visualizer (ASCII / HTML / SVG)
+try:
+    from .visualizer import summary as arch_summary
+    from .visualizer import visualize as arch_visualize
+
+    VISUALIZER_AVAILABLE = True
+except Exception:
+    VISUALIZER_AVAILABLE = False
+    arch_visualize = None
+    arch_summary = None
+
+if VISUALIZER_AVAILABLE:
+    __all__.extend(["arch_visualize", "arch_summary"])
+
 # Stable hashing
 from .stable_hash import bipolar_from_key, stable_bytes, stable_u32, stable_u64
