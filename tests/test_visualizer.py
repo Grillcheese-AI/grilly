@@ -14,11 +14,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # SNNVisualizer tests
 # ---------------------------------------------------------------------------
-
 from grilly.backend.snn_visualizer import SNNState, SNNVisualizer, get_visualizer
 
 
