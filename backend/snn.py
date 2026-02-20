@@ -249,6 +249,184 @@ class VulkanSNN(BufferMixin):
         finally:
             self._release_buffers([buf_pre, buf_post, buf_weights, buf_pre_trace, buf_post_trace])
 
+    def synapse_filter(self, x_in, y_state, decay):
+        """GPU-accelerated exponential decay synaptic filter.
+
+        Computes: y_state[i] = y_state[i] * decay + x_in[i]
+
+        Args:
+            x_in: Input at current timestep (flattened float32 array)
+            y_state: Filter state from previous timestep (same shape as x_in)
+            decay: Decay factor = exp(-1/tau)
+
+        Returns:
+            Updated y_state array
+        """
+        x_flat = x_in.astype(np.float32).flatten()
+        y_flat = y_state.astype(np.float32).flatten()
+        n = len(x_flat)
+
+        buf_x = self._acquire_buffer(x_flat.nbytes)
+        buf_y = self._acquire_buffer(y_flat.nbytes)
+
+        try:
+            self._upload_buffer(buf_x, x_flat)
+            self._upload_buffer(buf_y, y_flat)
+
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                "snn-synapse-filter", 2, push_constant_size=8
+            )
+
+            descriptor_set = self.pipelines._create_descriptor_set(
+                desc_layout,
+                [
+                    (self._get_buffer_handle(buf_x), x_flat.nbytes),
+                    (self._get_buffer_handle(buf_y), y_flat.nbytes),
+                ],
+            )
+
+            push_constants = struct.pack("If", n, float(decay))
+
+            workgroups = (n + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
+
+            y_out = self._download_buffer(buf_y, y_flat.nbytes, np.float32)
+
+            vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])
+
+            return y_out[: n].reshape(x_in.shape)
+        finally:
+            self._release_buffers([buf_x, buf_y])
+
+    def snn_node_forward(self, x_in, v_mem, neuron_type=0, tau=2.0,
+                         v_threshold=1.0, v_reset=0.0, reset_mode=0,
+                         decay_input=False, tau_param=None):
+        """GPU-accelerated SNN neuron forward pass (IF/LIF/PLIF).
+
+        Args:
+            x_in: Input current (flattened float32)
+            v_mem: Membrane potential state (same shape)
+            neuron_type: 0=IF, 1=LIF, 2=PLIF
+            tau: Time constant (LIF/PLIF default)
+            v_threshold: Spike threshold
+            v_reset: Reset voltage (-1e9 signals soft reset)
+            reset_mode: 0=hard reset, 1=soft reset
+            decay_input: If True, divide input by tau (physics). If False
+                (default), add input at full strength (practical).
+            tau_param: Per-neuron tau array for PLIF (optional)
+
+        Returns:
+            (spikes, updated_v_mem, h_cache) tuple
+        """
+        x_flat = x_in.astype(np.float32).flatten()
+        v_flat = v_mem.astype(np.float32).flatten()
+        n = len(x_flat)
+
+        if tau_param is None:
+            tau_param = np.full(1, tau, dtype=np.float32)
+        tau_flat = tau_param.astype(np.float32).flatten()
+
+        buf_x = self._acquire_buffer(x_flat.nbytes)
+        buf_v = self._acquire_buffer(v_flat.nbytes)
+        buf_s = self._acquire_buffer(n * 4)
+        buf_h = self._acquire_buffer(n * 4)
+        buf_tau = self._acquire_buffer(tau_flat.nbytes)
+
+        try:
+            self._upload_buffer(buf_x, x_flat)
+            self._upload_buffer(buf_v, v_flat)
+            self._upload_buffer(buf_tau, tau_flat)
+
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                "snn-node-forward", 5, push_constant_size=28
+            )
+
+            descriptor_set = self.pipelines._create_descriptor_set(
+                desc_layout,
+                [
+                    (self._get_buffer_handle(buf_x), x_flat.nbytes),
+                    (self._get_buffer_handle(buf_v), v_flat.nbytes),
+                    (self._get_buffer_handle(buf_s), n * 4),
+                    (self._get_buffer_handle(buf_h), n * 4),
+                    (self._get_buffer_handle(buf_tau), tau_flat.nbytes),
+                ],
+            )
+
+            push_constants = struct.pack(
+                "IIfffII", n, neuron_type, tau, v_threshold, v_reset,
+                reset_mode, 1 if decay_input else 0
+            )
+
+            workgroups = (n + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
+
+            spikes = self._download_buffer(buf_s, n * 4, np.float32)[:n].reshape(x_in.shape)
+            v_out = self._download_buffer(buf_v, v_flat.nbytes, np.float32)[:n].reshape(x_in.shape)
+            h_out = self._download_buffer(buf_h, n * 4, np.float32)[:n].reshape(x_in.shape)
+
+            vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])
+
+            return spikes, v_out, h_out
+        finally:
+            self._release_buffers([buf_x, buf_v, buf_s, buf_h, buf_tau])
+
+    def snn_node_backward(self, grad_spike, h_cache, alpha=2.0, surrogate_type=0, v_threshold=1.0):
+        """GPU-accelerated SNN backward pass with surrogate gradients.
+
+        Args:
+            grad_spike: Upstream gradient w.r.t. spikes
+            h_cache: Pre-spike membrane potential from forward
+            alpha: Surrogate function sharpness
+            surrogate_type: 0=ATan, 1=Sigmoid, 2=FastSigmoid
+            v_threshold: Spike threshold
+
+        Returns:
+            grad_x: Gradient w.r.t. input
+        """
+        gs_flat = grad_spike.astype(np.float32).flatten()
+        h_flat = h_cache.astype(np.float32).flatten()
+        n = len(gs_flat)
+
+        buf_gs = self._acquire_buffer(gs_flat.nbytes)
+        buf_h = self._acquire_buffer(h_flat.nbytes)
+        buf_gx = self._acquire_buffer(n * 4)
+
+        try:
+            self._upload_buffer(buf_gs, gs_flat)
+            self._upload_buffer(buf_h, h_flat)
+
+            pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
+                "snn-node-backward", 3, push_constant_size=16
+            )
+
+            descriptor_set = self.pipelines._create_descriptor_set(
+                desc_layout,
+                [
+                    (self._get_buffer_handle(buf_gs), gs_flat.nbytes),
+                    (self._get_buffer_handle(buf_h), h_flat.nbytes),
+                    (self._get_buffer_handle(buf_gx), n * 4),
+                ],
+            )
+
+            push_constants = struct.pack("IfIf", n, alpha, surrogate_type, v_threshold)
+
+            workgroups = (n + 255) // 256
+            self.core._dispatch_compute(
+                pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+            )
+
+            grad_x = self._download_buffer(buf_gx, n * 4, np.float32)[:n].reshape(grad_spike.shape)
+
+            vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])
+
+            return grad_x
+        finally:
+            self._release_buffers([buf_gs, buf_h, buf_gx])
+
     def gif_neuron_step(
         self,
         input_current: np.ndarray,
