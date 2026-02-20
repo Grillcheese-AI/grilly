@@ -162,13 +162,14 @@ class VulkanConv(BufferMixin):
 
     def conv2d(
         self,
-        input_data: np.ndarray,  # (batch, in_channels, height, width)
+        input_data,  # (batch, in_channels, height, width) — numpy or VulkanTensor
         weight: np.ndarray,  # (out_channels, in_channels/groups, kernel_h, kernel_w)
         bias: np.ndarray | None = None,  # (out_channels,)
         stride: tuple[int, int] = (1, 1),
         padding: tuple[int, int] = (0, 0),
         dilation: tuple[int, int] = (1, 1),
         groups: int = 1,
+        return_gpu_tensor: bool = False,
     ) -> np.ndarray:
         """
         2D Convolution forward pass.
@@ -186,17 +187,26 @@ class VulkanConv(BufferMixin):
             Output tensor (batch, out_channels, out_h, out_w)
         """
         # Check if shader is available
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(input_data, VulkanTensor)
         if "conv2d-forward" not in self.shaders:
+            if is_vt:
+                input_data = input_data.numpy()
             return self._conv2d_cpu(input_data, weight, bias, stride, padding, dilation, groups)
 
-        # Ensure float32 and convert to numpy if needed
-        input_data = np.asarray(input_data, dtype=np.float32)
+        # Ensure float32 — accept VulkanTensor or numpy
+        if is_vt:
+            input_shape = input_data.shape
+        else:
+            input_data = np.asarray(input_data, dtype=np.float32)
+            input_shape = input_data.shape
         weight = np.asarray(weight, dtype=np.float32)
         if bias is not None:
             bias = np.asarray(bias, dtype=np.float32)
 
         # Extract dimensions
-        batch_size, in_channels, in_height, in_width = input_data.shape
+        batch_size, in_channels, in_height, in_width = input_shape
         out_channels, channels_per_group, kernel_h, kernel_w = weight.shape
         stride_h, stride_w = stride
         padding_h, padding_w = padding
@@ -210,26 +220,34 @@ class VulkanConv(BufferMixin):
             and dilation_w == 1
         )
         if use_gemm:
+            if is_vt:
+                input_data = input_data.numpy()
             return self._conv2d_gemm(input_data, weight, bias, stride, padding, dilation, groups)
         # Calculate output dimensions
         out_height = (in_height + 2 * padding_h - dilation_h * (kernel_h - 1) - 1) // stride_h + 1
         out_width = (in_width + 2 * padding_w - dilation_w * (kernel_w - 1) - 1) // stride_w + 1
 
-        batch_size * out_channels * out_height * out_width * 4  # BYTES (float32)
         num_elements = batch_size * out_channels * out_height * out_width
         output_bytes = num_elements * 4  # float32
+        input_nbytes = batch_size * in_channels * in_height * in_width * 4
 
+        _output_owned = False  # Track whether VulkanTensor owns buf_output
         buf_output = self._acquire_buffer(output_bytes)
-        # Allocate buffers
-        buf_input = self._acquire_buffer(input_data.nbytes)
+        # Allocate / prepare input buffer (zero-copy for VulkanTensor)
+        if is_vt:
+            buf_input, release_input = self._prepare_input(input_data)
+        else:
+            buf_input = self._acquire_buffer(input_nbytes)
+            release_input = True
         buf_weight = self._acquire_buffer(weight.nbytes)
         buf_bias = self._acquire_buffer(
             bias.nbytes if bias is not None else 4
         )  # Dummy buffer if no bias
 
         try:
-            # Upload data
-            self._upload_buffer(buf_input, input_data.flatten())
+            # Upload data (skip input upload for VulkanTensor — already on GPU)
+            if not is_vt:
+                self._upload_buffer(buf_input, input_data.flatten())
             self._upload_buffer(buf_weight, weight.flatten())
             if bias is not None:
                 self._upload_buffer(buf_bias, bias.flatten())
@@ -251,7 +269,7 @@ class VulkanConv(BufferMixin):
             descriptor_set = self.pipelines.get_cached_descriptor_set(
                 "conv2d-forward",
                 [
-                    (in_handle, input_data.nbytes),
+                    (in_handle, input_nbytes),
                     (weight_handle, weight.nbytes),
                     (bias_handle, (bias.nbytes if bias is not None else 4)),
                     (out_handle, output_bytes),
@@ -295,12 +313,24 @@ class VulkanConv(BufferMixin):
                 group_count_z,
             )
 
-            # Download result
-            output_flat = self._download_buffer(buf_output, output_bytes, np.float32)
-            return output_flat.reshape(batch_size, out_channels, out_height, out_width)
+            output_shape = (batch_size, out_channels, out_height, out_width)
+
+            if return_gpu_tensor:
+                result = self._wrap_output_tensor(buf_output, output_shape)
+                _output_owned = True  # VulkanTensor now owns buf_output
+                return result
+            else:
+                output_flat = self._download_buffer(buf_output, output_bytes, np.float32)
+                return output_flat.reshape(output_shape)
 
         finally:
-            self._release_buffers([buf_input, buf_weight, buf_bias, buf_output])
+            # Always release input (unless borrowed from VulkanTensor), weight, bias
+            if release_input:
+                self._release_buffer(buf_input)
+            self._release_buffers([buf_weight, buf_bias])
+            # Only release output if NOT wrapped in VulkanTensor
+            if not _output_owned:
+                self._release_buffer(buf_output)
 
     def _conv2d_backward_input_gemm(
         self,

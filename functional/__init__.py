@@ -80,6 +80,14 @@ from .memory import (
 from .normalization import (
     layer_norm,
 )
+from .snn import (
+    if_step,
+    lif_step,
+    multi_step_forward,
+    reset_net,
+    seq_to_ann_forward,
+    set_step_mode,
+)
 
 __all__ = [
     # Activations
@@ -146,4 +154,11 @@ __all__ = [
     "faiss_ivf_filter",
     "faiss_kmeans_update",
     "faiss_quantize",
+    # SNN
+    "lif_step",
+    "if_step",
+    "multi_step_forward",
+    "seq_to_ann_forward",
+    "reset_net",
+    "set_step_mode",
 ]

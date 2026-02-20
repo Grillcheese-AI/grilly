@@ -53,7 +53,7 @@ The repo root **is** the `grilly` package. `pyproject.toml` uses `tool.setuptool
 
 3. **`functional/`** — Stateless functional API (`grilly.functional.*`), mirrors `torch.nn.functional`. Thin wrappers that instantiate `VulkanCompute` and call backend methods.
 
-4. **`optim/`** — Optimizers: `Adam`, `AdamW`, `SGD`, `NLMS`, `NaturalGradient`, plus LR schedulers.
+4. **`optim/`** — Optimizers: `Adam`, `AdamW`, `SGD`, `NLMS`, `NaturalGradient`, `AutoHypergradientAdamW` (OSGM-style auto LR tuning with surprise signal), plus LR schedulers.
 
 5. **`utils/`** — `DataLoader`/`Dataset` classes, `HuggingFaceBridge` (load pretrained weights without PyTorch runtime), `VulkanTensor`/tensor conversion, `pytorch_compat` (drop-in Tensor API), checkpointing, device management.
 
@@ -64,7 +64,8 @@ The repo root **is** the `grilly` package. `pyproject.toml` uses `tool.setuptool
 ### Key patterns
 
 - **Entry point**: `grilly.Compute()` (alias for `VulkanCompute`) → namespaced ops like `backend.snn.lif_step()`, `backend.fnn.linear()`, `backend.attention.flash_attention2()`.
-- **All data is `np.float32` numpy arrays**. The backend handles GPU upload/download transparently.
+- **All data is `np.float32` numpy arrays**. The backend handles GPU upload/download transparently. `VulkanTensor` wraps GPU buffers for zero-copy when `gpu_mode(True)` is set, but Conv2d GEMM path still downloads (needs GPU transpose kernel).
+- **SNN framework**: `nn/snn_base.py` (BaseNode/MemoryModule), `nn/snn_neurons.py` (IF/LIF/ParametricLIF), `nn/snn_containers.py` (SeqToANNContainer, MultiStepContainer), `nn/snn_surrogate.py` (ATan/Sigmoid/FastSigmoid). Benchmark: `tests/benchmark_snn_fashion_mnist.py`.
 - **GPU tests auto-skip** when Vulkan is unavailable — the `gpu_backend` pytest fixture in `tests/conftest.py` handles this.
 - **Environment variables**: `VK_GPU_INDEX` (GPU selection), `GRILLY_DEBUG=1` (debug logging), `ALLOW_CPU_VULKAN=1` (allow llvmpipe fallback).
 

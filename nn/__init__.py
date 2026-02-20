@@ -201,6 +201,37 @@ from .snn import (
     STDPLayer,
     Synapse,
 )
+
+# New SNN framework (surrogate gradients, nodes, containers, etc.)
+from .snn_ann2snn import Converter, VoltageScaler
+from .snn_attention import (
+    ChannelQKAttention,
+    MultiDimensionalAttention,
+    QKAttention,
+    SpikingSelfAttention,
+    TemporalWiseAttention,
+    TokenQKAttention,
+)
+from .snn_base import BaseNode, MemoryModule
+from .snn_containers import Flatten, MultiStepContainer, SeqToANNContainer
+from .snn_monitor import Monitor
+from .snn_neurons import IFNode, LIFNode, ParametricLIFNode
+from .snn_normalization import (
+    BatchNormThroughTime1d,
+    BatchNormThroughTime2d,
+    NeuNorm,
+    TemporalEffectiveBatchNorm1d,
+    TemporalEffectiveBatchNorm2d,
+    ThresholdDependentBatchNorm1d,
+    ThresholdDependentBatchNorm2d,
+)
+from .snn_surrogate import ATan, FastSigmoid, Sigmoid, SurrogateFunction
+from .snn_synapses import (
+    DualTimescaleSynapse,
+    ElementWiseRecurrentContainer,
+    STPSynapse,
+    SynapseFilter,
+)
 from .transformer import (
     ProsodyModulatedAttention,
     RoPE,
@@ -262,7 +293,7 @@ __all__ = [
     "Embedding",
     "Sequential",
     "Residual",
-    # SNN layers
+    # SNN layers (legacy)
     "LIFNeuron",
     "SNNLayer",
     "HebbianLayer",
@@ -273,6 +304,39 @@ __all__ = [
     "SNNRMSNorm",
     "SNNReadout",
     "Synapse",
+    # SNN framework (new)
+    "SurrogateFunction",
+    "ATan",
+    "Sigmoid",
+    "FastSigmoid",
+    "MemoryModule",
+    "BaseNode",
+    "IFNode",
+    "LIFNode",
+    "ParametricLIFNode",
+    "MultiStepContainer",
+    "SeqToANNContainer",
+    "Flatten",
+    "NeuNorm",
+    "ThresholdDependentBatchNorm1d",
+    "ThresholdDependentBatchNorm2d",
+    "TemporalEffectiveBatchNorm1d",
+    "TemporalEffectiveBatchNorm2d",
+    "BatchNormThroughTime1d",
+    "BatchNormThroughTime2d",
+    "DualTimescaleSynapse",
+    "ElementWiseRecurrentContainer",
+    "STPSynapse",
+    "SynapseFilter",
+    "TemporalWiseAttention",
+    "MultiDimensionalAttention",
+    "SpikingSelfAttention",
+    "QKAttention",
+    "TokenQKAttention",
+    "ChannelQKAttention",
+    "Converter",
+    "VoltageScaler",
+    "Monitor",
     # Memory layers (when implemented)
     "MemoryRead",
     "MemoryWrite",
