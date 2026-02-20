@@ -376,12 +376,12 @@ def main():
     model_lif_auto = CSNN_LIF(T=T, channels=CHANNELS)
     optimizer_auto = AutoHypergradientAdamW(
         model_lif_auto.parameters(),
-        lr=1e-3,
-        weight_decay=0.01,
-        hyper_lr=0.01,
-        warmup_steps=10,
+        lr=5e-4,
+        weight_decay=0.005,
+        hyper_lr=0.001,
+        warmup_steps=50,
         lr_min=1e-5,
-        lr_max=0.1,
+        lr_max=0.002,
         use_gpu=False,
     )
     r = benchmark_model(
@@ -395,17 +395,19 @@ def main():
     model_lif_surprise = CSNN_LIF(T=T, channels=CHANNELS)
     optimizer_surprise = AutoHypergradientAdamW(
         model_lif_surprise.parameters(),
-        lr=1e-3,
-        weight_decay=0.01,
-        hyper_lr=0.01,
-        warmup_steps=10,
+        lr=5e-4,
+        weight_decay=0.005,
+        hyper_lr=0.001,
+        warmup_steps=50,
         lr_min=1e-5,
-        lr_max=0.1,
+        lr_max=0.002,
         track_surprise=True,
-        surprise_gamma=0.9,
+        surprise_gamma=0.95,
+        surprise_alpha=0.05,
+        trauma_threshold=0.3,
         use_gpu=False,
     )
-    SURPRISE_GAIN = 0.5  # how much surprise amplifies input
+    SURPRISE_GAIN = 0.1  # moderate input-level surprise gain
     r = benchmark_model(
         "CSNN-LIF+Surprise", model_lif_surprise, train_loader, test_loader,
         epochs=EPOCHS, optimizer=optimizer_surprise,

@@ -306,12 +306,15 @@ class AutoHypergradientAdamW(AdamW):
         self.beta_max = beta_max
         self.warmup_steps = warmup_steps
 
-        # AdaGrad accumulators — sum of squared hypergradients.
-        # These provide automatic meta-LR decay: as more updates accumulate,
-        # the effective meta-LR shrinks, stabilizing convergence.
-        self._G_lr = 0.0
-        self._G_beta = 0.0
+        # AdaGrad accumulators for hypergradient stabilization.
+        # Seeded to 1.0 (not 0.0) so the first adaptive step doesn't apply
+        # the full hyper_lr as lr_delta. With G_lr=0 and hyper_lr=0.01,
+        # the first step would be lr_delta=±0.01, a 10x jump when lr=0.001.
+        # Seeding to 1.0 bounds the first step to hyper_lr*h/(sqrt(1+h^2)).
+        self._G_lr = 1.0
+        self._G_beta = 1.0
         self._adagrad_eps = 1e-12
+        self._meta_decay = 0.99  # RMSProp-style decay for meta-accumulator
 
         # Previous step state for hypergradient computation
         self._prev_directions = {}   # d_{k-1}: Adam update directions
@@ -465,13 +468,31 @@ class AutoHypergradientAdamW(AdamW):
                     h_lr -= np.sum(grad * self._prev_directions[pid])
             h_lr /= norm_sq
 
-            # AdaGrad update for lr
-            self._G_lr += h_lr * h_lr
+            # Clip hypergradient to prevent outliers from poisoning accumulator.
+            # Without clipping, a single step with tiny ||g_{k-1}||^2 (common
+            # in LIF silent phases) can produce h_lr >> 1, permanently inflating
+            # G_lr and freezing the meta-LR near zero.
+            h_lr = float(np.clip(h_lr, -1.0, 1.0))
+
+            # RMSProp-style decay for meta-accumulator (replaces pure AdaGrad).
+            # AdaGrad's "never forget" property means one outlier permanently
+            # poisons G_lr. Decaying lets the optimizer recover from early
+            # instability (especially important for LIF's noisy gradient start).
+            self._G_lr = self._meta_decay * self._G_lr + (1.0 - self._meta_decay) * h_lr * h_lr
             lr_delta = self.hyper_lr * h_lr / (np.sqrt(self._G_lr) + self._adagrad_eps)
-            new_lr = float(np.clip(
-                self.defaults["lr"] - lr_delta,
-                self.lr_min, self.lr_max,
-            ))
+
+            # Rate-limit LR changes: max 10% relative change per step.
+            # 50% allows 0.0005 to reach 0.01 in 7 steps (too fast for LIF).
+            # 10% means 0.0005 reaches 0.005 in ~24 steps — gradual enough
+            # for the model to signal back if the LR is getting too high.
+            current_lr = self.defaults["lr"]
+            target_lr = current_lr - lr_delta
+            max_change = 0.1 * current_lr
+            if abs(target_lr - current_lr) > max_change:
+                direction = 1.0 if target_lr > current_lr else -1.0
+                target_lr = current_lr + direction * max_change
+
+            new_lr = float(np.clip(target_lr, self.lr_min, self.lr_max))
             self.defaults["lr"] = new_lr
             for group in self.param_groups:
                 group["lr"] = new_lr
@@ -485,7 +506,9 @@ class AutoHypergradientAdamW(AdamW):
                         h_beta += np.sum(grad * self._prev_first_moments[pid])
                 h_beta /= norm_sq
 
-                self._G_beta += h_beta * h_beta
+                h_beta = float(np.clip(h_beta, -1.0, 1.0))
+                self._G_beta = (self._meta_decay * self._G_beta
+                                + (1.0 - self._meta_decay) * h_beta * h_beta)
                 beta_delta = (self.hyper_lr_beta * h_beta
                               / (np.sqrt(self._G_beta) + self._adagrad_eps))
 

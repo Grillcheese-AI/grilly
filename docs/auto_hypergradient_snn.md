@@ -168,12 +168,12 @@ Two classes in `optim/hypergradient.py`:
 
 ### 3.2 Key Parameters
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| lr | 1e-3 | Initial learning rate |
-| hyper_lr | 0.01 | Meta-learning rate (auto-modulated by AdaGrad) |
-| warmup_steps | 10 | Steps before LR adaptation begins |
-| lr_min, lr_max | 1e-6, 1.0 | LR clamp bounds |
+| Parameter | Default | LIF Recommended | Description |
+|-----------|---------|-----------------|-------------|
+| lr | 1e-3 | 5e-4 | Initial learning rate |
+| hyper_lr | 0.01 | 0.001 | Meta-learning rate (auto-modulated) |
+| warmup_steps | 10 | 50 | Steps before LR adaptation begins |
+| lr_min, lr_max | 1e-6, 1.0 | 1e-5, 0.002 | LR clamp bounds |
 | adapt_momentum | False | Also adapt beta1 via hypergradient |
 | hyper_lr_beta | 1.0 | Meta-LR for beta1 adaptation |
 | track_surprise | False | Compute and expose surprise signal for input gain |
@@ -182,7 +182,21 @@ Two classes in `optim/hypergradient.py`:
 | trauma_threshold | 0.5 | S_bar level where inverted-U gain peaks before suppression |
 | beta_min, beta_max | 0.5, 0.9995 | beta1 clamp bounds |
 
-### 3.3 GPU Acceleration
+### 3.3 Robustness Improvements
+
+The optimizer includes four safeguards critical for SNN stability:
+
+1. **Hypergradient clipping**: `h_lr` is clipped to [-1, 1] before entering the accumulator. Without this, a single step with tiny `||g_{k-1}||^2` (common in LIF silent phases) can produce extreme `h_lr`, permanently poisoning the meta-accumulator.
+
+2. **10% per-step rate limiter**: LR changes are capped at 10% of the current LR per step. This prevents exponential growth — with 50% limit, LR can 17x in 7 steps. With 10%, reaching 2x takes ~7 steps and 10x takes ~24 steps, giving the model time to signal instability through gradients.
+
+3. **AdaGrad seeding** (`G_lr = 1.0`): The meta-accumulator starts at 1.0 instead of 0.0. Without this, the first adaptive step applies the full `hyper_lr` as `lr_delta` — a 10x jump when `hyper_lr=0.01` and `lr=0.001`.
+
+4. **RMSProp-style meta-decay** (`decay=0.99`): Replaces pure AdaGrad's "never forget" accumulation. A single outlier hypergradient permanently inflates `G_lr` in pure AdaGrad, freezing the meta-LR. With decay, the optimizer recovers from early instability over ~100 steps.
+
+These were developed specifically for LIF neuron compatibility, where gradient attenuation (`dH/dV = 1-1/tau`) compounds to 6.25% over T=4 timesteps (tau=2.0), creating high gradient variance.
+
+### 3.4 GPU Acceleration
 
 The optimizer inherits AdamW's GPU shader support (`adamw-update.glsl`). The hypergradient computation itself is CPU-side (scalar operations on aggregated dot products), adding negligible overhead.
 
@@ -254,34 +268,43 @@ Input: (N, 1, 28, 28) grayscale image
 
 | Model | Optimizer | LR | Train Acc | Test Acc | Fwd ms/batch |
 |-------|-----------|-----|-----------|----------|--------------|
-| CSNN-IF | Manual SGD | 0.005 | 66.06% | 66.85% | 401.2ms |
-| CSNN-LIF | Manual SGD | 0.005 | 46.51% | 45.10% | 417.3ms |
-| CSNN-LIF | AutoHypergradientAdamW | auto | 73.93% | **73.60%** | 429.1ms |
-| CSNN-LIF | Auto + Surprise (gain=0.5) | auto | TBD | TBD | TBD |
+| CSNN-IF | Manual SGD | 0.005 | 60.75% | **66.00%** | 396ms |
+| CSNN-LIF | Manual SGD | 0.005 | 35.73% | 34.15% | 398ms |
+| CSNN-LIF | AutoHypergradientAdamW | auto | 63.54% | **64.00%** | 406ms |
+| CSNN-LIF | Auto + Surprise (gain=0.1) | auto | 12.98% | 10.60% | 404ms |
 
 Key observations:
-- LIF with SGD (45.10%) performs much worse than IF with SGD (66.85%), showing that LIF's leaky dynamics are harder to optimize with a fixed learning rate
-- AutoHypergradientAdamW transforms LIF from the worst to the best model (73.60%), a **28.5pp improvement** over LIF+SGD
-- The throughput overhead of the auto optimizer is minimal (~3% slower than SGD, due to AdamW moment computation, not the hypergradient itself)
-- Surprise + inverted-U gain results are pending benchmark run
+- LIF with SGD (34.15%) performs much worse than IF with SGD (66.00%), showing that LIF's leaky dynamics are harder to optimize with a fixed learning rate
+- AutoHypergradientAdamW transforms LIF from the worst to nearly matching IF (64.00% vs 66.00%), a **30pp improvement** over LIF+SGD
+- The throughput overhead of the auto optimizer is minimal (~2% slower than SGD)
+- Surprise input gain still causes instability in LIF (see Section 5.4)
 
 ### 5.3 LR Trajectory Analysis
 
-The auto optimizer's learning rate trajectory over 776 steps:
+The auto optimizer's learning rate trajectory over 736 steps (with robustness improvements):
 
 ```
-Start: 0.001000
-End:   0.002407
-Min:   0.000010
-Max:   0.014307
+Start: 0.000500
+End:   0.001248
+Min:   0.000495
+Max:   0.002000
 ```
 
-The trajectory reveals three phases:
-1. **Exploration phase** (steps 0-100): LR increases from 0.001 to ~0.014 as the optimizer discovers that the initial LR is too conservative for LIF neurons that are mostly silent
-2. **Correction phase** (steps 100-300): LR drops sharply to ~0.00001 when aggressive updates cause loss spikes, demonstrating the AdaGrad stabilization working correctly
-3. **Convergence phase** (steps 300-776): LR settles around 0.002-0.003, having found the regime where LIF neurons fire reliably and gradients are informative
+The trajectory shows stable, gradual adaptation:
+1. **Warmup phase** (steps 0-50): LR held at 0.0005 while gradient statistics stabilize. This is critical for LIF neurons which have noisy, attenuated gradients during early training.
+2. **Ramp-up phase** (steps 50-200): LR gradually increases from 0.0005 to ~0.002, constrained by the 10% per-step rate limiter. The optimizer discovers that higher LR helps LIF neurons fire more reliably.
+3. **Convergence phase** (steps 200-736): LR oscillates in the [0.001, 0.002] range, having found the optimal regime. The RMSProp-style meta-decay allows the optimizer to recover from temporary instabilities.
 
-This adaptive behavior is impossible to replicate with fixed schedules without extensive hyperparameter search.
+### 5.4 Surprise Signal Analysis
+
+The surprise-modulated variant diverges despite starting well (59% accuracy at epoch 1). The surprise input gain (even at 0.1) amplifies inputs when the optimizer detects gradient prediction error, pushing more LIF neurons over threshold simultaneously. This creates a positive feedback loop: more simultaneous firing increases gradient variance, which increases surprise, which increases gain, causing further instability.
+
+The S_bar accumulator reached 0.847 (well above trauma_threshold=0.3), so the inverted-U trauma protection correctly suppressed gain — but by then the model weights had already been destabilized.
+
+Potential fixes for future work:
+- Reduce SURPRISE_GAIN to 0.01-0.02 for LIF models
+- Apply surprise modulation to the learning rate rather than the input
+- Disable surprise during the initial ramp-up phase (first 100 steps)
 
 ## 6. Discussion
 
