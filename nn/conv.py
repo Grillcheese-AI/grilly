@@ -86,25 +86,30 @@ class Conv2d(Module):
         # Cache for backward pass
         self._cache_input = None
 
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x) -> np.ndarray:
         """
         Forward pass using conv2d-forward.glsl
 
         Args:
-            x: Input tensor (batch, in_channels, height, width)
+            x: Input tensor (batch, in_channels, height, width) — numpy or VulkanTensor
 
         Returns:
             Output tensor (batch, out_channels, out_h, out_w)
         """
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(x, VulkanTensor)
+
         # Validate input shape
         if x.ndim != 4:
             raise ValueError(f"Expected 4D input (batch, channels, height, width), got {x.ndim}D")
         if x.shape[1] != self.in_channels:
             raise ValueError(f"Expected {self.in_channels} input channels, got {x.shape[1]}")
 
-        # Cache input for backward pass
+        # Cache input for backward pass (download if needed)
         if self._grad_enabled:
-            self._cache_input = x.copy()
+            x_np = x.numpy() if is_vt else x
+            self._cache_input = x_np.copy()
 
         backend = self._get_backend()
         weight = self.weight.data if hasattr(self.weight, "data") else np.asarray(self.weight)
@@ -123,6 +128,7 @@ class Conv2d(Module):
             padding=self.padding,
             dilation=self.dilation,
             groups=self.groups,
+            return_gpu_tensor=self._return_gpu_tensor,
         )
 
     def backward(self, grad_output: np.ndarray) -> np.ndarray:

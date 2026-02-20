@@ -131,7 +131,8 @@ class VulkanPooling(BufferMixin):
                 self._release_buffers([buf_in, buf_out])
                 return data.mean(axis=1).astype(np.float32)
 
-    def maxpool2d(self, x: np.ndarray, kernel_size, stride=None, padding=0, dilation=1):
+    def maxpool2d(self, x, kernel_size, stride=None, padding=0, dilation=1,
+                  return_gpu_tensor=False):
         """
         2D max pooling forward pass.
 
@@ -146,8 +147,15 @@ class VulkanPooling(BufferMixin):
             output: Pooled output
             indices: Max indices for backward pass
         """
-        x = np.asarray(x, dtype=np.float32)
-        batch_size, channels, in_h, in_w = x.shape
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(x, VulkanTensor)
+        if is_vt:
+            x_shape = x.shape
+        else:
+            x = np.asarray(x, dtype=np.float32)
+            x_shape = x.shape
+        batch_size, channels, in_h, in_w = x_shape
 
         # Parse parameters
         kh, kw = (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
@@ -168,14 +176,20 @@ class VulkanPooling(BufferMixin):
         output_size = batch_size * channels * out_h * out_w * 4
         indices_size = batch_size * channels * out_h * out_w * 4  # uint
 
-        # Create buffers
-        buf_in = self._acquire_buffer(input_size)
+        _output_owned = False  # Track whether VulkanTensor owns buf_out
+        # Create / prepare buffers (zero-copy for VulkanTensor)
+        if is_vt:
+            buf_in, release_in = self._prepare_input(x)
+        else:
+            buf_in = self._acquire_buffer(input_size)
+            release_in = True
         buf_out = self._acquire_buffer(output_size)
         buf_idx = self._acquire_buffer(indices_size)
 
         try:
-            # Upload input
-            self._upload_buffer(buf_in, x.flatten())
+            # Upload input (skip for VulkanTensor — already on GPU)
+            if not is_vt:
+                self._upload_buffer(buf_in, x.flatten())
 
             # Push constants (14 uints)
             push_data = struct.pack(
@@ -215,17 +229,29 @@ class VulkanPooling(BufferMixin):
             gz = batch_size * channels
             self.core._dispatch_compute(pipeline, layout, desc, gx, push_data, gy, gz)
 
-            # Download results
-            output = self._download_buffer(buf_out, output_size, np.float32).reshape(
-                batch_size, channels, out_h, out_w
-            )
+            output_shape = (batch_size, channels, out_h, out_w)
+            # Always download indices (needed for backward, small)
             indices = self._download_buffer(buf_idx, indices_size, np.uint32).reshape(
-                batch_size, channels, out_h, out_w
+                output_shape
             )
 
-            return output, indices
+            if return_gpu_tensor:
+                result = self._wrap_output_tensor(buf_out, output_shape)
+                _output_owned = True  # VulkanTensor now owns buf_out
+                return result, indices
+            else:
+                output = self._download_buffer(buf_out, output_size, np.float32).reshape(
+                    output_shape
+                )
+                return output, indices
         finally:
-            self._release_buffers([buf_in, buf_out, buf_idx])
+            # Always release input (unless borrowed) and indices
+            if release_in:
+                self._release_buffer(buf_in)
+            self._release_buffer(buf_idx)
+            # Only release output if NOT wrapped in VulkanTensor
+            if not _output_owned:
+                self._release_buffer(buf_out)
 
     def maxpool2d_backward(self, grad_output: np.ndarray, indices: np.ndarray, input_shape):
         """

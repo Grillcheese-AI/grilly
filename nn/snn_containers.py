@@ -4,11 +4,25 @@ SNN Container modules for temporal dimension handling.
 MultiStepContainer: Wraps single-step module for [T,N,...] input.
 SeqToANNContainer: Reshapes [T,N,...] to [T*N,...] for ANN modules.
 Flatten: Flatten spatial dimensions (for use in Sequential).
+
+GPU-resident mode: When gpu_mode(True) is set, ANN modules inside
+SeqToANNContainer keep intermediate activations on GPU (as VulkanTensor)
+between layers, avoiding PCIe round-trips. Data is materialized to
+numpy at container boundaries for SNN neuron processing.
 """
 
 import numpy as np
 
 from .module import Module
+
+
+def _to_numpy(x):
+    """Convert VulkanTensor to numpy if needed, pass numpy through."""
+    from ..utils.tensor_conversion import VulkanTensor
+
+    if isinstance(x, VulkanTensor):
+        return x.numpy()
+    return x
 
 
 def multi_step_forward(x_seq, module):
@@ -46,13 +60,19 @@ class MultiStepContainer(Module):
         self._cached_inputs = []
 
     def forward(self, x_seq):
-        """Process [T, N, ...] by looping over T."""
+        """Process [T, N, ...] by looping over T.
+
+        Accepts numpy array. If inner module returns VulkanTensor
+        (gpu_mode), converts back to numpy for stacking.
+        """
         T = x_seq.shape[0]
         self._cached_inputs = []
         outputs = []
         for t in range(T):
-            self._cached_inputs.append(x_seq[t].copy())
-            outputs.append(self.module(x_seq[t]))
+            x_t = x_seq[t]
+            self._cached_inputs.append(np.asarray(_to_numpy(x_t)).copy())
+            out_t = self.module(x_t)
+            outputs.append(_to_numpy(out_t))
         return np.stack(outputs, axis=0)
 
     def backward(self, grad_output, x=None):
@@ -84,6 +104,12 @@ class SeqToANNContainer(Module):
     This is the key building block for using Conv2d, BatchNorm2d, Linear
     in SNN pipelines — these layers don't need temporal awareness.
 
+    GPU-resident mode: When gpu_mode(True) is set on the parent model,
+    the ANN modules inside this container keep activations on GPU
+    between layers (e.g., Conv2d output stays as VulkanTensor for
+    BatchNorm2d input). Data is only downloaded at the container boundary
+    for the [T*N,...] → [T,N,...] reshape.
+
     Args:
         *modules: One or more ANN modules to apply sequentially
     """
@@ -98,18 +124,27 @@ class SeqToANNContainer(Module):
         self._cached_intermediates = []
 
     def forward(self, x_seq):
-        """Process [T, N, ...] through ANN modules."""
+        """Process [T, N, ...] through ANN modules.
+
+        When gpu_mode is on, intermediate activations between ANN modules
+        stay on GPU as VulkanTensors. The final output is materialized to
+        numpy for the [T*N,...] → [T,N,...] reshape.
+        """
         self._T, self._N = x_seq.shape[0], x_seq.shape[1]
         spatial_shape = x_seq.shape[2:]
 
         # Merge T and N: [T, N, ...] -> [T*N, ...]
         x_flat = x_seq.reshape(self._T * self._N, *spatial_shape)
 
-        # Cache intermediates for backward
-        self._cached_intermediates = [x_flat.copy()]
+        # Cache intermediates for backward (always numpy for backward pass)
+        self._cached_intermediates = [np.asarray(_to_numpy(x_flat)).copy()]
         for mod in self.ann_modules:
             x_flat = mod(x_flat)
-            self._cached_intermediates.append(x_flat.copy())
+            # Cache numpy for backward, but pass through VulkanTensor to next layer
+            self._cached_intermediates.append(np.asarray(_to_numpy(x_flat)).copy())
+
+        # Materialize final output to numpy for reshape
+        x_flat = _to_numpy(x_flat)
 
         # Split T and N back: [T*N, ...] -> [T, N, ...]
         out_spatial = x_flat.shape[1:]

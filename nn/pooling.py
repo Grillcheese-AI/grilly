@@ -53,13 +53,18 @@ class MaxPool2d(Module):
         self._cached_input_shape = None
 
     def forward(self, x):
-        """Forward pass."""
-        x = np.asarray(x, dtype=np.float32)
+        """Forward pass. Accepts numpy array or VulkanTensor."""
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(x, VulkanTensor)
+        if not is_vt:
+            x = np.asarray(x, dtype=np.float32)
         self._cached_input_shape = x.shape
 
         compute = self._get_backend()
         output, indices = compute.pooling.maxpool2d(
-            x, self.kernel_size, self.stride, self.padding, self.dilation
+            x, self.kernel_size, self.stride, self.padding, self.dilation,
+            return_gpu_tensor=self._return_gpu_tensor,
         )
 
         self._cached_indices = indices

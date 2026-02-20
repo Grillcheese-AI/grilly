@@ -9,6 +9,10 @@ HypergradientAdamW: Basic hypergradient (Baydin et al. 2018).
 AutoHypergradientAdamW: OSGM-style auto adjustment (arXiv:2502.11229).
     Self-tuning via AdaGrad-stabilized hypergradients with gradient-norm
     normalization. No manual hypergradient LR tuning needed.
+    Optional surprise signal: gradient prediction error exposed as
+    `current_surprise` for input-level gain modulation. The model
+    scales inputs by (1 + gain * surprise), amplifying signals when
+    the optimization landscape shifts (e.g., SNN phase transitions).
 
 The core idea: the learning rate is treated as a learnable parameter.
 At each step, the hypergradient h = -g_k . d_{k-1} / ||g_{k-1}||^2
@@ -201,6 +205,36 @@ class AutoHypergradientAdamW(AdamW):
     Particularly effective for SNN training where surrogate gradients
     are noisy and the optimal learning rate shifts during training.
 
+    Surprise signal (optional, input-level):
+        Tracks gradient prediction error as a "surprise" signal and
+        exposes it for the model to use as input gain modulation.
+        Unlike backprop-level momentum changes, this acts at the
+        forward-pass level — amplifying input signals when the
+        optimization landscape shifts unexpectedly.
+
+        Instant surprise (gradient prediction error):
+            S_instant = tanh(||g_k - EMA(g)||^2 / (EMA(||g||^2) + eps))
+
+        Accumulated surprise (biological momentum / S_bar):
+            S_bar = alpha * S_instant + (1-alpha) * S_bar_prev
+
+        Inverted-U gain (Yerkes-Dodson / trauma protection):
+            gain = S_bar * exp(-S_bar / trauma_threshold)
+
+        The inverted-U curve implements the biological stress response:
+            - Low S_bar  → low gain (nothing interesting)
+            - Moderate S_bar → peak gain (optimal learning zone)
+            - High S_bar → gain drops (trauma protection)
+
+        This prevents "unerasable events" — if surprise stays high
+        for many consecutive steps (chronic stress), the gain suppresses
+        instead of amplifying, protecting the model from fixating on
+        a single extreme event. Mirrors the HPA axis: acute stress
+        enhances encoding, chronic stress impairs plasticity.
+
+        The model reads `current_surprise_gain` for input scaling:
+            x_effective = x * (1 + scale * optimizer.current_surprise_gain)
+
     Args:
         params: Iterator of parameter arrays to optimize
         lr: Initial learning rate (default: 1e-3)
@@ -214,7 +248,19 @@ class AutoHypergradientAdamW(AdamW):
             (default: 1.0). Only used when adapt_momentum=True.
         lr_min: Minimum learning rate clamp (default: 1e-6)
         lr_max: Maximum learning rate clamp (default: 1.0)
-        adapt_momentum: If True, also adapt beta1 online (default: False)
+        adapt_momentum: If True, also adapt beta1 via hypergradient
+            (default: False)
+        track_surprise: If True, compute and expose gradient surprise
+            signal via `current_surprise_gain` (default: False). The model's
+            forward pass should read this to modulate input gain.
+        surprise_gamma: EMA decay for gradient tracking (default: 0.9).
+            Higher = smoother baseline, slower to detect change.
+        surprise_alpha: EMA decay for surprise accumulation S_bar
+            (default: 0.1). Controls how fast accumulated surprise
+            builds up and decays. Lower = longer memory of surprise.
+        trauma_threshold: S_bar level where gain peaks before suppression
+            (default: 0.5). The inverted-U gain = S_bar * exp(-S_bar/T)
+            peaks at S_bar = T. Above this, gain decreases (protection).
         beta_min: Minimum beta1 clamp (default: 0.5)
         beta_max: Maximum beta1 clamp (default: 0.9995)
         warmup_steps: Steps before starting adaptation (default: 10).
@@ -234,6 +280,10 @@ class AutoHypergradientAdamW(AdamW):
         lr_min: float = 1e-6,
         lr_max: float = 1.0,
         adapt_momentum: bool = False,
+        track_surprise: bool = False,
+        surprise_gamma: float = 0.9,
+        surprise_alpha: float = 0.1,
+        trauma_threshold: float = 0.5,
         beta_min: float = 0.5,
         beta_max: float = 0.9995,
         warmup_steps: int = 10,
@@ -248,6 +298,10 @@ class AutoHypergradientAdamW(AdamW):
         self.lr_min = lr_min
         self.lr_max = lr_max
         self.adapt_momentum = adapt_momentum
+        self.track_surprise = track_surprise
+        self.surprise_gamma = surprise_gamma
+        self.surprise_alpha = surprise_alpha
+        self.trauma_threshold = trauma_threshold
         self.beta_min = beta_min
         self.beta_max = beta_max
         self.warmup_steps = warmup_steps
@@ -264,6 +318,18 @@ class AutoHypergradientAdamW(AdamW):
         self._prev_grad_norm_sq = 0.0  # ||g_{k-1}||^2
         self._prev_first_moments = {}  # m_{k-1}: for momentum adaptation
 
+        # Surprise signal state (input-level, not backprop-level).
+        # Tracks gradient prediction error as a neuromodulatory signal.
+        # The optimizer computes surprise; the model reads current_surprise_gain
+        # for input scaling via the inverted-U (Yerkes-Dodson) curve.
+        self._grad_ema = {}          # EMA of gradients (per-param)
+        self._grad_var_ema = 0.0     # EMA of ||g||^2 (scalar)
+        self._current_surprise = 0.0  # instant surprise [0, 1]
+        self._s_bar = 0.0            # accumulated surprise (biological momentum)
+        self._current_gain = 0.0     # inverted-U modulated gain
+        self._surprise_history = []  # instant surprise history
+        self._s_bar_history = []     # accumulated surprise history
+
         # History for monitoring / plotting
         self._lr_history = [lr]
         self._beta1_history = [betas[0]]
@@ -273,6 +339,34 @@ class AutoHypergradientAdamW(AdamW):
         return self.defaults["lr"]
 
     @property
+    def current_surprise(self):
+        """Instant surprise signal [0, 1]. Raw gradient prediction error."""
+        return self._current_surprise
+
+    @property
+    def accumulated_surprise(self):
+        """Accumulated surprise S_bar. Biological momentum of surprise."""
+        return self._s_bar
+
+    @property
+    def current_surprise_gain(self):
+        """Inverted-U gain signal for input-level modulation.
+
+        Implements the Yerkes-Dodson curve / trauma protection:
+            gain = S_bar * exp(-S_bar / trauma_threshold)
+
+        - Low S_bar → low gain (nothing interesting happening)
+        - Moderate S_bar → peak gain (optimal learning zone)
+        - High S_bar → gain drops (trauma protection, don't fixate)
+
+        Read this after each optimizer step and pass to the model:
+            x_effective = x * (1 + scale * optimizer.current_surprise_gain)
+
+        Returns 0.0 when surprise tracking is off or during warmup.
+        """
+        return self._current_gain
+
+    @property
     def lr_history(self):
         return self._lr_history
 
@@ -280,18 +374,81 @@ class AutoHypergradientAdamW(AdamW):
     def beta1_history(self):
         return self._beta1_history
 
+    @property
+    def surprise_history(self):
+        return self._surprise_history
+
+    @property
+    def s_bar_history(self):
+        return self._s_bar_history
+
     def step(self, closure=None, gradients=None):
         """Perform optimization step with OSGM-style auto LR adaptation.
 
         1. Collect current gradients g_k
-        2. Compute normalized hypergradients (after warmup):
+        2. Compute surprise signal (if track_surprise=True)
+        3. Compute normalized hypergradients (after warmup):
            h_lr  = -g_k . d_{k-1} / ||g_{k-1}||^2
            h_beta = g_k . m_{k-1} / ||g_{k-1}||^2
-        3. Update AdaGrad accumulators and adjust lr (and beta1)
-        4. Run standard AdamW step with adapted hyperparameters
-        5. Store d_k, ||g_k||^2, m_k for next step
+        4. Update AdaGrad accumulators and adjust lr (and beta1)
+        5. Run standard AdamW step with adapted hyperparameters
+        6. Store d_k, ||g_k||^2, m_k for next step
         """
         current_grads = _collect_grads(self.param_groups, gradients)
+
+        # --- Surprise signal computation (input-level, not backprop) ---
+        # Computes gradient prediction error and exposes it via
+        # current_surprise. The model reads this to scale inputs.
+        if self.track_surprise and self._step_count >= self.warmup_steps:
+            gamma = self.surprise_gamma
+
+            # Compute current gradient norm squared
+            current_norm_sq = 0.0
+            for grad in current_grads.values():
+                current_norm_sq += np.sum(grad * grad)
+
+            # Update gradient variance EMA: EMA(||g||^2)
+            if self._grad_var_ema == 0.0 and self._step_count == self.warmup_steps:
+                self._grad_var_ema = current_norm_sq
+            else:
+                self._grad_var_ema = (gamma * self._grad_var_ema
+                                      + (1.0 - gamma) * current_norm_sq)
+
+            # Compute surprise: ||g_k - EMA(g)||^2 / (EMA(||g||^2) + eps)
+            prediction_error_sq = 0.0
+            for pid, grad in current_grads.items():
+                if pid in self._grad_ema:
+                    diff = grad - self._grad_ema[pid]
+                    prediction_error_sq += np.sum(diff * diff)
+                else:
+                    prediction_error_sq += np.sum(grad * grad)
+
+            raw_surprise = prediction_error_sq / (self._grad_var_ema + self._adagrad_eps)
+            # Squash instant surprise to [0, 1] via tanh
+            self._current_surprise = float(np.tanh(raw_surprise))
+            self._surprise_history.append(self._current_surprise)
+
+            # Accumulate surprise: S_bar = alpha * S_instant + (1-alpha) * S_bar
+            # This is the biological momentum — tracks sustained surprise.
+            alpha = self.surprise_alpha
+            self._s_bar = alpha * self._current_surprise + (1.0 - alpha) * self._s_bar
+            self._s_bar_history.append(self._s_bar)
+
+            # Inverted-U gain (Yerkes-Dodson / trauma protection):
+            # gain = S_bar * exp(-S_bar / trauma_threshold)
+            # Peaks at S_bar = trauma_threshold, suppresses above.
+            # This prevents "unerasable events" — chronic high surprise
+            # (trauma) reduces gain instead of amplifying it.
+            T = self.trauma_threshold
+            self._current_gain = float(self._s_bar * np.exp(-self._s_bar / T))
+
+            # Update gradient EMA
+            for pid, grad in current_grads.items():
+                if pid in self._grad_ema:
+                    self._grad_ema[pid] = (gamma * self._grad_ema[pid]
+                                           + (1.0 - gamma) * grad.copy())
+                else:
+                    self._grad_ema[pid] = grad.copy()
 
         # --- Hypergradient-based adaptation (after warmup) ---
         if (self._step_count >= self.warmup_steps
@@ -302,8 +459,6 @@ class AutoHypergradientAdamW(AdamW):
 
             # Hypergradient for learning rate:
             # h_lr = -sum(g_k * d_{k-1}) / ||g_{k-1}||^2
-            # Negative sign: if g_k aligns with d_{k-1}, loss decreased
-            # along d_{k-1}, so lr should increase (h_lr < 0, lr -= negative = increase)
             h_lr = 0.0
             for pid, grad in current_grads.items():
                 if pid in self._prev_directions:
@@ -323,8 +478,6 @@ class AutoHypergradientAdamW(AdamW):
             self._lr_history.append(new_lr)
 
             # Hypergradient for momentum (beta1):
-            # h_beta = sum(g_k * m_{k-1}) / ||g_{k-1}||^2
-            # If gradient aligns with momentum direction, increase beta1
             if self.adapt_momentum and self._prev_first_moments:
                 h_beta = 0.0
                 for pid, grad in current_grads.items():
@@ -376,10 +529,12 @@ class AutoHypergradientAdamW(AdamW):
 
     def __repr__(self):
         beta1 = self.defaults["betas"][0]
-        return (
-            f"AutoHypergradientAdamW(lr={self.defaults['lr']:.6f}, "
-            f"beta1={beta1:.4f}, "
-            f"hyper_lr={self.hyper_lr}, "
-            f"lr_range=[{self.lr_min}, {self.lr_max}], "
-            f"adapt_momentum={self.adapt_momentum})"
-        )
+        parts = [
+            f"AutoHypergradientAdamW(lr={self.defaults['lr']:.6f}",
+            f"beta1={beta1:.4f}",
+            f"hyper_lr={self.hyper_lr}",
+            f"lr_range=[{self.lr_min}, {self.lr_max}]",
+            f"adapt_momentum={self.adapt_momentum}",
+            f"track_surprise={self.track_surprise}",
+        ]
+        return ", ".join(parts) + ")"

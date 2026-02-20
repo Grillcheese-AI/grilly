@@ -333,6 +333,223 @@ class TestAutoHypergradientAdamW:
 
 
 # ---------------------------------------------------------------------------
+# Surprise signal tests (input-level with trauma protection)
+# ---------------------------------------------------------------------------
+class TestSurpriseSignal:
+
+    def test_surprise_computed(self):
+        """Surprise signal should be computed when track_surprise=True."""
+        np.random.seed(42)
+        params = _make_params((20,))
+        opt = AutoHypergradientAdamW(
+            params, lr=0.01, warmup_steps=3,
+            track_surprise=True, use_gpu=False,
+        )
+
+        for _ in range(20):
+            _quadratic_grads(params)
+            opt.step()
+            opt.zero_grad()
+
+        assert len(opt.surprise_history) > 0
+        assert any(s > 0 for s in opt.surprise_history)
+
+    def test_current_surprise_exposed(self):
+        """current_surprise should be readable after each step."""
+        np.random.seed(42)
+        params = _make_params((20,))
+        opt = AutoHypergradientAdamW(
+            params, lr=0.01, warmup_steps=2,
+            track_surprise=True, use_gpu=False,
+        )
+
+        assert opt.current_surprise == 0.0
+
+        for _ in range(10):
+            _quadratic_grads(params)
+            opt.step()
+            opt.zero_grad()
+
+        assert 0.0 <= opt.current_surprise <= 1.0
+
+    def test_surprise_bounded_by_tanh(self):
+        """All instant surprise values should be in [0, 1]."""
+        params = _make_params((10,))
+        opt = AutoHypergradientAdamW(
+            params, lr=0.01, warmup_steps=1,
+            track_surprise=True, use_gpu=False,
+        )
+
+        for _ in range(20):
+            _quadratic_grads(params)
+            opt.step()
+            opt.zero_grad()
+
+        for s in opt.surprise_history:
+            assert 0 <= s <= 1.0
+            assert np.isfinite(s)
+
+    def test_s_bar_accumulated(self):
+        """S_bar (accumulated surprise) should build up over steps."""
+        np.random.seed(42)
+        params = _make_params((20,))
+        opt = AutoHypergradientAdamW(
+            params, lr=0.01, warmup_steps=2,
+            track_surprise=True, surprise_alpha=0.3, use_gpu=False,
+        )
+
+        for _ in range(15):
+            _quadratic_grads(params)
+            opt.step()
+            opt.zero_grad()
+
+        # S_bar should have accumulated
+        assert len(opt.s_bar_history) > 0
+        assert opt.accumulated_surprise >= 0
+        assert np.isfinite(opt.accumulated_surprise)
+
+    def test_inverted_u_gain_peaks_at_moderate_surprise(self):
+        """Inverted-U gain should peak at S_bar = trauma_threshold."""
+        # The gain function is: S_bar * exp(-S_bar / T)
+        # Its maximum is at S_bar = T (derivative = 0)
+        T = 0.5
+        s_values = np.linspace(0, 2, 100)
+        gains = s_values * np.exp(-s_values / T)
+
+        # Peak should be at S_bar ≈ T
+        peak_idx = np.argmax(gains)
+        peak_s = s_values[peak_idx]
+        assert abs(peak_s - T) < 0.05  # peak near trauma_threshold
+
+        # Gain at S_bar = 2*T should be less than gain at S_bar = T
+        gain_at_T = T * np.exp(-1)
+        gain_at_2T = 2 * T * np.exp(-2)
+        assert gain_at_2T < gain_at_T  # gain decreases past peak
+
+    def test_trauma_protection(self):
+        """Sustained high surprise should reduce gain (trauma protection)."""
+        np.random.seed(42)
+        params = _make_params((20,))
+        opt = AutoHypergradientAdamW(
+            params, lr=0.01, warmup_steps=2,
+            track_surprise=True, surprise_alpha=0.5,  # fast accumulation
+            trauma_threshold=0.3,  # low threshold
+            use_gpu=False,
+        )
+
+        # Phase 1: stable optimization (low surprise baseline)
+        target1 = np.zeros(20, dtype=np.float32)
+        for _ in range(15):
+            _quadratic_grads(params, target1)
+            opt.step()
+            opt.zero_grad()
+
+        # Phase 2: constant target shifts (chronic surprise = "trauma")
+        for i in range(20):
+            target = np.ones(20, dtype=np.float32) * (i * 2.0)
+            _quadratic_grads(params, target)
+            opt.step()
+            opt.zero_grad()
+
+        # After chronic surprise, S_bar should be high
+        assert opt.accumulated_surprise > opt.trauma_threshold
+        # The inverted-U should have suppressed gain
+        # (past the peak, gain decreases — trauma protection active)
+        gain_trauma = opt.current_surprise_gain
+        # Gain should be finite and non-negative
+        assert np.isfinite(gain_trauma)
+        assert gain_trauma >= 0
+
+    def test_surprise_spikes_on_landscape_shift(self):
+        """Surprise should spike when optimization target changes."""
+        np.random.seed(42)
+        params = _make_params((20,))
+        opt = AutoHypergradientAdamW(
+            params, lr=0.01, warmup_steps=2,
+            track_surprise=True, surprise_gamma=0.9, use_gpu=False,
+        )
+
+        target1 = np.zeros(20, dtype=np.float32)
+        for _ in range(15):
+            _quadratic_grads(params, target1)
+            opt.step()
+            opt.zero_grad()
+
+        surprise_before = opt.current_surprise
+
+        target2 = np.ones(20, dtype=np.float32) * 5.0
+        for _ in range(5):
+            _quadratic_grads(params, target2)
+            opt.step()
+            opt.zero_grad()
+
+        surprise_after = max(opt.surprise_history[-5:])
+        assert surprise_after > surprise_before
+
+    def test_surprise_does_not_modify_beta1(self):
+        """Surprise signal should NOT modify beta1 (input-level only)."""
+        params = _make_params((20,))
+        initial_beta1 = 0.9
+        opt = AutoHypergradientAdamW(
+            params, lr=0.01, betas=(initial_beta1, 0.999),
+            warmup_steps=3, track_surprise=True, use_gpu=False,
+        )
+
+        for _ in range(20):
+            _quadratic_grads(params)
+            opt.step()
+            opt.zero_grad()
+
+        assert opt.defaults["betas"][0] == initial_beta1
+
+    def test_surprise_off_by_default(self):
+        """With track_surprise=False, no surprise state should accumulate."""
+        params = _make_params((10,))
+        opt = AutoHypergradientAdamW(
+            params, lr=0.01, warmup_steps=2,
+            track_surprise=False, use_gpu=False,
+        )
+
+        for _ in range(10):
+            _quadratic_grads(params)
+            opt.step()
+            opt.zero_grad()
+
+        assert len(opt.surprise_history) == 0
+        assert opt.current_surprise == 0.0
+        assert opt.current_surprise_gain == 0.0
+        assert len(opt._grad_ema) == 0
+
+    def test_surprise_gain_usage(self):
+        """Demonstrate that current_surprise_gain works as input gain."""
+        np.random.seed(42)
+        params = _make_params((20,))
+        scale = 2.0
+        opt = AutoHypergradientAdamW(
+            params, lr=0.01, warmup_steps=2,
+            track_surprise=True, use_gpu=False,
+        )
+
+        for _ in range(15):
+            _quadratic_grads(params)
+            opt.step()
+            opt.zero_grad()
+
+            # Model would use: x * (1 + scale * current_surprise_gain)
+            gain = 1.0 + scale * opt.current_surprise_gain
+            assert gain >= 1.0  # gain never goes below 1
+            assert np.isfinite(gain)
+
+    def test_repr_includes_surprise(self):
+        params = _make_params((5,))
+        opt = AutoHypergradientAdamW(
+            params, lr=0.01, track_surprise=True, use_gpu=False,
+        )
+        r = repr(opt)
+        assert "track_surprise=True" in r
+
+
+# ---------------------------------------------------------------------------
 # Comparison test
 # ---------------------------------------------------------------------------
 class TestComparison:

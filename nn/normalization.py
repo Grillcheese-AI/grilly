@@ -89,16 +89,20 @@ class BatchNorm2d(Module):
         self._cache_batch_mean = None
         self._cache_batch_var = None
 
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x) -> np.ndarray:
         """
         Forward pass using batchnorm2d-forward.glsl
 
         Args:
-            x: Input tensor (batch, channels, height, width)
+            x: Input tensor (batch, channels, height, width) — numpy or VulkanTensor
 
         Returns:
             Normalized output (batch, channels, height, width)
         """
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(x, VulkanTensor)
+
         # Validate input
         if x.ndim != 4:
             raise ValueError(f"Expected 4D input (batch, channels, height, width), got {x.ndim}D")
@@ -107,14 +111,17 @@ class BatchNorm2d(Module):
 
         batch_size, num_features, height, width = x.shape
 
-        # Cache input for backward pass
+        # Cache input for backward pass (download if needed)
         if self._grad_enabled and self.training:
-            self._cache_input = x.copy()
+            x_np = x.numpy() if is_vt else x
+            self._cache_input = x_np.copy()
 
         backend = self._get_backend()
 
         # Check if shader is available
         if "batchnorm2d-forward" not in backend.shaders:
+            if is_vt:
+                x = x.numpy()
             return self._batchnorm2d_cpu(x)
 
         # Get parameters
@@ -146,6 +153,7 @@ class BatchNorm2d(Module):
             momentum=self.momentum,
             training=self.training,
             affine=self.affine,
+            return_gpu_tensor=self._return_gpu_tensor,
         )
 
         # Cache batch statistics for backward
