@@ -1,9 +1,6 @@
-import numpy as np
 import grilly.nn as nn
-import grilly.utils.blake3 as blake3
 import grilly.snn as snn
-from grilly.utils.tensor_conversion import VulkanTensor, to_vulkan_gpu
-
+import numpy as np
 
 
 class VoltageHook(nn.Module, snn.SpikingModule):
@@ -13,7 +10,7 @@ class VoltageHook(nn.Module, snn.SpikingModule):
         super().__init__()
         self.voltages = []
         self.buffer_size = 1000  # Limit buffer to last 1000 time steps
-        
+
 
     def forward(self, x):
         self.voltages.append(x.copy())

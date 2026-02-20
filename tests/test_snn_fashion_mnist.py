@@ -12,14 +12,14 @@ import numpy as np
 import pytest
 
 from grilly.functional.snn import reset_net
+from grilly.nn.conv import Conv2d
 from grilly.nn.module import Module
 from grilly.nn.modules import Linear, Sequential
 from grilly.nn.normalization import BatchNorm2d
+from grilly.nn.pooling import MaxPool2d
 from grilly.nn.snn_containers import Flatten, MultiStepContainer, SeqToANNContainer
 from grilly.nn.snn_neurons import IFNode, LIFNode
 from grilly.nn.snn_surrogate import ATan
-from grilly.nn.conv import Conv2d
-from grilly.nn.pooling import MaxPool2d
 
 
 class CSNN(Module):
@@ -80,7 +80,6 @@ class CSNN(Module):
         Returns:
             Firing rate output (N, 10)
         """
-        N = x.shape[0]
         # Repeat input over T timesteps: (T, N, 1, 28, 28)
         x_seq = np.stack([x] * self.T, axis=0)
 
@@ -134,7 +133,6 @@ class CSNN_GIF(Module):
         self._modules["conv_fc"] = self.conv_fc
 
     def forward(self, x):
-        N = x.shape[0]
         x_seq = np.stack([x] * self.T, axis=0)
         out_seq = self.conv_fc(x_seq)
         return out_seq.mean(axis=0)
@@ -231,7 +229,6 @@ class TestCSNNTraining:
         """A basic training loop should run without errors."""
         np.random.seed(42)
         model = CSNN(T=2, channels=4)  # Very small for speed
-        lr = 0.01
 
         # Synthetic Fashion-MNIST-like data
         N = 4
@@ -253,7 +250,6 @@ class TestCSNNTraining:
         """GIF variant training loop should also run without errors."""
         np.random.seed(42)
         model = CSNN_GIF(T=2, channels=4)
-        lr = 0.01
 
         N = 4
         x = np.random.randn(N, 1, 28, 28).astype(np.float32) * 0.1

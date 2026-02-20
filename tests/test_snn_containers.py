@@ -20,8 +20,8 @@ class TestMultiStepContainer:
 
     def test_wraps_identity(self):
         """MultiStepContainer should handle simple modules."""
-        from grilly.nn.snn_containers import MultiStepContainer
         from grilly.nn.module import Module
+        from grilly.nn.snn_containers import MultiStepContainer
 
         class Scale(Module):
             def forward(self, x):

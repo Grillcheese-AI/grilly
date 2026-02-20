@@ -1,7 +1,9 @@
-from abc import ABC, abstractmethod
+from abc import ABC
+
 from blake3 import blake3
-from experimental.spiking_fire.utils.spiking_buffer import SpikingBuffer
+
 import nn
+from experimental.spiking_fire.utils.spiking_buffer import SpikingBuffer
 
 
 class SpikingRegistry(ABC, nn.Module):
@@ -15,16 +17,16 @@ class SpikingRegistry(ABC, nn.Module):
     def register(self, name: str, obj):
         self.registry[name] = obj
 
-   
+
     def get(self, name: str):
         return self.registry.get(name, None)
-        
-    
+
+
     def __getitem__(self, name):
         if name not in self.registry:
             raise KeyError(f"'{name}' not found in registry.")
         return self.get(name)
-    
+
     def __len__(self):
         return len(self.registry)
 
@@ -50,13 +52,13 @@ class SpikingBufferRegistry(SpikingRegistry):
 
     def get(self, name: str):
         return self.registry.get(name, None)
-    
+
     def _is_dirty(self, name: str):
         buffer = self.get(name)
         if buffer is None:
             raise KeyError(f"Buffer '{name}' not found in registry.")
         return len(buffer.get_buffer()) > 0
-    
+
     def clear(self):
         self.registry.clear()
 
