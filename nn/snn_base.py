@@ -257,7 +257,7 @@ class BaseNode(MemoryModule):
 
     def _surrogate_type_id(self):
         """Map surrogate function to GPU shader type ID."""
-        from .snn_surrogate import Sigmoid, FastSigmoid
+        from .snn_surrogate import FastSigmoid, Sigmoid
 
         if isinstance(self.surrogate_function, Sigmoid):
             return 1

@@ -21,8 +21,7 @@ class TestElementWiseRecurrentContainer:
         assert out1[0, 0] == 0.0
 
         # Step 2: 0.6 + 0 (feedback=0) = 0.6 + accumulated v
-        out2 = rec(x)
-        # v should have accumulated from step 1
+        rec(x)  # v should have accumulated from step 1
 
     def test_custom_function(self):
         """Recurrent container with custom combining function."""
@@ -151,9 +150,8 @@ class TestSynapseFilterGPU:
     def gpu_available(self):
         """Set up shared GPU compute instance."""
         try:
-            from grilly.nn.snn_synapses import set_gpu_compute
-
             from grilly import Compute
+            from grilly.nn.snn_synapses import set_gpu_compute
 
             compute = Compute()
             set_gpu_compute(compute)
@@ -298,7 +296,7 @@ class TestSTPSynapse:
         x = np.ones((1, 4), dtype=np.float32)
 
         out1 = stp(x)
-        out2 = stp(x)
+        stp(x)  # step 2: deplete resources
         out3 = stp(x)
 
         # Depression: repeated spikes deplete resources

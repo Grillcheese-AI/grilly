@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+
 @dataclass
 class ANN2SNNConfig:
     """Configuration for ANN to SNN conversion."""

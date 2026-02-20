@@ -11,7 +11,6 @@ import numpy as np
 
 from .snn_base import MemoryModule
 
-
 _GPU_COMPUTE = None
 
 

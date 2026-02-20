@@ -1,13 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Optional
-from build.lib.grilly.backend import snn
+from collections.abc import Callable
+
 import nn
+from build.lib.grilly.backend import snn
 
 
 class BaseNode(ABC, nn.Module):
     """Abstract base class for nodes in the spiking fire framework."""
 
-    def __init__(self, voltage_threshold: float =1.0, reset_voltage: Optional[float]=0.0,
+    def __init__(self, voltage_threshold: float =1.0, reset_voltage: float | None=0.0,
                      surrogate_function: Callable = snn.surrogate.ATan()):
             super().__init__()
             self.voltage_threshold = voltage_threshold
