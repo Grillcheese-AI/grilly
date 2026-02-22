@@ -1,5 +1,7 @@
 # Native inference and FP16 coming soon.
 
+## I would implement BFloat16 and 32 but I only have a RDNA2 on hand ;) If you feel like providing RDNA3 GPU email me at ncloutier@grillcheeseai.com 
+
 # Grilly
 
 <p align="center">
