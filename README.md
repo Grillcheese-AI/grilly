@@ -1,4 +1,4 @@
-# Native inference and FP16 coming soon.
+# IMPORTANT V0.4.0 IS A MAJOR RELEASE  YOU SHOULD USE V0.3.X FOR YOUR EXISTING PROJECTS.
 
 ## I would implement BFloat16 and 32 but I only have a RDNA2 on hand ;) If you feel like providing RDNA3 GPU email me at ncloutier@grillcheeseai.com 
 
