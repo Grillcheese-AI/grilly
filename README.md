@@ -18,12 +18,12 @@ GPU-accelerated neural network framework using Vulkan compute shaders. No CUDA r
 
 ## Release Status
 
-- Current release line: **v0.3.5**
+- Current release line: **v0.4.0**
 - Package name: `grilly`
 - Python support: `>=3.12`
 - Release channel: PyPI
 
-Versioning is automated via [setuptools-scm](https://github.com/pypa/setuptools_scm) from git tags (e.g. `v0.3.1` → `0.3.1`).
+Versioning is automated via [setuptools-scm](https://github.com/pypa/setuptools_scm) from git tags (e.g. `v0.4.0` → `0.4.0`).
 
 ## Features
 
@@ -68,6 +68,14 @@ Versioning is automated via [setuptools-scm](https://github.com/pypa/setuptools_
 - **HuggingFace Bridge**: Load pre-trained models without PyTorch runtime
 - **Model Components**: Multi-head attention, positional encoding, layer normalization
 - **Fine-Tuning**: LoRA (Low-Rank Adaptation), gradient checkpointing
+
+### Inference & RDNA2 Optimizations (v0.4.0)
+- **RMSNorm**: GPU-accelerated 2-pass RMSNorm shader (used by Llama, Gemma)
+- **GQA Decode Attention**: Fused Grouped Query Attention for single-token generation against KV-cache
+- **Fused SwiGLU FFN**: gate_proj + up_proj + SiLU in one GPU dispatch
+- **Fused RMSNorm+Linear**: Eliminates intermediate buffer in pre-norm transformer layers
+- **INT8 GEMM**: Weight-only INT8 with FP32 accumulation and per-group scales
+- **4-bit Block Quantization**: Packed 4-bit weights with per-block scale + zero-point
 
 ### LoRA Fine-Tuning
 - Parameter-efficient fine-tuning for transformers
@@ -163,10 +171,29 @@ top_k_distances, top_k_indices = backend.faiss.topk(distances, k=10)
 - `backend.learning.*` - Learning algorithms
 - `backend.cells.*` - Place and time cells
 
+## Grilly Ecosystem
+
+Optional extension modules for inference, compression, HuggingFace integration, and distillation:
+
+| Module | Package | Description |
+|--------|---------|-------------|
+| [GrillyInference](https://github.com/grillcheese-ai/GrillyInference) | `grillyinference` | Native fp16 inference engine (Llama, paged KV-cache, INT8/4-bit quantization, 100B on 12GB) |
+| [GrillyCompression](https://github.com/grillcheese-ai/GrillyCompression) | `grillycompression` | DCT activation compression (30-60% VRAM), KV-cache page compression (3-5x) |
+| [GrillyOptimum](https://github.com/grillcheese-ai/GrillyOptimum) | `grillyoptimum` | HuggingFace Optimum Vulkan backend (`from_pretrained` + `generate`) |
+| [GrillyDistil](https://github.com/grillcheese-ai/GrillyDistil) | `grillydistil` | SA-KD adaptive temperature distillation trainer |
+
+```bash
+# Install with inference support
+pip install grilly grillyinference
+
+# Full ecosystem
+pip install grilly grillyinference grillycompression grillyoptimum grillydistil
+```
+
 ## Shader Statistics
 
-- Total GLSL shaders: 154
-- Compiled SPIR-V shaders: 154
+- Total GLSL shaders: 160
+- Compiled SPIR-V shaders: 160
 - Categories: 12+ operation types
 
 ## Compiling Shaders
@@ -379,10 +406,12 @@ For Test PyPI: `twine upload --repository testpypi dist/*`
 Open an issue. Tell us what to implement or optimize.
 
 Current priorities:
+- Native fp16 inference engine (GrillyInference) — Llama 3.2 3B at 30+ tok/s on RX 6750 XT
+- SmoothQuant INT8 and 4-bit block quantization for inference
+- Paged KV-cache with H2O eviction for 128k context
 - Training throughput (GEMM tiling, fused backward shaders)
 - Backward pass coverage for all operations
-- INT8/INT4 quantization kernels
-- Documentation and tutorials
+- HuggingFace Optimum integration (GrillyOptimum)
 
 ## License
 

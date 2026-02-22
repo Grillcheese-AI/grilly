@@ -75,3 +75,49 @@ The repo root **is** the `grilly` package. `pyproject.toml` uses `tool.setuptool
 - Vulkan drivers installed
 - Tested on Windows 11 and Ubuntu 24.04
 - Minimum: 8-10GB VRAM GPU, 32GB RAM
+
+## Work-Optim MCP Server (Auto-Orchestration)
+
+The `work-optim` MCP server provides persistent neural memory across sessions. **Use these tools automatically — do NOT wait for the user to ask.**
+
+### Mandatory Auto-Actions
+
+1. **On conversation start**: Call `session_start("grilly", "<current_branch>", "<inferred_goal>")` immediately. Infer the goal from the user's first message.
+
+2. **Log decisions automatically**: Whenever you make or recommend an architectural/design decision, call `session_log("decision", "<what was decided and why>")`.
+
+3. **Log experiments**: When running benchmarks, tests, or trying approaches, call `session_log("experiment", "<what you're testing>")`.
+
+4. **Log results**: After tests pass/fail, benchmarks complete, or features work, call `session_log("result", "<outcome>")`.
+
+5. **Log issues**: When you encounter bugs, errors, or blockers, call `session_log("issue", "<the problem>")`.
+
+6. **Before git push**: Always call `preflight()` first. If it fails, fix the issues before pushing.
+
+7. **Before starting work**: Call `session_recall("<topic>")` to check if prior sessions have relevant context.
+
+8. **On conversation end** (or when the user says goodbye/done): Call `session_end()` — it auto-generates a summary from your logged entries.
+
+### When to Use Other Tools
+
+- **`consult("cto", "<question>")`** — For significant architecture decisions about grilly
+- **`knowledge_search("<query>")`** — When you need context about prior work or captured knowledge
+- **`knowledge_ingest(content, source, category)`** — When you discover something worth remembering
+- **`innovation_scan()`** — When the user asks about AI trends or competitive landscape
+- **`run_smoke_test(script, steps=100)`** — Before committing to long training runs
+
+### Tool Chaining Patterns
+
+```
+# Starting work on a feature
+session_start → session_recall("<feature>") → [do work] → session_log → session_end
+
+# Before pushing
+preflight() → [fix if needed] → git push
+
+# Architecture decision
+session_recall("<topic>") → consult("cto", "<question>") → session_log("decision", ...)
+
+# Training experiment
+session_log("experiment", ...) → run_smoke_test → session_log("result", ...)
+```

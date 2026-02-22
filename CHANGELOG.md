@@ -6,6 +6,37 @@ This changelog follows the spirit of **Keep a Changelog** and uses the terms **A
 
 ---
 
+## [0.4.0] - 2026-02-22
+
+### Added
+
+#### New Vulkan Shaders (Inference & RDNA2 Optimization)
+- **`rms-norm.glsl`**: RMSNorm shader (2-pass: compute mean(x^2), then normalize+scale). Used by Llama, Gemma, and modern architectures that skip mean subtraction.
+- **`gqa-attention.glsl`**: Grouped Query Attention decode shader. Fuses repeat_kv expansion into the attention kernel — maps query heads to KV heads via integer division. Designed for single-token decode against KV-cache.
+- **`swiglu-fused.glsl`**: Fused SwiGLU FFN shader. Combines gate_proj + up_proj + SiLU + elementwise multiply into one dispatch (eliminates 2 intermediate buffers).
+- **`rms-norm-linear-fused.glsl`**: Fused RMSNorm → Linear projection. Eliminates intermediate buffer between normalization and linear transform (common in pre-norm Llama layers).
+- **`int8-gemm.glsl`**: INT8 weight-only GEMM with FP32 accumulation. Activations are fp32, weights are int8 packed 4 per uint32, with per-group fp32 scales. RDNA2 optimized.
+- **`dequant-4bit.glsl`**: 4-bit block-quantized GEMM. Weights packed 8 per uint32, with per-block scale and zero-point dequantization fused into the matmul kernel.
+
+#### New Backend Methods
+- **`VulkanFNN.rms_norm()`**: GPU-accelerated RMSNorm with VulkanTensor and device-local buffer support. 2-pass algorithm with CPU/Numba fallback.
+- **`VulkanFNN.swiglu_fused()`**: Fused SwiGLU FFN that takes gate and up projection weights, produces `SiLU(x @ gate.T) * (x @ up.T)` in one GPU dispatch.
+- **`VulkanFNN.gemm_int8()`**: INT8 weight-only GEMM. Accepts int8 weights with per-group scales, packs to uint32 for GPU, accumulates in FP32.
+- **`VulkanAttention.gqa_decode_attention()`**: GQA decode attention for single-token generation. Maps query heads to KV heads for Grouped Query Attention without materializing expanded KV tensors.
+
+#### Grilly Ecosystem Modules (Separate Repos)
+- **[GrillyInference](https://github.com/grillcheese-ai/GrillyInference)**: Native fp16 inference engine for Llama-family models. Includes paged KV-cache with H2O eviction and VSA multi-scale summaries, SmoothQuant INT8 and 4-bit block quantization, layer offloading for 100B models on 12GB VRAM, and text generation with top-k/top-p sampling.
+- **[GrillyCompression](https://github.com/grillcheese-ai/GrillyCompression)**: Block-wise DCT codec for activation compression (30-60% VRAM savings), KV-cache page compression (3-5x), and communication compression for future multi-GPU support.
+- **[GrillyOptimum](https://github.com/grillcheese-ai/GrillyOptimum)**: HuggingFace Optimum-compatible Vulkan backend. `VulkanModelForCausalLM.from_pretrained()` and `generate()` compatible with HF pipelines.
+- **[GrillyDistil](https://github.com/grillcheese-ai/GrillyDistil)**: SA-KD (Simulated Annealing-based Adaptive Temperature) distillation trainer with Metropolis acceptance, 50+ seed prompts per domain, and KL-divergence + CE combined loss.
+
+### Changed
+- **Version**: Bumped to 0.4.0 (from 0.3.x series)
+- **Shader count**: 154 → 160 GLSL compute shaders
+- **README**: Updated with ecosystem modules section and inference capabilities
+
+---
+
 ## [0.3.1] - 2026-02-10
 
 ### Added

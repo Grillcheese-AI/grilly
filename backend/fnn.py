@@ -3154,3 +3154,337 @@ class VulkanFNN(BufferMixin):
             return result.reshape(output_shape)
         else:
             return result.reshape(batch_seq, output_dim)
+
+    # ------------------------------------------------------------------
+    # RMSNorm (GPU accelerated)
+    # ------------------------------------------------------------------
+    def rms_norm(
+        self,
+        x: np.ndarray,
+        weight: np.ndarray = None,
+        eps: float = 1e-5,
+        return_gpu_tensor: bool = False,
+    ) -> np.ndarray:
+        """
+        GPU-accelerated RMSNorm using rms-norm.glsl shader.
+
+        RMSNorm(x) = x * rsqrt(mean(x^2) + eps) * weight
+
+        Unlike LayerNorm, RMSNorm has no mean subtraction and no bias.
+        Used by Llama, Gemma, and other modern architectures.
+
+        2-pass algorithm:
+        - Pass 0: Compute mean(x^2) along feature dimension
+        - Pass 1: Normalize and scale by weight
+
+        Args:
+            x: Input tensor (..., features). Can be numpy array or VulkanTensor.
+            weight: Scale parameter (features,). Defaults to ones.
+            eps: Small constant for numerical stability (default: 1e-5)
+            return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
+
+        Returns:
+            RMSNorm-normalized tensor (same shape as input)
+        """
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(x, VulkanTensor)
+        original_shape = x.shape
+        features = original_shape[-1]
+
+        if weight is None:
+            weight = np.ones(features, dtype=np.float32)
+
+        # CPU fallback if shader unavailable
+        if "rms-norm" not in self.shaders:
+            x_np = x.numpy() if is_vt else np.asarray(x, dtype=np.float32)
+            mean_sq = np.mean(x_np ** 2, axis=-1, keepdims=True)
+            normed = x_np * (1.0 / np.sqrt(mean_sq + eps))
+            return normed * weight
+
+        # Determine batch_size and seq_len from shape
+        if len(original_shape) == 1:
+            batch_size, seq_len = 1, 1
+        elif len(original_shape) == 2:
+            batch_size = original_shape[0]
+            seq_len = 1
+        else:
+            batch_size = int(np.prod(original_shape[:-2])) if len(original_shape) > 3 else original_shape[0]
+            seq_len = original_shape[-2] if len(original_shape) >= 3 else 1
+
+        x_nbytes = int(batch_size * seq_len * features * 4)
+
+        if is_vt:
+            buf_input, release_input = self._prepare_input(x, size=x_nbytes)
+        else:
+            x_np = np.ascontiguousarray(x, dtype=np.float32).reshape(-1)
+            x_nbytes = x_np.nbytes
+            buf_input = self._acquire_buffer(x_nbytes)
+            self._upload_buffer(buf_input, x_np)
+            release_input = True
+
+        weight_flat = np.ascontiguousarray(weight, dtype=np.float32).flatten()
+        total_positions = batch_size * seq_len
+        total_elements = batch_size * seq_len * features
+
+        use_device_local = return_gpu_tensor and hasattr(self, "_acquire_device_local_buffer")
+        if use_device_local:
+            buf_output = self._acquire_device_local_buffer(x_nbytes)
+        else:
+            buf_output = self._acquire_buffer(x_nbytes)
+        buf_weight = self._acquire_buffer(weight_flat.nbytes)
+        buf_rms = self._acquire_buffer(total_positions * 4)
+
+        self._upload_buffer(buf_weight, weight_flat)
+
+        pipeline, pipeline_layout, _ = self.pipelines.get_or_create_pipeline(
+            "rms-norm", 4, push_constant_size=20
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            "rms-norm",
+            [
+                (self._get_buffer_handle(buf_input), x_nbytes),
+                (self._get_buffer_handle(buf_output), x_nbytes),
+                (self._get_buffer_handle(buf_weight), weight_flat.nbytes),
+                (self._get_buffer_handle(buf_rms), total_positions * 4),
+            ],
+        )
+
+        # Run 2 passes
+        use_batched = return_gpu_tensor and hasattr(self.core, "record_commands")
+        if use_batched:
+            with self.core.record_commands() as rec:
+                for pass_type in range(2):
+                    push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, pass_type)
+                    if pass_type == 0:
+                        workgroups = (total_positions + 255) // 256
+                    else:
+                        workgroups = (total_elements + 255) // 256
+                    rec.dispatch(pipeline, pipeline_layout, descriptor_set, (workgroups, 1, 1), push_constants)
+                    if pass_type == 0:
+                        rec.barrier()
+        else:
+            for pass_type in range(2):
+                push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, pass_type)
+                if pass_type == 0:
+                    workgroups = (total_positions + 255) // 256
+                else:
+                    workgroups = (total_elements + 255) // 256
+                self.core._dispatch_compute(
+                    pipeline, pipeline_layout, descriptor_set, workgroups, push_constants
+                )
+
+        if return_gpu_tensor:
+            if release_input:
+                self._release_buffer(buf_input)
+            self._release_buffers([buf_weight, buf_rms])
+            if use_device_local and getattr(buf_output, "is_device_local", False):
+                return self._wrap_output_tensor_device_local(buf_output, original_shape)
+            return self._wrap_output_tensor(buf_output, original_shape)
+
+        result = self._download_buffer(buf_output, x_nbytes, np.float32)
+        if release_input:
+            self._release_buffer(buf_input)
+        self._release_buffers([buf_output, buf_weight, buf_rms])
+
+        return result.reshape(original_shape)
+
+    # ------------------------------------------------------------------
+    # Fused SwiGLU FFN (GPU accelerated)
+    # ------------------------------------------------------------------
+    def swiglu_fused(
+        self,
+        x: np.ndarray,
+        gate_weights: np.ndarray,
+        up_weights: np.ndarray,
+        return_gpu_tensor: bool = False,
+    ) -> np.ndarray:
+        """
+        Fused SwiGLU: output = SiLU(x @ gate_proj.T) * (x @ up_proj.T)
+
+        Fuses 2 matmuls + SiLU + elementwise multiply into one GPU dispatch.
+        Eliminates 2 intermediate buffers vs separate operations.
+
+        Args:
+            x: Input tensor (batch_seq, input_dim) or (batch, seq, input_dim)
+            gate_weights: Gate projection (intermediate_size, input_dim)
+            up_weights: Up projection (intermediate_size, input_dim)
+            return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
+
+        Returns:
+            SwiGLU output (batch_seq, intermediate_size)
+        """
+        from ..utils.tensor_conversion import VulkanTensor
+
+        is_vt = isinstance(x, VulkanTensor)
+        original_shape = x.shape
+        input_dim = original_shape[-1]
+        intermediate_size = gate_weights.shape[0]
+
+        if "swiglu-fused" not in self.shaders:
+            x_np = x.numpy() if is_vt else np.asarray(x, dtype=np.float32)
+            x_2d = x_np.reshape(-1, input_dim)
+            gate = x_2d @ gate_weights.T
+            up = x_2d @ up_weights.T
+            sigmoid_gate = 1.0 / (1.0 + np.exp(-np.clip(gate, -88, 88)))
+            silu_gate = gate * sigmoid_gate
+            result = silu_gate * up
+            if len(original_shape) > 2:
+                return result.reshape(original_shape[:-1] + (intermediate_size,))
+            return result
+
+        x_np = x.numpy() if is_vt else np.asarray(x, dtype=np.float32)
+        x_2d = np.ascontiguousarray(x_np.reshape(-1, input_dim), dtype=np.float32)
+        batch_seq = x_2d.shape[0]
+
+        gate_flat = np.ascontiguousarray(gate_weights, dtype=np.float32).flatten()
+        up_flat = np.ascontiguousarray(up_weights, dtype=np.float32).flatten()
+        x_flat = x_2d.flatten()
+
+        x_bytes = x_flat.nbytes
+        gate_bytes = gate_flat.nbytes
+        up_bytes = up_flat.nbytes
+        out_bytes = int(batch_seq * intermediate_size * 4)
+
+        buf_input = self._acquire_buffer(x_bytes)
+        buf_gate = self._acquire_buffer(gate_bytes)
+        buf_up = self._acquire_buffer(up_bytes)
+        buf_output = self._acquire_buffer(out_bytes)
+
+        self._upload_buffer(buf_input, x_flat)
+        self._upload_buffer(buf_gate, gate_flat)
+        self._upload_buffer(buf_up, up_flat)
+
+        pipeline, pipeline_layout, _ = self.pipelines.get_or_create_pipeline(
+            "swiglu-fused", 4, push_constant_size=12
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            "swiglu-fused",
+            [
+                (self._get_buffer_handle(buf_input), x_bytes),
+                (self._get_buffer_handle(buf_gate), gate_bytes),
+                (self._get_buffer_handle(buf_up), up_bytes),
+                (self._get_buffer_handle(buf_output), out_bytes),
+            ],
+        )
+
+        push_constants = struct.pack("III", batch_seq, input_dim, intermediate_size)
+        workgroups_x = (intermediate_size + 15) // 16
+        workgroups_y = (batch_seq + 15) // 16
+
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
+        )
+
+        if return_gpu_tensor:
+            self._release_buffers([buf_input, buf_gate, buf_up])
+            out_shape = original_shape[:-1] + (intermediate_size,)
+            return self._wrap_output_tensor(buf_output, out_shape)
+
+        result = self._download_buffer(buf_output, out_bytes, np.float32)
+        self._release_buffers([buf_input, buf_gate, buf_up, buf_output])
+
+        if len(original_shape) > 2:
+            return result.reshape(original_shape[:-1] + (intermediate_size,))
+        return result.reshape(batch_seq, intermediate_size)
+
+    # ------------------------------------------------------------------
+    # INT8 weight-only GEMM (GPU accelerated)
+    # ------------------------------------------------------------------
+    def gemm_int8(
+        self,
+        activations: np.ndarray,
+        weights_int8: np.ndarray,
+        scales: np.ndarray,
+        group_size: int = 64,
+        return_gpu_tensor: bool = False,
+    ) -> np.ndarray:
+        """
+        INT8 weight-only GEMM with FP32 accumulation.
+
+        Activations are fp32, weights are int8 with per-group fp32 scales.
+        Optimal for inference: 2x memory reduction, minimal accuracy loss
+        when combined with SmoothQuant calibration.
+
+        Args:
+            activations: Input tensor (M, K) fp32
+            weights_int8: INT8 weights (N, K) as int8 numpy array
+            scales: Per-group scales (N, ceil(K/group_size)) fp32
+            group_size: Quantization group size (default: 64)
+            return_gpu_tensor: If True, return VulkanTensor (stays on GPU)
+
+        Returns:
+            Output tensor (M, N) fp32
+        """
+        M, K = activations.shape
+        N = weights_int8.shape[0]
+
+        if "int8-gemm" not in self.shaders:
+            # CPU fallback: dequantize and matmul
+            num_groups = (K + group_size - 1) // group_size
+            w_fp32 = np.zeros((N, K), dtype=np.float32)
+            for g in range(num_groups):
+                k_start = g * group_size
+                k_end = min(k_start + group_size, K)
+                w_fp32[:, k_start:k_end] = weights_int8[:, k_start:k_end].astype(np.float32) * scales[:, g:g+1]
+            return activations @ w_fp32.T
+
+        # Pack int8 weights as uint32 (4 per uint32)
+        packed_K = (K + 3) // 4
+        w_packed = np.zeros((N, packed_K), dtype=np.uint32)
+        w_bytes_arr = weights_int8.view(np.uint8)
+        for i in range(K):
+            pack_idx = i // 4
+            pack_offset = i % 4
+            w_packed[:, pack_idx] |= w_bytes_arr[:, i].astype(np.uint32) << (pack_offset * 8)
+
+        act_flat = np.ascontiguousarray(activations, dtype=np.float32).flatten()
+        w_flat = np.ascontiguousarray(w_packed).flatten()
+        s_flat = np.ascontiguousarray(scales, dtype=np.float32).flatten()
+
+        act_nbytes = act_flat.nbytes
+        w_nbytes = w_flat.nbytes
+        s_nbytes = s_flat.nbytes
+        out_bytes = int(M * N * 4)
+
+        buf_act = self._acquire_buffer(act_nbytes)
+        buf_w = self._acquire_buffer(w_nbytes)
+        buf_s = self._acquire_buffer(s_nbytes)
+        buf_out = self._acquire_buffer(out_bytes)
+
+        self._upload_buffer(buf_act, act_flat)
+        self._upload_buffer_raw(buf_w, w_flat)
+        self._upload_buffer(buf_s, s_flat)
+
+        pipeline, pipeline_layout, _ = self.pipelines.get_or_create_pipeline(
+            "int8-gemm", 4, push_constant_size=16
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            "int8-gemm",
+            [
+                (self._get_buffer_handle(buf_act), act_nbytes),
+                (self._get_buffer_handle(buf_w), w_nbytes),
+                (self._get_buffer_handle(buf_s), s_nbytes),
+                (self._get_buffer_handle(buf_out), out_bytes),
+            ],
+        )
+
+        push_constants = struct.pack("IIII", M, K, N, group_size)
+        workgroups_x = (N + 15) // 16
+        workgroups_y = (M + 15) // 16
+
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
+        )
+
+        if return_gpu_tensor:
+            self._release_buffers([buf_act, buf_w, buf_s])
+            return self._wrap_output_tensor(buf_out, (M, N))
+
+        result = self._download_buffer(buf_out, out_bytes, np.float32)
+        self._release_buffers([buf_act, buf_w, buf_s, buf_out])
+
+        return result.reshape(M, N)

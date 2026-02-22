@@ -875,3 +875,119 @@ class VulkanAttention(BufferMixin):
                     result[b, s, h, half_dim:] = qk_second * cos_vals + qk_first * sin_vals
 
         return result
+
+    # ------------------------------------------------------------------
+    # GQA Decode Attention (single-token, reads from KV-cache)
+    # ------------------------------------------------------------------
+    def gqa_decode_attention(
+        self,
+        query: np.ndarray,
+        k_cache: np.ndarray,
+        v_cache: np.ndarray,
+        num_q_heads: int,
+        num_kv_heads: int,
+        head_dim: int,
+        cache_len: int = None,
+        scale: float = None,
+    ) -> np.ndarray:
+        """
+        GQA decode attention: single-token query against KV-cache.
+
+        Fuses repeat_kv expansion: maps query heads to KV heads via
+        integer division (kv_head = q_head // group_size).
+
+        For Llama 3.2 3B: 24 query heads, 8 KV heads, group_size=3.
+
+        Args:
+            query: Query for decode token (batch, 1, num_q_heads, head_dim)
+            k_cache: Cached keys (batch, cache_len, num_kv_heads, head_dim)
+            v_cache: Cached values (batch, cache_len, num_kv_heads, head_dim)
+            num_q_heads: Number of query heads
+            num_kv_heads: Number of KV heads (must divide num_q_heads evenly)
+            head_dim: Head dimension
+            cache_len: Current length of KV cache (if None, inferred from k_cache)
+            scale: Attention scale (default: 1/sqrt(head_dim))
+
+        Returns:
+            Attention output (batch, 1, num_q_heads, head_dim)
+        """
+        if scale is None:
+            scale = 1.0 / np.sqrt(head_dim)
+
+        q = np.asarray(query, dtype=np.float32)
+        k = np.asarray(k_cache, dtype=np.float32)
+        v = np.asarray(v_cache, dtype=np.float32)
+
+        batch_size = q.shape[0]
+        if cache_len is None:
+            cache_len = k.shape[1]
+
+        # CPU fallback if shader unavailable
+        if "gqa-attention" not in self.shaders:
+            kv_group_size = num_q_heads // num_kv_heads
+            q_2d = q.reshape(batch_size, num_q_heads, head_dim)
+            output = np.zeros((batch_size, num_q_heads, head_dim), dtype=np.float32)
+
+            for b in range(batch_size):
+                for qh in range(num_q_heads):
+                    kv_head = qh // kv_group_size
+                    scores = np.einsum("d,sd->s", q_2d[b, qh], k[b, :cache_len, kv_head]) * scale
+                    scores_max = np.max(scores)
+                    exp_scores = np.exp(scores - scores_max)
+                    weights = exp_scores / np.sum(exp_scores)
+                    output[b, qh] = np.einsum("s,sd->d", weights, v[b, :cache_len, kv_head])
+
+            return output.reshape(batch_size, 1, num_q_heads, head_dim)
+
+        # GPU path
+        q_flat = q.reshape(batch_size, num_q_heads, head_dim).flatten()
+        k_flat = k[:, :cache_len].flatten()
+        v_flat = v[:, :cache_len].flatten()
+
+        q_bytes = q_flat.nbytes
+        k_bytes = k_flat.nbytes
+        v_bytes = v_flat.nbytes
+        out_bytes = int(batch_size * num_q_heads * head_dim * 4)
+        score_bytes = int(batch_size * num_q_heads * cache_len * 4)
+
+        buf_q = self._acquire_buffer(q_bytes)
+        buf_k = self._acquire_buffer(k_bytes)
+        buf_v = self._acquire_buffer(v_bytes)
+        buf_out = self._acquire_buffer(out_bytes)
+        buf_scores = self._acquire_buffer(score_bytes)
+
+        self._upload_buffer(buf_q, q_flat)
+        self._upload_buffer(buf_k, k_flat)
+        self._upload_buffer(buf_v, v_flat)
+
+        pipeline, pipeline_layout, _ = self.pipelines.get_or_create_pipeline(
+            "gqa-attention", 5, push_constant_size=24
+        )
+
+        descriptor_set = self.pipelines.get_cached_descriptor_set(
+            "gqa-attention",
+            [
+                (self._get_buffer_handle(buf_q), q_bytes),
+                (self._get_buffer_handle(buf_k), k_bytes),
+                (self._get_buffer_handle(buf_v), v_bytes),
+                (self._get_buffer_handle(buf_out), out_bytes),
+                (self._get_buffer_handle(buf_scores), score_bytes),
+            ],
+        )
+
+        push_constants = struct.pack(
+            "IIIIIf", batch_size, num_q_heads, num_kv_heads, head_dim, cache_len, scale
+        )
+
+        total_q = batch_size * num_q_heads
+        workgroups_x = (max(cache_len, head_dim) + 15) // 16
+        workgroups_y = (total_q + 15) // 16
+
+        self.core._dispatch_compute(
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
+        )
+
+        result = self._download_buffer(buf_out, out_bytes, np.float32)
+        self._release_buffers([buf_q, buf_k, buf_v, buf_out, buf_scores])
+
+        return result.reshape(batch_size, 1, num_q_heads, head_dim)
