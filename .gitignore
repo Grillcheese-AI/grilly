@@ -161,8 +161,8 @@ PLAN.md
 pyvma
 *.gz
 VulkanMemoryAllocator
+!third_party/VulkanMemoryAllocator
 datasets/cifar-10-python.tar.gz
-VulkanMemoryAllocator
 datasets/cifar-10-python.tar.gz
 datasets/cifar-10-python.tar.gz
 ./datasets/*.tar.gz
