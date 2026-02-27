@@ -209,6 +209,15 @@ add_library(grilly_core_lib STATIC
     cpp/src/cognitive/world_model.cpp
     # ── Temporal ──
     cpp/src/temporal/vulkan_temporal.cpp
+    # ── NN framework ──
+    cpp/src/nn/tensor.cpp
+    cpp/src/nn/parameter.cpp
+    cpp/src/nn/module.cpp
+    cpp/src/nn/surrogate.cpp
+    cpp/src/nn/snn.cpp
+    cpp/src/nn/containers.cpp
+    cpp/src/nn/optimizer.cpp
+    cpp/src/nn/dataloader.cpp
 )
 
 target_include_directories(grilly_core_lib PUBLIC
@@ -226,6 +235,7 @@ target_link_libraries(grilly_core_lib PUBLIC
     Boost::pool
     Eigen3::Eigen
     blake3
+    pybind11::pybind11    # NN framework classes use py::array_t, py::dict
 )
 
 # VMA implementation compiled in device.cpp
