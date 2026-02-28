@@ -1627,7 +1627,7 @@ class TestLossesAutograd:
 
     def test_mse_loss_backward(self):
         pred = Variable(np.array([1.0, 2.0, 3.0], dtype=np.float32), requires_grad=True)
-        target = Variable([1.5, 2.5, 3.5])
+        Variable([1.5, 2.5, 3.5])
 
         def fn(v):
             return mse_loss(v, Variable([1.5, 2.5, 3.5]))
@@ -1651,7 +1651,7 @@ class TestLossesAutograd:
 
     def test_l1_loss_backward(self):
         pred = Variable(np.array([1.0, 2.0, 3.0], dtype=np.float32), requires_grad=True)
-        target = Variable([1.5, 2.5, 2.0])
+        Variable([1.5, 2.5, 2.0])
 
         def fn(v):
             return l1_loss(v, Variable([1.5, 2.5, 2.0]), reduction="mean")

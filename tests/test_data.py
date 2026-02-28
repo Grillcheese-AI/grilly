@@ -651,8 +651,10 @@ class TestTransforms:
 
     def test_compose_chains(self):
         """Compose applies transforms in order."""
-        add_one = lambda x: x + 1
-        double = lambda x: x * 2
+        def add_one(x):
+            return x + 1
+        def double(x):
+            return x * 2
         transform = Compose([add_one, double])
         x = np.array([3.0], dtype=np.float32)
         result = transform(x)

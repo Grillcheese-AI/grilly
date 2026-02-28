@@ -247,7 +247,7 @@ class TestCrossEntropyLoss:
         targets = np.random.randint(0, num_classes, size=(batch,))
 
         loss_fn = CrossEntropyLoss(reduction="mean")
-        loss = loss_fn.forward(logits, targets)
+        loss_fn.forward(logits, targets)
         grad = loss_fn.backward(np.float32(1.0), logits, targets)
 
         assert grad.shape == logits.shape
@@ -269,7 +269,7 @@ class TestCrossEntropyLoss:
         targets = np.random.randint(0, num_classes, size=(batch,))
 
         loss_fn = CrossEntropyLoss(reduction="sum")
-        loss = loss_fn.forward(logits, targets)
+        loss_fn.forward(logits, targets)
         grad = loss_fn.backward(np.float32(1.0), logits, targets)
 
         assert grad.shape == logits.shape

@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 try:
+    from grilly.nn.module import Module
     from grilly.nn.modules import (
         GCU,
         GELU,
@@ -25,7 +26,6 @@ try:
         _create_param_wrapper,
         _get_param_array,
     )
-    from grilly.nn.module import Module
     from grilly.nn.parameter import Parameter
 except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
