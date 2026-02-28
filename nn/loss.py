@@ -140,7 +140,9 @@ class CrossEntropyLoss(Module):
                 # (batch, num_classes) -> (batch,)
                 num_classes = input.shape[-1]
                 target_one_hot = np.zeros((batch_size, num_classes), dtype=np.float32)
-                target_one_hot[np.arange(batch_size), target] = 1.0
+                valid_mask = target != self.ignore_index
+                valid_indices = np.where(valid_mask)[0]
+                target_one_hot[valid_indices, target[valid_indices]] = 1.0
         else:
             # Target is already one-hot
             target_one_hot = target
@@ -210,7 +212,9 @@ class CrossEntropyLoss(Module):
                 # (batch, num_classes) -> (batch,)
                 num_classes = input.shape[-1]
                 target_one_hot = np.zeros((batch_size, num_classes), dtype=np.float32)
-                target_one_hot[np.arange(batch_size), target] = 1.0
+                valid_mask = target != self.ignore_index
+                valid_indices = np.where(valid_mask)[0]
+                target_one_hot[valid_indices, target[valid_indices]] = 1.0
         else:
             # Target is already one-hot
             target_one_hot = target
