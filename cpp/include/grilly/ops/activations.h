@@ -48,5 +48,40 @@ void siluBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
                   const float* gradOutput, const float* input,
                   float* gradInput, uint32_t totalElements);
 
+/// Tanh backward: uses tanh_output (not raw input) — d/dx tanh = 1 - tanh^2.
+/// 3 buffer bindings: grad_output, tanh_output, grad_input.
+void tanhBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+                  const float* gradOutput, const float* tanhOutput,
+                  float* gradInput, uint32_t totalElements);
+
+/// Softmax push constants — matches activation-softmax.glsl layout.
+struct SoftmaxParams {
+    uint32_t batchSize;
+    uint32_t seqLen;
+    uint32_t features;
+    uint32_t passType;
+    uint32_t dim;
+};
+
+/// GPU Softmax forward (3-pass: max → sum_exp → normalize).
+/// 4 buffers: input, output, max_vals, sum_exp.
+void softmax(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+             const float* input, float* output,
+             uint32_t batchSize, uint32_t seqLen, uint32_t features);
+
+/// Softmax backward push constants.
+struct SoftmaxBackwardParams {
+    uint32_t batchSize;
+    uint32_t seqLen;
+    uint32_t numClasses;
+};
+
+/// GPU Softmax backward.
+/// 3 buffers: grad_output, softmax_output, grad_input.
+void softmaxBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+                     const float* gradOutput, const float* softmaxOutput,
+                     float* gradInput, uint32_t batchSize, uint32_t seqLen,
+                     uint32_t numClasses);
+
 }  // namespace ops
 }  // namespace grilly

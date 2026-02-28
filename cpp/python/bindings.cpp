@@ -21,7 +21,16 @@
 #include "grilly/ops/conv.h"
 #include "grilly/ops/kv_cache.h"
 #include "grilly/ops/layernorm.h"
+#include "grilly/ops/rmsnorm.h"
 #include "grilly/ops/linear.h"
+#include "grilly/ops/snn.h"
+#include "grilly/ops/attention_ops.h"
+#include "grilly/ops/pooling.h"
+#include "grilly/ops/batchnorm.h"
+#include "grilly/ops/loss.h"
+#include "grilly/ops/optimizer.h"
+#include "grilly/ops/embedding.h"
+#include "grilly/ops/learning.h"
 #include "grilly/ops/swizzle.h"
 #include "grilly/pipeline_cache.h"
 #include "grilly/experimental/paged_latent_pool.h"
@@ -376,6 +385,363 @@ PYBIND11_MODULE(grilly_core, m) {
     defActivation("silu", grilly::ops::silu);
     defActivation("tanh_act", grilly::ops::tanh_act);
 
+    // ── Activation backward ops ──────────────────────────────────────────
+    // 3 buffers: grad_output, input (original forward input), grad_input.
+    // Same push constant (uint total_elements) and dispatch pattern.
+
+    auto defActivationBackward = [&m](const char* name, auto fn) {
+        m.def(
+            name,
+            [fn](GrillyCoreContext& ctx,
+                 py::array_t<float> grad_output,
+                 py::array_t<float> input) -> py::array_t<float> {
+                auto gBuf = grad_output.request();
+                auto iBuf = input.request();
+                uint32_t total = 1;
+                for (int i = 0; i < gBuf.ndim; ++i)
+                    total *= static_cast<uint32_t>(gBuf.shape[i]);
+
+                py::array_t<float> result(gBuf.shape);
+                auto rBuf = result.request();
+
+                fn(ctx.batch, ctx.pool, ctx.cache,
+                   static_cast<const float*>(gBuf.ptr),
+                   static_cast<const float*>(iBuf.ptr),
+                   static_cast<float*>(rBuf.ptr), total);
+
+                return result;
+            },
+            py::arg("device"), py::arg("grad_output"), py::arg("input"));
+    };
+
+    defActivationBackward("relu_backward", grilly::ops::reluBackward);
+    defActivationBackward("gelu_backward", grilly::ops::geluBackward);
+    defActivationBackward("silu_backward", grilly::ops::siluBackward);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // SNN STANDALONE OPS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    m.def(
+        "lif_step",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input, py::array_t<float> v_mem,
+           py::array_t<float> t_refrac,
+           float dt, float tau_mem, float v_rest, float v_reset,
+           float v_thresh, float r_mem,
+           float t_refrac_period) -> py::dict {
+            auto inBuf = input.request();
+            uint32_t n = 1;
+            for (int i = 0; i < inBuf.ndim; ++i)
+                n *= static_cast<uint32_t>(inBuf.shape[i]);
+
+            // Copy state arrays since they're updated in-place
+            py::array_t<float> vMemOut(v_mem.request().shape);
+            py::array_t<float> refracOut(t_refrac.request().shape);
+            py::array_t<float> spikes(inBuf.shape);
+
+            std::memcpy(vMemOut.request().ptr, v_mem.request().ptr,
+                        n * sizeof(float));
+            std::memcpy(refracOut.request().ptr, t_refrac.request().ptr,
+                        n * sizeof(float));
+
+            grilly::ops::LIFParams p{n, dt, tau_mem, v_rest, v_reset,
+                                     v_thresh, r_mem, t_refrac_period};
+
+            grilly::ops::lifStep(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(vMemOut.request().ptr),
+                static_cast<float*>(refracOut.request().ptr),
+                static_cast<float*>(spikes.request().ptr), p);
+
+            py::dict result;
+            result["spikes"] = spikes;
+            result["v_mem"] = vMemOut;
+            result["t_refrac"] = refracOut;
+            return result;
+        },
+        py::arg("device"), py::arg("input"), py::arg("v_mem"),
+        py::arg("t_refrac"),
+        py::arg("dt") = 1.0f, py::arg("tau_mem") = 20.0f,
+        py::arg("v_rest") = 0.0f, py::arg("v_reset") = 0.0f,
+        py::arg("v_thresh") = 1.0f, py::arg("r_mem") = 1.0f,
+        py::arg("t_refrac_period") = 0.0f,
+        "GPU LIF neuron step");
+
+    m.def(
+        "snn_node_forward",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> x_in, py::array_t<float> v_mem,
+           py::array_t<float> tau_param,
+           uint32_t neuron_type, float tau, float v_threshold,
+           float v_reset, uint32_t reset_mode,
+           uint32_t decay_input) -> py::dict {
+            auto xBuf = x_in.request();
+            uint32_t n = 1;
+            for (int i = 0; i < xBuf.ndim; ++i)
+                n *= static_cast<uint32_t>(xBuf.shape[i]);
+
+            py::array_t<float> vMemOut(v_mem.request().shape);
+            py::array_t<float> spikes(xBuf.shape);
+            py::array_t<float> hOut(xBuf.shape);
+
+            std::memcpy(vMemOut.request().ptr, v_mem.request().ptr,
+                        n * sizeof(float));
+
+            grilly::ops::SNNNodeForwardParams p{
+                n, neuron_type, tau, v_threshold, v_reset,
+                reset_mode, decay_input};
+
+            grilly::ops::snnNodeForward(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(xBuf.ptr),
+                static_cast<float*>(vMemOut.request().ptr),
+                static_cast<float*>(spikes.request().ptr),
+                static_cast<float*>(hOut.request().ptr),
+                static_cast<const float*>(tau_param.request().ptr), p);
+
+            py::dict result;
+            result["spikes"] = spikes;
+            result["v_mem"] = vMemOut;
+            result["h_out"] = hOut;
+            return result;
+        },
+        py::arg("device"), py::arg("x_in"), py::arg("v_mem"),
+        py::arg("tau_param"),
+        py::arg("neuron_type") = 1,
+        py::arg("tau") = 2.0f, py::arg("v_threshold") = 1.0f,
+        py::arg("v_reset") = 0.0f, py::arg("reset_mode") = 0,
+        py::arg("decay_input") = 0,
+        "GPU SNN node forward (IF/LIF/PLIF)");
+
+    m.def(
+        "snn_node_backward",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> grad_spike, py::array_t<float> h_cache,
+           float alpha, uint32_t surrogate_type,
+           float v_threshold) -> py::array_t<float> {
+            auto gBuf = grad_spike.request();
+            uint32_t n = 1;
+            for (int i = 0; i < gBuf.ndim; ++i)
+                n *= static_cast<uint32_t>(gBuf.shape[i]);
+
+            py::array_t<float> gradX(gBuf.shape);
+
+            grilly::ops::SNNNodeBackwardParams p{
+                n, alpha, surrogate_type, v_threshold};
+
+            grilly::ops::snnNodeBackward(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(gBuf.ptr),
+                static_cast<const float*>(h_cache.request().ptr),
+                static_cast<float*>(gradX.request().ptr), p);
+
+            return gradX;
+        },
+        py::arg("device"), py::arg("grad_spike"), py::arg("h_cache"),
+        py::arg("alpha") = 2.0f, py::arg("surrogate_type") = 0,
+        py::arg("v_threshold") = 1.0f,
+        "GPU SNN node backward (surrogate gradient)");
+
+    m.def(
+        "hebbian_learning",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> pre, py::array_t<float> post,
+           py::array_t<float> weights,
+           uint32_t batch_size, uint32_t time_steps,
+           float learning_rate,
+           float weight_decay) -> py::array_t<float> {
+            auto preBuf = pre.request();
+            auto postBuf = post.request();
+            auto wBuf = weights.request();
+
+            uint32_t pre_dim = static_cast<uint32_t>(
+                preBuf.shape[preBuf.ndim - 1]);
+            uint32_t post_dim = static_cast<uint32_t>(
+                postBuf.shape[postBuf.ndim - 1]);
+
+            py::array_t<float> wOut(wBuf.shape);
+            std::memcpy(wOut.request().ptr, wBuf.ptr,
+                        size_t(pre_dim) * post_dim * sizeof(float));
+
+            grilly::ops::HebbianParams p{batch_size, time_steps,
+                                         pre_dim, post_dim,
+                                         learning_rate, weight_decay};
+
+            grilly::ops::hebbianLearning(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(preBuf.ptr),
+                static_cast<const float*>(postBuf.ptr),
+                static_cast<float*>(wOut.request().ptr), p);
+
+            return wOut;
+        },
+        py::arg("device"), py::arg("pre"), py::arg("post"),
+        py::arg("weights"),
+        py::arg("batch_size") = 1, py::arg("time_steps") = 1,
+        py::arg("learning_rate") = 0.01f,
+        py::arg("weight_decay") = 0.0f,
+        "GPU Hebbian learning rule");
+
+    m.def(
+        "stdp_learning",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> pre, py::array_t<float> post,
+           py::array_t<float> weights,
+           py::array_t<float> pre_trace, py::array_t<float> post_trace,
+           uint32_t batch_size, uint32_t time_steps,
+           float lr_pot, float lr_dep,
+           float trace_decay) -> py::dict {
+            auto preBuf = pre.request();
+            auto postBuf = post.request();
+            auto wBuf = weights.request();
+
+            uint32_t pre_dim = static_cast<uint32_t>(
+                preBuf.shape[preBuf.ndim - 1]);
+            uint32_t post_dim = static_cast<uint32_t>(
+                postBuf.shape[postBuf.ndim - 1]);
+
+            py::array_t<float> wOut(wBuf.shape);
+            py::array_t<float> preTraceOut(pre_trace.request().shape);
+            py::array_t<float> postTraceOut(post_trace.request().shape);
+
+            std::memcpy(wOut.request().ptr, wBuf.ptr,
+                        size_t(pre_dim) * post_dim * sizeof(float));
+            std::memcpy(preTraceOut.request().ptr, pre_trace.request().ptr,
+                        size_t(batch_size) * pre_dim * sizeof(float));
+            std::memcpy(postTraceOut.request().ptr, post_trace.request().ptr,
+                        size_t(batch_size) * post_dim * sizeof(float));
+
+            grilly::ops::STDPParams p{batch_size, time_steps,
+                                      pre_dim, post_dim,
+                                      lr_pot, lr_dep, trace_decay, 0};
+
+            grilly::ops::stdpLearning(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(preBuf.ptr),
+                static_cast<const float*>(postBuf.ptr),
+                static_cast<float*>(wOut.request().ptr),
+                static_cast<float*>(preTraceOut.request().ptr),
+                static_cast<float*>(postTraceOut.request().ptr), p);
+
+            py::dict result;
+            result["weights"] = wOut;
+            result["pre_trace"] = preTraceOut;
+            result["post_trace"] = postTraceOut;
+            return result;
+        },
+        py::arg("device"), py::arg("pre"), py::arg("post"),
+        py::arg("weights"), py::arg("pre_trace"), py::arg("post_trace"),
+        py::arg("batch_size") = 1, py::arg("time_steps") = 1,
+        py::arg("lr_pot") = 0.01f, py::arg("lr_dep") = 0.01f,
+        py::arg("trace_decay") = 0.95f,
+        "GPU STDP learning (2-pass: traces then weights)");
+
+    m.def(
+        "synapse_filter",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> x_in,
+           py::array_t<float> y_state,
+           float decay) -> py::array_t<float> {
+            auto xBuf = x_in.request();
+            uint32_t n = 1;
+            for (int i = 0; i < xBuf.ndim; ++i)
+                n *= static_cast<uint32_t>(xBuf.shape[i]);
+
+            py::array_t<float> yOut(y_state.request().shape);
+            std::memcpy(yOut.request().ptr, y_state.request().ptr,
+                        n * sizeof(float));
+
+            grilly::ops::SynapseFilterParams p{n, decay};
+
+            grilly::ops::synapseFilter(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(xBuf.ptr),
+                static_cast<float*>(yOut.request().ptr), p);
+
+            return yOut;
+        },
+        py::arg("device"), py::arg("x_in"), py::arg("y_state"),
+        py::arg("decay") = 0.95f,
+        "GPU exponential synapse filter");
+
+    m.def(
+        "gif_neuron_step",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input, py::array_t<float> v_mem,
+           py::array_t<float> i_adapt,
+           py::array_t<float> g_input, py::array_t<float> g_forget,
+           py::array_t<float> t_refrac, py::array_t<float> t_last_spike,
+           float dt, float current_time,
+           float tau_mem, float v_rest, float v_reset, float v_thresh,
+           float r_mem, float tau_adapt, float delta_adapt, float b_adapt,
+           float tau_gate, float gate_strength,
+           float t_refrac_period) -> py::dict {
+            auto inBuf = input.request();
+            uint32_t n = 1;
+            for (int i = 0; i < inBuf.ndim; ++i)
+                n *= static_cast<uint32_t>(inBuf.shape[i]);
+
+            py::array_t<float> vMemOut(v_mem.request().shape);
+            py::array_t<float> iAdaptOut(i_adapt.request().shape);
+            py::array_t<float> gInputOut(g_input.request().shape);
+            py::array_t<float> gForgetOut(g_forget.request().shape);
+            py::array_t<float> refracOut(t_refrac.request().shape);
+            py::array_t<float> spikes(inBuf.shape);
+            py::array_t<float> tLastOut(t_last_spike.request().shape);
+
+            std::memcpy(vMemOut.request().ptr, v_mem.request().ptr,
+                        n * sizeof(float));
+            std::memcpy(iAdaptOut.request().ptr, i_adapt.request().ptr,
+                        n * sizeof(float));
+            std::memcpy(gInputOut.request().ptr, g_input.request().ptr,
+                        n * sizeof(float));
+            std::memcpy(gForgetOut.request().ptr, g_forget.request().ptr,
+                        n * sizeof(float));
+            std::memcpy(refracOut.request().ptr, t_refrac.request().ptr,
+                        n * sizeof(float));
+            std::memcpy(tLastOut.request().ptr, t_last_spike.request().ptr,
+                        n * sizeof(float));
+
+            grilly::ops::GIFParams p{
+                n, dt, current_time, tau_mem, v_rest, v_reset, v_thresh,
+                r_mem, tau_adapt, delta_adapt, b_adapt, tau_gate,
+                gate_strength, t_refrac_period};
+
+            grilly::ops::gifNeuronStep(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(vMemOut.request().ptr),
+                static_cast<float*>(iAdaptOut.request().ptr),
+                static_cast<float*>(gInputOut.request().ptr),
+                static_cast<float*>(gForgetOut.request().ptr),
+                static_cast<float*>(refracOut.request().ptr),
+                static_cast<float*>(spikes.request().ptr),
+                static_cast<float*>(tLastOut.request().ptr), p);
+
+            py::dict result;
+            result["spikes"] = spikes;
+            result["v_mem"] = vMemOut;
+            result["i_adapt"] = iAdaptOut;
+            result["g_input"] = gInputOut;
+            result["g_forget"] = gForgetOut;
+            result["t_refrac"] = refracOut;
+            result["t_last_spike"] = tLastOut;
+            return result;
+        },
+        py::arg("device"), py::arg("input"), py::arg("v_mem"),
+        py::arg("i_adapt"), py::arg("g_input"), py::arg("g_forget"),
+        py::arg("t_refrac"), py::arg("t_last_spike"),
+        py::arg("dt") = 1.0f, py::arg("current_time") = 0.0f,
+        py::arg("tau_mem") = 20.0f, py::arg("v_rest") = 0.0f,
+        py::arg("v_reset") = 0.0f, py::arg("v_thresh") = 1.0f,
+        py::arg("r_mem") = 1.0f, py::arg("tau_adapt") = 100.0f,
+        py::arg("delta_adapt") = 0.1f, py::arg("b_adapt") = 0.0f,
+        py::arg("tau_gate") = 50.0f, py::arg("gate_strength") = 1.0f,
+        py::arg("t_refrac_period") = 0.0f,
+        "GPU GIF (Generalized Integrate-and-Fire) neuron step");
+
     // ═══════════════════════════════════════════════════════════════════════
     // LAYERNORM
     // ═══════════════════════════════════════════════════════════════════════
@@ -414,6 +780,97 @@ PYBIND11_MODULE(grilly_core, m) {
         py::arg("device"), py::arg("input"), py::arg("gamma"),
         py::arg("beta"), py::arg("eps") = 1e-5f,
         "GPU LayerNorm: gamma * (x - mean) / sqrt(var + eps) + beta");
+
+    // ── LayerNorm backward ───────────────────────────────────────────────
+    // Returns dict with grad_input, grad_gamma, grad_beta.
+    // Requires mean and variance from the forward pass.
+
+    m.def(
+        "layernorm_backward",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> grad_output, py::array_t<float> input,
+           py::array_t<float> gamma, py::array_t<float> mean,
+           py::array_t<float> var, float eps) -> py::dict {
+            auto goBuf = grad_output.request();
+            auto inBuf = input.request();
+            auto gBuf  = gamma.request();
+
+            if (inBuf.ndim < 2)
+                throw std::runtime_error("input must be at least 2D");
+
+            uint32_t features = static_cast<uint32_t>(
+                inBuf.shape[inBuf.ndim - 1]);
+            uint32_t totalBatch = 1;
+            for (int i = 0; i < inBuf.ndim - 1; ++i)
+                totalBatch *= static_cast<uint32_t>(inBuf.shape[i]);
+
+            py::array_t<float> gradInput(inBuf.shape);
+            py::array_t<float> gradGamma({static_cast<py::ssize_t>(features)});
+            py::array_t<float> gradBeta({static_cast<py::ssize_t>(features)});
+
+            grilly::ops::layernormBackward(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(goBuf.ptr),
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<const float*>(gBuf.ptr),
+                static_cast<const float*>(mean.request().ptr),
+                static_cast<const float*>(var.request().ptr),
+                static_cast<float*>(gradInput.request().ptr),
+                static_cast<float*>(gradGamma.request().ptr),
+                static_cast<float*>(gradBeta.request().ptr),
+                1, totalBatch, features, eps);
+
+            py::dict result;
+            result["grad_input"] = gradInput;
+            result["grad_gamma"] = gradGamma;
+            result["grad_beta"] = gradBeta;
+            return result;
+        },
+        py::arg("device"), py::arg("grad_output"), py::arg("input"),
+        py::arg("gamma"), py::arg("mean"), py::arg("var"),
+        py::arg("eps") = 1e-5f,
+        "GPU LayerNorm backward: computes grad_input, grad_gamma, grad_beta");
+
+    // ── RMSNorm ──────────────────────────────────────────────────────────
+    m.def(
+        "rmsnorm",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input,
+           py::array_t<float> weight,
+           float eps) -> py::array_t<float> {
+            auto inBuf = input.request();
+
+            uint32_t features, batchSize, seqLen;
+            if (inBuf.ndim == 1) {
+                batchSize = 1; seqLen = 1;
+                features = static_cast<uint32_t>(inBuf.shape[0]);
+            } else if (inBuf.ndim == 2) {
+                batchSize = static_cast<uint32_t>(inBuf.shape[0]);
+                seqLen = 1;
+                features = static_cast<uint32_t>(inBuf.shape[1]);
+            } else if (inBuf.ndim == 3) {
+                batchSize = static_cast<uint32_t>(inBuf.shape[0]);
+                seqLen = static_cast<uint32_t>(inBuf.shape[1]);
+                features = static_cast<uint32_t>(inBuf.shape[2]);
+            } else {
+                throw std::runtime_error("RMSNorm input must be 1D, 2D, or 3D");
+            }
+
+            py::array_t<float> result(inBuf.shape);
+            auto rBuf = result.request();
+
+            grilly::ops::rmsnorm(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(rBuf.ptr),
+                static_cast<const float*>(weight.request().ptr),
+                batchSize, seqLen, features, eps);
+
+            return result;
+        },
+        py::arg("device"), py::arg("input"),
+        py::arg("weight"), py::arg("eps") = 1e-5f,
+        "GPU RMSNorm: weight * x * rsqrt(mean(x^2) + eps)");
 
     // ═══════════════════════════════════════════════════════════════════════
     // FLASH ATTENTION 2
@@ -2970,4 +3427,781 @@ PYBIND11_MODULE(grilly_core, m) {
         .def("__iter__", &DataLoader::iter, py::return_value_policy::reference)
         .def("iter", &DataLoader::iter, py::return_value_policy::reference)
         .def("__next__", &DataLoader::next);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // PHASE 3-6: ADDITIONAL OP BINDINGS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ── Tanh backward ───────────────────────────────────────────────────
+    defActivationBackward("tanh_backward", grilly::ops::tanhBackward);
+
+    // ── Softmax ─────────────────────────────────────────────────────────
+    m.def(
+        "softmax",
+        [](GrillyCoreContext& ctx, py::array_t<float> input,
+           int dim) -> py::array_t<float> {
+            auto inBuf = input.request();
+            if (inBuf.ndim < 1)
+                throw std::runtime_error("input must be at least 1D");
+
+            uint32_t features = static_cast<uint32_t>(
+                inBuf.shape[inBuf.ndim - 1]);
+            uint32_t totalBatch = 1;
+            for (int i = 0; i < inBuf.ndim - 1; ++i)
+                totalBatch *= static_cast<uint32_t>(inBuf.shape[i]);
+            if (inBuf.ndim == 1) totalBatch = 1;
+
+            py::array_t<float> result(inBuf.shape);
+            grilly::ops::softmax(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(result.request().ptr),
+                1, totalBatch, features);
+            return result;
+        },
+        py::arg("device"), py::arg("input"), py::arg("dim") = -1,
+        "GPU Softmax (3-pass: max, sum_exp, normalize)");
+
+    // ── Softmax backward ────────────────────────────────────────────────
+    m.def(
+        "softmax_backward",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> grad_output,
+           py::array_t<float> softmax_output) -> py::array_t<float> {
+            auto gBuf = grad_output.request();
+            uint32_t numClasses = static_cast<uint32_t>(
+                gBuf.shape[gBuf.ndim - 1]);
+            uint32_t batchSeq = 1;
+            for (int i = 0; i < gBuf.ndim - 1; ++i)
+                batchSeq *= static_cast<uint32_t>(gBuf.shape[i]);
+            if (gBuf.ndim == 1) batchSeq = 1;
+
+            py::array_t<float> result(gBuf.shape);
+            grilly::ops::softmaxBackward(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(gBuf.ptr),
+                static_cast<const float*>(softmax_output.request().ptr),
+                static_cast<float*>(result.request().ptr),
+                1, batchSeq, numClasses);
+            return result;
+        },
+        py::arg("device"), py::arg("grad_output"), py::arg("softmax_output"),
+        "GPU Softmax backward");
+
+    // ── Linear backward ─────────────────────────────────────────────────
+    m.def(
+        "linear_backward",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> grad_output, py::array_t<float> input,
+           py::array_t<float> weights) -> py::dict {
+            auto gBuf = grad_output.request();
+            auto iBuf = input.request();
+            auto wBuf = weights.request();
+
+            auto [batchSeq, outputDim] = extractBatchAndLastDim(gBuf);
+            uint32_t inputDim = static_cast<uint32_t>(
+                iBuf.shape[iBuf.ndim - 1]);
+
+            grilly::ops::LinearParams p{batchSeq, inputDim, outputDim, 1};
+
+            py::array_t<float> gradInput(iBuf.shape);
+            py::array_t<float> gradWeight(wBuf.shape);
+            py::array_t<float> gradBias({static_cast<py::ssize_t>(outputDim)});
+
+            grilly::ops::linearBackward(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(gBuf.ptr),
+                static_cast<const float*>(iBuf.ptr),
+                static_cast<const float*>(wBuf.ptr),
+                static_cast<float*>(gradInput.request().ptr),
+                static_cast<float*>(gradWeight.request().ptr),
+                static_cast<float*>(gradBias.request().ptr), p);
+
+            py::dict result;
+            result["grad_input"] = gradInput;
+            result["grad_weight"] = gradWeight;
+            result["grad_bias"] = gradBias;
+            return result;
+        },
+        py::arg("device"), py::arg("grad_output"), py::arg("input"),
+        py::arg("weights"),
+        "GPU linear backward: grad_input, grad_weight, grad_bias");
+
+    // ── Dropout ─────────────────────────────────────────────────────────
+    m.def(
+        "dropout",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input, py::array_t<float> random_mask,
+           float p, bool training) -> py::array_t<float> {
+            auto inBuf = input.request();
+            uint32_t total = 1;
+            for (int i = 0; i < inBuf.ndim; ++i)
+                total *= static_cast<uint32_t>(inBuf.shape[i]);
+
+            py::array_t<float> result(inBuf.shape);
+            grilly::ops::dropout(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<const float*>(random_mask.request().ptr),
+                static_cast<float*>(result.request().ptr),
+                total, p, training);
+            return result;
+        },
+        py::arg("device"), py::arg("input"), py::arg("random_mask"),
+        py::arg("p") = 0.5f, py::arg("training") = true,
+        "GPU dropout with inverted scaling");
+
+    // ── Conv2d backward ─────────────────────────────────────────────────
+    m.def(
+        "conv2d_backward_input",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> grad_output, py::array_t<float> weight,
+           std::vector<uint32_t> input_shape,
+           std::vector<uint32_t> stride, std::vector<uint32_t> padding,
+           std::vector<uint32_t> dilation,
+           uint32_t groups) -> py::array_t<float> {
+            auto gBuf = grad_output.request();
+            auto wBuf = weight.request();
+
+            uint32_t batchSize  = input_shape[0];
+            uint32_t inChannels = input_shape[1];
+            uint32_t inH        = input_shape[2];
+            uint32_t inW        = input_shape[3];
+            uint32_t outChannels = static_cast<uint32_t>(gBuf.shape[1]);
+            uint32_t outH        = static_cast<uint32_t>(gBuf.shape[2]);
+            uint32_t outW        = static_cast<uint32_t>(gBuf.shape[3]);
+            uint32_t kH          = static_cast<uint32_t>(wBuf.shape[2]);
+            uint32_t kW          = static_cast<uint32_t>(wBuf.shape[3]);
+
+            uint32_t sH = stride.size() >= 1 ? stride[0] : 1;
+            uint32_t sW = stride.size() >= 2 ? stride[1] : sH;
+            uint32_t pH = padding.size() >= 1 ? padding[0] : 0;
+            uint32_t pW = padding.size() >= 2 ? padding[1] : pH;
+            uint32_t dH = dilation.size() >= 1 ? dilation[0] : 1;
+            uint32_t dW = dilation.size() >= 2 ? dilation[1] : dH;
+
+            grilly::ops::Conv2dBackwardInputParams p{
+                batchSize, inChannels, inH, inW, outChannels, outH, outW,
+                kH, kW, sH, sW, pH, pW, dH, dW, groups};
+
+            py::array_t<float> result({
+                static_cast<py::ssize_t>(batchSize),
+                static_cast<py::ssize_t>(inChannels),
+                static_cast<py::ssize_t>(inH),
+                static_cast<py::ssize_t>(inW)});
+
+            grilly::ops::conv2dBackwardInput(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(gBuf.ptr),
+                static_cast<const float*>(wBuf.ptr),
+                static_cast<float*>(result.request().ptr), p);
+
+            return result;
+        },
+        py::arg("device"), py::arg("grad_output"), py::arg("weight"),
+        py::arg("input_shape"),
+        py::arg("stride") = std::vector<uint32_t>{1, 1},
+        py::arg("padding") = std::vector<uint32_t>{0, 0},
+        py::arg("dilation") = std::vector<uint32_t>{1, 1},
+        py::arg("groups") = 1,
+        "GPU Conv2d backward w.r.t. input");
+
+    m.def(
+        "conv2d_backward_weight",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> grad_output, py::array_t<float> input,
+           std::vector<uint32_t> weight_shape,
+           std::vector<uint32_t> stride, std::vector<uint32_t> padding,
+           std::vector<uint32_t> dilation,
+           uint32_t groups, bool has_bias) -> py::dict {
+            auto gBuf = grad_output.request();
+            auto iBuf = input.request();
+
+            uint32_t batchSize  = static_cast<uint32_t>(iBuf.shape[0]);
+            uint32_t inChannels = static_cast<uint32_t>(iBuf.shape[1]);
+            uint32_t inH        = static_cast<uint32_t>(iBuf.shape[2]);
+            uint32_t inW        = static_cast<uint32_t>(iBuf.shape[3]);
+            uint32_t outChannels = weight_shape[0];
+            uint32_t outH        = static_cast<uint32_t>(gBuf.shape[2]);
+            uint32_t outW        = static_cast<uint32_t>(gBuf.shape[3]);
+            uint32_t kH          = weight_shape[2];
+            uint32_t kW          = weight_shape[3];
+
+            uint32_t sH = stride.size() >= 1 ? stride[0] : 1;
+            uint32_t sW = stride.size() >= 2 ? stride[1] : sH;
+            uint32_t pH = padding.size() >= 1 ? padding[0] : 0;
+            uint32_t pW = padding.size() >= 2 ? padding[1] : pH;
+            uint32_t dH = dilation.size() >= 1 ? dilation[0] : 1;
+            uint32_t dW = dilation.size() >= 2 ? dilation[1] : dH;
+
+            grilly::ops::Conv2dBackwardWeightParams p{
+                batchSize, inChannels, inH, inW, outChannels, outH, outW,
+                kH, kW, sH, sW, pH, pW, dH, dW, groups,
+                has_bias ? 1u : 0u};
+
+            py::array_t<float> gradWeight({
+                static_cast<py::ssize_t>(weight_shape[0]),
+                static_cast<py::ssize_t>(weight_shape[1]),
+                static_cast<py::ssize_t>(weight_shape[2]),
+                static_cast<py::ssize_t>(weight_shape[3])});
+
+            py::array_t<float> gradBias(
+                has_bias ? std::vector<py::ssize_t>{
+                    static_cast<py::ssize_t>(outChannels)}
+                : std::vector<py::ssize_t>{1});
+
+            grilly::ops::conv2dBackwardWeight(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(gBuf.ptr),
+                static_cast<const float*>(iBuf.ptr),
+                static_cast<float*>(gradWeight.request().ptr),
+                has_bias ? static_cast<float*>(gradBias.request().ptr)
+                         : nullptr,
+                p);
+
+            py::dict result;
+            result["grad_weight"] = gradWeight;
+            if (has_bias) result["grad_bias"] = gradBias;
+            return result;
+        },
+        py::arg("device"), py::arg("grad_output"), py::arg("input"),
+        py::arg("weight_shape"),
+        py::arg("stride") = std::vector<uint32_t>{1, 1},
+        py::arg("padding") = std::vector<uint32_t>{0, 0},
+        py::arg("dilation") = std::vector<uint32_t>{1, 1},
+        py::arg("groups") = 1, py::arg("has_bias") = false,
+        "GPU Conv2d backward w.r.t. weight and bias");
+
+    // ── Attention decomposed ops ────────────────────────────────────────
+    m.def(
+        "attention_scores",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> Q, py::array_t<float> K,
+           float scale) -> py::array_t<float> {
+            auto qBuf = Q.request();
+            if (qBuf.ndim != 4)
+                throw std::runtime_error("Q must be 4D (B, H, S, D)");
+
+            uint32_t B = static_cast<uint32_t>(qBuf.shape[0]);
+            uint32_t H = static_cast<uint32_t>(qBuf.shape[1]);
+            uint32_t S = static_cast<uint32_t>(qBuf.shape[2]);
+            uint32_t D = static_cast<uint32_t>(qBuf.shape[3]);
+
+            if (scale == 0.0f) scale = 1.0f / std::sqrt(float(D));
+
+            py::array_t<float> result({
+                static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(H),
+                static_cast<py::ssize_t>(S), static_cast<py::ssize_t>(S)});
+
+            grilly::ops::AttentionScoresParams p{B, S, H, D, scale, 0};
+            grilly::ops::attentionScores(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(qBuf.ptr),
+                static_cast<const float*>(K.request().ptr),
+                static_cast<float*>(result.request().ptr), p);
+            return result;
+        },
+        py::arg("device"), py::arg("Q"), py::arg("K"),
+        py::arg("scale") = 0.0f,
+        "GPU attention scores: Q @ K^T / sqrt(d_h)");
+
+    m.def(
+        "attention_mask",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> scores,
+           std::optional<py::array_t<float>> mask,
+           bool causal, float mask_value) -> py::array_t<float> {
+            auto sBuf = scores.request();
+            if (sBuf.ndim != 4)
+                throw std::runtime_error("scores must be 4D (B, H, S, S)");
+
+            uint32_t B = static_cast<uint32_t>(sBuf.shape[0]);
+            uint32_t H = static_cast<uint32_t>(sBuf.shape[1]);
+            uint32_t S = static_cast<uint32_t>(sBuf.shape[2]);
+
+            py::array_t<float> result(sBuf.shape);
+            std::memcpy(result.mutable_data(), sBuf.ptr,
+                        sBuf.size * sizeof(float));
+
+            const float* maskPtr = nullptr;
+            if (mask.has_value())
+                maskPtr = static_cast<const float*>(mask->request().ptr);
+
+            grilly::ops::AttentionMaskParams p{
+                B, H, S, causal ? 1u : 0u, mask_value};
+            grilly::ops::attentionMask(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<float*>(result.mutable_data()), maskPtr, p);
+            return result;
+        },
+        py::arg("device"), py::arg("scores"),
+        py::arg("mask") = py::none(),
+        py::arg("causal") = true, py::arg("mask_value") = -1e9f,
+        "GPU attention mask (causal or custom)");
+
+    m.def(
+        "attention_output",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> weights, py::array_t<float> V) -> py::array_t<float> {
+            auto wBuf = weights.request();
+            auto vBuf = V.request();
+            if (wBuf.ndim != 4 || vBuf.ndim != 4)
+                throw std::runtime_error("weights and V must be 4D");
+
+            uint32_t B = static_cast<uint32_t>(vBuf.shape[0]);
+            uint32_t H = static_cast<uint32_t>(vBuf.shape[1]);
+            uint32_t S = static_cast<uint32_t>(vBuf.shape[2]);
+            uint32_t D = static_cast<uint32_t>(vBuf.shape[3]);
+
+            py::array_t<float> result({
+                static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(H),
+                static_cast<py::ssize_t>(S), static_cast<py::ssize_t>(D)});
+
+            grilly::ops::AttentionOutputParams p{B, S, H, D};
+            grilly::ops::attentionOutput(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(wBuf.ptr),
+                static_cast<const float*>(vBuf.ptr),
+                static_cast<float*>(result.request().ptr), p);
+            return result;
+        },
+        py::arg("device"), py::arg("weights"), py::arg("V"),
+        "GPU attention output: softmax(scores) @ V");
+
+    m.def(
+        "attention_concat_heads",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> mh_output) -> py::array_t<float> {
+            auto inBuf = mh_output.request();
+            if (inBuf.ndim != 4)
+                throw std::runtime_error("input must be 4D (B, H, S, D)");
+
+            uint32_t B = static_cast<uint32_t>(inBuf.shape[0]);
+            uint32_t H = static_cast<uint32_t>(inBuf.shape[1]);
+            uint32_t S = static_cast<uint32_t>(inBuf.shape[2]);
+            uint32_t D = static_cast<uint32_t>(inBuf.shape[3]);
+
+            py::array_t<float> result({
+                static_cast<py::ssize_t>(B),
+                static_cast<py::ssize_t>(S),
+                static_cast<py::ssize_t>(H * D)});
+
+            grilly::ops::ConcatHeadsParams p{B, S, H, D};
+            grilly::ops::attentionConcatHeads(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(result.request().ptr), p);
+            return result;
+        },
+        py::arg("device"), py::arg("mh_output"),
+        "GPU concat multi-head attention output: (B,H,S,D) -> (B,S,H*D)");
+
+    m.def(
+        "rope",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input,
+           std::optional<py::array_t<float>> cos_table,
+           std::optional<py::array_t<float>> sin_table,
+           float base, float scaling) -> py::array_t<float> {
+            auto inBuf = input.request();
+            if (inBuf.ndim != 4)
+                throw std::runtime_error("input must be 4D (B, H, S, D)");
+
+            uint32_t B = static_cast<uint32_t>(inBuf.shape[0]);
+            uint32_t H = static_cast<uint32_t>(inBuf.shape[1]);
+            uint32_t S = static_cast<uint32_t>(inBuf.shape[2]);
+            uint32_t D = static_cast<uint32_t>(inBuf.shape[3]);
+
+            bool precomputed = cos_table.has_value() && sin_table.has_value();
+            const float* cosPtr = precomputed ?
+                static_cast<const float*>(cos_table->request().ptr) : nullptr;
+            const float* sinPtr = precomputed ?
+                static_cast<const float*>(sin_table->request().ptr) : nullptr;
+
+            py::array_t<float> result(inBuf.shape);
+            grilly::ops::RoPEParams p{
+                B, S, H, D, base, precomputed ? 1u : 0u, scaling};
+            grilly::ops::applyRoPE(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(result.request().ptr),
+                cosPtr, sinPtr, p);
+            return result;
+        },
+        py::arg("device"), py::arg("input"),
+        py::arg("cos_table") = py::none(), py::arg("sin_table") = py::none(),
+        py::arg("base") = 10000.0f, py::arg("scaling") = 1.0f,
+        "GPU Rotary Position Embeddings");
+
+    // ── Pooling ops ─────────────────────────────────────────────────────
+    m.def(
+        "maxpool2d",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input,
+           std::vector<uint32_t> kernel_size,
+           std::vector<uint32_t> stride,
+           std::vector<uint32_t> padding,
+           std::vector<uint32_t> dilation) -> py::dict {
+            auto inBuf = input.request();
+            if (inBuf.ndim != 4)
+                throw std::runtime_error("input must be 4D (B, C, H, W)");
+
+            uint32_t B  = static_cast<uint32_t>(inBuf.shape[0]);
+            uint32_t C  = static_cast<uint32_t>(inBuf.shape[1]);
+            uint32_t iH = static_cast<uint32_t>(inBuf.shape[2]);
+            uint32_t iW = static_cast<uint32_t>(inBuf.shape[3]);
+            uint32_t kH = kernel_size[0];
+            uint32_t kW = kernel_size.size() > 1 ? kernel_size[1] : kH;
+            uint32_t sH = stride[0]; uint32_t sW = stride.size() > 1 ? stride[1] : sH;
+            uint32_t pH = padding[0]; uint32_t pW = padding.size() > 1 ? padding[1] : pH;
+            uint32_t dH = dilation[0]; uint32_t dW = dilation.size() > 1 ? dilation[1] : dH;
+
+            uint32_t oH = grilly::ops::convOutputSize(iH, kH, sH, pH, dH);
+            uint32_t oW = grilly::ops::convOutputSize(iW, kW, sW, pW, dW);
+
+            py::array_t<float> result({
+                static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(C),
+                static_cast<py::ssize_t>(oH), static_cast<py::ssize_t>(oW)});
+            py::array_t<uint32_t> indices({
+                static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(C),
+                static_cast<py::ssize_t>(oH), static_cast<py::ssize_t>(oW)});
+
+            grilly::ops::MaxPool2dParams p{B, C, iH, iW, oH, oW,
+                                           kH, kW, sH, sW, pH, pW, dH, dW};
+            grilly::ops::maxpool2dForward(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(result.request().ptr),
+                static_cast<uint32_t*>(indices.request().ptr), p);
+
+            py::dict out;
+            out["output"] = result;
+            out["indices"] = indices;
+            return out;
+        },
+        py::arg("device"), py::arg("input"),
+        py::arg("kernel_size"), py::arg("stride") = std::vector<uint32_t>{2, 2},
+        py::arg("padding") = std::vector<uint32_t>{0, 0},
+        py::arg("dilation") = std::vector<uint32_t>{1, 1},
+        "GPU MaxPool2d forward");
+
+    m.def(
+        "avgpool2d",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input,
+           std::vector<uint32_t> kernel_size,
+           std::vector<uint32_t> stride,
+           std::vector<uint32_t> padding,
+           bool count_include_pad) -> py::array_t<float> {
+            auto inBuf = input.request();
+            if (inBuf.ndim != 4)
+                throw std::runtime_error("input must be 4D");
+
+            uint32_t B  = static_cast<uint32_t>(inBuf.shape[0]);
+            uint32_t C  = static_cast<uint32_t>(inBuf.shape[1]);
+            uint32_t iH = static_cast<uint32_t>(inBuf.shape[2]);
+            uint32_t iW = static_cast<uint32_t>(inBuf.shape[3]);
+            uint32_t kH = kernel_size[0];
+            uint32_t kW = kernel_size.size() > 1 ? kernel_size[1] : kH;
+            uint32_t sH = stride[0]; uint32_t sW = stride.size() > 1 ? stride[1] : sH;
+            uint32_t pH = padding[0]; uint32_t pW = padding.size() > 1 ? padding[1] : pH;
+
+            uint32_t oH = grilly::ops::convOutputSize(iH, kH, sH, pH, 1);
+            uint32_t oW = grilly::ops::convOutputSize(iW, kW, sW, pW, 1);
+
+            py::array_t<float> result({
+                static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(C),
+                static_cast<py::ssize_t>(oH), static_cast<py::ssize_t>(oW)});
+
+            grilly::ops::AvgPool2dParams p{
+                B, C, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW,
+                count_include_pad ? 1u : 0u};
+            grilly::ops::avgpool2dForward(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(result.request().ptr), p);
+            return result;
+        },
+        py::arg("device"), py::arg("input"),
+        py::arg("kernel_size"), py::arg("stride") = std::vector<uint32_t>{2, 2},
+        py::arg("padding") = std::vector<uint32_t>{0, 0},
+        py::arg("count_include_pad") = true,
+        "GPU AvgPool2d forward");
+
+    // ── BatchNorm2d ─────────────────────────────────────────────────────
+    m.def(
+        "batchnorm2d_forward",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input,
+           py::array_t<float> gamma, py::array_t<float> beta,
+           py::array_t<float> running_mean, py::array_t<float> running_var,
+           float eps, float momentum, bool training) -> py::dict {
+            auto inBuf = input.request();
+            if (inBuf.ndim != 4)
+                throw std::runtime_error("input must be 4D (B, C, H, W)");
+
+            uint32_t B = static_cast<uint32_t>(inBuf.shape[0]);
+            uint32_t C = static_cast<uint32_t>(inBuf.shape[1]);
+            uint32_t H = static_cast<uint32_t>(inBuf.shape[2]);
+            uint32_t W = static_cast<uint32_t>(inBuf.shape[3]);
+
+            py::array_t<float> output(inBuf.shape);
+            py::array_t<float> rmOut(running_mean.request().shape);
+            py::array_t<float> rvOut(running_var.request().shape);
+            py::array_t<float> bMean({static_cast<py::ssize_t>(C)});
+            py::array_t<float> bVar({static_cast<py::ssize_t>(C)});
+
+            std::memcpy(rmOut.mutable_data(), running_mean.data(),
+                        C * sizeof(float));
+            std::memcpy(rvOut.mutable_data(), running_var.data(),
+                        C * sizeof(float));
+
+            grilly::ops::BatchNorm2dForwardParams p{
+                B, C, H, W, eps, momentum, training ? 1u : 0u, 1u};
+            grilly::ops::batchnorm2dForward(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(output.request().ptr),
+                static_cast<const float*>(gamma.request().ptr),
+                static_cast<const float*>(beta.request().ptr),
+                static_cast<float*>(rmOut.mutable_data()),
+                static_cast<float*>(rvOut.mutable_data()),
+                static_cast<float*>(bMean.mutable_data()),
+                static_cast<float*>(bVar.mutable_data()), p);
+
+            py::dict result;
+            result["output"] = output;
+            result["running_mean"] = rmOut;
+            result["running_var"] = rvOut;
+            result["batch_mean"] = bMean;
+            result["batch_var"] = bVar;
+            return result;
+        },
+        py::arg("device"), py::arg("input"),
+        py::arg("gamma"), py::arg("beta"),
+        py::arg("running_mean"), py::arg("running_var"),
+        py::arg("eps") = 1e-5f, py::arg("momentum") = 0.1f,
+        py::arg("training") = true,
+        "GPU BatchNorm2d forward");
+
+    // ── Cross-entropy loss ──────────────────────────────────────────────
+    m.def(
+        "cross_entropy_loss",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> logits, py::array_t<uint32_t> targets,
+           float label_smoothing) -> py::array_t<float> {
+            auto lBuf = logits.request();
+
+            uint32_t batchSize, seqLen, vocabSize;
+            if (lBuf.ndim == 2) {
+                batchSize = static_cast<uint32_t>(lBuf.shape[0]);
+                seqLen = 1;
+                vocabSize = static_cast<uint32_t>(lBuf.shape[1]);
+            } else if (lBuf.ndim == 3) {
+                batchSize = static_cast<uint32_t>(lBuf.shape[0]);
+                seqLen = static_cast<uint32_t>(lBuf.shape[1]);
+                vocabSize = static_cast<uint32_t>(lBuf.shape[2]);
+            } else {
+                throw std::runtime_error("logits must be 2D or 3D");
+            }
+
+            uint32_t totalPos = batchSize * seqLen;
+            py::array_t<float> losses(totalPos);
+
+            grilly::ops::CrossEntropyParams p{
+                batchSize, seqLen, vocabSize, 0, label_smoothing};
+            grilly::ops::crossEntropyLoss(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(lBuf.ptr),
+                static_cast<const uint32_t*>(targets.request().ptr),
+                static_cast<float*>(losses.request().ptr), p);
+            return losses;
+        },
+        py::arg("device"), py::arg("logits"), py::arg("targets"),
+        py::arg("label_smoothing") = 0.0f,
+        "GPU cross-entropy loss forward");
+
+    m.def(
+        "cross_entropy_backward",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> logits,
+           py::array_t<uint32_t> targets) -> py::array_t<float> {
+            auto lBuf = logits.request();
+            uint32_t batchSize = static_cast<uint32_t>(lBuf.shape[0]);
+            uint32_t numClasses = static_cast<uint32_t>(lBuf.shape[1]);
+
+            py::array_t<float> gradLogits(lBuf.shape);
+
+            grilly::ops::CrossEntropyBackwardParams p{batchSize, numClasses};
+            grilly::ops::crossEntropyBackward(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(lBuf.ptr),
+                static_cast<const uint32_t*>(targets.request().ptr),
+                static_cast<float*>(gradLogits.request().ptr), p);
+            return gradLogits;
+        },
+        py::arg("device"), py::arg("logits"), py::arg("targets"),
+        "GPU cross-entropy backward");
+
+    // ── Optimizer GPU ops ───────────────────────────────────────────────
+    m.def(
+        "adam_update",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> weights, py::array_t<float> grad,
+           py::array_t<float> m_state, py::array_t<float> v_state,
+           float lr, float beta1, float beta2, float eps,
+           float beta1_t, float beta2_t, bool clear_grad) -> py::dict {
+            auto wBuf = weights.request();
+            uint32_t total = 1;
+            for (int i = 0; i < wBuf.ndim; ++i)
+                total *= static_cast<uint32_t>(wBuf.shape[i]);
+
+            py::array_t<float> wOut(wBuf.shape);
+            py::array_t<float> gOut(wBuf.shape);
+            py::array_t<float> mOut(wBuf.shape);
+            py::array_t<float> vOut(wBuf.shape);
+
+            std::memcpy(wOut.mutable_data(), wBuf.ptr, total * sizeof(float));
+            std::memcpy(gOut.mutable_data(), grad.data(), total * sizeof(float));
+            std::memcpy(mOut.mutable_data(), m_state.data(), total * sizeof(float));
+            std::memcpy(vOut.mutable_data(), v_state.data(), total * sizeof(float));
+
+            grilly::ops::AdamParams p{total, lr, beta1, beta2, eps,
+                                      beta1_t, beta2_t, clear_grad ? 1u : 0u};
+            grilly::ops::adamUpdate(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<float*>(wOut.mutable_data()),
+                static_cast<float*>(gOut.mutable_data()),
+                static_cast<float*>(mOut.mutable_data()),
+                static_cast<float*>(vOut.mutable_data()), p);
+
+            py::dict result;
+            result["weights"] = wOut;
+            result["grad"] = gOut;
+            result["m"] = mOut;
+            result["v"] = vOut;
+            return result;
+        },
+        py::arg("device"), py::arg("weights"), py::arg("grad"),
+        py::arg("m"), py::arg("v"),
+        py::arg("lr") = 1e-3f, py::arg("beta1") = 0.9f,
+        py::arg("beta2") = 0.999f, py::arg("eps") = 1e-8f,
+        py::arg("beta1_t") = 0.9f, py::arg("beta2_t") = 0.999f,
+        py::arg("clear_grad") = false,
+        "GPU Adam optimizer step");
+
+    m.def(
+        "adamw_update",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> weights, py::array_t<float> grad,
+           py::array_t<float> m_state, py::array_t<float> v_state,
+           float lr, float beta1, float beta2, float eps,
+           float weight_decay,
+           float beta1_t, float beta2_t, bool clear_grad) -> py::dict {
+            auto wBuf = weights.request();
+            uint32_t total = 1;
+            for (int i = 0; i < wBuf.ndim; ++i)
+                total *= static_cast<uint32_t>(wBuf.shape[i]);
+
+            py::array_t<float> wOut(wBuf.shape);
+            py::array_t<float> gOut(wBuf.shape);
+            py::array_t<float> mOut(wBuf.shape);
+            py::array_t<float> vOut(wBuf.shape);
+
+            std::memcpy(wOut.mutable_data(), wBuf.ptr, total * sizeof(float));
+            std::memcpy(gOut.mutable_data(), grad.data(), total * sizeof(float));
+            std::memcpy(mOut.mutable_data(), m_state.data(), total * sizeof(float));
+            std::memcpy(vOut.mutable_data(), v_state.data(), total * sizeof(float));
+
+            grilly::ops::AdamWParams p{total, lr, beta1, beta2, eps,
+                                       weight_decay, beta1_t, beta2_t,
+                                       clear_grad ? 1u : 0u};
+            grilly::ops::adamwUpdate(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<float*>(wOut.mutable_data()),
+                static_cast<float*>(gOut.mutable_data()),
+                static_cast<float*>(mOut.mutable_data()),
+                static_cast<float*>(vOut.mutable_data()), p);
+
+            py::dict result;
+            result["weights"] = wOut;
+            result["grad"] = gOut;
+            result["m"] = mOut;
+            result["v"] = vOut;
+            return result;
+        },
+        py::arg("device"), py::arg("weights"), py::arg("grad"),
+        py::arg("m"), py::arg("v"),
+        py::arg("lr") = 1e-3f, py::arg("beta1") = 0.9f,
+        py::arg("beta2") = 0.999f, py::arg("eps") = 1e-8f,
+        py::arg("weight_decay") = 0.01f,
+        py::arg("beta1_t") = 0.9f, py::arg("beta2_t") = 0.999f,
+        py::arg("clear_grad") = false,
+        "GPU AdamW optimizer step");
+
+    // ── Embedding lookup ────────────────────────────────────────────────
+    m.def(
+        "embedding_lookup",
+        [](GrillyCoreContext& ctx,
+           py::array_t<uint32_t> token_ids,
+           py::array_t<float> embeddings) -> py::array_t<float> {
+            auto idBuf = token_ids.request();
+            auto eBuf = embeddings.request();
+
+            uint32_t batchSize = 1, seqLen;
+            if (idBuf.ndim == 1) {
+                seqLen = static_cast<uint32_t>(idBuf.shape[0]);
+            } else {
+                batchSize = static_cast<uint32_t>(idBuf.shape[0]);
+                seqLen = static_cast<uint32_t>(idBuf.shape[1]);
+            }
+            uint32_t vocabSize = static_cast<uint32_t>(eBuf.shape[0]);
+            uint32_t embDim = static_cast<uint32_t>(eBuf.shape[1]);
+
+            py::array_t<float> result({
+                static_cast<py::ssize_t>(batchSize),
+                static_cast<py::ssize_t>(seqLen),
+                static_cast<py::ssize_t>(embDim)});
+
+            grilly::ops::EmbeddingParams p{batchSize, seqLen, vocabSize, embDim};
+            grilly::ops::embeddingLookup(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const uint32_t*>(idBuf.ptr),
+                static_cast<const float*>(eBuf.ptr),
+                static_cast<float*>(result.request().ptr), p);
+
+            if (idBuf.ndim == 1)
+                result = result.reshape({
+                    static_cast<py::ssize_t>(seqLen),
+                    static_cast<py::ssize_t>(embDim)});
+            return result;
+        },
+        py::arg("device"), py::arg("token_ids"), py::arg("embeddings"),
+        "GPU embedding table lookup");
+
+    // ── Mean pooling ────────────────────────────────────────────────────
+    m.def(
+        "mean_pool",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input) -> py::array_t<float> {
+            auto inBuf = input.request();
+            if (inBuf.ndim != 3)
+                throw std::runtime_error("input must be 3D (B, S, D)");
+
+            uint32_t B = static_cast<uint32_t>(inBuf.shape[0]);
+            uint32_t S = static_cast<uint32_t>(inBuf.shape[1]);
+            uint32_t D = static_cast<uint32_t>(inBuf.shape[2]);
+
+            py::array_t<float> result({
+                static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(D)});
+
+            grilly::ops::MeanPoolParams p{B, S, D};
+            grilly::ops::meanPool(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(result.request().ptr), p);
+            return result;
+        },
+        py::arg("device"), py::arg("input"),
+        "GPU mean pooling over sequence dim: (B,S,D) -> (B,D)");
 }

@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tensors and Operations &mdash; Grilly Howto</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --accent: #f78166; --accent2: #79c0ff; --accent3: #56d364; --accent4: #e3b341;
+      --text: #e6edf3; --muted: #8b949e;
+    }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.6; }
+    a { color: var(--accent2); text-decoration: none; } a:hover { text-decoration: underline; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 0; }
+    .header-inner { max-width: 900px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 16px; }
+    .logo { font-size: 22px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
+    .logo:hover { text-decoration: none; }
+    .tagline { color: var(--muted); font-size: 14px; }
+    main { max-width: 900px; margin: 0 auto; padding: 40px 24px 64px; }
+    footer { border-top: 1px solid var(--border); padding: 32px 24px; text-align: center; color: var(--muted); font-size: 13px; }
+    footer a { color: var(--muted); } footer a:hover { color: var(--text); }
+    .breadcrumb { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
+    .breadcrumb a { color: var(--muted); } .breadcrumb a:hover { color: var(--text); }
+    h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 8px; }
+    .lead { color: var(--muted); font-size: 17px; margin-bottom: 40px; }
+    h2 { font-size: 22px; font-weight: 700; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    h3 { font-size: 17px; font-weight: 600; margin: 32px 0 12px; }
+    p { margin-bottom: 16px; }
+    section { margin-bottom: 24px; }
+    .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+    .code-header { background: #1c2128; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+    .code-lang { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .code-block pre { padding: 20px 24px; overflow-x: auto; margin: 0; }
+    .code-block code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 13.5px; line-height: 1.55; color: var(--text); }
+    .kw { color: #f97583; } .str { color: #9ecbff; } .num { color: #79c0ff; }
+    .cmt { color: #6a737d; font-style: italic; } .fn { color: #b392f0; }
+    .cls { color: #e3b341; } .const { color: #79c0ff; }
+    .output-block { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+    .output-header { background: #1a1e24; padding: 6px 16px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .output-block pre { padding: 16px 24px; margin: 0; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 13px; line-height: 1.5; color: var(--accent3); }
+    .callout { border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; font-size: 14px; line-height: 1.6; }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .callout.note { background: #1c2230; border-left: 4px solid var(--accent2); }
+    .callout.note strong { color: var(--accent2); }
+    .callout.warn { background: #2a1e0f; border-left: 4px solid var(--accent4); }
+    .callout.warn strong { color: var(--accent4); }
+    .callout.tip { background: #122117; border-left: 4px solid var(--accent3); }
+    .callout.tip strong { color: var(--accent3); }
+    .page-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
+    .nav-btn { display: inline-block; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; border: 1px solid var(--border); color: var(--text); transition: border-color 0.2s; }
+    .nav-btn:hover { border-color: var(--accent); text-decoration: none; }
+    .nav-btn.home { color: var(--muted); }
+    /* ── Sidebar navigation ──────────────────── */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 232px;
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      padding: 80px 0 32px;
+      overflow-y: auto;
+      z-index: 5;
+    }
+    .sidebar-group { padding: 0 12px; margin-bottom: 4px; border: none; }
+    .sidebar-label {
+      display: flex;
+      align-items: center;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: #484f58;
+      padding: 6px 12px;
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      border-radius: 4px;
+      transition: color .15s;
+    }
+    .sidebar-label:hover { color: var(--muted); }
+    .sidebar-label::-webkit-details-marker { display: none; }
+    .sidebar-label::after {
+      content: '';
+      margin-left: auto;
+      border: solid #484f58;
+      border-width: 0 1.5px 1.5px 0;
+      padding: 2.5px;
+      transform: rotate(-45deg);
+      transition: transform .2s;
+    }
+    details.sidebar-group[open] > .sidebar-label::after { transform: rotate(45deg); }
+    details.sidebar-group[open] { margin-bottom: 12px; }
+    .sidebar a {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      margin: 1px 0;
+      font-size: 13px;
+      color: var(--muted);
+      border-radius: 6px;
+      transition: color .15s, background .15s;
+    }
+    .sidebar a:hover {
+      color: var(--text);
+      background: rgba(255,255,255,.04);
+      text-decoration: none;
+    }
+    .sidebar a.active {
+      color: var(--accent);
+      background: rgba(247,129,102,.08);
+      font-weight: 600;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .sidebar .sn {
+      font-family: 'JetBrains Mono', Consolas, monospace;
+      font-size: 10px;
+      min-width: 16px;
+      color: #484f58;
+    }
+    .sidebar a.active .sn { color: var(--accent); opacity: .7; }
+    header { position: relative; z-index: 10; }
+    main { margin-left: 252px; }
+    footer { margin-left: 252px; }
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+      main, footer { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a href="index.html" class="logo">Grilly</a>
+      <span class="tagline">GPU Neural Networks via Vulkan</span>
+    </div>
+  </header>
+
+  <nav class="sidebar">
+    <details class="sidebar-group" open>
+      <summary class="sidebar-label">Fundamentals</summary>
+      <a href="01-tensors.html" class="active"><span class="sn">01</span> Tensors</a>
+      <a href="02-gpu-acceleration.html"><span class="sn">02</span> GPU Acceleration</a>
+    </details>
+    <details class="sidebar-group">
+      <summary class="sidebar-label">Training</summary>
+      <a href="03-neural-networks.html"><span class="sn">03</span> Neural Networks</a>
+      <a href="04-datasets-dataloaders.html"><span class="sn">04</span> Datasets</a>
+    </details>
+    <details class="sidebar-group">
+      <summary class="sidebar-label">Architectures</summary>
+      <a href="05-cnns.html"><span class="sn">05</span> CNNs</a>
+      <a href="06-spiking-neural-networks.html"><span class="sn">06</span> Spiking NNs</a>
+      <a href="07-advanced-features.html"><span class="sn">07</span> Advanced</a>
+    </details>
+  </nav>
+
+  <main>
+    <div class="breadcrumb"><a href="index.html">Howtos</a> / Tensors and Operations</div>
+    <h1>Tensors and Operations</h1>
+    <p class="lead">Grilly uses plain numpy arrays as its core data format. No custom tensor class needed for most work.</p>
+
+    <section>
+      <h2>The Data Format</h2>
+      <p>Unlike PyTorch's <code>torch.Tensor</code>, grilly operates directly on <strong>numpy <code>float32</code> arrays</strong>. Every layer accepts and returns numpy arrays. The framework also provides PyTorch-style factory functions for convenience:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> grilly
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+<span class="cmt"># 1D tensor (vector)</span>
+x = grilly.<span class="fn">tensor</span>([<span class="num">1.0</span>, <span class="num">2.0</span>, <span class="num">3.0</span>])
+<span class="fn">print</span>(<span class="str">"1D:"</span>, x, x.dtype)
+
+<span class="cmt"># 2D tensor (matrix)</span>
+m = grilly.<span class="fn">tensor</span>([[<span class="num">1</span>, <span class="num">2</span>], [<span class="num">3</span>, <span class="num">4</span>]])
+<span class="fn">print</span>(<span class="str">"2D:"</span>, m)
+
+<span class="cmt"># Factory functions</span>
+z = grilly.<span class="fn">zeros</span>(<span class="num">2</span>, <span class="num">3</span>)     <span class="cmt"># shape (2, 3), all zeros</span>
+o = grilly.<span class="fn">ones</span>(<span class="num">2</span>, <span class="num">3</span>)      <span class="cmt"># shape (2, 3), all ones</span>
+r = grilly.<span class="fn">randn</span>(<span class="num">2</span>, <span class="num">3</span>)     <span class="cmt"># shape (2, 3), random normal</span>
+<span class="fn">print</span>(<span class="str">"Zeros:"</span>, z)
+<span class="fn">print</span>(<span class="str">"Ones:"</span>, o)
+<span class="fn">print</span>(<span class="str">"Random:"</span>, r)</code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>1D: [1. 2. 3.] float32
+2D: [[1. 2.]
+ [3. 4.]]
+Zeros: [[0. 0. 0.]
+ [0. 0. 0.]]
+Ones: [[1. 1. 1.]
+ [1. 1. 1.]]
+Random: [[-0.4532  1.2041  0.0893]
+ [ 0.7612 -0.3287  1.5140]]</pre>
+      </div>
+      <div class="callout note">
+        <strong>vs PyTorch</strong>
+        All of these return <code>np.ndarray</code> with <code>dtype=float32</code>. There is no <code>.cuda()</code> or <code>.to(device)</code> call needed for basic operations &mdash; data is always numpy until you opt into GPU mode with <code>VulkanTensor</code>.
+      </div>
+    </section>
+
+    <section>
+      <h2>Indexing and Slicing</h2>
+      <p>Since grilly tensors are numpy arrays, you get full numpy indexing, slicing, and fancy indexing for free:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+
+tensor = np.<span class="fn">array</span>([[<span class="num">1</span>, <span class="num">2</span>], [<span class="num">3</span>, <span class="num">4</span>], [<span class="num">5</span>, <span class="num">6</span>]], dtype=np.float32)
+
+<span class="cmt"># Single element</span>
+element = tensor[<span class="num">1</span>, <span class="num">0</span>]
+<span class="fn">print</span>(<span class="str">f"Element [1,0]: </span>{element}<span class="str">"</span>)
+
+<span class="cmt"># Slicing: first two rows</span>
+sliced = tensor[:<span class="num">2</span>, :]
+<span class="fn">print</span>(<span class="str">f"First two rows:\n</span>{sliced}<span class="str">"</span>)
+
+<span class="cmt"># Boolean mask</span>
+mask = tensor &gt; <span class="num">3</span>
+<span class="fn">print</span>(<span class="str">f"Elements &gt; 3: </span>{tensor[mask]}<span class="str">"</span>)
+
+<span class="cmt"># Fancy indexing</span>
+rows = np.<span class="fn">array</span>([<span class="num">0</span>, <span class="num">2</span>])
+<span class="fn">print</span>(<span class="str">f"Rows 0 and 2:\n</span>{tensor[rows]}<span class="str">"</span>)</code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>Element [1,0]: 3.0
+First two rows:
+[[1. 2.]
+ [3. 4.]]
+Elements > 3: [4. 5. 6.]
+Rows 0 and 2:
+[[1. 2.]
+ [5. 6.]]</pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Reshaping</h2>
+      <p>Reshape arrays without copying data. This is essential for adapting tensor dimensions between layers:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code>tensor = np.<span class="fn">array</span>([[<span class="num">1</span>, <span class="num">2</span>], [<span class="num">3</span>, <span class="num">4</span>], [<span class="num">5</span>, <span class="num">6</span>]], dtype=np.float32)
+
+<span class="cmt"># Reshape (3, 2) -> (2, 3)</span>
+reshaped = tensor.<span class="fn">reshape</span>(<span class="num">2</span>, <span class="num">3</span>)
+<span class="fn">print</span>(<span class="str">f"Reshaped (2x3):\n</span>{reshaped}<span class="str">"</span>)
+
+<span class="cmt"># Flatten to 1D</span>
+flat = tensor.<span class="fn">flatten</span>()
+<span class="fn">print</span>(<span class="str">f"Flat: </span>{flat}<span class="str">"</span>)
+
+<span class="cmt"># Transpose</span>
+t = tensor.T
+<span class="fn">print</span>(<span class="str">f"Transposed (2x3):\n</span>{t}<span class="str">"</span>)
+
+<span class="cmt"># Add/remove dimensions</span>
+expanded = np.<span class="fn">expand_dims</span>(tensor, axis=<span class="num">0</span>)  <span class="cmt"># (1, 3, 2)</span>
+squeezed = np.<span class="fn">squeeze</span>(expanded)              <span class="cmt"># (3, 2)</span>
+<span class="fn">print</span>(<span class="str">f"Expanded shape: </span>{expanded.shape}<span class="str">"</span>)
+<span class="fn">print</span>(<span class="str">f"Squeezed shape: </span>{squeezed.shape}<span class="str">"</span>)</code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>Reshaped (2x3):
+[[1. 2. 3.]
+ [4. 5. 6.]]
+Flat: [1. 2. 3. 4. 5. 6.]
+Transposed (2x3):
+[[1. 3. 5.]
+ [2. 4. 6.]]
+Expanded shape: (1, 3, 2)
+Squeezed shape: (3, 2)</pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Broadcasting and Matrix Multiplication</h2>
+      <p>Broadcasting lets you combine arrays of different shapes. Matrix multiplication is at the heart of every neural network layer:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+
+a = np.<span class="fn">array</span>([[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>], [<span class="num">4</span>, <span class="num">5</span>, <span class="num">6</span>]], dtype=np.float32)
+b = np.<span class="fn">array</span>([[<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>]], dtype=np.float32)
+
+<span class="cmt"># Broadcasting: (2, 3) + (1, 3) -> (2, 3)</span>
+result = a + b
+<span class="fn">print</span>(<span class="str">f"Broadcast add:\n</span>{result}<span class="str">"</span>)
+
+<span class="cmt"># Matrix multiplication: (2, 3) @ (3, 2) -> (2, 2)</span>
+matmul = a @ a.T
+<span class="fn">print</span>(<span class="str">f"A @ A^T:\n</span>{matmul}<span class="str">"</span>)
+
+<span class="cmt"># Element-wise operations</span>
+<span class="fn">print</span>(<span class="str">f"a * 2:\n</span>{a * <span class="num">2</span>}<span class="str">"</span>)
+<span class="fn">print</span>(<span class="str">f"np.sqrt(a):\n</span>{np.<span class="fn">sqrt</span>(a)}<span class="str">"</span>)</code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>Broadcast add:
+[[11. 22. 33.]
+ [14. 25. 36.]]
+A @ A^T:
+[[14. 32.]
+ [32. 77.]]
+a * 2:
+[[ 2.  4.  6.]
+ [ 8. 10. 12.]]
+np.sqrt(a):
+[[1.    1.414 1.732]
+ [2.    2.236 2.449]]</pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>VulkanTensor: GPU-Resident Data</h2>
+      <p><code>VulkanTensor</code> wraps a numpy array with an optional GPU buffer. When modules run in <code>gpu_mode</code>, data stays in VRAM between layers, avoiding PCIe round-trips:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly <span class="kw">import</span> <span class="cls">VulkanTensor</span>
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+<span class="cmt"># Create from numpy</span>
+data = np.<span class="fn">random.randn</span>(<span class="num">32</span>, <span class="num">128</span>).<span class="fn">astype</span>(np.float32)
+vt = <span class="cls">VulkanTensor</span>(data)
+
+<span class="cmt"># Factory methods</span>
+vt_zeros = <span class="cls">VulkanTensor</span>.<span class="fn">zeros</span>((<span class="num">32</span>, <span class="num">128</span>))
+vt_ones  = <span class="cls">VulkanTensor</span>.<span class="fn">ones</span>((<span class="num">16</span>, <span class="num">64</span>))
+vt_empty = <span class="cls">VulkanTensor</span>.<span class="fn">empty</span>((<span class="num">8</span>, <span class="num">256</span>))
+
+<span class="cmt"># Properties</span>
+<span class="fn">print</span>(vt.shape)    <span class="cmt"># (32, 128)</span>
+<span class="fn">print</span>(vt.dtype)    <span class="cmt"># float32</span>
+<span class="fn">print</span>(vt.on_gpu)   <span class="cmt"># True or False</span>
+
+<span class="cmt"># Transfer between CPU and GPU</span>
+vt.<span class="fn">upload</span>()        <span class="cmt"># force upload to GPU</span>
+arr = vt.<span class="fn">numpy</span>()   <span class="cmt"># download to CPU numpy</span>
+arr = vt.<span class="fn">cpu</span>()      <span class="cmt"># alias for numpy()</span></code></pre>
+      </div>
+      <div class="callout warn">
+        <strong>Note</strong>
+        <code>VulkanTensor</code> requires Vulkan drivers to be installed. Check <code>grilly.VULKAN_AVAILABLE</code> at runtime. Without Vulkan, grilly still works &mdash; it falls back to CPU numpy automatically.
+      </div>
+    </section>
+
+    <section>
+      <h2>Autograd Variable</h2>
+      <p>For automatic differentiation, grilly provides <code>Variable</code> &mdash; a wrapper that tracks operations and computes gradients via backpropagation:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">Variable</span>, no_grad
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+<span class="cmt"># Create differentiable variables</span>
+x = <span class="cls">Variable</span>(np.<span class="fn">array</span>([<span class="num">1.0</span>, <span class="num">2.0</span>, <span class="num">3.0</span>]), requires_grad=<span class="const">True</span>)
+w = <span class="cls">Variable</span>(np.<span class="fn">array</span>([<span class="num">0.5</span>, <span class="num">-0.3</span>, <span class="num">0.8</span>]), requires_grad=<span class="const">True</span>)
+
+<span class="cmt"># Forward: build computation graph</span>
+y = x * w
+loss = y.<span class="fn">sum</span>()
+
+<span class="cmt"># Backward: compute gradients</span>
+loss.<span class="fn">backward</span>()
+<span class="fn">print</span>(<span class="str">"x.grad:"</span>, x.grad)  <span class="cmt"># d(loss)/dx = w</span>
+<span class="fn">print</span>(<span class="str">"w.grad:"</span>, w.grad)  <span class="cmt"># d(loss)/dw = x</span>
+
+<span class="cmt"># Disable gradient tracking</span>
+<span class="kw">with</span> <span class="fn">no_grad</span>():
+    val = x * <span class="num">2</span>   <span class="cmt"># no graph, no gradient</span></code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>x.grad: [ 0.5 -0.3  0.8]
+w.grad: [1. 2. 3.]</pre>
+      </div>
+      <div class="callout tip">
+        <strong>Tip</strong>
+        Variable-based autograd is optional. Most grilly training code uses the <code>nn.Module</code> backward methods with explicit gradient passing, which is faster for standard architectures.
+      </div>
+    </section>
+
+    <nav class="page-nav">
+      <a href="index.html" class="nav-btn home">All Howtos</a>
+      <a href="02-gpu-acceleration.html" class="nav-btn next">Next: GPU Acceleration &rarr;</a>
+    </nav>
+  </main>
+
+  <footer>
+    <p>Grilly &mdash; GPU-accelerated neural networks via Vulkan. MIT License.</p>
+  </footer>
+</body>
+</html>

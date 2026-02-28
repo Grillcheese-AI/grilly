@@ -199,6 +199,7 @@ fail_under = 40
 
 [tool.pytest.ini_options]
 testpaths = ["grilly/tests"]
+pythonpath = ["."]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
 filterwarnings = [

@@ -150,6 +150,7 @@ from .modules import (
     FlashAttention2,
     LayerNorm,
     Linear,
+    RMSNorm,
     MultiheadAttention,
     ReLU,
     Residual,
@@ -279,6 +280,7 @@ __all__ = [
     # Standard layers
     "Linear",
     "LayerNorm",
+    "RMSNorm",
     "Dropout",
     "ReLU",
     "GELU",

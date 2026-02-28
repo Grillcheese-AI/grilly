@@ -283,5 +283,122 @@ void conv1d(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
            groups);
 }
 
+// ── Conv2d backward input ────────────────────────────────────────────────
+// Transposed convolution to compute gradient w.r.t. input.
+// Dispatches over input spatial dimensions at (8,8,1).
+
+void conv2dBackwardInput(CommandBatch& batch, BufferPool& pool,
+                         PipelineCache& cache,
+                         const float* gradOutput, const float* weight,
+                         float* gradInput,
+                         const Conv2dBackwardInputParams& p) {
+    const size_t gradOutBytes = size_t(p.batchSize) * p.outChannels * p.outHeight *
+                                p.outWidth * sizeof(float);
+    const size_t weightBytes  = size_t(p.outChannels) * (p.inChannels / p.groups) *
+                                p.kernelH * p.kernelW * sizeof(float);
+    const size_t gradInBytes  = size_t(p.batchSize) * p.inChannels * p.inHeight *
+                                p.inWidth * sizeof(float);
+
+    GrillyBuffer bufGradOut = pool.acquire(gradOutBytes);
+    GrillyBuffer bufWeight  = pool.acquire(weightBytes);
+    GrillyBuffer bufGradIn  = pool.acquire(gradInBytes);
+
+    pool.upload(bufGradOut, gradOutput, gradOutBytes);
+    pool.upload(bufWeight, weight, weightBytes);
+
+    PipelineEntry pipe = cache.getOrCreate("conv2d-backward-input", 3,
+                                           sizeof(Conv2dBackwardInputParams));
+
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {bufGradOut.handle, 0, gradOutBytes},
+        {bufWeight.handle,  0, weightBytes},
+        {bufGradIn.handle,  0, gradInBytes},
+    };
+    VkDescriptorSet descSet = cache.allocDescriptorSet("conv2d-backward-input",
+                                                        bufInfos);
+
+    uint32_t gx = (p.inWidth + 7) / 8;
+    uint32_t gy = (p.inHeight + 7) / 8;
+    uint32_t gz = p.batchSize * p.inChannels;
+
+    batch.begin();
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, gz,
+                   &p, sizeof(p));
+    batch.submit();
+
+    pool.download(bufGradIn, gradInput, gradInBytes);
+
+    pool.release(bufGradOut);
+    pool.release(bufWeight);
+    pool.release(bufGradIn);
+}
+
+// ── Conv2d backward weight ──────────────────────────────────────────────
+// Accumulates gradient over batch and spatial dims.
+// Dispatches at (16,16,1) over (kernelW * inChannels/groups, outChannels * kernelH).
+
+void conv2dBackwardWeight(CommandBatch& batch, BufferPool& pool,
+                          PipelineCache& cache,
+                          const float* gradOutput, const float* input,
+                          float* gradWeight, float* gradBias,
+                          const Conv2dBackwardWeightParams& p) {
+    const size_t gradOutBytes  = size_t(p.batchSize) * p.outChannels * p.outHeight *
+                                 p.outWidth * sizeof(float);
+    const size_t inputBytes    = size_t(p.batchSize) * p.inChannels * p.inHeight *
+                                 p.inWidth * sizeof(float);
+    const size_t gradWBytes    = size_t(p.outChannels) * (p.inChannels / p.groups) *
+                                 p.kernelH * p.kernelW * sizeof(float);
+    const size_t gradBiasBytes = p.hasBias ? size_t(p.outChannels) * sizeof(float)
+                                           : sizeof(float);
+
+    GrillyBuffer bufGradOut  = pool.acquire(gradOutBytes);
+    GrillyBuffer bufInput    = pool.acquire(inputBytes);
+    GrillyBuffer bufGradW    = pool.acquire(gradWBytes);
+    GrillyBuffer bufGradBias = pool.acquire(gradBiasBytes);
+
+    pool.upload(bufGradOut, gradOutput, gradOutBytes);
+    pool.upload(bufInput, input, inputBytes);
+
+    // Zero grad outputs
+    std::vector<float> zerosW(p.outChannels * (p.inChannels / p.groups) *
+                               p.kernelH * p.kernelW, 0.0f);
+    pool.upload(bufGradW, zerosW.data(), gradWBytes);
+    if (p.hasBias) {
+        std::vector<float> zerosB(p.outChannels, 0.0f);
+        pool.upload(bufGradBias, zerosB.data(), gradBiasBytes);
+    }
+
+    PipelineEntry pipe = cache.getOrCreate("conv2d-backward-weight", 4,
+                                           sizeof(Conv2dBackwardWeightParams));
+
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {bufGradOut.handle,  0, gradOutBytes},
+        {bufInput.handle,    0, inputBytes},
+        {bufGradW.handle,    0, gradWBytes},
+        {bufGradBias.handle, 0, gradBiasBytes},
+    };
+    VkDescriptorSet descSet = cache.allocDescriptorSet("conv2d-backward-weight",
+                                                        bufInfos);
+
+    uint32_t inPerGroup = p.inChannels / p.groups;
+    uint32_t gx = (p.kernelW * inPerGroup + 15) / 16;
+    uint32_t gy = (p.outChannels * p.kernelH + 15) / 16;
+
+    batch.begin();
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
+                   &p, sizeof(p));
+    batch.submit();
+
+    pool.download(bufGradW, gradWeight, gradWBytes);
+    if (p.hasBias && gradBias) {
+        pool.download(bufGradBias, gradBias, gradBiasBytes);
+    }
+
+    pool.release(bufGradOut);
+    pool.release(bufInput);
+    pool.release(bufGradW);
+    pool.release(bufGradBias);
+}
+
 }  // namespace ops
 }  // namespace grilly

@@ -56,5 +56,37 @@ void linear(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
 std::vector<float> linearCPU(const float* x, const float* weights,
                              const float* bias, const LinearParams& p);
 
+/// Linear backward push constants — matches fnn-linear-backward.glsl.
+/// Uses pass_type: 0=grad_input, 1=grad_weight, 2=grad_bias.
+struct LinearBackwardParams {
+    uint32_t batchSeq;
+    uint32_t inputDim;
+    uint32_t outputDim;
+    uint32_t passType;
+};
+
+/// GPU linear backward. Produces grad_input, grad_weight, grad_bias.
+/// 3-pass dispatch with barriers.
+/// 6 buffers: grad_output(0), input(1), weights(2),
+///            grad_input(3), grad_weight(4), grad_bias(5).
+void linearBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+                    const float* gradOutput, const float* input,
+                    const float* weights,
+                    float* gradInput, float* gradWeight, float* gradBias,
+                    const LinearParams& p);
+
+/// Dropout push constants — matches fnn-dropout.glsl.
+struct DropoutParams {
+    uint32_t totalElements;
+    float dropoutProb;
+    uint32_t isTraining;
+};
+
+/// GPU dropout (inverted scaling in forward).
+/// 3 buffers: input(0), random_mask(1), output(2).
+void dropout(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+             const float* input, const float* randomMask, float* output,
+             uint32_t totalElements, float dropoutProb, bool isTraining);
+
 }  // namespace ops
 }  // namespace grilly

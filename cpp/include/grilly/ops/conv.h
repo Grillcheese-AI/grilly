@@ -112,5 +112,65 @@ void conv1d(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
             uint32_t stride = 1, uint32_t padding = 0,
             uint32_t dilation = 1, uint32_t groups = 1);
 
+/// Conv2d backward input push constants — matches conv2d-backward-input.glsl.
+/// 16 uint fields (same Conv2dParams minus hasBias).
+struct Conv2dBackwardInputParams {
+    uint32_t batchSize;
+    uint32_t inChannels;
+    uint32_t inHeight;
+    uint32_t inWidth;
+    uint32_t outChannels;
+    uint32_t outHeight;
+    uint32_t outWidth;
+    uint32_t kernelH;
+    uint32_t kernelW;
+    uint32_t strideH;
+    uint32_t strideW;
+    uint32_t paddingH;
+    uint32_t paddingW;
+    uint32_t dilationH;
+    uint32_t dilationW;
+    uint32_t groups;
+};
+
+/// Conv2d backward — compute gradient w.r.t. input.
+/// Shader: conv2d-backward-input.spv
+/// 3 buffers: grad_output(0), weight(1), grad_input(2).
+void conv2dBackwardInput(CommandBatch& batch, BufferPool& pool,
+                         PipelineCache& cache,
+                         const float* gradOutput, const float* weight,
+                         float* gradInput,
+                         const Conv2dBackwardInputParams& p);
+
+/// Conv2d backward weight push constants — matches conv2d-backward-weight.glsl.
+struct Conv2dBackwardWeightParams {
+    uint32_t batchSize;
+    uint32_t inChannels;
+    uint32_t inHeight;
+    uint32_t inWidth;
+    uint32_t outChannels;
+    uint32_t outHeight;
+    uint32_t outWidth;
+    uint32_t kernelH;
+    uint32_t kernelW;
+    uint32_t strideH;
+    uint32_t strideW;
+    uint32_t paddingH;
+    uint32_t paddingW;
+    uint32_t dilationH;
+    uint32_t dilationW;
+    uint32_t groups;
+    uint32_t hasBias;
+};
+
+/// Conv2d backward — compute gradient w.r.t. weight (and optionally bias).
+/// Shader: conv2d-backward-weight.spv
+/// 4 buffers: grad_output(0), input(1), grad_weight(2), grad_bias(3).
+void conv2dBackwardWeight(CommandBatch& batch, BufferPool& pool,
+                          PipelineCache& cache,
+                          const float* gradOutput, const float* input,
+                          float* gradWeight, float* gradBias,
+                          const Conv2dBackwardWeightParams& p);
+
 }  // namespace ops
 }  // namespace grilly

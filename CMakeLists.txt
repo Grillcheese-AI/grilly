@@ -189,10 +189,19 @@ add_library(grilly_core_lib STATIC
     cpp/src/ops/linear.cpp
     cpp/src/ops/activations.cpp
     cpp/src/ops/layernorm.cpp
+    cpp/src/ops/rmsnorm.cpp
     cpp/src/ops/attention.cpp
     cpp/src/ops/conv.cpp
     cpp/src/ops/kv_cache.cpp
     cpp/src/ops/swizzle.cpp
+    cpp/src/ops/snn.cpp
+    cpp/src/ops/attention_ops.cpp
+    cpp/src/ops/pooling.cpp
+    cpp/src/ops/batchnorm.cpp
+    cpp/src/ops/loss.cpp
+    cpp/src/ops/optimizer.cpp
+    cpp/src/ops/embedding.cpp
+    cpp/src/ops/learning.cpp
     # ── Experimental ──
     cpp/src/experimental/paged_latent_pool.cpp
     cpp/src/experimental/fused_attention.cpp
