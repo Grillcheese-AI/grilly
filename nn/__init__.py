@@ -153,6 +153,7 @@ from .modules import (
     MultiheadAttention,
     ReLU,
     Residual,
+    RMSNorm,
     RoSwish,
     Sequential,
     SiLU,
@@ -279,6 +280,7 @@ __all__ = [
     # Standard layers
     "Linear",
     "LayerNorm",
+    "RMSNorm",
     "Dropout",
     "ReLU",
     "GELU",

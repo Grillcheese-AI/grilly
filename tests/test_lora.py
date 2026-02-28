@@ -13,7 +13,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from grilly.nn.autograd import Variable
 from grilly.nn.lora import (
     LoRAAttention,

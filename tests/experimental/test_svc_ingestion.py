@@ -10,7 +10,6 @@ import json
 
 import numpy as np
 import pytest
-
 from grilly.experimental.cognitive.controller import CognitiveController
 from grilly.experimental.language.encoder import SentenceEncoder, WordEncoder
 from grilly.experimental.language.generator import SentenceGenerator

@@ -131,8 +131,9 @@ class VulkanPooling(BufferMixin):
                 self._release_buffers([buf_in, buf_out])
                 return data.mean(axis=1).astype(np.float32)
 
-    def maxpool2d(self, x, kernel_size, stride=None, padding=0, dilation=1,
-                  return_gpu_tensor=False):
+    def maxpool2d(
+        self, x, kernel_size, stride=None, padding=0, dilation=1, return_gpu_tensor=False
+    ):
         """
         2D max pooling forward pass.
 
@@ -231,9 +232,7 @@ class VulkanPooling(BufferMixin):
 
             output_shape = (batch_size, channels, out_h, out_w)
             # Always download indices (needed for backward, small)
-            indices = self._download_buffer(buf_idx, indices_size, np.uint32).reshape(
-                output_shape
-            )
+            indices = self._download_buffer(buf_idx, indices_size, np.uint32).reshape(output_shape)
 
             if return_gpu_tensor:
                 result = self._wrap_output_tensor(buf_out, output_shape)

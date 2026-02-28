@@ -13,7 +13,6 @@ import json
 import re
 
 import numpy as np
-
 from grilly.experimental.cognitive import (
     CognitiveController,
     UnderstandingResult,

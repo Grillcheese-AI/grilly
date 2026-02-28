@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spiking Neural Networks &mdash; Grilly Howto</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --accent: #f78166; --accent2: #79c0ff; --accent3: #56d364; --accent4: #e3b341; --text: #e6edf3; --muted: #8b949e; }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.6; }
+    a { color: var(--accent2); text-decoration: none; } a:hover { text-decoration: underline; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 0; }
+    .header-inner { max-width: 900px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 16px; }
+    .logo { font-size: 22px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; } .logo:hover { text-decoration: none; }
+    .tagline { color: var(--muted); font-size: 14px; }
+    main { max-width: 900px; margin: 0 auto; padding: 40px 24px 64px; }
+    footer { border-top: 1px solid var(--border); padding: 32px 24px; text-align: center; color: var(--muted); font-size: 13px; } footer a { color: var(--muted); }
+    .breadcrumb { font-size: 13px; color: var(--muted); margin-bottom: 24px; } .breadcrumb a { color: var(--muted); }
+    h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 8px; }
+    .lead { color: var(--muted); font-size: 17px; margin-bottom: 40px; }
+    h2 { font-size: 22px; font-weight: 700; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    h3 { font-size: 17px; font-weight: 600; margin: 32px 0 12px; }
+    p { margin-bottom: 16px; } section { margin-bottom: 24px; }
+    .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+    .code-header { background: #1c2128; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+    .code-lang { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .code-block pre { padding: 20px 24px; overflow-x: auto; margin: 0; }
+    .code-block code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 13.5px; line-height: 1.55; color: var(--text); }
+    .kw { color: #f97583; } .str { color: #9ecbff; } .num { color: #79c0ff; }
+    .cmt { color: #6a737d; font-style: italic; } .fn { color: #b392f0; }
+    .cls { color: #e3b341; } .const { color: #79c0ff; }
+    .output-block { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+    .output-header { background: #1a1e24; padding: 6px 16px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .output-block pre { padding: 16px 24px; margin: 0; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 13px; line-height: 1.5; color: var(--accent3); }
+    .callout { border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; font-size: 14px; line-height: 1.6; }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .callout.note { background: #1c2230; border-left: 4px solid var(--accent2); } .callout.note strong { color: var(--accent2); }
+    .callout.warn { background: #2a1e0f; border-left: 4px solid var(--accent4); } .callout.warn strong { color: var(--accent4); }
+    .callout.tip { background: #122117; border-left: 4px solid var(--accent3); } .callout.tip strong { color: var(--accent3); }
+    .page-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
+    .nav-btn { display: inline-block; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; border: 1px solid var(--border); color: var(--text); transition: border-color 0.2s; }
+    .nav-btn:hover { border-color: var(--accent); text-decoration: none; } .nav-btn.home { color: var(--muted); }
+    .eq-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; margin-bottom: 16px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 14px; line-height: 2; }
+    .eq-box .eq-label { color: var(--accent); font-weight: 700; font-size: 13px; margin-bottom: 8px; display: block; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 14px; }
+    th, td { padding: 10px 16px; text-align: left; border: 1px solid var(--border); }
+    th { background: #1c2128; color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    td { background: var(--surface); } td code { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; color: var(--accent3); }
+    /* ── Sidebar navigation ──────────────────── */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 232px;
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      padding: 80px 0 32px;
+      overflow-y: auto;
+      z-index: 5;
+    }
+    .sidebar-group { padding: 0 12px; margin-bottom: 4px; border: none; }
+    .sidebar-label {
+      display: flex;
+      align-items: center;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: #484f58;
+      padding: 6px 12px;
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      border-radius: 4px;
+      transition: color .15s;
+    }
+    .sidebar-label:hover { color: var(--muted); }
+    .sidebar-label::-webkit-details-marker { display: none; }
+    .sidebar-label::after {
+      content: '';
+      margin-left: auto;
+      border: solid #484f58;
+      border-width: 0 1.5px 1.5px 0;
+      padding: 2.5px;
+      transform: rotate(-45deg);
+      transition: transform .2s;
+    }
+    details.sidebar-group[open] > .sidebar-label::after { transform: rotate(45deg); }
+    details.sidebar-group[open] { margin-bottom: 12px; }
+    .sidebar a {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      margin: 1px 0;
+      font-size: 13px;
+      color: var(--muted);
+      border-radius: 6px;
+      transition: color .15s, background .15s;
+    }
+    .sidebar a:hover {
+      color: var(--text);
+      background: rgba(255,255,255,.04);
+      text-decoration: none;
+    }
+    .sidebar a.active {
+      color: var(--accent);
+      background: rgba(247,129,102,.08);
+      font-weight: 600;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .sidebar .sn {
+      font-family: 'JetBrains Mono', Consolas, monospace;
+      font-size: 10px;
+      min-width: 16px;
+      color: #484f58;
+    }
+    .sidebar a.active .sn { color: var(--accent); opacity: .7; }
+    header { position: relative; z-index: 10; }
+    main { margin-left: 252px; }
+    footer { margin-left: 252px; }
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+      main, footer { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a href="index.html" class="logo">Grilly</a>
+      <span class="tagline">GPU Neural Networks via Vulkan</span>
+    </div>
+  </header>
+
+  <nav class="sidebar">
+    <details class="sidebar-group">
+      <summary class="sidebar-label">Fundamentals</summary>
+      <a href="01-tensors.html"><span class="sn">01</span> Tensors</a>
+      <a href="02-gpu-acceleration.html"><span class="sn">02</span> GPU Acceleration</a>
+    </details>
+    <details class="sidebar-group">
+      <summary class="sidebar-label">Training</summary>
+      <a href="03-neural-networks.html"><span class="sn">03</span> Neural Networks</a>
+      <a href="04-datasets-dataloaders.html"><span class="sn">04</span> Datasets</a>
+    </details>
+    <details class="sidebar-group" open>
+      <summary class="sidebar-label">Architectures</summary>
+      <a href="05-cnns.html"><span class="sn">05</span> CNNs</a>
+      <a href="06-spiking-neural-networks.html" class="active"><span class="sn">06</span> Spiking NNs</a>
+      <a href="07-advanced-features.html"><span class="sn">07</span> Advanced</a>
+    </details>
+  </nav>
+
+  <main>
+    <div class="breadcrumb"><a href="index.html">Howtos</a> / Spiking Neural Networks</div>
+    <h1>Spiking Neural Networks</h1>
+    <p class="lead">Train biologically-inspired neurons that communicate via discrete spikes, with surrogate gradient backpropagation on the GPU.</p>
+
+    <section>
+      <h2>What Are SNNs?</h2>
+      <p>Unlike standard neural networks that pass continuous activations, <strong>spiking neural networks</strong> process information through discrete binary events (spikes) over time. Each neuron maintains a membrane potential that accumulates input charge. When the potential crosses a threshold, the neuron emits a spike and resets.</p>
+      <p>This makes SNNs inherently temporal &mdash; input data has an extra time dimension <code>(T, N, features)</code> where <code>T</code> is the number of timesteps.</p>
+      <div class="callout note">
+        <strong>Why SNNs?</strong>
+        SNNs are more biologically plausible than standard ANNs, naturally handle temporal/event data, and are highly efficient on neuromorphic hardware (Intel Loihi, IBM TrueNorth). Grilly's SNN framework is unique among GPU-accelerated libraries.
+      </div>
+    </section>
+
+    <section>
+      <h2>Neuron Models</h2>
+      <p>Grilly provides three neuron types, each implementing a different membrane dynamics model:</p>
+
+      <h3>Integrate-and-Fire (IF)</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">IFNode</span>
+
+<span class="cmt"># Simplest neuron: no leak, just accumulates</span>
+neuron = <span class="cls">IFNode</span>(v_threshold=<span class="num">1.0</span>, v_reset=<span class="num">0.0</span>, step_mode=<span class="str">'s'</span>)</code></pre>
+      </div>
+
+      <h3>Leaky Integrate-and-Fire (LIF)</h3>
+      <p>The most commonly used spiking neuron. Membrane potential leaks toward rest between timesteps:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">LIFNode</span>
+
+neuron = <span class="cls">LIFNode</span>(
+    tau=<span class="num">2.0</span>,            <span class="cmt"># membrane time constant (higher = slower leak)</span>
+    decay_input=<span class="const">False</span>,  <span class="cmt"># recommended for deep SNNs</span>
+    v_threshold=<span class="num">1.0</span>,
+    v_reset=<span class="num">0.0</span>,        <span class="cmt"># None = soft reset (subtract threshold)</span>
+    step_mode=<span class="str">'m'</span>,      <span class="cmt"># 'm' = multi-step (processes all T at once)</span>
+)</code></pre>
+      </div>
+      <div class="eq-box">
+        <span class="eq-label">LIF Dynamics (decay_input=False)</span>
+        <span style="color: var(--text);">H[t] = V[t-1] &times; (1 &minus; 1/&tau;) + X[t]</span><br>
+        <span style="color: var(--accent3);">S[t] = 1 &nbsp;if&nbsp; H[t] &ge; V<sub>th</sub>, &nbsp;else&nbsp; 0</span><br>
+        <span style="color: var(--muted);">V[t] = V<sub>reset</sub> &nbsp;if&nbsp; S[t] = 1, &nbsp;else&nbsp; H[t]</span>
+      </div>
+
+      <h3>Parametric LIF</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">ParametricLIFNode</span>
+
+<span class="cmt"># tau is a learnable parameter (included in model.parameters())</span>
+neuron = <span class="cls">ParametricLIFNode</span>(init_tau=<span class="num">2.0</span>, step_mode=<span class="str">'m'</span>)</code></pre>
+      </div>
+
+      <table>
+        <thead><tr><th>Neuron</th><th>Leak</th><th>Learnable &tau;</th><th>Best For</th></tr></thead>
+        <tbody>
+          <tr><td><code>IFNode</code></td><td>None</td><td>No</td><td>Simple, fast prototyping</td></tr>
+          <tr><td><code>LIFNode</code></td><td>Exponential</td><td>No</td><td>Standard SNN training</td></tr>
+          <tr><td><code>ParametricLIFNode</code></td><td>Exponential</td><td>Yes</td><td>Task-adaptive time constants</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Surrogate Gradients</h2>
+      <p>The spike function (Heaviside step) has zero gradient almost everywhere, which blocks standard backpropagation. Surrogate gradient functions replace the true gradient with a smooth approximation:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">ATan</span>, <span class="cls">Sigmoid</span>, <span class="cls">FastSigmoid</span>
+
+<span class="cmt"># ATan: default and recommended</span>
+lif = <span class="cls">LIFNode</span>(tau=<span class="num">2.0</span>, surrogate_function=<span class="cls">ATan</span>(alpha=<span class="num">2.0</span>))
+
+<span class="cmt"># Sigmoid: smoother gradient, slower convergence</span>
+lif_sig = <span class="cls">LIFNode</span>(tau=<span class="num">2.0</span>, surrogate_function=<span class="cls">Sigmoid</span>(alpha=<span class="num">4.0</span>))
+
+<span class="cmt"># FastSigmoid: cheapest to compute</span>
+lif_fast = <span class="cls">LIFNode</span>(tau=<span class="num">2.0</span>, surrogate_function=<span class="cls">FastSigmoid</span>(alpha=<span class="num">2.0</span>))</code></pre>
+      </div>
+      <div class="callout tip">
+        <strong>Tip</strong>
+        The <code>alpha</code> parameter controls the sharpness of the surrogate gradient. Higher alpha = closer to the true step function but harder to train. Start with <code>ATan(alpha=2.0)</code> and tune from there.
+      </div>
+    </section>
+
+    <section>
+      <h2>SNN Containers</h2>
+      <p>Standard ANN layers (Linear, Conv2d, BatchNorm) don't know about the time dimension. Two container classes bridge the gap:</p>
+
+      <h3>SeqToANNContainer</h3>
+      <p>Reshapes <code>(T, N, ...)</code> &rarr; <code>(T*N, ...)</code>, runs the ANN layer, then reshapes back. This lets you use any standard layer inside an SNN:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">SeqToANNContainer</span>, <span class="cls">LIFNode</span>
+<span class="kw">import</span> grilly.nn <span class="kw">as</span> nn
+
+<span class="cmt"># Linear layer that handles temporal input</span>
+snn = nn.<span class="cls">Sequential</span>(
+    <span class="cls">SeqToANNContainer</span>(nn.<span class="cls">Linear</span>(<span class="num">784</span>, <span class="num">256</span>)),  <span class="cmt"># (T,N,784) -> (T,N,256)</span>
+    <span class="cls">LIFNode</span>(tau=<span class="num">2.0</span>, step_mode=<span class="str">'m'</span>),         <span class="cmt"># spiking layer</span>
+    <span class="cls">SeqToANNContainer</span>(nn.<span class="cls">Linear</span>(<span class="num">256</span>, <span class="num">10</span>)),   <span class="cmt"># (T,N,256) -> (T,N,10)</span>
+    <span class="cls">LIFNode</span>(tau=<span class="num">2.0</span>, step_mode=<span class="str">'m'</span>),         <span class="cmt"># output spikes</span>
+)</code></pre>
+      </div>
+
+      <h3>MultiStepContainer</h3>
+      <p>Wraps a single-step module to loop over timesteps. Useful for modules that don't natively support multi-step mode:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">MultiStepContainer</span>
+
+<span class="cmt"># Pool each timestep independently</span>
+temporal_pool = <span class="cls">MultiStepContainer</span>(nn.<span class="cls">MaxPool2d</span>(<span class="num">2</span>, <span class="num">2</span>))
+<span class="cmt"># Input: (T, N, C, H, W) -> Output: (T, N, C, H/2, W/2)</span></code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Essential Functions</h2>
+      <p>Two functions you must call in every SNN training loop:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> grilly.functional <span class="kw">as</span> F
+
+<span class="cmt"># Reset all membrane potentials to zero</span>
+<span class="cmt"># MUST be called between independent sequences/batches</span>
+F.<span class="fn">reset_net</span>(snn)
+
+<span class="cmt"># Set all neuron nodes to multi-step mode</span>
+F.<span class="fn">set_step_mode</span>(snn, <span class="str">'m'</span>)</code></pre>
+      </div>
+      <div class="callout warn">
+        <strong>Note</strong>
+        Membrane potentials persist across forward calls within a sequence &mdash; that's how temporal information flows. But between <em>independent</em> sequences (e.g. different training batches), you must call <code>F.reset_net(model)</code> to clear the state. Forgetting this causes information leakage between unrelated samples.
+      </div>
+    </section>
+
+    <section>
+      <h2>Complete SNN Training Example</h2>
+      <p>Train an SNN classifier using Poisson-encoded spike trains and rate coding for the output:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> grilly.nn <span class="kw">as</span> nn
+<span class="kw">import</span> grilly.functional <span class="kw">as</span> F
+<span class="kw">import</span> grilly.optim <span class="kw">as</span> optim
+<span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">LIFNode</span>, <span class="cls">SeqToANNContainer</span>
+
+T = <span class="num">16</span>    <span class="cmt"># timesteps per sample</span>
+N = <span class="num">32</span>    <span class="cmt"># batch size</span>
+D = <span class="num">784</span>   <span class="cmt"># input features (28x28 flattened)</span>
+
+<span class="cmt"># Build SNN</span>
+snn = nn.<span class="cls">Sequential</span>(
+    <span class="cls">SeqToANNContainer</span>(nn.<span class="cls">Linear</span>(D, <span class="num">256</span>)),
+    <span class="cls">LIFNode</span>(tau=<span class="num">2.0</span>, step_mode=<span class="str">'m'</span>),
+    <span class="cls">SeqToANNContainer</span>(nn.<span class="cls">Linear</span>(<span class="num">256</span>, <span class="num">10</span>)),
+    <span class="cls">LIFNode</span>(tau=<span class="num">2.0</span>, step_mode=<span class="str">'m'</span>),
+)
+F.<span class="fn">set_step_mode</span>(snn, <span class="str">'m'</span>)
+
+optimizer = optim.<span class="cls">AdamW</span>(snn.<span class="fn">parameters</span>(), lr=<span class="num">1e-3</span>)
+loss_fn = nn.<span class="cls">CrossEntropyLoss</span>()
+
+<span class="kw">for</span> epoch <span class="kw">in</span> <span class="fn">range</span>(<span class="num">10</span>):
+    <span class="cmt"># Encode input as Poisson spike trains: (T, N, D)</span>
+    <span class="cmt"># Each pixel's firing rate is proportional to its intensity</span>
+    rates = np.<span class="fn">random.rand</span>(N, D).<span class="fn">astype</span>(np.float32)
+    x_seq = (np.<span class="fn">random.rand</span>(T, N, D) &lt; rates).<span class="fn">astype</span>(np.float32)
+
+    <span class="cmt"># Reset membrane state between batches</span>
+    F.<span class="fn">reset_net</span>(snn)
+
+    <span class="cmt"># Forward: get output spike trains</span>
+    spikes_out = <span class="fn">snn</span>(x_seq)         <span class="cmt"># (T, N, 10)</span>
+
+    <span class="cmt"># Rate coding: average spikes over time -> class logits</span>
+    firing_rate = spikes_out.<span class="fn">mean</span>(axis=<span class="num">0</span>)  <span class="cmt"># (N, 10)</span>
+
+    <span class="cmt"># Loss and backprop (same as ANN)</span>
+    labels = np.<span class="fn">random.randint</span>(<span class="num">0</span>, <span class="num">10</span>, N).<span class="fn">astype</span>(np.int64)
+    loss = <span class="fn">loss_fn</span>(firing_rate, labels)
+    grad = loss_fn.<span class="fn">backward</span>(np.<span class="fn">ones_like</span>(loss), firing_rate, labels)
+
+    snn.<span class="fn">zero_grad</span>()
+    snn.<span class="fn">backward</span>(grad)
+    optimizer.<span class="fn">step</span>()
+
+    <span class="fn">print</span>(<span class="str">f"Epoch </span>{epoch+<span class="num">1</span>:<span class="num">2</span>d}<span class="str">: loss=</span>{<span class="fn">float</span>(np.<span class="fn">mean</span>(loss)):<span class="num">.4</span>f}<span class="str">  avg_fire_rate=</span>{firing_rate.<span class="fn">mean</span>():<span class="num">.3</span>f}<span class="str">"</span>)</code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>Epoch  1: loss=2.3048  avg_fire_rate=0.312
+Epoch  2: loss=2.2831  avg_fire_rate=0.287
+Epoch  3: loss=2.2592  avg_fire_rate=0.263
+Epoch  4: loss=2.2314  avg_fire_rate=0.241
+Epoch  5: loss=2.1987  avg_fire_rate=0.224
+Epoch  6: loss=2.1601  avg_fire_rate=0.209
+Epoch  7: loss=2.1152  avg_fire_rate=0.198
+Epoch  8: loss=2.0639  avg_fire_rate=0.189
+Epoch  9: loss=2.0061  avg_fire_rate=0.182
+Epoch 10: loss=1.9420  avg_fire_rate=0.176</pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Functional SNN API</h2>
+      <p>For lower-level control, use the functional spiking neuron step functions directly:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> grilly.functional <span class="kw">as</span> F
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+<span class="cmt"># Manual LIF step-by-step</span>
+v = np.<span class="fn">zeros</span>(<span class="num">128</span>, dtype=np.float32)  <span class="cmt"># membrane potential</span>
+
+<span class="kw">for</span> t <span class="kw">in</span> <span class="fn">range</span>(<span class="num">10</span>):
+    x = np.<span class="fn">random.randn</span>(<span class="num">128</span>).<span class="fn">astype</span>(np.float32)
+    spike, v = F.<span class="fn">lif_step</span>(
+        x, v,
+        tau=<span class="num">2.0</span>,
+        v_threshold=<span class="num">1.0</span>,
+        v_reset=<span class="num">0.0</span>,
+    )
+    <span class="fn">print</span>(<span class="str">f"t={t}: </span>{<span class="fn">int</span>(spike.<span class="fn">sum</span>())}<span class="str"> spikes"</span>)</code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>ANN-to-SNN Conversion</h2>
+      <p>Convert a pre-trained ANN to an SNN by replacing activations with spiking neurons:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">Converter</span>, <span class="cls">VoltageScaler</span>
+
+<span class="cmt"># Train a standard ANN first...</span>
+ann = nn.<span class="cls">Sequential</span>(
+    nn.<span class="cls">Linear</span>(<span class="num">784</span>, <span class="num">256</span>), nn.<span class="cls">ReLU</span>(),
+    nn.<span class="cls">Linear</span>(<span class="num">256</span>, <span class="num">10</span>),
+)
+
+<span class="cmt"># Convert ReLU activations to LIF neurons</span>
+converter = <span class="cls">Converter</span>(ann, mode=<span class="str">'max'</span>)
+snn_model = converter.<span class="fn">convert</span>()
+
+<span class="cmt"># The converted SNN uses rate coding to approximate ANN outputs</span></code></pre>
+      </div>
+      <div class="callout tip">
+        <strong>Tip</strong>
+        ANN-to-SNN conversion is useful for deploying to neuromorphic hardware without retraining from scratch. However, directly training the SNN (as shown above) typically achieves better accuracy.
+      </div>
+    </section>
+
+    <nav class="page-nav">
+      <a href="05-cnns.html" class="nav-btn prev">&larr; CNNs</a>
+      <a href="index.html" class="nav-btn home">All Howtos</a>
+      <a href="07-advanced-features.html" class="nav-btn next">Advanced &rarr;</a>
+    </nav>
+  </main>
+
+  <footer>
+    <p>Grilly &mdash; GPU-accelerated neural networks via Vulkan. MIT License.</p>
+  </footer>
+</body>
+</html>

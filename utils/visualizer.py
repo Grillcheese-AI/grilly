@@ -117,27 +117,27 @@ _LAYER_CATEGORIES: dict[str, str] = {
 
 # Color palette for HTML/SVG mode
 _CATEGORY_COLORS: dict[str, str] = {
-    "embedding": "#4A90D9",     # blue
-    "linear": "#5CB85C",        # green
-    "activation": "#F0AD4E",    # orange
-    "norm": "#9B59B6",          # purple
-    "attention": "#E74C3C",     # red
-    "recurrent": "#1ABC9C",     # teal
-    "ssm": "#2C3E50",           # dark blue
-    "snn": "#E67E22",           # dark orange
-    "container": "#95A5A6",     # grey
-    "memory": "#8E44AD",        # dark purple
-    "capsule": "#16A085",       # dark teal
-    "routing": "#D35400",       # rust
-    "conv": "#27AE60",          # emerald
-    "pooling": "#2980B9",       # bright blue
-    "regularization": "#BDC3C7",# light grey
-    "loss": "#C0392B",          # dark red
-    "vsa": "#2ECC71",           # bright green
-    "nlms": "#F39C12",          # amber
-    "transformer": "#E74C3C",   # red
-    "multimodal": "#3498DB",    # sky blue
-    "unknown": "#7F8C8D",       # grey
+    "embedding": "#4A90D9",  # blue
+    "linear": "#5CB85C",  # green
+    "activation": "#F0AD4E",  # orange
+    "norm": "#9B59B6",  # purple
+    "attention": "#E74C3C",  # red
+    "recurrent": "#1ABC9C",  # teal
+    "ssm": "#2C3E50",  # dark blue
+    "snn": "#E67E22",  # dark orange
+    "container": "#95A5A6",  # grey
+    "memory": "#8E44AD",  # dark purple
+    "capsule": "#16A085",  # dark teal
+    "routing": "#D35400",  # rust
+    "conv": "#27AE60",  # emerald
+    "pooling": "#2980B9",  # bright blue
+    "regularization": "#BDC3C7",  # light grey
+    "loss": "#C0392B",  # dark red
+    "vsa": "#2ECC71",  # bright green
+    "nlms": "#F39C12",  # amber
+    "transformer": "#E74C3C",  # red
+    "multimodal": "#3498DB",  # sky blue
+    "unknown": "#7F8C8D",  # grey
 }
 
 _CATEGORY_LABELS: dict[str, str] = {
@@ -169,9 +169,11 @@ _CATEGORY_LABELS: dict[str, str] = {
 # Layer info extraction
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class LayerInfo:
     """Extracted metadata about a single layer."""
+
     name: str
     type_name: str
     category: str
@@ -337,6 +339,7 @@ def _has_gpu(obj: Any) -> bool:
 # Model introspection: discover layers
 # ---------------------------------------------------------------------------
 
+
 def _discover_layers_grilly_ssm(model: Any) -> list[LayerInfo]:
     """Specialized introspection for GrillySSMLM architecture."""
     layers: list[LayerInfo] = []
@@ -349,17 +352,19 @@ def _discover_layers_grilly_ssm(model: Any) -> list[LayerInfo]:
     tok_embed = getattr(model, "tok_embed", None)
     if tok_embed is not None:
         in_s, out_s = _infer_shapes(tok_embed)
-        layers.append(LayerInfo(
-            name="tok_embed",
-            type_name="Embedding",
-            category="embedding",
-            param_count=_count_params(tok_embed),
-            param_shapes=_get_param_shapes(tok_embed),
-            input_shape=in_s,
-            output_shape=out_s,
-            has_gpu=_has_gpu(tok_embed),
-            extra_info={"vocab_size": str(vocab_size), "d_model": str(d_model)},
-        ))
+        layers.append(
+            LayerInfo(
+                name="tok_embed",
+                type_name="Embedding",
+                category="embedding",
+                param_count=_count_params(tok_embed),
+                param_shapes=_get_param_shapes(tok_embed),
+                input_shape=in_s,
+                output_shape=out_s,
+                has_gpu=_has_gpu(tok_embed),
+                extra_info={"vocab_size": str(vocab_size), "d_model": str(d_model)},
+            )
+        )
 
     # SSM blocks
     blocks = getattr(model, "blocks", [])
@@ -376,98 +381,112 @@ def _discover_layers_grilly_ssm(model: Any) -> list[LayerInfo]:
             uses_snn = getattr(block_norm, "uses_snn", False)
             label = "SNNRMSNorm" if uses_snn else norm_type
             dim_val = getattr(norm_layer, "normalized_shape", d_model)
-            block_children.append(LayerInfo(
-                name="norm",
-                type_name=label,
-                category="norm",
-                param_count=_count_params(block_norm),
-                param_shapes=_get_param_shapes(block_norm),
-                input_shape=f"(B, T, {d_model})",
-                output_shape=f"(B, T, {d_model})",
-                extra_info={"dim": str(dim_val)},
-            ))
+            block_children.append(
+                LayerInfo(
+                    name="norm",
+                    type_name=label,
+                    category="norm",
+                    param_count=_count_params(block_norm),
+                    param_shapes=_get_param_shapes(block_norm),
+                    input_shape=f"(B, T, {d_model})",
+                    output_shape=f"(B, T, {d_model})",
+                    extra_info={"dim": str(dim_val)},
+                )
+            )
 
         # in_proj
         in_proj = getattr(block, "in_proj", None)
         if in_proj is not None:
             in_s, out_s = _infer_shapes(in_proj)
-            block_children.append(LayerInfo(
-                name="in_proj",
-                type_name="Linear",
-                category="linear",
-                param_count=_count_params(in_proj),
-                param_shapes=_get_param_shapes(in_proj),
-                input_shape=f"(B, T, {d_model})",
-                output_shape=f"(B, T, {2 * d_model})",
-                has_gpu=_has_gpu(in_proj),
-            ))
+            block_children.append(
+                LayerInfo(
+                    name="in_proj",
+                    type_name="Linear",
+                    category="linear",
+                    param_count=_count_params(in_proj),
+                    param_shapes=_get_param_shapes(in_proj),
+                    input_shape=f"(B, T, {d_model})",
+                    output_shape=f"(B, T, {2 * d_model})",
+                    has_gpu=_has_gpu(in_proj),
+                )
+            )
 
         # Gate + value split (not a parameterized layer)
         gate_act = getattr(block, "gate_activation", "sigmoid_tanh")
-        block_children.append(LayerInfo(
-            name="gate_value_split",
-            type_name="Split",
-            category="activation",
-            param_count=0,
-            param_shapes=[],
-            input_shape=f"(B, T, {2 * d_model})",
-            output_shape=f"gate: (B,T,{d_model}), value: (B,T,{d_model})",
-            extra_info={"activation": gate_act},
-        ))
+        block_children.append(
+            LayerInfo(
+                name="gate_value_split",
+                type_name="Split",
+                category="activation",
+                param_count=0,
+                param_shapes=[],
+                input_shape=f"(B, T, {2 * d_model})",
+                output_shape=f"gate: (B,T,{d_model}), value: (B,T,{d_model})",
+                extra_info={"activation": gate_act},
+            )
+        )
 
         # Selective scan
-        block_children.append(LayerInfo(
-            name="selective_scan",
-            type_name="SelectiveScan",
-            category="ssm",
-            param_count=d_model,  # decay_logits
-            param_shapes=[("decay_logits", (d_model,))],
-            input_shape=f"gate, value: (B, T, {d_model})",
-            output_shape=f"(B, T, {d_model})",
-            extra_info={"scan_impl": getattr(block, "scan_impl", "vectorized")},
-        ))
+        block_children.append(
+            LayerInfo(
+                name="selective_scan",
+                type_name="SelectiveScan",
+                category="ssm",
+                param_count=d_model,  # decay_logits
+                param_shapes=[("decay_logits", (d_model,))],
+                input_shape=f"gate, value: (B, T, {d_model})",
+                output_shape=f"(B, T, {d_model})",
+                extra_info={"scan_impl": getattr(block, "scan_impl", "vectorized")},
+            )
+        )
 
         # out_proj
         out_proj = getattr(block, "out_proj", None)
         if out_proj is not None:
-            block_children.append(LayerInfo(
-                name="out_proj",
-                type_name="Linear",
-                category="linear",
-                param_count=_count_params(out_proj),
-                param_shapes=_get_param_shapes(out_proj),
-                input_shape=f"(B, T, {d_model})",
-                output_shape=f"(B, T, {d_model})",
-                has_gpu=_has_gpu(out_proj),
-            ))
+            block_children.append(
+                LayerInfo(
+                    name="out_proj",
+                    type_name="Linear",
+                    category="linear",
+                    param_count=_count_params(out_proj),
+                    param_shapes=_get_param_shapes(out_proj),
+                    input_shape=f"(B, T, {d_model})",
+                    output_shape=f"(B, T, {d_model})",
+                    has_gpu=_has_gpu(out_proj),
+                )
+            )
 
         # Residual add
-        block_children.append(LayerInfo(
-            name="residual",
-            type_name="ResidualAdd",
-            category="container",
-            param_count=0,
-            param_shapes=[],
-            input_shape=f"x, scan_out: (B, T, {d_model})",
-            output_shape=f"(B, T, {d_model})",
-        ))
+        block_children.append(
+            LayerInfo(
+                name="residual",
+                type_name="ResidualAdd",
+                category="container",
+                param_count=0,
+                param_shapes=[],
+                input_shape=f"x, scan_out: (B, T, {d_model})",
+                output_shape=f"(B, T, {d_model})",
+            )
+        )
 
         total_block_params = sum(c.param_count for c in block_children)
         total_all_blocks = total_block_params * n_layers
 
-        layers.append(LayerInfo(
-            name="blocks",
-            type_name="_SelectiveScanBlock",
-            category="ssm",
-            param_count=total_all_blocks,
-            param_shapes=[],
-            input_shape=f"(B, T, {d_model})",
-            output_shape=f"(B, T, {d_model})",
-            children=block_children,
-            repeat_count=n_layers,
-            has_gpu=_has_gpu(block),
-            extra_info={"per_block_params": str(total_block_params)},
-        ))
+        layers.append(
+            LayerInfo(
+                name="blocks",
+                type_name="_SelectiveScanBlock",
+                category="ssm",
+                param_count=total_all_blocks,
+                param_shapes=[],
+                input_shape=f"(B, T, {d_model})",
+                output_shape=f"(B, T, {d_model})",
+                children=block_children,
+                repeat_count=n_layers,
+                has_gpu=_has_gpu(block),
+                extra_info={"per_block_params": str(total_block_params)},
+            )
+        )
 
     # Final norm
     final_norm = getattr(model, "norm", None)
@@ -476,15 +495,17 @@ def _discover_layers_grilly_ssm(model: Any) -> list[LayerInfo]:
         norm_type = type(norm_layer).__name__
         uses_snn = getattr(final_norm, "uses_snn", False)
         label = "SNNRMSNorm" if uses_snn else norm_type
-        layers.append(LayerInfo(
-            name="norm",
-            type_name=label,
-            category="norm",
-            param_count=_count_params(final_norm),
-            param_shapes=_get_param_shapes(final_norm),
-            input_shape=f"(B, T, {d_model})",
-            output_shape=f"(B, T, {d_model})",
-        ))
+        layers.append(
+            LayerInfo(
+                name="norm",
+                type_name=label,
+                category="norm",
+                param_count=_count_params(final_norm),
+                param_shapes=_get_param_shapes(final_norm),
+                input_shape=f"(B, T, {d_model})",
+                output_shape=f"(B, T, {d_model})",
+            )
+        )
 
     # Branching heads: LM head and optional VSA head
     lm_head = getattr(model, "lm_head", None)
@@ -492,52 +513,58 @@ def _discover_layers_grilly_ssm(model: Any) -> list[LayerInfo]:
     use_vsa = getattr(model, "use_vsa_head", False) and vsa_head is not None
 
     if lm_head is not None:
-        layers.append(LayerInfo(
-            name="lm_head",
-            type_name="Linear",
-            category="linear",
-            param_count=_count_params(lm_head),
-            param_shapes=_get_param_shapes(lm_head),
-            input_shape=f"(B, T, {d_model})",
-            output_shape=f"(B, T, {vocab_size})",
-            has_gpu=_has_gpu(lm_head),
-            extra_info={"role": "LM Head"},
-        ))
+        layers.append(
+            LayerInfo(
+                name="lm_head",
+                type_name="Linear",
+                category="linear",
+                param_count=_count_params(lm_head),
+                param_shapes=_get_param_shapes(lm_head),
+                input_shape=f"(B, T, {d_model})",
+                output_shape=f"(B, T, {vocab_size})",
+                has_gpu=_has_gpu(lm_head),
+                extra_info={"role": "LM Head"},
+            )
+        )
 
     if use_vsa and vsa_head is not None:
         vsa_dim = getattr(vsa_head, "vsa_dim", 10000)
-        layers.append(LayerInfo(
-            name="vsa_head",
-            type_name="VSAReasoningHead",
-            category="vsa",
-            param_count=_count_params(vsa_head),
-            param_shapes=_get_param_shapes(vsa_head),
-            input_shape=f"(B, {d_model})",
-            output_shape=f"(B, {vsa_dim})",
-            has_gpu=_has_gpu(vsa_head) if hasattr(vsa_head, "use_vulkan_tensor") else False,
-            extra_info={
-                "role": "VSA Head",
-                "pipeline": f"Linear {d_model}->{vsa_dim} -> tanh -> sign",
-            },
-        ))
+        layers.append(
+            LayerInfo(
+                name="vsa_head",
+                type_name="VSAReasoningHead",
+                category="vsa",
+                param_count=_count_params(vsa_head),
+                param_shapes=_get_param_shapes(vsa_head),
+                input_shape=f"(B, {d_model})",
+                output_shape=f"(B, {vsa_dim})",
+                has_gpu=_has_gpu(vsa_head) if hasattr(vsa_head, "use_vulkan_tensor") else False,
+                extra_info={
+                    "role": "VSA Head",
+                    "pipeline": f"Linear {d_model}->{vsa_dim} -> tanh -> sign",
+                },
+            )
+        )
 
     # NLMS head (non-parametric, metadata only)
     nlms = getattr(model, "nlms_head", None)
     if nlms is not None and getattr(nlms, "enabled", False):
-        layers.append(LayerInfo(
-            name="nlms_head",
-            type_name="_NLMSResidualHead",
-            category="nlms",
-            param_count=0,
-            param_shapes=[],
-            input_shape=f"hidden: (T, {d_model}), logits: (T, {vocab_size})",
-            output_shape=f"logits: (T, {vocab_size})",
-            extra_info={
-                "topk": str(getattr(nlms, "topk", "?")),
-                "scale": str(getattr(nlms, "scale", "?")),
-                "role": "NLMS Residual",
-            },
-        ))
+        layers.append(
+            LayerInfo(
+                name="nlms_head",
+                type_name="_NLMSResidualHead",
+                category="nlms",
+                param_count=0,
+                param_shapes=[],
+                input_shape=f"hidden: (T, {d_model}), logits: (T, {vocab_size})",
+                output_shape=f"logits: (T, {vocab_size})",
+                extra_info={
+                    "topk": str(getattr(nlms, "topk", "?")),
+                    "scale": str(getattr(nlms, "scale", "?")),
+                    "role": "NLMS Residual",
+                },
+            )
+        )
 
     return layers
 
@@ -557,18 +584,20 @@ def _discover_layers_generic(model: Any, name: str = "model") -> list[LayerInfo]
             children = []
             if hasattr(mod, "_modules") and mod._modules:
                 children = _discover_layers_generic(mod, mod_name)
-            layers.append(LayerInfo(
-                name=mod_name,
-                type_name=type_name,
-                category=category,
-                param_count=_count_params(mod),
-                param_shapes=_get_param_shapes(mod),
-                input_shape=in_s,
-                output_shape=out_s,
-                children=children,
-                is_frozen=_is_frozen(mod),
-                has_gpu=_has_gpu(mod),
-            ))
+            layers.append(
+                LayerInfo(
+                    name=mod_name,
+                    type_name=type_name,
+                    category=category,
+                    param_count=_count_params(mod),
+                    param_shapes=_get_param_shapes(mod),
+                    input_shape=in_s,
+                    output_shape=out_s,
+                    children=children,
+                    is_frozen=_is_frozen(mod),
+                    has_gpu=_has_gpu(mod),
+                )
+            )
         return layers
 
     # Fallback: scan all attributes for module-like objects
@@ -581,23 +610,27 @@ def _discover_layers_generic(model: Any, name: str = "model") -> list[LayerInfo]
             continue
         if attr is None or callable(attr) and not hasattr(attr, "parameters"):
             continue
-        if hasattr(attr, "parameters") and not isinstance(attr, (int, float, str, bool, np.ndarray)):
+        if hasattr(attr, "parameters") and not isinstance(
+            attr, (int, float, str, bool, np.ndarray)
+        ):
             type_name = type(attr).__name__
             if type_name in ("method", "builtin_function_or_method", "function"):
                 continue
             category = _classify_layer(type_name)
             in_s, out_s = _infer_shapes(attr)
-            layers.append(LayerInfo(
-                name=attr_name,
-                type_name=type_name,
-                category=category,
-                param_count=_count_params(attr),
-                param_shapes=_get_param_shapes(attr),
-                input_shape=in_s,
-                output_shape=out_s,
-                is_frozen=_is_frozen(attr),
-                has_gpu=_has_gpu(attr),
-            ))
+            layers.append(
+                LayerInfo(
+                    name=attr_name,
+                    type_name=type_name,
+                    category=category,
+                    param_count=_count_params(attr),
+                    param_shapes=_get_param_shapes(attr),
+                    input_shape=in_s,
+                    output_shape=out_s,
+                    is_frozen=_is_frozen(attr),
+                    has_gpu=_has_gpu(attr),
+                )
+            )
 
     # Also handle list attributes (like blocks)
     for attr_name in sorted(dir(model)):
@@ -614,17 +647,19 @@ def _discover_layers_generic(model: Any, name: str = "model") -> list[LayerInfo]
                 category = _classify_layer(type_name)
                 in_s, out_s = _infer_shapes(first)
                 per_elem_params = _count_params(first)
-                layers.append(LayerInfo(
-                    name=attr_name,
-                    type_name=type_name,
-                    category=category,
-                    param_count=per_elem_params * len(attr),
-                    param_shapes=_get_param_shapes(first),
-                    input_shape=in_s,
-                    output_shape=out_s,
-                    repeat_count=len(attr),
-                    has_gpu=_has_gpu(first),
-                ))
+                layers.append(
+                    LayerInfo(
+                        name=attr_name,
+                        type_name=type_name,
+                        category=category,
+                        param_count=per_elem_params * len(attr),
+                        param_shapes=_get_param_shapes(first),
+                        input_shape=in_s,
+                        output_shape=out_s,
+                        repeat_count=len(attr),
+                        has_gpu=_has_gpu(first),
+                    )
+                )
 
     return layers
 
@@ -635,9 +670,7 @@ def discover_layers(model: Any) -> list[LayerInfo]:
 
     # GrillySSMLM specialization
     if type_name == "GrillySSMLM" or (
-        hasattr(model, "blocks")
-        and hasattr(model, "tok_embed")
-        and hasattr(model, "lm_head")
+        hasattr(model, "blocks") and hasattr(model, "tok_embed") and hasattr(model, "lm_head")
     ):
         return _discover_layers_grilly_ssm(model)
 
@@ -647,6 +680,7 @@ def discover_layers(model: Any) -> list[LayerInfo]:
 # ---------------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------------
+
 
 def _format_param_count(n: int) -> str:
     """Format a parameter count as a human-readable string."""
@@ -675,15 +709,15 @@ def _format_memory(n_params: int, bytes_per_param: int = 4) -> str:
 # ASCII / Terminal renderer
 # ---------------------------------------------------------------------------
 
-_BOX_TL = "\u250c"   # top-left
-_BOX_TR = "\u2510"   # top-right
-_BOX_BL = "\u2514"   # bottom-left
-_BOX_BR = "\u2518"   # bottom-right
-_BOX_H = "\u2500"    # horizontal
-_BOX_V = "\u2502"    # vertical
-_BOX_TJ = "\u252c"   # top junction
-_BOX_BJ = "\u2534"   # bottom junction
-_BOX_LJ = "\u251c"   # left junction
+_BOX_TL = "\u250c"  # top-left
+_BOX_TR = "\u2510"  # top-right
+_BOX_BL = "\u2514"  # bottom-left
+_BOX_BR = "\u2518"  # bottom-right
+_BOX_H = "\u2500"  # horizontal
+_BOX_V = "\u2502"  # vertical
+_BOX_TJ = "\u252c"  # top junction
+_BOX_BJ = "\u2534"  # bottom junction
+_BOX_LJ = "\u251c"  # left junction
 _ARROW_DOWN = "\u25bc"
 _TREE_BRANCH = "\u251c\u2500 "
 _TREE_LAST = "\u2514\u2500 "
@@ -821,7 +855,11 @@ def render_ascii(
         box_lines = []
         repeat_str = f" x {layer.repeat_count}" if layer.repeat_count > 1 else ""
         type_label = layer.type_name
-        if layer.category == "norm" and layer.type_name not in ("LayerNorm", "BatchNorm1d", "BatchNorm2d"):
+        if layer.category == "norm" and layer.type_name not in (
+            "LayerNorm",
+            "BatchNorm1d",
+            "BatchNorm2d",
+        ):
             type_label = layer.type_name
 
         title = f"{type_label}{repeat_str}"
@@ -829,8 +867,7 @@ def render_ascii(
         # First line: type and shape info
         if layer.param_shapes:
             ", ".join(
-                f"{s[0]}x{s[1]}" if len(s) == 2 else str(s)
-                for _, s in layer.param_shapes[:2]
+                f"{s[0]}x{s[1]}" if len(s) == 2 else str(s) for _, s in layer.param_shapes[:2]
             )
             title_line = f"{title}"
             if len(title_line) < content_width:
@@ -851,7 +888,9 @@ def render_ascii(
                             child_info = f"{child.name} ({shape[1]} -> {shape[0]})"
                             break
                 elif child.type_name in ("SelectiveScan",):
-                    child_info = f"selective_scan ({layer.extra_info.get('per_block_params', '?')} features)"
+                    child_info = (
+                        f"selective_scan ({layer.extra_info.get('per_block_params', '?')} features)"
+                    )
                 elif child.type_name == "Split":
                     child_info = f"gate + value split ({child.extra_info.get('activation', '?')})"
                 elif child.type_name == "ResidualAdd":
@@ -889,7 +928,7 @@ def render_ascii(
             out.write(f"{_BOX_V}{line.ljust(outer_width)}{_BOX_V}\n")
 
         # Draw connector to next layer (except before branch)
-        is_last_main = (i == len(main_layers) - 1)
+        is_last_main = i == len(main_layers) - 1
         if not is_last_main:
             connector = _draw_connector(layer.output_shape, box_w)
             for line in connector:
@@ -952,7 +991,9 @@ def render_ascii(
 
     # Footer with summary
     out.write(f"{_BOX_V}{' ' * outer_width}{_BOX_V}\n")
-    summary_line = f"  Total: {_format_param_count(total_params)} params | {_format_memory(total_params)}"
+    summary_line = (
+        f"  Total: {_format_param_count(total_params)} params | {_format_memory(total_params)}"
+    )
     out.write(f"{_BOX_V}{summary_line.ljust(outer_width)}{_BOX_V}\n")
 
     # Layer breakdown
@@ -980,8 +1021,17 @@ def render_ascii(
 # HTML / SVG renderer
 # ---------------------------------------------------------------------------
 
-def _svg_rect(x: float, y: float, w: float, h: float, fill: str,
-              rx: float = 8, stroke: str = "#333", stroke_width: float = 1.5) -> str:
+
+def _svg_rect(
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    fill: str,
+    rx: float = 8,
+    stroke: str = "#333",
+    stroke_width: float = 1.5,
+) -> str:
     """Generate an SVG rect element."""
     return (
         f'<rect x="{x}" y="{y}" width="{w}" height="{h}" '
@@ -989,9 +1039,16 @@ def _svg_rect(x: float, y: float, w: float, h: float, fill: str,
     )
 
 
-def _svg_text(x: float, y: float, text: str, font_size: int = 14,
-              fill: str = "#fff", anchor: str = "middle",
-              weight: str = "normal", font_family: str = "monospace") -> str:
+def _svg_text(
+    x: float,
+    y: float,
+    text: str,
+    font_size: int = 14,
+    fill: str = "#fff",
+    anchor: str = "middle",
+    weight: str = "normal",
+    font_family: str = "monospace",
+) -> str:
     """Generate an SVG text element."""
     escaped = html_mod.escape(text)
     return (
@@ -1001,24 +1058,25 @@ def _svg_text(x: float, y: float, text: str, font_size: int = 14,
     )
 
 
-def _svg_line(x1: float, y1: float, x2: float, y2: float,
-              stroke: str = "#555", width: float = 2) -> str:
+def _svg_line(
+    x1: float, y1: float, x2: float, y2: float, stroke: str = "#555", width: float = 2
+) -> str:
     """Generate an SVG line element."""
     return (
-        f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
-        f'stroke="{stroke}" stroke-width="{width}"/>'
+        f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{stroke}" stroke-width="{width}"/>'
     )
 
 
-def _svg_arrow(x1: float, y1: float, x2: float, y2: float,
-               stroke: str = "#555", width: float = 2) -> str:
+def _svg_arrow(
+    x1: float, y1: float, x2: float, y2: float, stroke: str = "#555", width: float = 2
+) -> str:
     """Generate an SVG line with arrowhead."""
     arrow_size = 8
     elements = [_svg_line(x1, y1, x2, y2 - arrow_size, stroke, width)]
     # Triangle arrowhead
     elements.append(
-        f'<polygon points="{x2},{y2} {x2-arrow_size/2},{y2-arrow_size} '
-        f'{x2+arrow_size/2},{y2-arrow_size}" fill="{stroke}"/>'
+        f'<polygon points="{x2},{y2} {x2 - arrow_size / 2},{y2 - arrow_size} '
+        f'{x2 + arrow_size / 2},{y2 - arrow_size}" fill="{stroke}"/>'
     )
     return "\n".join(elements)
 
@@ -1087,7 +1145,8 @@ def render_html(
             bx = start_x + i * (branch_box_width + 40)
             bh = _box_height(bl) + (
                 len(bl.extra_info.get("pipeline", "").split(" -> ")) * child_line_height
-                if "pipeline" in bl.extra_info else 0
+                if "pipeline" in bl.extra_info
+                else 0
             )
             branch_positions.append((bx, branch_y + 30, bh))
             branch_height = max(branch_height, bh)
@@ -1099,20 +1158,29 @@ def render_html(
 
     # Background
     svg_elements.append(
-        f'<rect width="{canvas_width}" height="{total_height}" '
-        f'fill="#1a1a2e" rx="12"/>'
+        f'<rect width="{canvas_width}" height="{total_height}" fill="#1a1a2e" rx="12"/>'
     )
 
     # Title
-    svg_elements.append(_svg_text(
-        canvas_width / 2, 35, model_name,
-        font_size=22, fill="#e0e0e0", weight="bold",
-    ))
-    svg_elements.append(_svg_text(
-        canvas_width / 2, 58,
-        f"{_format_param_count(total_params)} params | {_format_memory(total_params)}",
-        font_size=14, fill="#aaa",
-    ))
+    svg_elements.append(
+        _svg_text(
+            canvas_width / 2,
+            35,
+            model_name,
+            font_size=22,
+            fill="#e0e0e0",
+            weight="bold",
+        )
+    )
+    svg_elements.append(
+        _svg_text(
+            canvas_width / 2,
+            58,
+            f"{_format_param_count(total_params)} params | {_format_memory(total_params)}",
+            font_size=14,
+            fill="#aaa",
+        )
+    )
 
     # Render main layers
     for idx, layer in enumerate(main_layers):
@@ -1126,10 +1194,16 @@ def render_html(
         repeat_str = f" x {layer.repeat_count}" if layer.repeat_count > 1 else ""
         title_text = f"{layer.type_name}{repeat_str}"
         ty = y + box_padding + 14
-        svg_elements.append(_svg_text(
-            x + box_width / 2, ty, title_text,
-            font_size=16, fill="#fff", weight="bold",
-        ))
+        svg_elements.append(
+            _svg_text(
+                x + box_width / 2,
+                ty,
+                title_text,
+                font_size=16,
+                fill="#fff",
+                weight="bold",
+            )
+        )
         ty += line_height
 
         # Children
@@ -1151,10 +1225,16 @@ def render_html(
                     dims = child.extra_info.get("dim", "")
                     child_text = f"{child.type_name}({dims})" if dims else child.type_name
 
-                svg_elements.append(_svg_text(
-                    x + child_indent + 10, ty, f"  {child_text}",
-                    font_size=12, fill="#ddd", anchor="start",
-                ))
+                svg_elements.append(
+                    _svg_text(
+                        x + child_indent + 10,
+                        ty,
+                        f"  {child_text}",
+                        font_size=12,
+                        fill="#ddd",
+                        anchor="start",
+                    )
+                )
                 ty += child_line_height
 
         # Param count
@@ -1167,10 +1247,15 @@ def render_html(
                 flags.append("GPU")
             if flags:
                 count_str += f" [{', '.join(flags)}]"
-            svg_elements.append(_svg_text(
-                x + box_width / 2, ty, count_str,
-                font_size=12, fill="#ccc",
-            ))
+            svg_elements.append(
+                _svg_text(
+                    x + box_width / 2,
+                    ty,
+                    count_str,
+                    font_size=12,
+                    fill="#ccc",
+                )
+            )
             ty += line_height
 
         # Connector arrow to next layer
@@ -1181,10 +1266,16 @@ def render_html(
 
             # Shape label on connector
             mid_y = (y + h + next_y) / 2
-            svg_elements.append(_svg_text(
-                cx + box_width / 2 + 20, mid_y, layer.output_shape,
-                font_size=11, fill="#999", anchor="start",
-            ))
+            svg_elements.append(
+                _svg_text(
+                    cx + box_width / 2 + 20,
+                    mid_y,
+                    layer.output_shape,
+                    font_size=11,
+                    fill="#999",
+                    anchor="start",
+                )
+            )
         elif branch_layers:
             # Connector to branching point
             cx = x + box_width / 2
@@ -1193,16 +1284,25 @@ def render_html(
 
             # Shape label
             mid_y = y + h + 8
-            svg_elements.append(_svg_text(
-                cx + box_width / 2 + 20, mid_y, layer.output_shape,
-                font_size=11, fill="#999", anchor="start",
-            ))
+            svg_elements.append(
+                _svg_text(
+                    cx + box_width / 2 + 20,
+                    mid_y,
+                    layer.output_shape,
+                    font_size=11,
+                    fill="#999",
+                    anchor="start",
+                )
+            )
 
             # Horizontal fork line
             if len(branch_positions) > 0:
-                min(bp[0] + (branch_box_width if len(branch_layers) > 1 else box_width) / 2
-                             for bp, branch_box_width_dummy in
-                             [(bp, min(box_width, 240)) for bp in branch_positions])
+                min(
+                    bp[0] + (branch_box_width if len(branch_layers) > 1 else box_width) / 2
+                    for bp, branch_box_width_dummy in [
+                        (bp, min(box_width, 240)) for bp in branch_positions
+                    ]
+                )
                 max(bp[0] + min(box_width, 240) / 2 for bp in branch_positions)
                 branch_box_width = min(box_width, 240)
 
@@ -1212,15 +1312,27 @@ def render_html(
                 if len(branch_positions) > 1:
                     left_cx = branch_positions[0][0] + branch_box_width / 2
                     right_cx = branch_positions[-1][0] + branch_box_width / 2
-                    svg_elements.append(_svg_line(
-                        left_cx, fork_y2, right_cx, fork_y2, stroke="#888",
-                    ))
+                    svg_elements.append(
+                        _svg_line(
+                            left_cx,
+                            fork_y2,
+                            right_cx,
+                            fork_y2,
+                            stroke="#888",
+                        )
+                    )
 
                 for bp in branch_positions:
                     bcx = bp[0] + branch_box_width / 2
-                    svg_elements.append(_svg_arrow(
-                        bcx, fork_y2, bcx, bp[1], stroke="#888",
-                    ))
+                    svg_elements.append(
+                        _svg_arrow(
+                            bcx,
+                            fork_y2,
+                            bcx,
+                            bp[1],
+                            stroke="#888",
+                        )
+                    )
 
     # Render branch layers
     branch_box_width = min(box_width, 240)
@@ -1234,43 +1346,70 @@ def render_html(
 
         ty = by + box_padding + 14
         role_text = bl.extra_info.get("role", bl.type_name)
-        svg_elements.append(_svg_text(
-            bx + branch_box_width / 2, ty, role_text,
-            font_size=14, fill="#fff", weight="bold",
-        ))
+        svg_elements.append(
+            _svg_text(
+                bx + branch_box_width / 2,
+                ty,
+                role_text,
+                font_size=14,
+                fill="#fff",
+                weight="bold",
+            )
+        )
         ty += line_height
 
         # Shape info
         if bl.type_name == "Linear" and bl.param_shapes:
             for _, shape in bl.param_shapes:
                 if len(shape) == 2:
-                    svg_elements.append(_svg_text(
-                        bx + branch_box_width / 2, ty, f"{shape[1]} -> {shape[0]}",
-                        font_size=12, fill="#ddd",
-                    ))
+                    svg_elements.append(
+                        _svg_text(
+                            bx + branch_box_width / 2,
+                            ty,
+                            f"{shape[1]} -> {shape[0]}",
+                            font_size=12,
+                            fill="#ddd",
+                        )
+                    )
                     ty += child_line_height
                     break
         elif "pipeline" in bl.extra_info:
             for part in bl.extra_info["pipeline"].split(" -> "):
-                svg_elements.append(_svg_text(
-                    bx + branch_box_width / 2, ty, part.strip(),
-                    font_size=12, fill="#ddd",
-                ))
+                svg_elements.append(
+                    _svg_text(
+                        bx + branch_box_width / 2,
+                        ty,
+                        part.strip(),
+                        font_size=12,
+                        fill="#ddd",
+                    )
+                )
                 ty += child_line_height
 
         if bl.param_count > 0:
-            svg_elements.append(_svg_text(
-                bx + branch_box_width / 2, ty,
-                f"{_format_param_count(bl.param_count)} params",
-                font_size=12, fill="#ccc",
-            ))
+            svg_elements.append(
+                _svg_text(
+                    bx + branch_box_width / 2,
+                    ty,
+                    f"{_format_param_count(bl.param_count)} params",
+                    font_size=12,
+                    fill="#ccc",
+                )
+            )
 
     # Summary bar at the bottom
     summary_y = total_height - 55
-    svg_elements.append(_svg_rect(
-        30, summary_y, canvas_width - 60, 40,
-        "#16213e", rx=8, stroke="#444",
-    ))
+    svg_elements.append(
+        _svg_rect(
+            30,
+            summary_y,
+            canvas_width - 60,
+            40,
+            "#16213e",
+            rx=8,
+            stroke="#444",
+        )
+    )
 
     # Layer breakdown
     param_by_category: dict[str, int] = {}
@@ -1285,10 +1424,15 @@ def render_html(
             breakdown_parts.append(f"{label}: {_format_param_count(count)}")
 
     summary_text = " | ".join(breakdown_parts[:6])
-    svg_elements.append(_svg_text(
-        canvas_width / 2, summary_y + 25, summary_text,
-        font_size=13, fill="#bbb",
-    ))
+    svg_elements.append(
+        _svg_text(
+            canvas_width / 2,
+            summary_y + 25,
+            summary_text,
+            font_size=13,
+            fill="#bbb",
+        )
+    )
 
     # Legend
     legend_y = total_height - 15
@@ -1299,13 +1443,18 @@ def render_html(
         color = _CATEGORY_COLORS.get(cat, _CATEGORY_COLORS["unknown"])
         label = _CATEGORY_LABELS.get(cat, cat[:3].upper())
         svg_elements.append(
-            f'<rect x="{lx}" y="{legend_y - 10}" width="12" height="12" '
-            f'rx="3" fill="{color}"/>'
+            f'<rect x="{lx}" y="{legend_y - 10}" width="12" height="12" rx="3" fill="{color}"/>'
         )
-        svg_elements.append(_svg_text(
-            lx + 18, legend_y, label,
-            font_size=11, fill="#888", anchor="start",
-        ))
+        svg_elements.append(
+            _svg_text(
+                lx + 18,
+                legend_y,
+                label,
+                font_size=11,
+                fill="#888",
+                anchor="start",
+            )
+        )
         lx += len(label) * 8 + 30
 
     # Assemble SVG
@@ -1415,7 +1564,7 @@ def render_html(
             flags.append("frozen")
         if layer.has_gpu:
             flags.append("GPU")
-        flag_str = f' [{", ".join(flags)}]' if flags else ""
+        flag_str = f" [{', '.join(flags)}]" if flags else ""
 
         html += f"""\
                 <tr>
@@ -1442,6 +1591,7 @@ def render_html(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def visualize(
     model: Any,
@@ -1541,9 +1691,7 @@ def summary(model: Any) -> str:
     lines.append(sep)
     lines.append(f"  {model_name} Summary")
     lines.append(sep)
-    lines.append(
-        f"  {'Layer':<20} {'Type':<20} {'Output Shape':<20} {'Params':>10}"
-    )
+    lines.append(f"  {'Layer':<20} {'Type':<20} {'Output Shape':<20} {'Params':>10}")
     lines.append("-" * 80)
 
     for layer in layers:

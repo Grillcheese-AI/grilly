@@ -105,9 +105,7 @@ class SynapseFilter(MemoryModule):
         if learnable:
             from .parameter import Parameter
 
-            self.tau = Parameter(
-                np.array([tau], dtype=np.float32), requires_grad=True
-            )
+            self.tau = Parameter(np.array([tau], dtype=np.float32), requires_grad=True)
             self.register_parameter("tau", self.tau)
         else:
             self.tau = tau
@@ -197,8 +195,9 @@ class DualTimescaleSynapse(MemoryModule):
         use_gpu: If True, attempt GPU dispatch (default: True)
     """
 
-    def __init__(self, tau_fast=2.0, tau_slow=20.0, w_fast=0.7, w_slow=0.3,
-                 learnable=False, use_gpu=True):
+    def __init__(
+        self, tau_fast=2.0, tau_slow=20.0, w_fast=0.7, w_slow=0.3, learnable=False, use_gpu=True
+    ):
         super().__init__()
         self.learnable = learnable
         self.use_gpu = use_gpu
@@ -207,18 +206,10 @@ class DualTimescaleSynapse(MemoryModule):
         if learnable:
             from .parameter import Parameter
 
-            self.tau_fast = Parameter(
-                np.array([tau_fast], dtype=np.float32), requires_grad=True
-            )
-            self.tau_slow = Parameter(
-                np.array([tau_slow], dtype=np.float32), requires_grad=True
-            )
-            self.w_fast = Parameter(
-                np.array([w_fast], dtype=np.float32), requires_grad=True
-            )
-            self.w_slow = Parameter(
-                np.array([w_slow], dtype=np.float32), requires_grad=True
-            )
+            self.tau_fast = Parameter(np.array([tau_fast], dtype=np.float32), requires_grad=True)
+            self.tau_slow = Parameter(np.array([tau_slow], dtype=np.float32), requires_grad=True)
+            self.w_fast = Parameter(np.array([w_fast], dtype=np.float32), requires_grad=True)
+            self.w_slow = Parameter(np.array([w_slow], dtype=np.float32), requires_grad=True)
             self.register_parameter("tau_fast", self.tau_fast)
             self.register_parameter("tau_slow", self.tau_slow)
             self.register_parameter("w_fast", self.w_fast)

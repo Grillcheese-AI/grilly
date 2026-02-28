@@ -212,7 +212,8 @@ class BaseNode(MemoryModule):
         v_reset = self.v_reset if self.v_reset is not None else 0.0
 
         spikes, v_out, h_out = gpu.snn_node_forward(
-            x, self.v,
+            x,
+            self.v,
             neuron_type=self._gpu_neuron_type(),
             tau=tau,
             v_threshold=self.v_threshold,
@@ -306,7 +307,8 @@ class BaseNode(MemoryModule):
                 try:
                     sg_type = self._surrogate_type_id()
                     grad_x = gpu.snn_node_backward(
-                        grad_output, self._h_cache,
+                        grad_output,
+                        self._h_cache,
                         alpha=self.surrogate_function.alpha,
                         surrogate_type=sg_type,
                         v_threshold=self.v_threshold,

@@ -90,11 +90,15 @@ class Converter:
                 else:
                     b = np.zeros(mod_conv.out_channels, dtype=np.float32)
 
-                gamma = np.asarray(mod_bn.weight, dtype=np.float32) if mod_bn.affine else np.ones(
-                    mod_bn.num_features, dtype=np.float32
+                gamma = (
+                    np.asarray(mod_bn.weight, dtype=np.float32)
+                    if mod_bn.affine
+                    else np.ones(mod_bn.num_features, dtype=np.float32)
                 )
-                beta = np.asarray(mod_bn.bias, dtype=np.float32) if mod_bn.affine else np.zeros(
-                    mod_bn.num_features, dtype=np.float32
+                beta = (
+                    np.asarray(mod_bn.bias, dtype=np.float32)
+                    if mod_bn.affine
+                    else np.zeros(mod_bn.num_features, dtype=np.float32)
                 )
                 mu = mod_bn.running_mean
                 sigma = np.sqrt(mod_bn.running_var + mod_bn.eps)

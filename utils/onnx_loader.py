@@ -1,4 +1,4 @@
-﻿"""
+"""
 ONNX Model Loader for Grilly
 
 Parses ONNX protobuf and reconstructs as a Grilly nn.Module graph.
@@ -898,7 +898,9 @@ def _handle_expand(node, inputs, initializers, attrs):
                 # after normalizing -1 placeholders; preserve non-unit source dims.
                 adjusted_shape = list(shape)
                 changed = False
-                for dim_idx, (src_dim, tgt_dim) in enumerate(zip(arr.shape, adjusted_shape, strict=False)):
+                for dim_idx, (src_dim, tgt_dim) in enumerate(
+                    zip(arr.shape, adjusted_shape, strict=False)
+                ):
                     if int(tgt_dim) == 1 and int(src_dim) > 1:
                         adjusted_shape[dim_idx] = int(src_dim)
                         changed = True
@@ -1211,4 +1213,3 @@ __all__ = [
     "OnnxModelLoader",
     "GrillyOnnxModel",
 ]
-

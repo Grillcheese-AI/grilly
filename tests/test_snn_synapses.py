@@ -205,15 +205,17 @@ class TestDualTimescaleSynapse:
         """Fast component should decay faster than slow."""
         from grilly.nn.snn_synapses import DualTimescaleSynapse
 
-        syn = DualTimescaleSynapse(tau_fast=2.0, tau_slow=50.0, w_fast=1.0, w_slow=0.0,
-                                   use_gpu=False)
+        syn = DualTimescaleSynapse(
+            tau_fast=2.0, tau_slow=50.0, w_fast=1.0, w_slow=0.0, use_gpu=False
+        )
         x = np.array([[1.0]], dtype=np.float32)
         syn(x)
         x_zero = np.array([[0.0]], dtype=np.float32)
         fast_decay = syn(x_zero)[0, 0]
 
-        syn2 = DualTimescaleSynapse(tau_fast=2.0, tau_slow=50.0, w_fast=0.0, w_slow=1.0,
-                                    use_gpu=False)
+        syn2 = DualTimescaleSynapse(
+            tau_fast=2.0, tau_slow=50.0, w_fast=0.0, w_slow=1.0, use_gpu=False
+        )
         syn2(x)
         slow_decay = syn2(x_zero)[0, 0]
 
@@ -224,8 +226,9 @@ class TestDualTimescaleSynapse:
         """Output should be weighted sum of fast and slow."""
         from grilly.nn.snn_synapses import DualTimescaleSynapse
 
-        syn = DualTimescaleSynapse(tau_fast=2.0, tau_slow=20.0, w_fast=0.7, w_slow=0.3,
-                                   use_gpu=False)
+        syn = DualTimescaleSynapse(
+            tau_fast=2.0, tau_slow=20.0, w_fast=0.7, w_slow=0.3, use_gpu=False
+        )
         x = np.array([[1.0]], dtype=np.float32)
         out = syn(x)
         # First step: y_fast = 1.0, y_slow = 1.0

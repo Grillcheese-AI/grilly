@@ -145,7 +145,6 @@ class TestAutomaticConversion:
         """Test that nn.Module automatically converts PyTorch tensors"""
         try:
             import torch
-
             from grilly import nn
 
             # Create PyTorch tensor
@@ -168,7 +167,6 @@ class TestAutomaticConversion:
         """Test automatic conversion with Sequential model"""
         try:
             import torch
-
             from grilly import nn
 
             # Create PyTorch tensor

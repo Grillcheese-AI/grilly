@@ -224,7 +224,11 @@ class VulkanTensor:
                 self._gpu_buffer, self._gpu_memory = backend.create_buffer(size, usage="storage")
 
             # Upload to GPU — use VMA path if pooled buffer
-            if self._pooled_buffer is not None and hasattr(self._pooled_buffer, "pool") and self._pooled_buffer.pool is not None:
+            if (
+                self._pooled_buffer is not None
+                and hasattr(self._pooled_buffer, "pool")
+                and self._pooled_buffer.pool is not None
+            ):
                 self._pooled_buffer.pool.upload_data(self._pooled_buffer, self._cpu_data)
             else:
                 backend.upload_buffer(self._gpu_buffer, self._gpu_memory, self._cpu_data)
@@ -259,9 +263,9 @@ class VulkanTensor:
                 and pooled.pool is not None
                 and hasattr(pooled.pool, "download_data")
             ):
-                self._cpu_data = pooled.pool.download_data(
-                    pooled, size, dtype=self._dtype
-                ).reshape(self._shape)
+                self._cpu_data = pooled.pool.download_data(pooled, size, dtype=self._dtype).reshape(
+                    self._shape
+                )
                 self._cpu_valid = True
                 return
 
@@ -291,6 +295,7 @@ class VulkanTensor:
         core = self._core
         if core is None:
             from grilly import Compute
+
             backend = Compute()
             core = backend.core
             self._core = core
@@ -307,7 +312,11 @@ class VulkanTensor:
 
         # Get handles
         dl_handle = self._gpu_buffer
-        rb_handle = readback.get_vulkan_handle() if hasattr(readback, "get_vulkan_handle") else readback.handle
+        rb_handle = (
+            readback.get_vulkan_handle()
+            if hasattr(readback, "get_vulkan_handle")
+            else readback.handle
+        )
 
         with core.record_commands() as rec:
             rec.transfer_barrier()

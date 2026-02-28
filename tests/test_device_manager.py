@@ -6,7 +6,6 @@ Tests multi-backend device management (Vulkan, CUDA, CPU)
 
 import numpy as np
 import pytest
-
 from grilly.utils.device_manager import (
     DeviceManager,
     get_cuda_backend,

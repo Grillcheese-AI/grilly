@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced Features &mdash; Grilly Howto</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --accent: #f78166; --accent2: #79c0ff; --accent3: #56d364; --accent4: #e3b341; --text: #e6edf3; --muted: #8b949e; }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.6; }
+    a { color: var(--accent2); text-decoration: none; } a:hover { text-decoration: underline; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 0; }
+    .header-inner { max-width: 900px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 16px; }
+    .logo { font-size: 22px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; } .logo:hover { text-decoration: none; }
+    .tagline { color: var(--muted); font-size: 14px; }
+    main { max-width: 900px; margin: 0 auto; padding: 40px 24px 64px; }
+    footer { border-top: 1px solid var(--border); padding: 32px 24px; text-align: center; color: var(--muted); font-size: 13px; } footer a { color: var(--muted); }
+    .breadcrumb { font-size: 13px; color: var(--muted); margin-bottom: 24px; } .breadcrumb a { color: var(--muted); }
+    h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 8px; }
+    .lead { color: var(--muted); font-size: 17px; margin-bottom: 40px; }
+    h2 { font-size: 22px; font-weight: 700; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    h3 { font-size: 17px; font-weight: 600; margin: 32px 0 12px; }
+    p { margin-bottom: 16px; } section { margin-bottom: 24px; }
+    .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+    .code-header { background: #1c2128; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+    .code-lang { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .code-block pre { padding: 20px 24px; overflow-x: auto; margin: 0; }
+    .code-block code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 13.5px; line-height: 1.55; color: var(--text); }
+    .kw { color: #f97583; } .str { color: #9ecbff; } .num { color: #79c0ff; }
+    .cmt { color: #6a737d; font-style: italic; } .fn { color: #b392f0; }
+    .cls { color: #e3b341; } .const { color: #79c0ff; }
+    .output-block { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+    .output-header { background: #1a1e24; padding: 6px 16px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .output-block pre { padding: 16px 24px; margin: 0; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 13px; line-height: 1.5; color: var(--accent3); }
+    .callout { border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; font-size: 14px; line-height: 1.6; }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .callout.note { background: #1c2230; border-left: 4px solid var(--accent2); } .callout.note strong { color: var(--accent2); }
+    .callout.warn { background: #2a1e0f; border-left: 4px solid var(--accent4); } .callout.warn strong { color: var(--accent4); }
+    .callout.tip { background: #122117; border-left: 4px solid var(--accent3); } .callout.tip strong { color: var(--accent3); }
+    .page-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
+    .nav-btn { display: inline-block; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; border: 1px solid var(--border); color: var(--text); transition: border-color 0.2s; }
+    .nav-btn:hover { border-color: var(--accent); text-decoration: none; } .nav-btn.home { color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 14px; }
+    th, td { padding: 10px 16px; text-align: left; border: 1px solid var(--border); }
+    th { background: #1c2128; color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    td { background: var(--surface); } td code { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; color: var(--accent3); }
+    /* ── Sidebar navigation ──────────────────── */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 232px;
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      padding: 80px 0 32px;
+      overflow-y: auto;
+      z-index: 5;
+    }
+    .sidebar-group { padding: 0 12px; margin-bottom: 4px; border: none; }
+    .sidebar-label {
+      display: flex;
+      align-items: center;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: #484f58;
+      padding: 6px 12px;
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      border-radius: 4px;
+      transition: color .15s;
+    }
+    .sidebar-label:hover { color: var(--muted); }
+    .sidebar-label::-webkit-details-marker { display: none; }
+    .sidebar-label::after {
+      content: '';
+      margin-left: auto;
+      border: solid #484f58;
+      border-width: 0 1.5px 1.5px 0;
+      padding: 2.5px;
+      transform: rotate(-45deg);
+      transition: transform .2s;
+    }
+    details.sidebar-group[open] > .sidebar-label::after { transform: rotate(45deg); }
+    details.sidebar-group[open] { margin-bottom: 12px; }
+    .sidebar a {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      margin: 1px 0;
+      font-size: 13px;
+      color: var(--muted);
+      border-radius: 6px;
+      transition: color .15s, background .15s;
+    }
+    .sidebar a:hover {
+      color: var(--text);
+      background: rgba(255,255,255,.04);
+      text-decoration: none;
+    }
+    .sidebar a.active {
+      color: var(--accent);
+      background: rgba(247,129,102,.08);
+      font-weight: 600;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .sidebar .sn {
+      font-family: 'JetBrains Mono', Consolas, monospace;
+      font-size: 10px;
+      min-width: 16px;
+      color: #484f58;
+    }
+    .sidebar a.active .sn { color: var(--accent); opacity: .7; }
+    header { position: relative; z-index: 10; }
+    main { margin-left: 252px; }
+    footer { margin-left: 252px; }
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+      main, footer { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a href="index.html" class="logo">Grilly</a>
+      <span class="tagline">GPU Neural Networks via Vulkan</span>
+    </div>
+  </header>
+
+  <nav class="sidebar">
+    <details class="sidebar-group">
+      <summary class="sidebar-label">Fundamentals</summary>
+      <a href="01-tensors.html"><span class="sn">01</span> Tensors</a>
+      <a href="02-gpu-acceleration.html"><span class="sn">02</span> GPU Acceleration</a>
+    </details>
+    <details class="sidebar-group">
+      <summary class="sidebar-label">Training</summary>
+      <a href="03-neural-networks.html"><span class="sn">03</span> Neural Networks</a>
+      <a href="04-datasets-dataloaders.html"><span class="sn">04</span> Datasets</a>
+    </details>
+    <details class="sidebar-group" open>
+      <summary class="sidebar-label">Architectures</summary>
+      <a href="05-cnns.html"><span class="sn">05</span> CNNs</a>
+      <a href="06-spiking-neural-networks.html"><span class="sn">06</span> Spiking NNs</a>
+      <a href="07-advanced-features.html" class="active"><span class="sn">07</span> Advanced</a>
+    </details>
+  </nav>
+
+  <main>
+    <div class="breadcrumb"><a href="index.html">Howtos</a> / Advanced Features</div>
+    <h1>Advanced Features</h1>
+    <p class="lead">Attention mechanisms, efficient fine-tuning, automatic differentiation, and the full functional API.</p>
+
+    <section>
+      <h2>Multi-Head Attention</h2>
+      <p>Self-attention lets each position attend to all other positions in a sequence. Grilly provides both standard and flash attention:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> grilly.nn <span class="kw">as</span> nn
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+attn = nn.<span class="cls">MultiheadAttention</span>(embed_dim=<span class="num">256</span>, num_heads=<span class="num">8</span>)
+
+<span class="cmt"># Self-attention: Q = K = V</span>
+x = np.<span class="fn">random.randn</span>(<span class="num">4</span>, <span class="num">32</span>, <span class="num">256</span>).<span class="fn">astype</span>(np.float32)
+<span class="cmt"># (batch=4, seq_len=32, embed_dim=256)</span>
+
+output, weights = <span class="fn">attn</span>(x, x, x)
+<span class="fn">print</span>(<span class="str">f"Output: </span>{output.shape}<span class="str">"</span>)     <span class="cmt"># (4, 32, 256)</span>
+<span class="fn">print</span>(<span class="str">f"Weights: </span>{weights.shape}<span class="str">"</span>)   <span class="cmt"># (4, 8, 32, 32) attention maps</span></code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>Output: (4, 32, 256)
+Weights: (4, 8, 32, 32)</pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>FlashAttention2</h2>
+      <p>FlashAttention2 uses tiled GPU computation to reduce memory from O(seq&sup2;) to O(seq), enabling much longer sequences:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code>fa2 = nn.<span class="cls">FlashAttention2</span>(
+    embed_dim=<span class="num">256</span>,
+    num_heads=<span class="num">8</span>,
+    use_rope=<span class="const">False</span>,  <span class="cmt"># True to fuse RoPE into attention</span>
+)
+
+q = k = v = np.<span class="fn">random.randn</span>(<span class="num">4</span>, <span class="num">32</span>, <span class="num">256</span>).<span class="fn">astype</span>(np.float32)
+out = <span class="fn">fa2</span>(q, k, v)
+<span class="fn">print</span>(<span class="str">f"FlashAttention2 output: </span>{out.shape}<span class="str">"</span>)</code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>FlashAttention2 output: (4, 32, 256)</pre>
+      </div>
+      <div class="callout tip">
+        <strong>Tip</strong>
+        Set <code>use_rope=True</code> to fuse rotary position embeddings directly into the attention kernel, saving an extra GPU dispatch. The fused shader is at <code>flash-attention2-rope.spv</code>.
+      </div>
+    </section>
+
+    <section>
+      <h2>Rotary Position Embeddings (RoPE)</h2>
+      <p>RoPE encodes position information by rotating query and key vectors in complex space. Used by LLaMA, Mistral, and many modern architectures:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">RoPE</span>
+
+rope = <span class="cls">RoPE</span>(head_dim=<span class="num">64</span>, max_seq_len=<span class="num">2048</span>, base=<span class="num">10000.0</span>)
+
+q = np.<span class="fn">random.randn</span>(<span class="num">4</span>, <span class="num">32</span>, <span class="num">8</span>, <span class="num">64</span>).<span class="fn">astype</span>(np.float32)
+<span class="cmt"># (batch, seq_len, num_heads, head_dim)</span>
+
+q_rotated = <span class="fn">rope</span>(q, seq_len=<span class="num">32</span>)
+<span class="fn">print</span>(<span class="str">f"RoPE output: </span>{q_rotated.shape}<span class="str">"</span>)</code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>RoPE output: (4, 32, 8, 64)</pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>LoRA: Low-Rank Adaptation</h2>
+      <p>LoRA adds small trainable matrices to frozen base weights, reducing trainable parameters from O(d&sup2;) to O(2dr). This enables efficient fine-tuning of large models:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">LoRAConfig</span>, <span class="cls">LoRAModel</span>, <span class="cls">LoRALinear</span>
+
+<span class="cmt"># Direct LoRA linear layer</span>
+lora_layer = <span class="cls">LoRALinear</span>(
+    in_features=<span class="num">768</span>,
+    out_features=<span class="num">768</span>,
+    rank=<span class="num">8</span>,          <span class="cmt"># low rank (r << d)</span>
+    alpha=<span class="num">16.0</span>,      <span class="cmt"># scaling factor</span>
+)
+<span class="cmt"># LoRA: W_eff = W_base + (alpha/r) * B @ A</span>
+<span class="cmt"># Only A (r x d) and B (d x r) are trainable</span>
+
+<span class="cmt"># Config-based approach for wrapping a full model</span>
+config = <span class="cls">LoRAConfig</span>(
+    rank=<span class="num">8</span>,
+    alpha=<span class="num">16.0</span>,
+    dropout=<span class="num">0.1</span>,
+    target_modules=[<span class="str">'q_proj'</span>, <span class="str">'v_proj'</span>],
+)
+
+<span class="cmt"># Wrap an existing model</span>
+<span class="cmt"># lora_model = LoRAModel(base_model, config)</span>
+<span class="cmt"># Only LoRA params are trainable; base weights frozen</span></code></pre>
+      </div>
+      <div class="callout note">
+        <strong>vs PyTorch</strong>
+        In PyTorch you'd use the <code>peft</code> library for LoRA. Grilly has LoRA built into <code>grilly.nn</code> with the same API pattern, no extra dependency needed.
+      </div>
+    </section>
+
+    <section>
+      <h2>The Functional API</h2>
+      <p>Stateless functional versions of every operation, matching <code>torch.nn.functional</code>:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> grilly.functional <span class="kw">as</span> F
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+x = np.<span class="fn">random.randn</span>(<span class="num">32</span>, <span class="num">128</span>).<span class="fn">astype</span>(np.float32)
+w = np.<span class="fn">random.randn</span>(<span class="num">64</span>, <span class="num">128</span>).<span class="fn">astype</span>(np.float32)
+b = np.<span class="fn">zeros</span>(<span class="num">64</span>, dtype=np.float32)
+
+<span class="cmt"># Linear + activation</span>
+out = F.<span class="fn">linear</span>(x, w, b)           <span class="cmt"># x @ w.T + b</span>
+out = F.<span class="fn">relu</span>(out)                  <span class="cmt"># max(0, x)</span>
+out = F.<span class="fn">gelu</span>(out)                  <span class="cmt"># GELU activation</span>
+out = F.<span class="fn">silu</span>(out)                  <span class="cmt"># x * sigmoid(x)</span>
+
+<span class="cmt"># Normalization</span>
+gamma = np.<span class="fn">ones</span>(<span class="num">64</span>, dtype=np.float32)
+beta  = np.<span class="fn">zeros</span>(<span class="num">64</span>, dtype=np.float32)
+out = F.<span class="fn">layer_norm</span>(out, gamma, beta)
+
+<span class="cmt"># Dropout (training only)</span>
+out = F.<span class="fn">dropout</span>(out, p=<span class="num">0.1</span>, training=<span class="const">True</span>)
+
+<span class="cmt"># Softmax</span>
+probs = F.<span class="fn">softmax</span>(out)
+
+<span class="cmt"># Loss</span>
+targets = np.<span class="fn">random.randint</span>(<span class="num">0</span>, <span class="num">64</span>, <span class="num">32</span>)
+loss = F.<span class="fn">cross_entropy</span>(out, targets)
+
+<span class="cmt"># Attention</span>
+q = k = v = np.<span class="fn">random.randn</span>(<span class="num">2</span>, <span class="num">16</span>, <span class="num">64</span>).<span class="fn">astype</span>(np.float32)
+attn_out = F.<span class="fn">attention</span>(q, k, v)</code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Variable Autograd</h2>
+      <p>Grilly includes a full autograd engine with a PyTorch-like <code>Variable</code> that builds a computation graph and computes gradients automatically:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">Variable</span>, no_grad
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+<span class="cmt"># Create tracked variables</span>
+a = <span class="cls">Variable</span>(np.<span class="fn">array</span>([<span class="num">1.0</span>, <span class="num">2.0</span>, <span class="num">3.0</span>]), requires_grad=<span class="const">True</span>)
+b = <span class="cls">Variable</span>(np.<span class="fn">array</span>([<span class="num">4.0</span>, <span class="num">5.0</span>, <span class="num">6.0</span>]), requires_grad=<span class="const">True</span>)
+
+<span class="cmt"># Build computation graph</span>
+c = a * b + a.<span class="fn">sum</span>()
+loss = c.<span class="fn">sum</span>()
+
+<span class="cmt"># Backward: compute all gradients</span>
+loss.<span class="fn">backward</span>()
+
+<span class="fn">print</span>(<span class="str">"a.grad:"</span>, a.grad)  <span class="cmt"># d(loss)/da</span>
+<span class="fn">print</span>(<span class="str">"b.grad:"</span>, b.grad)  <span class="cmt"># d(loss)/db</span>
+
+<span class="cmt"># Stop gradient tracking</span>
+<span class="kw">with</span> <span class="fn">no_grad</span>():
+    val = a * <span class="num">2</span>  <span class="cmt"># no graph, no gradient overhead</span></code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>a.grad: [7. 8. 9.]
+b.grad: [1. 2. 3.]</pre>
+      </div>
+      <p>The autograd system supports arithmetic, reductions, activations, matrix operations, loss functions, and shape operations. Available operations include:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> (
+    <span class="cmt"># Arithmetic</span>
+    add, sub, mul, div, neg, <span class="fn">pow</span>, matmul,
+    <span class="cmt"># Reductions</span>
+    <span class="fn">sum</span>, mean, <span class="fn">max</span>, <span class="fn">min</span>, var, std, norm,
+    <span class="cmt"># Activations</span>
+    relu, sigmoid, tanh, gelu, silu, softmax,
+    <span class="cmt"># Shape</span>
+    reshape, transpose, squeeze, unsqueeze, flatten,
+    concat, stack, clone,
+    <span class="cmt"># Loss</span>
+    cross_entropy, mse_loss, l1_loss, bce_loss,
+)</code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Optimizers Reference</h2>
+      <table>
+        <thead><tr><th>Optimizer</th><th>Constructor</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>AdamW</code></td><td><code>AdamW(params, lr=1e-3, weight_decay=0.01)</code></td><td>Default choice for most tasks</td></tr>
+          <tr><td><code>Adam</code></td><td><code>Adam(params, lr=1e-3)</code></td><td>Classic adaptive learning rate</td></tr>
+          <tr><td><code>SGD</code></td><td><code>SGD(params, lr=0.01, momentum=0.9)</code></td><td>Stochastic gradient descent</td></tr>
+          <tr><td><code>NLMS</code></td><td><code>NLMS(params, lr=1e-2)</code></td><td>Normalized LMS (neuromorphic)</td></tr>
+          <tr><td><code>NaturalGradient</code></td><td><code>NaturalGradient(params, lr=1e-3)</code></td><td>Fisher-preconditioned updates</td></tr>
+          <tr><td><code>AutoHypergradientAdamW</code></td><td><code>AutoHypergradientAdamW(params)</code></td><td>Auto LR via OSGM surprise signal</td></tr>
+          <tr><td><code>AffectAdam</code></td><td><code>AffectAdam(params, lr=1e-3)</code></td><td>Affect-modulated Adam</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Learning Rate Schedulers</h3>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> grilly.optim <span class="kw">as</span> optim
+
+optimizer = optim.<span class="cls">AdamW</span>(model.<span class="fn">parameters</span>(), lr=<span class="num">1e-3</span>)
+
+<span class="cmt"># Decay LR by 0.1 every 30 epochs</span>
+scheduler = optim.<span class="cls">StepLR</span>(optimizer, step_size=<span class="num">30</span>, gamma=<span class="num">0.1</span>)
+
+<span class="cmt"># Cosine annealing</span>
+scheduler = optim.<span class="cls">CosineAnnealingLR</span>(optimizer, T_max=<span class="num">100</span>)
+
+<span class="cmt"># Reduce on plateau</span>
+scheduler = optim.<span class="cls">ReduceLROnPlateau</span>(optimizer, patience=<span class="num">10</span>)
+
+<span class="cmt"># One-cycle policy (call per batch, not per epoch)</span>
+scheduler = optim.<span class="cls">OneCycleLR</span>(optimizer, max_lr=<span class="num">1e-2</span>, total_steps=<span class="num">1000</span>)
+
+<span class="cmt"># In training loop:</span>
+<span class="cmt"># scheduler.step()          # per epoch (StepLR, Cosine)</span>
+<span class="cmt"># scheduler.step(val_loss)  # per epoch (ReduceLROnPlateau)</span></code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Transformer Layers</h2>
+      <p>Build transformers from encoder and decoder layer blocks:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.nn <span class="kw">import</span> <span class="cls">TransformerEncoderLayer</span>, <span class="cls">TransformerDecoderLayer</span>
+
+<span class="cmt"># Single encoder layer: self-attention + FFN</span>
+encoder = <span class="cls">TransformerEncoderLayer</span>(
+    d_model=<span class="num">512</span>,
+    nhead=<span class="num">8</span>,
+    dim_feedforward=<span class="num">2048</span>,
+    dropout=<span class="num">0.1</span>,
+)
+
+x = np.<span class="fn">random.randn</span>(<span class="num">4</span>, <span class="num">64</span>, <span class="num">512</span>).<span class="fn">astype</span>(np.float32)
+out = <span class="fn">encoder</span>(x)
+<span class="fn">print</span>(<span class="str">f"Encoder output: </span>{out.shape}<span class="str">"</span>)  <span class="cmt"># (4, 64, 512)</span></code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>HuggingFace Bridge</h2>
+      <p>Load pre-trained weights from HuggingFace models without the PyTorch runtime:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">from</span> grilly.utils <span class="kw">import</span> <span class="cls">HuggingFaceBridge</span>
+
+bridge = <span class="cls">HuggingFaceBridge</span>()
+
+<span class="cmt"># Load weights as numpy arrays (no torch dependency)</span>
+weights = bridge.<span class="fn">load_weights</span>(<span class="str">'bert-base-uncased'</span>)
+<span class="cmt"># Returns dict: {'encoder.layer.0.attention.self.query.weight': ndarray, ...}</span></code></pre>
+      </div>
+      <div class="callout tip">
+        <strong>Tip</strong>
+        The HuggingFace bridge downloads <code>safetensors</code> or <code>pytorch_model.bin</code> and extracts the weight tensors directly into numpy arrays, bypassing PyTorch entirely. This lets you run inference on grilly without installing torch.
+      </div>
+    </section>
+
+    <nav class="page-nav">
+      <a href="06-spiking-neural-networks.html" class="nav-btn prev">&larr; SNNs</a>
+      <a href="index.html" class="nav-btn home">All Howtos</a>
+    </nav>
+  </main>
+
+  <footer>
+    <p>Grilly &mdash; GPU-accelerated neural networks via Vulkan. MIT License.</p>
+  </footer>
+</body>
+</html>

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Base constants and utilities for Vulkan backend.
 """
 
@@ -292,8 +292,7 @@ class BufferMixin:
             recorder.copy_buffer(staging_handle, dl_handle, flat.nbytes)
             return staging  # caller must release after submit
 
-    def _download_from_device_local(self, device_local_buf, size, dtype=np.float32,
-                                     recorder=None):
+    def _download_from_device_local(self, device_local_buf, size, dtype=np.float32, recorder=None):
         """Stage-download data from a DEVICE_LOCAL buffer.
 
         1. Acquire readback buffer (GPU_TO_CPU, mapped).
@@ -417,4 +416,3 @@ class BufferMixin:
 
 
 __all__ = ["VULKAN_AVAILABLE", "BufferMixin", "_DirectBuffer", "BUFFER_POOL_AVAILABLE"]
-
