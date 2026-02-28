@@ -54,9 +54,12 @@ class MaxPool2d(Module):
 
     def forward(self, x):
         """Forward pass. Accepts numpy array or VulkanTensor."""
-        from ..utils.tensor_conversion import VulkanTensor
+        try:
+            from ..utils.tensor_conversion import VulkanTensor
 
-        is_vt = isinstance(x, VulkanTensor)
+            is_vt = isinstance(x, VulkanTensor)
+        except (ImportError, SystemError):
+            is_vt = False
         if not is_vt:
             x = np.asarray(x, dtype=np.float32)
         self._cached_input_shape = x.shape

@@ -18,10 +18,13 @@ from .module import Module
 
 def _to_numpy(x):
     """Convert VulkanTensor to numpy if needed, pass numpy through."""
-    from ..utils.tensor_conversion import VulkanTensor
+    try:
+        from ..utils.tensor_conversion import VulkanTensor
 
-    if isinstance(x, VulkanTensor):
-        return x.numpy()
+        if isinstance(x, VulkanTensor):
+            return x.numpy()
+    except (ImportError, SystemError):
+        pass
     return x
 
 

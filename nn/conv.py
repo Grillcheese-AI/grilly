@@ -105,9 +105,12 @@ class Conv2d(Module):
         Returns:
             Output tensor (batch, out_channels, out_h, out_w)
         """
-        from ..utils.tensor_conversion import VulkanTensor
+        try:
+            from ..utils.tensor_conversion import VulkanTensor
 
-        is_vt = isinstance(x, VulkanTensor)
+            is_vt = isinstance(x, VulkanTensor)
+        except (ImportError, SystemError):
+            is_vt = False
 
         # Validate input shape
         if x.ndim != 4:

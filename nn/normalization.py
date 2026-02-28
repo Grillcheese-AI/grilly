@@ -99,9 +99,12 @@ class BatchNorm2d(Module):
         Returns:
             Normalized output (batch, channels, height, width)
         """
-        from ..utils.tensor_conversion import VulkanTensor
+        try:
+            from ..utils.tensor_conversion import VulkanTensor
 
-        is_vt = isinstance(x, VulkanTensor)
+            is_vt = isinstance(x, VulkanTensor)
+        except (ImportError, SystemError):
+            is_vt = False
 
         # Validate input
         if x.ndim != 4:
