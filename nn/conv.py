@@ -128,15 +128,9 @@ class Conv2d(Module):
             else None
         )
 
-        # C++ bridge fast path
-        if _USE_CPP_BRIDGE and not is_vt:
-            result = _bridge.conv2d(
-                x, weight, bias,
-                stride=self.stride, padding=self.padding,
-                dilation=self.dilation, groups=self.groups,
-            )
-            if result is not None:
-                return result
+        # NOTE: C++ bridge conv2d disabled — multi-channel kernel has correctness
+        # issues (max diff ~25 vs PyTorch). Linear/activation bridge paths are
+        # correct and provide the main speedup. Conv2d fix tracked separately.
 
         # Legacy Python ctypes Vulkan path
         return backend.conv.conv2d(
