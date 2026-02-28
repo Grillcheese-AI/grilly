@@ -204,9 +204,12 @@ class Linear(Module):
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias) if self.bias is not None else None
 
-        from ..utils.tensor_conversion import VulkanTensor
+        try:
+            from ..utils.tensor_conversion import VulkanTensor
 
-        is_vt = isinstance(x, VulkanTensor)
+            is_vt = isinstance(x, VulkanTensor)
+        except (ImportError, SystemError):
+            is_vt = False
 
         if not is_vt:
             x = np.asarray(x, dtype=np.float32)
