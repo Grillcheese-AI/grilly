@@ -126,9 +126,7 @@ class ParametricLIFNode(BaseNode):
     def __init__(self, init_tau=2.0, decay_input=False, **kwargs):
         super().__init__(**kwargs)
         self.decay_input = decay_input
-        self.tau = Parameter(
-            np.array([init_tau], dtype=np.float32), requires_grad=True
-        )
+        self.tau = Parameter(np.array([init_tau], dtype=np.float32), requires_grad=True)
         self.register_parameter("tau", self.tau)
 
     def _get_tau(self):

@@ -74,8 +74,8 @@ def _compute_update_directions(param_groups, state, step_count, betas, eps):
             sc = s.get("step", step_count)
             if sc == 0:
                 continue
-            m_hat = s["exp_avg"] / (1.0 - beta1 ** sc)
-            v_hat = s["exp_avg_sq"] / (1.0 - beta2 ** sc)
+            m_hat = s["exp_avg"] / (1.0 - beta1**sc)
+            v_hat = s["exp_avg_sq"] / (1.0 - beta2**sc)
             directions[param_id] = m_hat / (np.sqrt(v_hat) + eps)
     return directions
 
@@ -117,8 +117,12 @@ class HypergradientAdamW(AdamW):
         use_gpu: bool = True,
     ):
         super().__init__(
-            params, lr=lr, betas=betas, eps=eps,
-            weight_decay=weight_decay, use_gpu=use_gpu,
+            params,
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay,
+            use_gpu=use_gpu,
         )
         self.beta_hyper = beta_hyper
         self.lr_min = lr_min
@@ -150,9 +154,7 @@ class HypergradientAdamW(AdamW):
             if self.log_scale:
                 log_lr = np.log(self.defaults["lr"])
                 log_lr += self.beta_hyper * hypergradient
-                new_lr = float(np.exp(np.clip(
-                    log_lr, np.log(self.lr_min), np.log(self.lr_max)
-                )))
+                new_lr = float(np.exp(np.clip(log_lr, np.log(self.lr_min), np.log(self.lr_max))))
             else:
                 new_lr = self.defaults["lr"] + self.beta_hyper * hypergradient
                 new_lr = float(np.clip(new_lr, self.lr_min, self.lr_max))
@@ -164,8 +166,11 @@ class HypergradientAdamW(AdamW):
         loss = super().step(closure=closure, gradients=gradients)
 
         self._prev_directions = _compute_update_directions(
-            self.param_groups, self.state, self._step_count,
-            self.defaults["betas"], self.defaults["eps"],
+            self.param_groups,
+            self.state,
+            self._step_count,
+            self.defaults["betas"],
+            self.defaults["eps"],
         )
         return loss
 
@@ -290,8 +295,12 @@ class AutoHypergradientAdamW(AdamW):
         use_gpu: bool = True,
     ):
         super().__init__(
-            params, lr=lr, betas=betas, eps=eps,
-            weight_decay=weight_decay, use_gpu=use_gpu,
+            params,
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay,
+            use_gpu=use_gpu,
         )
         self.hyper_lr = hyper_lr
         self.hyper_lr_beta = hyper_lr_beta
@@ -317,7 +326,7 @@ class AutoHypergradientAdamW(AdamW):
         self._meta_decay = 0.99  # RMSProp-style decay for meta-accumulator
 
         # Previous step state for hypergradient computation
-        self._prev_directions = {}   # d_{k-1}: Adam update directions
+        self._prev_directions = {}  # d_{k-1}: Adam update directions
         self._prev_grad_norm_sq = 0.0  # ||g_{k-1}||^2
         self._prev_first_moments = {}  # m_{k-1}: for momentum adaptation
 
@@ -325,13 +334,13 @@ class AutoHypergradientAdamW(AdamW):
         # Tracks gradient prediction error as a neuromodulatory signal.
         # The optimizer computes surprise; the model reads current_surprise_gain
         # for input scaling via the inverted-U (Yerkes-Dodson) curve.
-        self._grad_ema = {}          # EMA of gradients (per-param)
-        self._grad_var_ema = 0.0     # EMA of ||g||^2 (scalar)
+        self._grad_ema = {}  # EMA of gradients (per-param)
+        self._grad_var_ema = 0.0  # EMA of ||g||^2 (scalar)
         self._current_surprise = 0.0  # instant surprise [0, 1]
-        self._s_bar = 0.0            # accumulated surprise (biological momentum)
-        self._current_gain = 0.0     # inverted-U modulated gain
+        self._s_bar = 0.0  # accumulated surprise (biological momentum)
+        self._current_gain = 0.0  # inverted-U modulated gain
         self._surprise_history = []  # instant surprise history
-        self._s_bar_history = []     # accumulated surprise history
+        self._s_bar_history = []  # accumulated surprise history
 
         # History for monitoring / plotting
         self._lr_history = [lr]
@@ -414,8 +423,7 @@ class AutoHypergradientAdamW(AdamW):
             if self._grad_var_ema == 0.0 and self._step_count == self.warmup_steps:
                 self._grad_var_ema = current_norm_sq
             else:
-                self._grad_var_ema = (gamma * self._grad_var_ema
-                                      + (1.0 - gamma) * current_norm_sq)
+                self._grad_var_ema = gamma * self._grad_var_ema + (1.0 - gamma) * current_norm_sq
 
             # Compute surprise: ||g_k - EMA(g)||^2 / (EMA(||g||^2) + eps)
             prediction_error_sq = 0.0
@@ -448,16 +456,16 @@ class AutoHypergradientAdamW(AdamW):
             # Update gradient EMA
             for pid, grad in current_grads.items():
                 if pid in self._grad_ema:
-                    self._grad_ema[pid] = (gamma * self._grad_ema[pid]
-                                           + (1.0 - gamma) * grad.copy())
+                    self._grad_ema[pid] = gamma * self._grad_ema[pid] + (1.0 - gamma) * grad.copy()
                 else:
                     self._grad_ema[pid] = grad.copy()
 
         # --- Hypergradient-based adaptation (after warmup) ---
-        if (self._step_count >= self.warmup_steps
-                and self._prev_grad_norm_sq > self._adagrad_eps
-                and self._prev_directions):
-
+        if (
+            self._step_count >= self.warmup_steps
+            and self._prev_grad_norm_sq > self._adagrad_eps
+            and self._prev_directions
+        ):
             norm_sq = self._prev_grad_norm_sq
 
             # Hypergradient for learning rate:
@@ -507,16 +515,21 @@ class AutoHypergradientAdamW(AdamW):
                 h_beta /= norm_sq
 
                 h_beta = float(np.clip(h_beta, -1.0, 1.0))
-                self._G_beta = (self._meta_decay * self._G_beta
-                                + (1.0 - self._meta_decay) * h_beta * h_beta)
-                beta_delta = (self.hyper_lr_beta * h_beta
-                              / (np.sqrt(self._G_beta) + self._adagrad_eps))
+                self._G_beta = (
+                    self._meta_decay * self._G_beta + (1.0 - self._meta_decay) * h_beta * h_beta
+                )
+                beta_delta = (
+                    self.hyper_lr_beta * h_beta / (np.sqrt(self._G_beta) + self._adagrad_eps)
+                )
 
                 beta1, beta2 = self.defaults["betas"]
-                new_beta1 = float(np.clip(
-                    beta1 - beta_delta,
-                    self.beta_min, self.beta_max,
-                ))
+                new_beta1 = float(
+                    np.clip(
+                        beta1 - beta_delta,
+                        self.beta_min,
+                        self.beta_max,
+                    )
+                )
                 self.defaults["betas"] = (new_beta1, beta2)
                 for group in self.param_groups:
                     group["betas"] = (new_beta1, beta2)
@@ -532,8 +545,11 @@ class AutoHypergradientAdamW(AdamW):
 
         # --- Store state for next step's hypergradient ---
         self._prev_directions = _compute_update_directions(
-            self.param_groups, self.state, self._step_count,
-            self.defaults["betas"], self.defaults["eps"],
+            self.param_groups,
+            self.state,
+            self._step_count,
+            self.defaults["betas"],
+            self.defaults["eps"],
         )
         self._prev_grad_norm_sq = grad_norm_sq
 

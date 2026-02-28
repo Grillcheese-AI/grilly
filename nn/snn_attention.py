@@ -112,9 +112,7 @@ class MultiDimensionalAttention(Module):
         self._modules["time_attn"] = self.time_attn
 
         # Channel attention: learnable per-channel scale
-        self.channel_scale = Parameter(
-            np.ones(channels, dtype=np.float32), requires_grad=True
-        )
+        self.channel_scale = Parameter(np.ones(channels, dtype=np.float32), requires_grad=True)
         self.register_parameter("channel_scale", self.channel_scale)
 
         # Spatial attention: 1x1 conv equivalent
@@ -251,10 +249,7 @@ class SpikingSelfAttention(Module):
         return out.reshape(N, L, D).astype(np.float32)
 
     def __repr__(self):
-        return (
-            f"SpikingSelfAttention(embed_dim={self.embed_dim}, "
-            f"num_heads={self.num_heads})"
-        )
+        return f"SpikingSelfAttention(embed_dim={self.embed_dim}, num_heads={self.num_heads})"
 
 
 class QKAttention(Module):

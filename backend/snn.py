@@ -296,13 +296,22 @@ class VulkanSNN(BufferMixin):
 
             vkFreeDescriptorSets(self.core.device, self.core.descriptor_pool, 1, [descriptor_set])
 
-            return y_out[: n].reshape(x_in.shape)
+            return y_out[:n].reshape(x_in.shape)
         finally:
             self._release_buffers([buf_x, buf_y])
 
-    def snn_node_forward(self, x_in, v_mem, neuron_type=0, tau=2.0,
-                         v_threshold=1.0, v_reset=0.0, reset_mode=0,
-                         decay_input=False, tau_param=None):
+    def snn_node_forward(
+        self,
+        x_in,
+        v_mem,
+        neuron_type=0,
+        tau=2.0,
+        v_threshold=1.0,
+        v_reset=0.0,
+        reset_mode=0,
+        decay_input=False,
+        tau_param=None,
+    ):
         """GPU-accelerated SNN neuron forward pass (IF/LIF/PLIF).
 
         Args:
@@ -355,8 +364,14 @@ class VulkanSNN(BufferMixin):
             )
 
             push_constants = struct.pack(
-                "IIfffII", n, neuron_type, tau, v_threshold, v_reset,
-                reset_mode, 1 if decay_input else 0
+                "IIfffII",
+                n,
+                neuron_type,
+                tau,
+                v_threshold,
+                v_reset,
+                reset_mode,
+                1 if decay_input else 0,
             )
 
             workgroups = (n + 255) // 256

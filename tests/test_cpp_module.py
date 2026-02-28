@@ -93,12 +93,8 @@ class TestModuleParameters:
         class TwoParam(Module):
             def __init__(self):
                 super().__init__()
-                self.register_parameter(
-                    "weight", Parameter(Tensor.zeros([3, 4]))
-                )
-                self.register_parameter(
-                    "bias", Parameter(Tensor.zeros([4]))
-                )
+                self.register_parameter("weight", Parameter(Tensor.zeros([3, 4])))
+                self.register_parameter("bias", Parameter(Tensor.zeros([4])))
 
             def forward(self, x):
                 return x
@@ -115,9 +111,7 @@ class TestModuleParameters:
         class Child(Module):
             def __init__(self):
                 super().__init__()
-                self.register_parameter(
-                    "w", Parameter(Tensor.zeros([2, 3]))
-                )
+                self.register_parameter("w", Parameter(Tensor.zeros([2, 3])))
 
             def forward(self, x):
                 return x
@@ -143,9 +137,7 @@ class TestModuleParameters:
         class Leaf(Module):
             def __init__(self, name):
                 super().__init__()
-                self.register_parameter(
-                    name, Parameter(Tensor.zeros([2]))
-                )
+                self.register_parameter(name, Parameter(Tensor.zeros([2])))
 
             def forward(self, x):
                 return x

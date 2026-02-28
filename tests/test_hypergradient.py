@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-
 from grilly.nn.parameter import Parameter
 from grilly.optim.hypergradient import AutoHypergradientAdamW, HypergradientAdamW
 
@@ -32,7 +31,6 @@ def _quadratic_grads(params, target=None):
 # HypergradientAdamW tests
 # ---------------------------------------------------------------------------
 class TestHypergradientAdamW:
-
     def test_basic_step(self):
         params = _make_params((10,))
         opt = HypergradientAdamW(params, lr=0.01, beta_hyper=1e-6, use_gpu=False)
@@ -62,8 +60,12 @@ class TestHypergradientAdamW:
         """LR should stay within [lr_min, lr_max]."""
         params = _make_params((5,))
         opt = HypergradientAdamW(
-            params, lr=0.5, beta_hyper=1.0,  # Extreme beta_hyper
-            lr_min=0.001, lr_max=0.1, use_gpu=False,
+            params,
+            lr=0.5,
+            beta_hyper=1.0,  # Extreme beta_hyper
+            lr_min=0.001,
+            lr_max=0.1,
+            use_gpu=False,
         )
 
         for _ in range(10):
@@ -77,8 +79,11 @@ class TestHypergradientAdamW:
     def test_log_scale(self):
         params = _make_params((10,))
         opt = HypergradientAdamW(
-            params, lr=0.01, beta_hyper=1e-5,
-            log_scale=True, use_gpu=False,
+            params,
+            lr=0.01,
+            beta_hyper=1e-5,
+            log_scale=True,
+            use_gpu=False,
         )
 
         for _ in range(10):
@@ -129,7 +134,6 @@ class TestHypergradientAdamW:
 # AutoHypergradientAdamW tests
 # ---------------------------------------------------------------------------
 class TestAutoHypergradientAdamW:
-
     def test_basic_step(self):
         params = _make_params((10,))
         opt = AutoHypergradientAdamW(params, lr=0.01, warmup_steps=2, use_gpu=False)
@@ -146,7 +150,10 @@ class TestAutoHypergradientAdamW:
         params = _make_params((10,))
         warmup = 5
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=warmup, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=warmup,
+            use_gpu=False,
         )
 
         initial_lr = opt.current_lr
@@ -161,7 +168,11 @@ class TestAutoHypergradientAdamW:
         """LR should adapt after warmup completes."""
         params = _make_params((20,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=3, hyper_lr=0.1, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=3,
+            hyper_lr=0.1,
+            use_gpu=False,
         )
 
         initial_lr = opt.current_lr
@@ -175,8 +186,13 @@ class TestAutoHypergradientAdamW:
     def test_lr_clamping(self):
         params = _make_params((5,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.05, hyper_lr=10.0, warmup_steps=1,
-            lr_min=0.001, lr_max=0.1, use_gpu=False,
+            params,
+            lr=0.05,
+            hyper_lr=10.0,
+            warmup_steps=1,
+            lr_min=0.001,
+            lr_max=0.1,
+            use_gpu=False,
         )
 
         for _ in range(20):
@@ -192,7 +208,11 @@ class TestAutoHypergradientAdamW:
         np.random.seed(42)
         params = _make_params((50,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, hyper_lr=0.1, warmup_steps=2, use_gpu=False,
+            params,
+            lr=0.01,
+            hyper_lr=0.1,
+            warmup_steps=2,
+            use_gpu=False,
         )
 
         for _ in range(50):
@@ -211,7 +231,11 @@ class TestAutoHypergradientAdamW:
         np.random.seed(42)
         params = _make_params((10,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.05, hyper_lr=0.01, warmup_steps=5, use_gpu=False,
+            params,
+            lr=0.05,
+            hyper_lr=0.01,
+            warmup_steps=5,
+            use_gpu=False,
         )
 
         initial_loss = 0.5 * np.sum(np.asarray(params[0]) ** 2)
@@ -227,8 +251,12 @@ class TestAutoHypergradientAdamW:
         """When adapt_momentum=True, beta1 should change."""
         params = _make_params((20,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=3,
-            adapt_momentum=True, hyper_lr_beta=1.0, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=3,
+            adapt_momentum=True,
+            hyper_lr_beta=1.0,
+            use_gpu=False,
         )
 
         initial_beta1 = opt.defaults["betas"][0]
@@ -245,9 +273,14 @@ class TestAutoHypergradientAdamW:
     def test_momentum_clamping(self):
         params = _make_params((10,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=1,
-            adapt_momentum=True, hyper_lr_beta=100.0,
-            beta_min=0.8, beta_max=0.95, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=1,
+            adapt_momentum=True,
+            hyper_lr_beta=100.0,
+            beta_min=0.8,
+            beta_max=0.95,
+            use_gpu=False,
         )
 
         for _ in range(20):
@@ -262,7 +295,10 @@ class TestAutoHypergradientAdamW:
         """Should handle multiple parameter tensors."""
         params = _make_params((10,), (20,), (5, 5))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=2, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=2,
+            use_gpu=False,
         )
 
         for _ in range(15):
@@ -278,7 +314,10 @@ class TestAutoHypergradientAdamW:
     def test_repr(self):
         params = _make_params((5,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, adapt_momentum=True, use_gpu=False,
+            params,
+            lr=0.01,
+            adapt_momentum=True,
+            use_gpu=False,
         )
         r = repr(opt)
         assert "AutoHypergradientAdamW" in r
@@ -292,10 +331,18 @@ class TestAutoHypergradientAdamW:
         params2 = [Parameter(np.array(p, copy=True)) for p in params1]
 
         opt1 = AutoHypergradientAdamW(
-            params1, lr=0.01, warmup_steps=2, hyper_lr=0.01, use_gpu=False,
+            params1,
+            lr=0.01,
+            warmup_steps=2,
+            hyper_lr=0.01,
+            use_gpu=False,
         )
         opt2 = AutoHypergradientAdamW(
-            params2, lr=0.01, warmup_steps=2, hyper_lr=0.01, use_gpu=False,
+            params2,
+            lr=0.01,
+            warmup_steps=2,
+            hyper_lr=0.01,
+            use_gpu=False,
         )
 
         for _ in range(20):
@@ -336,14 +383,16 @@ class TestAutoHypergradientAdamW:
 # Surprise signal tests (input-level with trauma protection)
 # ---------------------------------------------------------------------------
 class TestSurpriseSignal:
-
     def test_surprise_computed(self):
         """Surprise signal should be computed when track_surprise=True."""
         np.random.seed(42)
         params = _make_params((20,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=3,
-            track_surprise=True, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=3,
+            track_surprise=True,
+            use_gpu=False,
         )
 
         for _ in range(20):
@@ -359,8 +408,11 @@ class TestSurpriseSignal:
         np.random.seed(42)
         params = _make_params((20,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=2,
-            track_surprise=True, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=2,
+            track_surprise=True,
+            use_gpu=False,
         )
 
         assert opt.current_surprise == 0.0
@@ -376,8 +428,11 @@ class TestSurpriseSignal:
         """All instant surprise values should be in [0, 1]."""
         params = _make_params((10,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=1,
-            track_surprise=True, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=1,
+            track_surprise=True,
+            use_gpu=False,
         )
 
         for _ in range(20):
@@ -394,8 +449,12 @@ class TestSurpriseSignal:
         np.random.seed(42)
         params = _make_params((20,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=2,
-            track_surprise=True, surprise_alpha=0.3, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=2,
+            track_surprise=True,
+            surprise_alpha=0.3,
+            use_gpu=False,
         )
 
         for _ in range(15):
@@ -431,8 +490,11 @@ class TestSurpriseSignal:
         np.random.seed(42)
         params = _make_params((20,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=2,
-            track_surprise=True, surprise_alpha=0.5,  # fast accumulation
+            params,
+            lr=0.01,
+            warmup_steps=2,
+            track_surprise=True,
+            surprise_alpha=0.5,  # fast accumulation
             trauma_threshold=0.3,  # low threshold
             use_gpu=False,
         )
@@ -465,8 +527,12 @@ class TestSurpriseSignal:
         np.random.seed(42)
         params = _make_params((20,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=2,
-            track_surprise=True, surprise_gamma=0.9, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=2,
+            track_surprise=True,
+            surprise_gamma=0.9,
+            use_gpu=False,
         )
 
         target1 = np.zeros(20, dtype=np.float32)
@@ -491,8 +557,12 @@ class TestSurpriseSignal:
         params = _make_params((20,))
         initial_beta1 = 0.9
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, betas=(initial_beta1, 0.999),
-            warmup_steps=3, track_surprise=True, use_gpu=False,
+            params,
+            lr=0.01,
+            betas=(initial_beta1, 0.999),
+            warmup_steps=3,
+            track_surprise=True,
+            use_gpu=False,
         )
 
         for _ in range(20):
@@ -506,8 +576,11 @@ class TestSurpriseSignal:
         """With track_surprise=False, no surprise state should accumulate."""
         params = _make_params((10,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=2,
-            track_surprise=False, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=2,
+            track_surprise=False,
+            use_gpu=False,
         )
 
         for _ in range(10):
@@ -526,8 +599,11 @@ class TestSurpriseSignal:
         params = _make_params((20,))
         scale = 2.0
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, warmup_steps=2,
-            track_surprise=True, use_gpu=False,
+            params,
+            lr=0.01,
+            warmup_steps=2,
+            track_surprise=True,
+            use_gpu=False,
         )
 
         for _ in range(15):
@@ -543,7 +619,10 @@ class TestSurpriseSignal:
     def test_repr_includes_surprise(self):
         params = _make_params((5,))
         opt = AutoHypergradientAdamW(
-            params, lr=0.01, track_surprise=True, use_gpu=False,
+            params,
+            lr=0.01,
+            track_surprise=True,
+            use_gpu=False,
         )
         r = repr(opt)
         assert "track_surprise=True" in r
@@ -553,7 +632,6 @@ class TestSurpriseSignal:
 # Comparison test
 # ---------------------------------------------------------------------------
 class TestComparison:
-
     def test_auto_vs_fixed_convergence(self):
         """Auto should converge at least as well as fixed-LR AdamW."""
         np.random.seed(42)
@@ -561,6 +639,7 @@ class TestComparison:
         # Fixed AdamW
         p_fixed = _make_params((20,))
         from grilly.optim.adamw import AdamW
+
         opt_fixed = AdamW(p_fixed, lr=0.01, use_gpu=False)
 
         for _ in range(100):
@@ -573,7 +652,11 @@ class TestComparison:
         np.random.seed(42)
         p_auto = _make_params((20,))
         opt_auto = AutoHypergradientAdamW(
-            p_auto, lr=0.01, hyper_lr=0.01, warmup_steps=5, use_gpu=False,
+            p_auto,
+            lr=0.01,
+            hyper_lr=0.01,
+            warmup_steps=5,
+            use_gpu=False,
         )
 
         for _ in range(100):

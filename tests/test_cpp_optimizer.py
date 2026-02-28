@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 try:
-    from grilly_core import Adam, AdamW, Parameter, SGD, Tensor
+    from grilly_core import SGD, Adam, AdamW, Parameter, Tensor
 
     CPP_AVAILABLE = True
 except ImportError:
@@ -37,7 +37,7 @@ class TestAdamBasic:
         p = Parameter(Tensor.from_numpy(np.ones((3, 3), dtype=np.float32)))
         # Manually set gradient
         g = p.grad()
-        g_data = g.numpy()
+        g.numpy()
         # Fill gradient with 0.1
         new_grad = Tensor.from_numpy(np.ones((3, 3), dtype=np.float32) * 0.1)
         p.set_grad(new_grad)

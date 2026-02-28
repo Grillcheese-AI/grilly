@@ -72,7 +72,9 @@ class VulkanLearning(BufferMixin):
         gate_np = np.asarray(gate, dtype=np.float32)
         value_np = np.asarray(value, dtype=np.float32)
         if gate_np.shape != value_np.shape or gate_np.ndim != 3:
-            raise ValueError("ssm_fused_math expects gate/value with shape [batch, seq_len, features]")
+            raise ValueError(
+                "ssm_fused_math expects gate/value with shape [batch, seq_len, features]"
+            )
 
         batch_size, seq_len, features = gate_np.shape
         if batch_size <= 0 or seq_len <= 0 or features <= 0:
@@ -184,7 +186,9 @@ class VulkanLearning(BufferMixin):
             if decay_np.size == 1:
                 decay_np = np.full((features,), float(decay_np[0]), dtype=np.float32)
             else:
-                raise ValueError(f"ssm_fused_uv decay mismatch: got {decay_np.size}, expected {features}")
+                raise ValueError(
+                    f"ssm_fused_uv decay mismatch: got {decay_np.size}, expected {features}"
+                )
         decay_np = np.clip(decay_np, 1e-4, 1.0 - 1e-4).astype(np.float32, copy=False)
 
         if "ssm-fused-uv" not in self.shaders:
@@ -226,7 +230,9 @@ class VulkanLearning(BufferMixin):
 
         try:
             self._upload_buffer(buf_decay, decay_np)
-            self._upload_buffer(buf_mask, np.ascontiguousarray(mask_arr, dtype=np.float32).reshape(-1))
+            self._upload_buffer(
+                buf_mask, np.ascontiguousarray(mask_arr, dtype=np.float32).reshape(-1)
+            )
 
             pipeline, pipeline_layout, desc_layout = self.pipelines.get_or_create_pipeline(
                 "ssm-fused-uv", 4, push_constant_size=24

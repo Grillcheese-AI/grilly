@@ -7,7 +7,6 @@ including cross-module interactions and end-to-end workflows.
 
 import numpy as np
 import pytest
-
 from grilly.experimental.cognitive import CognitiveController
 from grilly.experimental.language import InstantLanguage
 from grilly.experimental.moe import RelationalEncoder, RelationalMoE, ResonatorMoE

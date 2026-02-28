@@ -819,8 +819,7 @@ class CommandRecorder:
         vkBeginCommandBuffer(self._cmd, begin_info)
         self._recording = True
 
-    def dispatch(self, pipeline, pipeline_layout, descriptor_set,
-                 workgroups, push_constants=None):
+    def dispatch(self, pipeline, pipeline_layout, descriptor_set, workgroups, push_constants=None):
         """Record a compute dispatch (no submit).
 
         Args:
@@ -831,15 +830,25 @@ class CommandRecorder:
 
         vkCmdBindPipeline(self._cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline)
         vkCmdBindDescriptorSets(
-            self._cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-            pipeline_layout, 0, 1, [descriptor_set], 0, None,
+            self._cmd,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            pipeline_layout,
+            0,
+            1,
+            [descriptor_set],
+            0,
+            None,
         )
 
         if push_constants:
             push_buf = ctypes.create_string_buffer(push_constants)
             vkCmdPushConstants(
-                self._cmd, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
-                0, len(push_constants), ctypes.addressof(push_buf),
+                self._cmd,
+                pipeline_layout,
+                VK_SHADER_STAGE_COMPUTE_BIT,
+                0,
+                len(push_constants),
+                ctypes.addressof(push_buf),
             )
 
         if isinstance(workgroups, (tuple, list)):
@@ -872,9 +881,12 @@ class CommandRecorder:
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  # srcStageMask
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,  # dstStageMask
                 0,  # dependencyFlags
-                1, [mem_barrier],  # memoryBarriers
-                0, None,  # bufferMemoryBarriers
-                0, None,  # imageMemoryBarriers
+                1,
+                [mem_barrier],  # memoryBarriers
+                0,
+                None,  # bufferMemoryBarriers
+                0,
+                None,  # imageMemoryBarriers
             )
         except Exception as exc:
             logger.warning("CommandRecorder.barrier() failed: %s", exc)
@@ -900,9 +912,12 @@ class CommandRecorder:
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                 VK_PIPELINE_STAGE_TRANSFER_BIT,
                 0,
-                1, [mem_barrier],
-                0, None,
-                0, None,
+                1,
+                [mem_barrier],
+                0,
+                None,
+                0,
+                None,
             )
         except Exception as exc:
             logger.warning("CommandRecorder.transfer_barrier() failed: %s", exc)

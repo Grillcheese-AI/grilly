@@ -11,13 +11,12 @@ import tempfile
 import numpy as np
 import onnx
 import pytest
-from onnx import TensorProto, helper, numpy_helper
-
 from grilly.nn.lora import LoRAConfig
 from grilly.nn.modules import LayerNorm, Linear
 from grilly.utils.onnx_exporter import OnnxExporter
 from grilly.utils.onnx_finetune import OnnxFineTuner
 from grilly.utils.onnx_loader import GrillyOnnxModel, OnnxModelLoader, OnnxOpRegistry
+from onnx import TensorProto, helper, numpy_helper
 
 # ---------------------------------------------------------------------------
 # Helper: build small ONNX models in-memory
@@ -440,7 +439,9 @@ class TestOnnxOpCoverage:
         proto.ir_version = 8
 
         model = OnnxModelLoader.load_from_proto(proto)
-        out = model(np.array(1, dtype=np.int64), np.array(7, dtype=np.int64), np.array(2, dtype=np.int64))
+        out = model(
+            np.array(1, dtype=np.int64), np.array(7, dtype=np.int64), np.array(2, dtype=np.int64)
+        )
         expected = np.array([1, 3, 5], dtype=np.int64)
         np.testing.assert_array_equal(out, expected)
 

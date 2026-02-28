@@ -193,8 +193,8 @@ class TestLIFNode:
 
         x = Tensor.from_numpy(np.array([[1.0]], dtype=np.float32))
         # Both start with V=0
-        s1 = node_decay.forward(x)
-        s2 = node_no_decay.forward(x)
+        node_decay.forward(x)
+        node_no_decay.forward(x)
 
         # With decay_input=True: V = 0.5*(0+1) = 0.5 (no spike)
         # With decay_input=False: V = 0.5*0 + 1.0 = 1.0 (no spike, threshold=10)

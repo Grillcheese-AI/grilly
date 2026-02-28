@@ -222,7 +222,9 @@ class Linear(Module):
         backend = self._get_backend()
         if hasattr(backend, "fnn") and hasattr(backend.fnn, "linear"):
             return backend.fnn.linear(
-                x, weight, bias,
+                x,
+                weight,
+                bias,
                 return_gpu_tensor=self._return_gpu_tensor,
             )
 
@@ -560,7 +562,7 @@ class RMSNorm(Module):
 
         # CPU fallback
         x = np.asarray(x, dtype=np.float32)
-        mean_sq = np.mean(x ** 2, axis=-1, keepdims=True)
+        mean_sq = np.mean(x**2, axis=-1, keepdims=True)
         normed = x * (1.0 / np.sqrt(mean_sq + self.eps))
         return normed * weight
 
@@ -570,7 +572,7 @@ class RMSNorm(Module):
         x = np.asarray(x, dtype=np.float32)
 
         # Recompute forward intermediates
-        mean_sq = np.mean(x ** 2, axis=-1, keepdims=True)
+        mean_sq = np.mean(x**2, axis=-1, keepdims=True)
         inv_rms = 1.0 / np.sqrt(mean_sq + self.eps)
         normed = x * inv_rms
 
@@ -583,8 +585,10 @@ class RMSNorm(Module):
 
         # Gradient w.r.t. input
         grad_normed = grad_output * weight
-        d = normed.shape[-1]
-        grad_input = inv_rms * (grad_normed - normed * np.mean(grad_normed * normed, axis=-1, keepdims=True))
+        normed.shape[-1]
+        grad_input = inv_rms * (
+            grad_normed - normed * np.mean(grad_normed * normed, axis=-1, keepdims=True)
+        )
 
         return grad_input
 
@@ -1085,8 +1089,10 @@ class Embedding(Module):
             "false",
             "no",
         }
-        if gpu_lookup_enabled and hasattr(backend, "learning") and hasattr(
-            backend.learning, "embedding_lookup"
+        if (
+            gpu_lookup_enabled
+            and hasattr(backend, "learning")
+            and hasattr(backend.learning, "embedding_lookup")
         ):
             try:
                 return backend.learning.embedding_lookup(

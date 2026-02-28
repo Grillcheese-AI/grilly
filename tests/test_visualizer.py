@@ -237,6 +237,7 @@ class TestGetVisualizer:
 
     def test_returns_singleton(self):
         import grilly.backend.snn_visualizer as mod
+
         mod._visualizer = None  # reset
         v1 = get_visualizer()
         v2 = get_visualizer()
@@ -258,6 +259,7 @@ from grilly.utils.visualization import (
 
 class _FakeParam:
     """Minimal parameter mock for visualization functions."""
+
     def __init__(self, shape, requires_grad=True):
         self.data = np.random.randn(*shape).astype(np.float32)
         self.grad = np.random.randn(*shape).astype(np.float32)
@@ -270,6 +272,7 @@ class _FakeParam:
 
 class _FakeModule:
     """Minimal module mock for model visualization."""
+
     def __init__(self):
         self._parameters = {
             "weight": _FakeParam((10, 5)),
@@ -280,6 +283,7 @@ class _FakeModule:
 
 class _FakeNestedModule:
     """Module with submodules."""
+
     def __init__(self):
         self._parameters = {}
         self._modules = {"layer1": _FakeModule(), "layer2": _FakeModule()}
@@ -433,6 +437,7 @@ class TestClassifyLayer:
 
 class _MockLinear:
     """Mock grilly Linear layer."""
+
     def __init__(self, in_f, out_f):
         self.in_features = in_f
         self.out_features = out_f
@@ -447,6 +452,7 @@ class _MockLinear:
 
 class _MockEmbedding:
     """Mock grilly Embedding layer."""
+
     def __init__(self, num_embeddings, embedding_dim):
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -460,6 +466,7 @@ class _MockEmbedding:
 
 class _MockSequential:
     """Mock grilly Sequential container."""
+
     def __init__(self, *modules):
         self._parameters = {}
         self._modules = {str(i): m for i, m in enumerate(modules)}

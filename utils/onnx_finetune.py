@@ -204,7 +204,9 @@ class OnnxFineTuner:
         return arr, arr.reshape(-1, arr.shape[-1]), prefix
 
     @staticmethod
-    def _restore_last_dim(x_2d: np.ndarray, prefix: tuple[int, ...], out_features: int) -> np.ndarray:
+    def _restore_last_dim(
+        x_2d: np.ndarray, prefix: tuple[int, ...], out_features: int
+    ) -> np.ndarray:
         if not prefix:
             return x_2d.reshape(out_features)
         return x_2d.reshape(*prefix, out_features)
@@ -259,7 +261,9 @@ class OnnxFineTuner:
             "x_2d": np.asarray(x_2d, dtype=np.float32),
             "h": np.asarray(h, dtype=np.float32),
         }
-        return self._restore_last_dim(np.asarray(out_2d, dtype=np.float32), prefix, lora.out_features)
+        return self._restore_last_dim(
+            np.asarray(out_2d, dtype=np.float32), prefix, lora.out_features
+        )
 
     def _forward_with_lora(self, x: Any) -> np.ndarray:
         """Run forward pass, substituting LoRA layers for originals."""
@@ -598,8 +602,9 @@ class OnnxFineTuner:
                 chunk = data[start : start + actual_bs]
                 inputs = [item[0] for item in chunk]
                 targets = [item[1] for item in chunk]
-                yield OnnxFineTuner._stack_model_inputs(inputs), OnnxFineTuner._stack_targets(
-                    targets
+                yield (
+                    OnnxFineTuner._stack_model_inputs(inputs),
+                    OnnxFineTuner._stack_targets(targets),
                 )
             return
 
@@ -727,4 +732,3 @@ class OnnxFineTuner:
 __all__ = [
     "OnnxFineTuner",
 ]
-

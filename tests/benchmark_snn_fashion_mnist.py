@@ -252,14 +252,15 @@ def evaluate(model, dataloader):
 # ---------------------------------------------------------------------------
 # Main benchmark
 # ---------------------------------------------------------------------------
-def benchmark_model(name, model, train_loader, test_loader,
-                    epochs=3, lr=0.01, optimizer=None, surprise_gain=0.0):
+def benchmark_model(
+    name, model, train_loader, test_loader, epochs=3, lr=0.01, optimizer=None, surprise_gain=0.0
+):
     """Run benchmark for a single model."""
     opt_name = repr(optimizer) if optimizer else f"SGD(lr={lr})"
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Benchmarking: {name}")
     print(f"  T={model.T}, epochs={epochs}, optimizer={opt_name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     param_count = sum(np.prod(p.shape) for p in model.parameters())
     print(f"  Parameters: {param_count:,}")
@@ -286,13 +287,16 @@ def benchmark_model(name, model, train_loader, test_loader,
 
     avg_fwd = np.mean(batch_times)
     bs = train_loader.batch_size
-    print(f"{avg_fwd:.3f}s/batch ({bs/avg_fwd:.1f} samples/s fwd)")
+    print(f"{avg_fwd:.3f}s/batch ({bs / avg_fwd:.1f} samples/s fwd)")
 
     # Training
     for epoch in range(epochs):
         t0 = time.time()
         train_loss, train_acc = train_epoch(
-            model, train_loader, lr=lr, optimizer=optimizer,
+            model,
+            train_loader,
+            lr=lr,
+            optimizer=optimizer,
             surprise_gain=surprise_gain,
         )
         epoch_time = time.time() - t0
@@ -300,7 +304,7 @@ def benchmark_model(name, model, train_loader, test_loader,
         if optimizer is not None and hasattr(optimizer, "current_lr"):
             lr_info = f", lr={optimizer.current_lr:.6f}"
         print(
-            f"  Epoch {epoch+1}/{epochs}: "
+            f"  Epoch {epoch + 1}/{epochs}: "
             f"loss={train_loss:.4f}, train_acc={train_acc:.2%}, "
             f"time={epoch_time:.1f}s{lr_info}"
         )
@@ -357,8 +361,12 @@ def main():
     np.random.seed(42)
     model_if = CSNN_IF(T=T, channels=CHANNELS)
     r = benchmark_model(
-        "CSNN-IF", model_if, train_loader, test_loader,
-        epochs=EPOCHS, lr=LR,
+        "CSNN-IF",
+        model_if,
+        train_loader,
+        test_loader,
+        epochs=EPOCHS,
+        lr=LR,
     )
     results.append(r)
 
@@ -366,8 +374,12 @@ def main():
     np.random.seed(42)
     model_lif = CSNN_LIF(T=T, channels=CHANNELS)
     r = benchmark_model(
-        "CSNN-LIF", model_lif, train_loader, test_loader,
-        epochs=EPOCHS, lr=LR,
+        "CSNN-LIF",
+        model_lif,
+        train_loader,
+        test_loader,
+        epochs=EPOCHS,
+        lr=LR,
     )
     results.append(r)
 
@@ -385,8 +397,12 @@ def main():
         use_gpu=False,
     )
     r = benchmark_model(
-        "CSNN-LIF+Auto", model_lif_auto, train_loader, test_loader,
-        epochs=EPOCHS, optimizer=optimizer_auto,
+        "CSNN-LIF+Auto",
+        model_lif_auto,
+        train_loader,
+        test_loader,
+        epochs=EPOCHS,
+        optimizer=optimizer_auto,
     )
     results.append(r)
 
@@ -409,16 +425,20 @@ def main():
     )
     SURPRISE_GAIN = 0.1  # moderate input-level surprise gain
     r = benchmark_model(
-        "CSNN-LIF+Surprise", model_lif_surprise, train_loader, test_loader,
-        epochs=EPOCHS, optimizer=optimizer_surprise,
+        "CSNN-LIF+Surprise",
+        model_lif_surprise,
+        train_loader,
+        test_loader,
+        epochs=EPOCHS,
+        optimizer=optimizer_surprise,
         surprise_gain=SURPRISE_GAIN,
     )
     results.append(r)
 
     # Summary
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("  RESULTS SUMMARY")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(
         f"{'Model':<20} {'Params':>10} {'Fwd ms/batch':>14} "
         f"{'Samples/s':>11} {'Train Acc':>10} {'Test Acc':>10}"
@@ -437,7 +457,9 @@ def main():
     best_acc = max(results, key=lambda r: r["test_acc"])
     best_speed = max(results, key=lambda r: r["fwd_samples_per_sec"])
     print(f"\n  Best accuracy:   {best_acc['name']} ({best_acc['test_acc']:.2%})")
-    print(f"  Best throughput: {best_speed['name']} ({best_speed['fwd_samples_per_sec']:.0f} samples/s)")
+    print(
+        f"  Best throughput: {best_speed['name']} ({best_speed['fwd_samples_per_sec']:.0f} samples/s)"
+    )
 
     # Print LR trajectories
     for name, opt in [("Auto", optimizer_auto), ("Surprise", optimizer_surprise)]:
