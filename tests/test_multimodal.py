@@ -75,16 +75,16 @@ class TestPerceiverIO:
     def test_perceiver_io_basic(self):
         """Test basic Perceiver IO functionality"""
         model = PerceiverIO(
-            input_dim=512, latent_dim=1024, num_latents=256, num_heads=8, num_layers=3
+            input_dim=128, latent_dim=256, num_latents=32, num_heads=4, num_layers=2
         )
 
-        # Large multimodal input
-        inputs = np.random.randn(2, 1000, 512).astype(np.float32)
+        # Multimodal input (kept small enough for software Vulkan in CI)
+        inputs = np.random.randn(2, 100, 128).astype(np.float32)
 
         output = model(inputs)
 
         # Should compress to fixed latent size
-        assert output.shape == (2, 256, 1024)
+        assert output.shape == (2, 32, 256)
         assert np.all(np.isfinite(output))
 
     def test_perceiver_io_with_output_queries(self):
