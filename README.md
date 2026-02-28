@@ -183,7 +183,7 @@ Optional extension modules for inference, compression, HuggingFace integration, 
 |--------|---------|-------------|
 | [GrillyInference](https://github.com/grillcheese-ai/GrillyInference) | `grillyinference` | Native fp16 inference engine (Llama, paged KV-cache, INT8/4-bit quantization, 100B on 12GB) |
 | [GrillyCompression](https://github.com/grillcheese-ai/GrillyCompression) | `grillycompression` | DCT activation compression (30-60% VRAM), KV-cache page compression (3-5x) |
-| [GrillyOptimum](https://github.com/grillcheese-ai/GrillyOptimum) | `grillyoptimum` | HuggingFace Optimum Vulkan backend (`from_pretrained` + `generate`) |
+| [optimum-grilly](https://github.com/grillcheese-ai/optimum-grilly) | `optimum-grilly` | HuggingFace Optimum Vulkan backend — `from_pretrained` → Vulkan inference on any GPU |
 | [GrillyDistil](https://github.com/grillcheese-ai/GrillyDistil) | `grillydistil` | SA-KD adaptive temperature distillation trainer |
 
 ```bash
@@ -191,7 +191,7 @@ Optional extension modules for inference, compression, HuggingFace integration, 
 pip install grilly grillyinference
 
 # Full ecosystem
-pip install grilly grillyinference grillycompression grillyoptimum grillydistil
+pip install grilly grillyinference grillycompression optimum-grilly grillydistil
 ```
 
 ## Shader Statistics
@@ -257,10 +257,20 @@ pytest tests/ -m "gpu" -v          # GPU-only
 
 Grilly uses Vulkan compute shaders for cross-platform GPU acceleration. Each operation is implemented as a GLSL compute shader compiled to SPIR-V bytecode.
 
+### C++ Backend
+
+Grilly includes a native C++ backend (`grilly_core`) via pybind11 that wraps Vulkan dispatch for maximum performance. The C++ ops cover: linear, convolution, activation functions (ReLU, GELU, SiLU, tanh), normalization (LayerNorm, RMSNorm, BatchNorm), attention (Flash Attention 2, RoPE, KV-cache), embedding, pooling, loss functions, SNN neurons, and optimizers. Build with CMake:
+
+```bash
+cmake -B build -DPYBIND11_FINDPYTHON=ON
+cmake --build build --config Release
+```
+
 ### Design Principles
 
 - Pure Vulkan backend (no CUDA dependency)
 - Hardware-agnostic (AMD, NVIDIA, Intel)
+- Native C++ pybind11 extension for low-overhead GPU dispatch
 - Zero-copy GPU memory operations
 - Minimal CPU-GPU transfers
 - CPU fallback for unsupported operations
@@ -415,7 +425,7 @@ Current priorities:
 - Paged KV-cache with H2O eviction for 128k context
 - Training throughput (GEMM tiling, fused backward shaders)
 - Backward pass coverage for all operations
-- HuggingFace Optimum integration (GrillyOptimum)
+- HuggingFace Optimum integration ([optimum-grilly](https://github.com/grillcheese-ai/optimum-grilly))
 
 ## License
 
