@@ -51,6 +51,9 @@ protected:
     };
     std::vector<ParamGroup> param_groups_;
 
+    /// Refresh parameter pointers from Python list (pybind11 safety).
+    void refresh_params();
+
     /// Per-parameter optimizer state (exp_avg, exp_avg_sq, etc.)
     struct ParamState {
         Tensor exp_avg;
@@ -58,9 +61,13 @@ protected:
         Tensor max_exp_avg_sq;  // For AMSGrad
         int step_count = 0;
     };
-    std::unordered_map<Parameter*, ParamState> state_;
+    std::unordered_map<size_t, ParamState> state_;  // Key = param index
 
     ComputeBackend* backend_ = nullptr;
+
+public:
+    /// Keep Python param objects alive to prevent GC
+    py::list py_params_;
 };
 
 /// Adam optimizer with batched GPU dispatch.

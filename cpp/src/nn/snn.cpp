@@ -168,7 +168,11 @@ Tensor BaseNode::multi_step_forward(const Tensor& x_seq) {
     if (!backend) backend = backend_;
 
     if (backend && backend->hasShader("snn-node-forward")) {
-        return multi_step_forward_gpu(x_seq, backend, T, step_shape, step_numel);
+        try {
+            return multi_step_forward_gpu(x_seq, backend, T, step_shape, step_numel);
+        } catch (...) {
+            // GPU dispatch failed (pipeline/driver error) — fall back to CPU
+        }
     }
 
     // CPU fallback: loop over timesteps
@@ -288,97 +292,126 @@ Tensor BaseNode::multi_step_forward_gpu(const Tensor& x_seq,
         spike_handles[t] = backend->createBuffer(desc);
     }
 
-    // Allocate h buffer (pre-spike voltage, for backward caching)
-    BufferDesc h_desc;
-    h_desc.size = step_bytes;
-    h_desc.usage = BufferDesc::DeviceLocal;
-    uint64_t h_handle = backend->createBuffer(h_desc);
+    // Allocate per-timestep h buffers (for backward caching)
+    std::vector<uint64_t> h_handles(T);
+    for (int64_t t = 0; t < T; t++) {
+        BufferDesc h_desc;
+        h_desc.size = step_bytes;
+        h_desc.usage = BufferDesc::DeviceLocal;
+        h_handles[t] = backend->createBuffer(h_desc);
+    }
 
-    // Push constants for the SNN shader
-    struct SNNPushConstants {
-        uint32_t num_elements;
+    // Push constants matching snn-node-forward.glsl layout exactly:
+    //   uint  n_elements;
+    //   uint  neuron_type;   // 0=IF, 1=LIF, 2=PLIF
+    //   float tau;
+    //   float v_threshold;
+    //   float v_reset;
+    //   uint  reset_mode;    // 0=hard, 1=soft
+    //   uint  decay_input;   // 0=full input, 1=input/tau
+    struct SNNPush {
+        uint32_t n_elements;
+        uint32_t neuron_type;
+        float tau;
         float v_threshold;
         float v_reset;
-        float tau;
-        uint32_t neuron_type;  // 0=IF, 1=LIF, 2=PLIF
-        uint32_t decay_input;  // bool
-        uint32_t has_reset;    // bool (hard vs soft)
-        uint32_t surrogate_type;
-        float surrogate_alpha;
-        uint32_t _pad[3];      // Alignment to 48 bytes
+        uint32_t reset_mode;
+        uint32_t decay_input;
     };
 
-    SNNPushConstants push{};
-    push.num_elements = static_cast<uint32_t>(step_numel);
-    push.v_threshold = v_threshold_;
-    push.v_reset = v_reset_;
-    push.tau = gpu_tau();
+    SNNPush push{};
+    push.n_elements = static_cast<uint32_t>(step_numel);
     push.neuron_type = gpu_neuron_type();
+    push.tau = gpu_tau();
+    push.v_threshold = v_threshold_;
+    push.v_reset = has_reset_ ? v_reset_ : -1e9f;
+    push.reset_mode = has_reset_ ? 0u : 1u;
     push.decay_input = gpu_decay_input() ? 1u : 0u;
-    push.has_reset = has_reset_ ? 1u : 0u;
-    push.surrogate_type = static_cast<uint32_t>(surrogate_.type);
-    push.surrogate_alpha = surrogate_.alpha;
 
     uint32_t workgroups = (static_cast<uint32_t>(step_numel) + 255) / 256;
     uint64_t v_handle = v->gpu_handle();
 
+    // Allocate tau buffer (binding 4) — PLIF uses per-neuron tau
+    // For IF/LIF we still need a dummy buffer to satisfy the 5-binding layout
+    BufferDesc tau_desc;
+    tau_desc.size = sizeof(float);  // Minimum 1 element
+    tau_desc.usage = BufferDesc::DeviceLocal;
+    uint64_t tau_handle = backend->createBuffer(tau_desc);
+    float tau_val = gpu_tau();
+    backend->upload(tau_handle, &tau_val, sizeof(float));
+
+    // Upload per-timestep input slices as separate buffers
+    // (shader reads x_in[idx], not x_in[offset + idx])
+    std::vector<uint64_t> x_step_handles(T);
+    {
+        // Download full x_seq to CPU, then upload each slice
+        const float* x_data = x_gpu.data();
+        for (int64_t t = 0; t < T; t++) {
+            BufferDesc xdesc;
+            xdesc.size = step_bytes;
+            xdesc.usage = BufferDesc::DeviceLocal;
+            x_step_handles[t] = backend->createBuffer(xdesc);
+            backend->upload(x_step_handles[t],
+                            x_data + t * step_numel, step_bytes);
+        }
+    }
+
     // ★ Record all T timesteps into a single command batch
     backend->beginBatch();
-    for (int64_t t = 0; t < T; t++) {
-        // x_seq is contiguous [T, step_numel], slice by offset
-        // We pass the full x buffer + an offset via push constants
-        // For simplicity, we use separate dispatches with barriers
-        uint64_t x_offset_handle = x_gpu.gpu_handle();  // Full buffer
+    try {
+        for (int64_t t = 0; t < T; t++) {
+            backend->dispatch(
+                "snn-node-forward",
+                {x_step_handles[t], v_handle, spike_handles[t],
+                 h_handles[t], tau_handle},
+                workgroups, 1, 1,
+                &push, sizeof(push));
 
-        // Update push constant with timestep offset
-        struct SNNStepPush {
-            uint32_t num_elements;
-            float v_threshold;
-            float v_reset;
-            float tau;
-            uint32_t neuron_type;
-            uint32_t decay_input;
-            uint32_t has_reset;
-            uint32_t surrogate_type;
-            float surrogate_alpha;
-            uint32_t timestep_offset;
-            uint32_t _pad[2];
-        } step_push{};
-
-        step_push.num_elements = static_cast<uint32_t>(step_numel);
-        step_push.v_threshold = v_threshold_;
-        step_push.v_reset = v_reset_;
-        step_push.tau = gpu_tau();
-        step_push.neuron_type = gpu_neuron_type();
-        step_push.decay_input = gpu_decay_input() ? 1u : 0u;
-        step_push.has_reset = has_reset_ ? 1u : 0u;
-        step_push.surrogate_type = static_cast<uint32_t>(surrogate_.type);
-        step_push.surrogate_alpha = surrogate_.alpha;
-        step_push.timestep_offset = static_cast<uint32_t>(t);
-
-        backend->dispatch(
-            "snn-node-forward",
-            {x_offset_handle, v_handle, spike_handles[t], h_handle},
-            workgroups, 1, 1,
-            &step_push, sizeof(step_push));
-
-        // Memory barrier: V[t] must complete before V[t+1]
-        backend->barrier();
+            // Memory barrier: V[t] must complete before V[t+1]
+            backend->barrier();
+        }
+        backend->endBatch();  // ★ Single fence wait for all T steps!
+    } catch (...) {
+        backend->endBatch();  // Clean up batch state before re-throwing
+        throw;
     }
-    backend->endBatch();  // ★ Single fence wait for all T steps!
 
     // Mark membrane potential as GPU-modified
     v->mark_gpu_modified();
 
-    // Download and stack spike results
+    // Clear backward caches
+    h_seq_cache_.clear();
+    spike_seq_cache_.clear();
+
+    // Download and stack spike results, cache h for backward
     std::vector<float> all_spikes(static_cast<size_t>(T * step_numel));
     for (int64_t t = 0; t < T; t++) {
         backend->download(spike_handles[t],
                           all_spikes.data() + t * step_numel,
                           step_bytes);
+
+        // Cache h and spikes for backward (BPTT)
+        // CPU backward expects h - v_threshold (centered at 0 for surrogate)
+        if (training_) {
+            std::vector<float> h_data(static_cast<size_t>(step_numel));
+            backend->download(h_handles[t], h_data.data(), step_bytes);
+            for (size_t i = 0; i < h_data.size(); i++) {
+                h_data[i] -= v_threshold_;
+            }
+            h_seq_cache_.emplace_back(std::move(h_data), step_shape, backend);
+
+            std::vector<float> spike_data(
+                all_spikes.data() + t * step_numel,
+                all_spikes.data() + (t + 1) * step_numel);
+            spike_seq_cache_.emplace_back(
+                std::move(spike_data), step_shape, backend);
+        }
+
         backend->destroyBuffer(spike_handles[t]);
+        backend->destroyBuffer(x_step_handles[t]);
+        backend->destroyBuffer(h_handles[t]);
     }
-    backend->destroyBuffer(h_handle);
+    backend->destroyBuffer(tau_handle);
 
     std::vector<int64_t> out_shape = {T};
     out_shape.insert(out_shape.end(), step_shape.begin(), step_shape.end());

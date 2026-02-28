@@ -5,6 +5,15 @@ import numpy as np
 from .module import Module
 from .parameter import Parameter
 
+# C++ bridge fast path
+try:
+    from ..backend import _bridge
+
+    _USE_CPP_BRIDGE = _bridge.is_available()
+except Exception:
+    _bridge = None
+    _USE_CPP_BRIDGE = False
+
 
 def _pair(x):
     """Convert single value to pair (h, w)"""
@@ -119,7 +128,17 @@ class Conv2d(Module):
             else None
         )
 
-        # Call backend conv2d operation
+        # C++ bridge fast path
+        if _USE_CPP_BRIDGE and not is_vt:
+            result = _bridge.conv2d(
+                x, weight, bias,
+                stride=self.stride, padding=self.padding,
+                dilation=self.dilation, groups=self.groups,
+            )
+            if result is not None:
+                return result
+
+        # Legacy Python ctypes Vulkan path
         return backend.conv.conv2d(
             x,
             weight,

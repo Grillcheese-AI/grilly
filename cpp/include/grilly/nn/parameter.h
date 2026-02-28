@@ -27,6 +27,9 @@ public:
     const Tensor& grad_ref() const;
     bool has_grad() const;
 
+    /// Set the gradient tensor explicitly.
+    void set_grad(const Tensor& grad);
+
     /// Zero out the gradient tensor.
     void zero_grad();
 };

@@ -16,30 +16,35 @@ Parameter::Parameter(std::vector<int64_t> shape, ComputeBackend* backend,
 }
 
 Tensor& Parameter::grad_ref() {
-    if (!grad()) {
+    if (!Tensor::grad()) {
         // Lazily create gradient tensor matching this parameter's shape
         auto g = std::make_shared<Tensor>(
             Tensor::zeros(this->shape(), this->backend()));
-        set_grad(g);
+        Tensor::set_grad(std::move(g));
     }
-    return *grad();
+    return *Tensor::grad();
 }
 
 const Tensor& Parameter::grad_ref() const {
-    if (!grad()) {
+    if (!Tensor::grad()) {
         throw std::runtime_error("Parameter has no gradient");
     }
-    return *grad();
+    return *Tensor::grad();
 }
 
 bool Parameter::has_grad() const {
-    return grad() != nullptr && grad()->valid();
+    return Tensor::grad() != nullptr && Tensor::grad()->valid();
+}
+
+void Parameter::set_grad(const Tensor& new_grad) {
+    auto g = std::make_shared<Tensor>(new_grad);
+    Tensor::set_grad(std::move(g));
 }
 
 void Parameter::zero_grad() {
-    if (grad()) {
-        size_t count = static_cast<size_t>(grad()->numel());
-        float* ptr = grad()->mutable_data();
+    if (Tensor::grad()) {
+        size_t count = static_cast<size_t>(Tensor::grad()->numel());
+        float* ptr = Tensor::grad()->mutable_data();
         std::memset(ptr, 0, count * sizeof(float));
     }
 }

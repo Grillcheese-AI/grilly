@@ -46,6 +46,13 @@ inline size_t dtype_size(DType dt) {
     return 4;
 }
 
+/// Global default backend — lazily created on first use.
+/// All tensors use this unless explicitly overridden.
+ComputeBackend* default_backend();
+
+/// Set a custom default backend (e.g., for testing).
+void set_default_backend(ComputeBackend* backend);
+
 class Tensor {
 public:
     Tensor() = default;

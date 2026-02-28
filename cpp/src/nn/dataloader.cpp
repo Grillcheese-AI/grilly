@@ -73,8 +73,13 @@ Batch DataLoader::next() {
     Batch batch;
 
     if (num_workers_ > 0 && prefetch_queue_) {
-        // Get from prefetch queue
-        if (!prefetch_queue_->pop(batch)) {
+        // Release GIL while waiting so worker threads can load batches
+        bool got_batch;
+        {
+            py::gil_scoped_release release;
+            got_batch = prefetch_queue_->pop(batch);
+        }
+        if (!got_batch) {
             throw py::stop_iteration();
         }
     } else {
@@ -102,8 +107,12 @@ void DataLoader::stop_and_join_workers() {
     if (prefetch_queue_) {
         prefetch_queue_->shutdown();
     }
-    for (auto& w : workers_) {
-        if (w.joinable()) w.join();
+    // Release GIL while joining — workers need GIL to finish load_batch
+    {
+        py::gil_scoped_release release;
+        for (auto& w : workers_) {
+            if (w.joinable()) w.join();
+        }
     }
     workers_.clear();
     prefetch_queue_.reset();

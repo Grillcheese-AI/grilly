@@ -48,13 +48,13 @@ const std::vector<FusionRule>& OpGraph::builtinRules() {
         // Linear + Activation fusions
         // The fused shader applies the activation during the output store,
         // eliminating one full buffer read+write cycle.
-        {"fnn-linear", "activation-relu", "fnn-linear-relu", 4,
+        {"fnn-linear", "activation-relu", "fused-linear-relu", 4,
          sizeof(uint32_t) * 4},
-        {"fnn-linear", "activation-gelu", "fnn-linear-gelu", 4,
+        {"fnn-linear", "activation-gelu", "fused-linear-gelu", 4,
          sizeof(uint32_t) * 4},
-        {"fnn-linear", "activation-silu", "fnn-linear-silu", 4,
+        {"fnn-linear", "activation-silu", "fused-linear-silu", 4,
          sizeof(uint32_t) * 4},
-        {"fnn-linear", "activation-tanh", "fnn-linear-tanh", 4,
+        {"fnn-linear", "activation-tanh", "fused-linear-tanh", 4,
          sizeof(uint32_t) * 4},
 
         // GEMM + bias addition (for conv2d GEMM path)

@@ -18,6 +18,15 @@ except ImportError:
     _PARAMETER_AVAILABLE = False
     ParameterClass = None
 
+# C++ bridge fast path (persistent-mapped VMA, zero vkMap/vkUnmap)
+try:
+    from ..backend import _bridge
+
+    _USE_CPP_BRIDGE = _bridge.is_available()
+except Exception:
+    _bridge = None
+    _USE_CPP_BRIDGE = False
+
 
 class Linear(Module):
     """
@@ -203,6 +212,12 @@ class Linear(Module):
         if not is_vt:
             x = np.asarray(x, dtype=np.float32)
         weight = np.asarray(weight, dtype=np.float32)
+
+        # C++ bridge fast path (persistent-mapped VMA, ~3x faster)
+        if _USE_CPP_BRIDGE and not is_vt:
+            result = _bridge.linear(x, weight, bias)
+            if result is not None:
+                return result
 
         # Use fnn.linear() which handles x @ W^T + bias in a single dispatch
         # without needing a CPU weight transpose copy
@@ -457,9 +472,16 @@ class LayerNorm(Module):
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using fnn-layernorm.glsl"""
-        backend = self._get_backend()
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias)
+
+        # C++ bridge fast path
+        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
+            result = _bridge.layernorm(x, weight, bias, self.eps)
+            if result is not None:
+                return result
+
+        backend = self._get_backend()
         return backend.fnn.layernorm(
             x,
             weight,
@@ -624,6 +646,10 @@ class ReLU(Module):
 
     def forward(self, x) -> np.ndarray:
         """Forward pass using activation-relu.glsl"""
+        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
+            result = _bridge.relu(x)
+            if result is not None:
+                return result
         backend = self._get_backend()
         return backend.activation_relu(x, return_gpu_tensor=self._return_gpu_tensor)
 
@@ -655,6 +681,10 @@ class GELU(Module):
 
     def forward(self, x) -> np.ndarray:
         """Forward pass using activation-gelu.glsl"""
+        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
+            result = _bridge.gelu(x)
+            if result is not None:
+                return result
         backend = self._get_backend()
         return backend.activation_gelu(x, return_gpu_tensor=self._return_gpu_tensor)
 
@@ -706,6 +736,10 @@ class SiLU(Module):
 
     def forward(self, x) -> np.ndarray:
         """Forward pass using activation-silu.glsl"""
+        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
+            result = _bridge.silu(x)
+            if result is not None:
+                return result
         backend = self._get_backend()
         return backend.activation_silu(x, return_gpu_tensor=self._return_gpu_tensor)
 

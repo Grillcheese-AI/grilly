@@ -8,6 +8,45 @@
 namespace grilly {
 namespace nn {
 
+// ── Global default backend ───────────────────────────────────────────
+
+static ComputeBackend* g_default_backend = nullptr;
+
+ComputeBackend* default_backend() {
+    if (!g_default_backend) {
+        try {
+            // Lazily create VulkanBackend on first use
+            static auto backend = createBackend("vulkan");
+            g_default_backend = backend.get();
+            (void)g_default_backend;  // Suppress warning
+
+            // Auto-load shaders from standard locations
+            // Try relative to the working directory first
+            const char* shader_dirs[] = {
+                "shaders/spv",
+                "../shaders/spv",
+                "shaders",
+            };
+            for (const char* dir : shader_dirs) {
+                try {
+                    g_default_backend->loadShaderDir(dir);
+                    break;  // Loaded successfully
+                } catch (...) {
+                    // Try next path
+                }
+            }
+        } catch (...) {
+            // Vulkan not available — fall back to CPU-only
+            return nullptr;
+        }
+    }
+    return g_default_backend;
+}
+
+void set_default_backend(ComputeBackend* backend) {
+    g_default_backend = backend;
+}
+
 // ── Constructors ──────────────────────────────────────────────────────
 
 Tensor::Tensor(std::vector<int64_t> shape, DType dtype,
@@ -39,6 +78,8 @@ Tensor::Tensor(std::vector<float> data, std::vector<int64_t> shape,
 // ── Factory methods ───────────────────────────────────────────────────
 
 Tensor Tensor::from_numpy(py::array_t<float> arr, ComputeBackend* backend) {
+    if (!backend) backend = default_backend();
+
     auto buf = arr.request();
     std::vector<int64_t> shape(buf.ndim);
     for (int i = 0; i < buf.ndim; i++) {
@@ -53,10 +94,12 @@ Tensor Tensor::from_numpy(py::array_t<float> arr, ComputeBackend* backend) {
 }
 
 Tensor Tensor::zeros(std::vector<int64_t> shape, ComputeBackend* backend) {
+    if (!backend) backend = default_backend();
     return Tensor(std::move(shape), DType::Float32, backend);
 }
 
 Tensor Tensor::empty(std::vector<int64_t> shape, ComputeBackend* backend) {
+    if (!backend) backend = default_backend();
     Tensor t;
     t.shape_ = std::move(shape);
     t.dtype_ = DType::Float32;

@@ -6,6 +6,7 @@
 /// buffer handles to GrillyBuffer structs via an internal table.
 
 #include "grilly/compute_backend.h"
+#include "grilly/op_graph.h"
 #include "grilly/vulkan/vk_buffer_pool.h"
 #include "grilly/vulkan/vk_command_batch.h"
 #include "grilly/vulkan/vk_device.h"
@@ -59,11 +60,23 @@ public:
     GrillyBuffer& resolveBuffer(uint64_t handle);
     const GrillyBuffer& resolveBuffer(uint64_t handle) const;
 
+    // ── Graph recording mode ──
+    // When enabled, dispatch() records ops into an OpGraph instead of
+    // directly into CommandBatch. endBatch() runs optimize() + execute()
+    // for automatic fusion and barrier elimination.
+    void setGraphMode(bool enable) { graphMode_ = enable; }
+    bool graphMode() const { return graphMode_; }
+    OpGraph& opGraph() { return graph_; }
+
 private:
     GrillyDevice device_;
     BufferPool pool_;
     PipelineCache cache_;
     CommandBatch batch_;
+
+    // Graph recording mode
+    bool graphMode_ = false;
+    OpGraph graph_;
 
     // Handle -> GrillyBuffer mapping
     mutable std::mutex handleMutex_;

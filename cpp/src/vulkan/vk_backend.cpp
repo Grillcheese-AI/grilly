@@ -134,6 +134,10 @@ bool VulkanBackend::hasShader(const std::string& name) const {
 // ── Compute dispatch ────────────────────────────────────────────────────────
 
 void VulkanBackend::beginBatch() {
+    if (graphMode_) {
+        graph_.clear();
+        return;
+    }
     batch_.begin();
 }
 
@@ -141,10 +145,6 @@ void VulkanBackend::dispatch(const std::string& shader,
                              const std::vector<uint64_t>& buffers,
                              uint32_t gx, uint32_t gy, uint32_t gz,
                              const void* push, uint32_t pushBytes) {
-    // Get or create pipeline
-    auto entry = cache_.getOrCreate(
-        shader, static_cast<uint32_t>(buffers.size()), pushBytes);
-
     // Build descriptor buffer infos from opaque handles
     std::vector<VkDescriptorBufferInfo> bufInfos;
     bufInfos.reserve(buffers.size());
@@ -153,19 +153,33 @@ void VulkanBackend::dispatch(const std::string& shader,
         bufInfos.push_back({buf.handle, 0, buf.size});
     }
 
-    // Allocate descriptor set
-    VkDescriptorSet descSet = cache_.allocDescriptorSet(shader, bufInfos);
+    if (graphMode_) {
+        // Record into OpGraph for deferred optimization + execution
+        graph_.addOp(shader, static_cast<uint32_t>(buffers.size()),
+                     bufInfos, push, pushBytes, gx, gy, gz);
+        return;
+    }
 
-    // Record dispatch
+    // Immediate mode: dispatch directly into CommandBatch
+    auto entry = cache_.getOrCreate(
+        shader, static_cast<uint32_t>(buffers.size()), pushBytes);
+    VkDescriptorSet descSet = cache_.allocDescriptorSet(shader, bufInfos);
     batch_.dispatch(entry.pipeline, entry.layout, descSet,
                     gx, gy, gz, push, pushBytes);
 }
 
 void VulkanBackend::barrier() {
+    if (graphMode_) return;  // optimize() handles barriers
     batch_.barrier();
 }
 
 void VulkanBackend::endBatch() {
+    if (graphMode_) {
+        if (graph_.size() == 0) return;
+        graph_.optimize(cache_);
+        graph_.execute(batch_, cache_);
+        return;
+    }
     batch_.submit();
 }
 

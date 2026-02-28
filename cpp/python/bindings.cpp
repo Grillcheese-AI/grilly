@@ -2758,6 +2758,9 @@ PYBIND11_MODULE(grilly_core, m) {
              py::arg("requires_grad") = true)
         .def("grad", static_cast<Tensor& (Parameter::*)()>(&Parameter::grad_ref),
              py::return_value_policy::reference)
+        .def("set_grad",
+             static_cast<void (Parameter::*)(const Tensor&)>(&Parameter::set_grad),
+             py::arg("grad"))
         .def("has_grad", &Parameter::has_grad)
         .def("zero_grad", &Parameter::zero_grad);
 
@@ -2862,14 +2865,16 @@ PYBIND11_MODULE(grilly_core, m) {
     // ── Containers ──
     py::class_<MultiStepContainer, Module,
                std::shared_ptr<MultiStepContainer>>(m, "MultiStepContainer")
-        .def(py::init<std::shared_ptr<Module>>(), py::arg("module"))
+        .def(py::init<std::shared_ptr<Module>>(), py::arg("module"),
+             py::keep_alive<1, 2>())
         .def("backward", &MultiStepContainer::backward,
              py::arg("grad_output"));
 
     py::class_<SeqToANNContainer, Module,
                std::shared_ptr<SeqToANNContainer>>(m, "SeqToANNContainer")
         .def(py::init<std::vector<std::shared_ptr<Module>>>(),
-             py::arg("modules"))
+             py::arg("modules"),
+             py::keep_alive<1, 2>())
         .def("backward", &SeqToANNContainer::backward,
              py::arg("grad_output"));
 
@@ -2888,8 +2893,18 @@ PYBIND11_MODULE(grilly_core, m) {
         .def_property_readonly("param_count", &Optimizer::param_count);
 
     py::class_<Adam, Optimizer>(m, "Adam")
-        .def(py::init<std::vector<Parameter*>, float,
-                      std::pair<float, float>, float, float, bool>(),
+        .def(py::init([](py::list params, float lr,
+                         std::pair<float, float> betas, float eps,
+                         float weight_decay, bool amsgrad) {
+                 std::vector<Parameter*> ptrs;
+                 for (auto& item : params) {
+                     ptrs.push_back(item.cast<Parameter*>());
+                 }
+                 auto opt = new Adam(std::move(ptrs), lr, betas, eps,
+                                     weight_decay, amsgrad);
+                 opt->py_params_ = params;
+                 return opt;
+             }),
              py::arg("params"),
              py::arg("lr") = 1e-3f,
              py::arg("betas") = std::make_pair(0.9f, 0.999f),
@@ -2899,8 +2914,18 @@ PYBIND11_MODULE(grilly_core, m) {
         .def_property("lr", &Adam::lr, &Adam::set_lr);
 
     py::class_<AdamW, Optimizer>(m, "AdamW")
-        .def(py::init<std::vector<Parameter*>, float,
-                      std::pair<float, float>, float, float, bool>(),
+        .def(py::init([](py::list params, float lr,
+                         std::pair<float, float> betas, float eps,
+                         float weight_decay, bool amsgrad) {
+                 std::vector<Parameter*> ptrs;
+                 for (auto& item : params) {
+                     ptrs.push_back(item.cast<Parameter*>());
+                 }
+                 auto opt = new AdamW(std::move(ptrs), lr, betas, eps,
+                                      weight_decay, amsgrad);
+                 opt->py_params_ = params;
+                 return opt;
+             }),
              py::arg("params"),
              py::arg("lr") = 1e-3f,
              py::arg("betas") = std::make_pair(0.9f, 0.999f),
@@ -2910,7 +2935,17 @@ PYBIND11_MODULE(grilly_core, m) {
         .def_property("lr", &AdamW::lr, &AdamW::set_lr);
 
     py::class_<SGD, Optimizer>(m, "SGD")
-        .def(py::init<std::vector<Parameter*>, float, float, float, bool>(),
+        .def(py::init([](py::list params, float lr, float momentum,
+                         float weight_decay, bool nesterov) {
+                 std::vector<Parameter*> ptrs;
+                 for (auto& item : params) {
+                     ptrs.push_back(item.cast<Parameter*>());
+                 }
+                 auto opt = new SGD(std::move(ptrs), lr, momentum,
+                                    weight_decay, nesterov);
+                 opt->py_params_ = params;
+                 return opt;
+             }),
              py::arg("params"),
              py::arg("lr") = 0.01f,
              py::arg("momentum") = 0.0f,
@@ -2933,5 +2968,6 @@ PYBIND11_MODULE(grilly_core, m) {
         .def_property_readonly("num_batches", &DataLoader::num_batches)
         .def_property_readonly("dataset_size", &DataLoader::dataset_size)
         .def("__iter__", &DataLoader::iter, py::return_value_policy::reference)
+        .def("iter", &DataLoader::iter, py::return_value_policy::reference)
         .def("__next__", &DataLoader::next);
 }
