@@ -232,13 +232,9 @@ Build instructions: see [INSTALL.md](INSTALL.md#c-backend-grilly_core).
 | Package | Description |
 |---------|-------------|
 | [optimum-grilly](https://github.com/grillcheese-ai/optimum-grilly) | HuggingFace Optimum backend — `from_pretrained` → Vulkan inference (Llama, Mistral, BERT, GPT-2) |
-| [GrillyInference](https://github.com/grillcheese-ai/GrillyInference) | Native fp16 inference engine (paged KV-cache, INT8/4-bit quantization) |
-| [GrillyCompression](https://github.com/grillcheese-ai/GrillyCompression) | DCT activation compression, KV-cache page compression |
-| [GrillyDistil](https://github.com/grillcheese-ai/GrillyDistil) | SA-KD adaptive temperature distillation trainer |
 
 ```bash
-pip install grilly optimum-grilly    # HuggingFace integration
-pip install grilly grillyinference   # Native inference engine
+pip install grilly optimum-grilly
 ```
 
 ---
