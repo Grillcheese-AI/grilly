@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CNNs &mdash; Grilly Howto</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --accent: #f78166; --accent2: #79c0ff; --accent3: #56d364; --accent4: #e3b341; --text: #e6edf3; --muted: #8b949e; }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.6; }
+    a { color: var(--accent2); text-decoration: none; } a:hover { text-decoration: underline; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 0; }
+    .header-inner { max-width: 900px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 16px; }
+    .logo { font-size: 22px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; } .logo:hover { text-decoration: none; }
+    .tagline { color: var(--muted); font-size: 14px; }
+    main { max-width: 900px; margin: 0 auto; padding: 40px 24px 64px; }
+    footer { border-top: 1px solid var(--border); padding: 32px 24px; text-align: center; color: var(--muted); font-size: 13px; } footer a { color: var(--muted); }
+    .breadcrumb { font-size: 13px; color: var(--muted); margin-bottom: 24px; } .breadcrumb a { color: var(--muted); }
+    h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 8px; }
+    .lead { color: var(--muted); font-size: 17px; margin-bottom: 40px; }
+    h2 { font-size: 22px; font-weight: 700; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    p { margin-bottom: 16px; } section { margin-bottom: 24px; }
+    .code-block { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+    .code-header { background: #1c2128; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+    .code-lang { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .code-block pre { padding: 20px 24px; overflow-x: auto; margin: 0; }
+    .code-block code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 13.5px; line-height: 1.55; color: var(--text); }
+    .kw { color: #f97583; } .str { color: #9ecbff; } .num { color: #79c0ff; }
+    .cmt { color: #6a737d; font-style: italic; } .fn { color: #b392f0; }
+    .cls { color: #e3b341; } .const { color: #79c0ff; }
+    .output-block { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+    .output-header { background: #1a1e24; padding: 6px 16px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .output-block pre { padding: 16px 24px; margin: 0; font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 13px; line-height: 1.5; color: var(--accent3); }
+    .callout { border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; font-size: 14px; line-height: 1.6; }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .callout.note { background: #1c2230; border-left: 4px solid var(--accent2); } .callout.note strong { color: var(--accent2); }
+    .callout.warn { background: #2a1e0f; border-left: 4px solid var(--accent4); } .callout.warn strong { color: var(--accent4); }
+    .callout.tip { background: #122117; border-left: 4px solid var(--accent3); } .callout.tip strong { color: var(--accent3); }
+    .page-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
+    .nav-btn { display: inline-block; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; border: 1px solid var(--border); color: var(--text); transition: border-color 0.2s; }
+    .nav-btn:hover { border-color: var(--accent); text-decoration: none; } .nav-btn.home { color: var(--muted); }
+    .dim-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; margin-bottom: 16px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 14px; line-height: 1.8; text-align: center; }
+    .dim-box .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+    .dim-box .shape { color: var(--accent); font-size: 20px; font-weight: 700; }
+    /* ── Sidebar navigation ──────────────────── */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 232px;
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      padding: 80px 0 32px;
+      overflow-y: auto;
+      z-index: 5;
+    }
+    .sidebar-group { padding: 0 12px; margin-bottom: 4px; border: none; }
+    .sidebar-label {
+      display: flex;
+      align-items: center;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: #484f58;
+      padding: 6px 12px;
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      border-radius: 4px;
+      transition: color .15s;
+    }
+    .sidebar-label:hover { color: var(--muted); }
+    .sidebar-label::-webkit-details-marker { display: none; }
+    .sidebar-label::after {
+      content: '';
+      margin-left: auto;
+      border: solid #484f58;
+      border-width: 0 1.5px 1.5px 0;
+      padding: 2.5px;
+      transform: rotate(-45deg);
+      transition: transform .2s;
+    }
+    details.sidebar-group[open] > .sidebar-label::after { transform: rotate(45deg); }
+    details.sidebar-group[open] { margin-bottom: 12px; }
+    .sidebar a {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      margin: 1px 0;
+      font-size: 13px;
+      color: var(--muted);
+      border-radius: 6px;
+      transition: color .15s, background .15s;
+    }
+    .sidebar a:hover {
+      color: var(--text);
+      background: rgba(255,255,255,.04);
+      text-decoration: none;
+    }
+    .sidebar a.active {
+      color: var(--accent);
+      background: rgba(247,129,102,.08);
+      font-weight: 600;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .sidebar .sn {
+      font-family: 'JetBrains Mono', Consolas, monospace;
+      font-size: 10px;
+      min-width: 16px;
+      color: #484f58;
+    }
+    .sidebar a.active .sn { color: var(--accent); opacity: .7; }
+    header { position: relative; z-index: 10; }
+    main { margin-left: 252px; }
+    footer { margin-left: 252px; }
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+      main, footer { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a href="index.html" class="logo">Grilly</a>
+      <span class="tagline">GPU Neural Networks via Vulkan</span>
+    </div>
+  </header>
+
+  <nav class="sidebar">
+    <details class="sidebar-group">
+      <summary class="sidebar-label">Fundamentals</summary>
+      <a href="01-tensors.html"><span class="sn">01</span> Tensors</a>
+      <a href="02-gpu-acceleration.html"><span class="sn">02</span> GPU Acceleration</a>
+    </details>
+    <details class="sidebar-group">
+      <summary class="sidebar-label">Training</summary>
+      <a href="03-neural-networks.html"><span class="sn">03</span> Neural Networks</a>
+      <a href="04-datasets-dataloaders.html"><span class="sn">04</span> Datasets</a>
+    </details>
+    <details class="sidebar-group" open>
+      <summary class="sidebar-label">Architectures</summary>
+      <a href="05-cnns.html" class="active"><span class="sn">05</span> CNNs</a>
+      <a href="06-spiking-neural-networks.html"><span class="sn">06</span> Spiking NNs</a>
+      <a href="07-advanced-features.html"><span class="sn">07</span> Advanced</a>
+    </details>
+  </nav>
+
+  <main>
+    <div class="breadcrumb"><a href="index.html">Howtos</a> / Convolutional Neural Networks</div>
+    <h1>Convolutional Neural Networks</h1>
+    <p class="lead">Build image classifiers using Conv2d, pooling, batch normalization, and GPU-accelerated training.</p>
+
+    <section>
+      <h2>Input Format: NCHW</h2>
+      <p>Grilly uses the same NCHW memory layout as PyTorch:</p>
+      <div class="dim-box">
+        <div class="label">Tensor Shape</div>
+        <div class="shape">(N, C, H, W)</div>
+        <div style="margin-top: 8px; color: var(--muted); font-size: 13px;">
+          N = batch &nbsp;&middot;&nbsp; C = channels &nbsp;&middot;&nbsp; H = height &nbsp;&middot;&nbsp; W = width
+        </div>
+      </div>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+
+<span class="cmt"># 8 RGB images of size 32x32</span>
+x = np.<span class="fn">random.randn</span>(<span class="num">8</span>, <span class="num">3</span>, <span class="num">32</span>, <span class="num">32</span>).<span class="fn">astype</span>(np.float32)
+<span class="fn">print</span>(<span class="str">f"Input: </span>{x.shape}<span class="str">"</span>)  <span class="cmt"># (8, 3, 32, 32)</span></code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Conv2d</h2>
+      <p>A 2D convolution layer slides a learnable kernel across the spatial dimensions. The key parameters are:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> grilly.nn <span class="kw">as</span> nn
+
+conv = nn.<span class="cls">Conv2d</span>(
+    in_channels=<span class="num">3</span>,       <span class="cmt"># RGB input</span>
+    out_channels=<span class="num">32</span>,     <span class="cmt"># number of filters</span>
+    kernel_size=<span class="num">3</span>,       <span class="cmt"># 3x3 kernel</span>
+    stride=<span class="num">1</span>,
+    padding=<span class="num">1</span>,            <span class="cmt"># 'same' padding: output size = input size</span>
+)
+
+out = <span class="fn">conv</span>(x)
+<span class="fn">print</span>(<span class="str">f"Conv output: </span>{out.shape}<span class="str">"</span>)</code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>Conv output: (8, 32, 32, 32)</pre>
+      </div>
+      <div class="callout tip">
+        <strong>Tip</strong>
+        The SPIR-V backend uses an im2col + GEMM dispatch path for standard convolutions, and falls back to a direct dispatch for grouped or dilated convolutions. Both paths are GPU-accelerated.
+      </div>
+    </section>
+
+    <section>
+      <h2>Pooling and BatchNorm</h2>
+      <p>Pooling reduces spatial dimensions. Batch normalization stabilizes training by normalizing per-channel statistics:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="cmt"># MaxPool2d: halves spatial size</span>
+pool = nn.<span class="cls">MaxPool2d</span>(kernel_size=<span class="num">2</span>, stride=<span class="num">2</span>)
+pooled = <span class="fn">pool</span>(out)
+<span class="fn">print</span>(<span class="str">f"After pooling: </span>{pooled.shape}<span class="str">"</span>)
+
+<span class="cmt"># BatchNorm2d: normalize across batch for each channel</span>
+bn = nn.<span class="cls">BatchNorm2d</span>(num_features=<span class="num">32</span>)
+normed = <span class="fn">bn</span>(pooled)
+<span class="fn">print</span>(<span class="str">f"After batchnorm: </span>{normed.shape}<span class="str">"</span>)
+
+<span class="cmt"># AvgPool2d: average pooling alternative</span>
+avg_pool = nn.<span class="cls">AvgPool2d</span>(kernel_size=<span class="num">2</span>, stride=<span class="num">2</span>)
+
+<span class="cmt"># AdaptiveAvgPool2d: reduces any spatial size to target size</span>
+global_pool = nn.<span class="cls">AdaptiveAvgPool2d</span>((<span class="num">1</span>, <span class="num">1</span>))
+<span class="fn">print</span>(<span class="str">f"Global pool: </span>{<span class="fn">global_pool</span>(normed).shape}<span class="str">"</span>)</code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>After pooling: (8, 32, 16, 16)
+After batchnorm: (8, 32, 16, 16)
+Global pool: (8, 32, 1, 1)</pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Building a CNN Classifier</h2>
+      <p>A typical CNN alternates convolution + activation + pooling blocks, then flattens and feeds into fully connected layers:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">class</span> <span class="cls">SimpleCNN</span>(nn.<span class="cls">Module</span>):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self, num_classes=<span class="num">10</span>):
+        <span class="fn">super</span>().<span class="fn">__init__</span>()
+        <span class="cmt"># Block 1: 3 -> 32 channels, 32x32 -> 16x16</span>
+        self.conv1   = nn.<span class="cls">Conv2d</span>(<span class="num">3</span>, <span class="num">32</span>, kernel_size=<span class="num">3</span>, padding=<span class="num">1</span>)
+        self.bn1     = nn.<span class="cls">BatchNorm2d</span>(<span class="num">32</span>)
+        <span class="cmt"># Block 2: 32 -> 64 channels, 16x16 -> 8x8</span>
+        self.conv2   = nn.<span class="cls">Conv2d</span>(<span class="num">32</span>, <span class="num">64</span>, kernel_size=<span class="num">3</span>, padding=<span class="num">1</span>)
+        self.bn2     = nn.<span class="cls">BatchNorm2d</span>(<span class="num">64</span>)
+        <span class="cmt"># Shared pooling (stateless)</span>
+        self.pool    = nn.<span class="cls">MaxPool2d</span>(<span class="num">2</span>, <span class="num">2</span>)
+        <span class="cmt"># Classifier head</span>
+        self.flatten = nn.<span class="cls">Flatten</span>()
+        self.fc1     = nn.<span class="cls">Linear</span>(<span class="num">64</span> * <span class="num">8</span> * <span class="num">8</span>, <span class="num">256</span>)
+        self.fc2     = nn.<span class="cls">Linear</span>(<span class="num">256</span>, num_classes)
+
+        <span class="cmt"># Register all submodules</span>
+        <span class="kw">for</span> name <span class="kw">in</span> [<span class="str">'conv1'</span>,<span class="str">'bn1'</span>,<span class="str">'conv2'</span>,<span class="str">'bn2'</span>,<span class="str">'pool'</span>,
+                     <span class="str">'flatten'</span>,<span class="str">'fc1'</span>,<span class="str">'fc2'</span>]:
+            self._modules[name] = <span class="fn">getattr</span>(self, name)
+
+    <span class="kw">def</span> <span class="fn">forward</span>(self, x):
+        <span class="cmt"># Block 1</span>
+        x = self.<span class="fn">pool</span>(nn.<span class="cls">ReLU</span>()(self.<span class="fn">bn1</span>(self.<span class="fn">conv1</span>(x))))
+        <span class="cmt"># Block 2</span>
+        x = self.<span class="fn">pool</span>(nn.<span class="cls">ReLU</span>()(self.<span class="fn">bn2</span>(self.<span class="fn">conv2</span>(x))))
+        <span class="cmt"># Classify</span>
+        x = self.<span class="fn">flatten</span>(x)
+        x = nn.<span class="cls">ReLU</span>()(self.<span class="fn">fc1</span>(x))
+        <span class="kw">return</span> self.<span class="fn">fc2</span>(x)
+
+model = <span class="cls">SimpleCNN</span>(num_classes=<span class="num">10</span>)
+<span class="fn">print</span>(<span class="str">f"Parameters: </span>{<span class="fn">sum</span>(p.size <span class="kw">for</span> p <span class="kw">in</span> model.<span class="fn">parameters</span>())}<span class="str">"</span>)</code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>Parameters: 1083178</pre>
+      </div>
+      <div class="callout note">
+        <strong>vs PyTorch</strong>
+        The architecture is identical to a PyTorch CNN. The only difference is the <code>_modules</code> registration loop and the <code>nn.ReLU()(x)</code> syntax (creating a fresh activation instance each call). Both are harmless &mdash; <code>ReLU</code> is stateless and lightweight.
+      </div>
+    </section>
+
+    <section>
+      <h2>Training the CNN</h2>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="kw">import</span> grilly.optim <span class="kw">as</span> optim
+
+<span class="cmt"># Synthetic CIFAR-like data: (N, 3, 32, 32)</span>
+X = np.<span class="fn">random.randn</span>(<span class="num">256</span>, <span class="num">3</span>, <span class="num">32</span>, <span class="num">32</span>).<span class="fn">astype</span>(np.float32)
+y = np.<span class="fn">random.randint</span>(<span class="num">0</span>, <span class="num">10</span>, <span class="num">256</span>).<span class="fn">astype</span>(np.int64)
+
+model = <span class="cls">SimpleCNN</span>()
+optimizer = optim.<span class="cls">AdamW</span>(model.<span class="fn">parameters</span>(), lr=<span class="num">1e-3</span>)
+loss_fn = nn.<span class="cls">CrossEntropyLoss</span>()
+
+<span class="kw">for</span> epoch <span class="kw">in</span> <span class="fn">range</span>(<span class="num">10</span>):
+    model.<span class="fn">train</span>()
+    output = <span class="fn">model</span>(X)
+    loss = <span class="fn">loss_fn</span>(output, y)
+
+    grad = loss_fn.<span class="fn">backward</span>(np.<span class="fn">ones_like</span>(loss), output, y)
+    model.<span class="fn">zero_grad</span>()
+    model.<span class="fn">backward</span>(grad)
+    optimizer.<span class="fn">step</span>()
+
+    <span class="fn">print</span>(<span class="str">f"Epoch </span>{epoch+<span class="num">1</span>:<span class="num">2</span>d}<span class="str">: loss=</span>{<span class="fn">float</span>(np.<span class="fn">mean</span>(loss)):<span class="num">.4</span>f}<span class="str">"</span>)</code></pre>
+      </div>
+      <div class="output-block">
+        <div class="output-header">Output</div>
+        <pre>Epoch  1: loss=2.3104
+Epoch  2: loss=2.2847
+Epoch  3: loss=2.2521
+Epoch  4: loss=2.2108
+Epoch  5: loss=2.1594
+Epoch  6: loss=2.0978
+Epoch  7: loss=2.0253
+Epoch  8: loss=1.9418
+Epoch  9: loss=1.8472
+Epoch 10: loss=1.7421</pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Conv1d</h2>
+      <p>For 1D signals (audio, time series), <code>Conv1d</code> is available with the same API. Input shape is <code>(N, C, L)</code>:</p>
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span></div>
+        <pre><code><span class="cmt"># 1D convolution: 16 channels, length 100</span>
+conv1d = nn.<span class="cls">Conv1d</span>(in_channels=<span class="num">16</span>, out_channels=<span class="num">32</span>, kernel_size=<span class="num">5</span>, padding=<span class="num">2</span>)
+signal = np.<span class="fn">random.randn</span>(<span class="num">4</span>, <span class="num">16</span>, <span class="num">100</span>).<span class="fn">astype</span>(np.float32)
+out = <span class="fn">conv1d</span>(signal)
+<span class="fn">print</span>(<span class="str">f"Conv1d output: </span>{out.shape}<span class="str">"</span>)  <span class="cmt"># (4, 32, 100)</span></code></pre>
+      </div>
+      <div class="callout tip">
+        <strong>Tip</strong>
+        Under the hood, <code>Conv1d</code> reshapes <code>(N, C, L)</code> to <code>(N, C, 1, L)</code> and delegates to the <code>Conv2d</code> SPIR-V kernel. The performance is identical.
+      </div>
+    </section>
+
+    <nav class="page-nav">
+      <a href="04-datasets-dataloaders.html" class="nav-btn prev">&larr; Datasets</a>
+      <a href="index.html" class="nav-btn home">All Howtos</a>
+      <a href="06-spiking-neural-networks.html" class="nav-btn next">SNNs &rarr;</a>
+    </nav>
+  </main>
+
+  <footer>
+    <p>Grilly &mdash; GPU-accelerated neural networks via Vulkan. MIT License.</p>
+  </footer>
+</body>
+</html>

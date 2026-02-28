@@ -186,10 +186,16 @@ class VulkanNormalization(BufferMixin):
             # Always release auxiliary buffers
             if release_input:
                 self._release_buffer(buf_input)
-            self._release_buffers([
-                buf_gamma, buf_beta, buf_running_mean,
-                buf_running_var, buf_batch_mean, buf_batch_var,
-            ])
+            self._release_buffers(
+                [
+                    buf_gamma,
+                    buf_beta,
+                    buf_running_mean,
+                    buf_running_var,
+                    buf_batch_mean,
+                    buf_batch_var,
+                ]
+            )
             # Only release output if NOT wrapped in VulkanTensor
             if not _output_owned:
                 self._release_buffer(buf_output)

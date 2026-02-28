@@ -28,9 +28,7 @@ class NeuNorm(Module):
         super().__init__()
         self.in_channels = in_channels
         self.k = k
-        self.w = Parameter(
-            np.full(in_channels, k, dtype=np.float32), requires_grad=True
-        )
+        self.w = Parameter(np.full(in_channels, k, dtype=np.float32), requires_grad=True)
         self.register_parameter("w", self.w)
 
     def forward(self, x):
@@ -79,12 +77,8 @@ class ThresholdDependentBatchNorm2d(Module):
         self.affine = affine
 
         if affine:
-            self.alpha = Parameter(
-                np.ones(num_features, dtype=np.float32), requires_grad=True
-            )
-            self.bias = Parameter(
-                np.zeros(num_features, dtype=np.float32), requires_grad=True
-            )
+            self.alpha = Parameter(np.ones(num_features, dtype=np.float32), requires_grad=True)
+            self.bias = Parameter(np.zeros(num_features, dtype=np.float32), requires_grad=True)
             self.register_parameter("alpha", self.alpha)
             self.register_parameter("bias", self.bias)
 
@@ -124,10 +118,7 @@ class ThresholdDependentBatchNorm2d(Module):
         return x_norm * self.v_threshold
 
     def __repr__(self):
-        return (
-            f"ThresholdDependentBatchNorm2d("
-            f"{self.num_features}, v_threshold={self.v_threshold})"
-        )
+        return f"ThresholdDependentBatchNorm2d({self.num_features}, v_threshold={self.v_threshold})"
 
 
 class ThresholdDependentBatchNorm1d(Module):
@@ -143,9 +134,7 @@ class ThresholdDependentBatchNorm1d(Module):
 
     def __init__(self, num_features, v_threshold=1.0, eps=1e-5, momentum=0.1, affine=True):
         super().__init__()
-        self.bn2d = ThresholdDependentBatchNorm2d(
-            num_features, v_threshold, eps, momentum, affine
-        )
+        self.bn2d = ThresholdDependentBatchNorm2d(num_features, v_threshold, eps, momentum, affine)
         self.num_features = num_features
 
     def forward(self, x):
@@ -182,18 +171,12 @@ class TemporalEffectiveBatchNorm2d(Module):
         self.affine = affine
 
         # Per-timestep coefficients
-        self.lambda_t = Parameter(
-            np.ones(T, dtype=np.float32), requires_grad=True
-        )
+        self.lambda_t = Parameter(np.ones(T, dtype=np.float32), requires_grad=True)
         self.register_parameter("lambda_t", self.lambda_t)
 
         if affine:
-            self.weight = Parameter(
-                np.ones(num_features, dtype=np.float32), requires_grad=True
-            )
-            self.bias = Parameter(
-                np.zeros(num_features, dtype=np.float32), requires_grad=True
-            )
+            self.weight = Parameter(np.ones(num_features, dtype=np.float32), requires_grad=True)
+            self.bias = Parameter(np.zeros(num_features, dtype=np.float32), requires_grad=True)
             self.register_parameter("weight", self.weight)
             self.register_parameter("bias", self.bias)
 
@@ -296,12 +279,8 @@ class BatchNormThroughTime2d(Module):
         self.affine = affine
 
         if affine:
-            self.weight = Parameter(
-                np.ones(num_features, dtype=np.float32), requires_grad=True
-            )
-            self.bias = Parameter(
-                np.zeros(num_features, dtype=np.float32), requires_grad=True
-            )
+            self.weight = Parameter(np.ones(num_features, dtype=np.float32), requires_grad=True)
+            self.bias = Parameter(np.zeros(num_features, dtype=np.float32), requires_grad=True)
             self.register_parameter("weight", self.weight)
             self.register_parameter("bias", self.bias)
 
@@ -318,12 +297,8 @@ class BatchNormThroughTime2d(Module):
             if self.training:
                 mean = np.mean(x, axis=(0, 2, 3))
                 var = np.var(x, axis=(0, 2, 3))
-                self.running_mean = (
-                    self.momentum * mean + (1 - self.momentum) * self.running_mean
-                )
-                self.running_var = (
-                    self.momentum * var + (1 - self.momentum) * self.running_var
-                )
+                self.running_mean = self.momentum * mean + (1 - self.momentum) * self.running_mean
+                self.running_var = self.momentum * var + (1 - self.momentum) * self.running_var
             else:
                 mean = self.running_mean
                 var = self.running_var

@@ -14,6 +14,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "benchmark: marks GPU benchmark tests (deselect with '-m \"not benchmark\"')"
     )
+    config.addinivalue_line(
+        "markers", "cpp: marks tests that require C++ backend (deselect with '-m \"not cpp\"')"
+    )
 
 
 try:
@@ -21,9 +24,17 @@ try:
     from grilly.backend.base import VULKAN_AVAILABLE
 
     GRILLY_AVAILABLE = True
-except ImportError:
+except (ImportError, AttributeError, Exception):
     GRILLY_AVAILABLE = False
     VULKAN_AVAILABLE = False
+
+# C++ backend (grilly_core with NN framework classes)
+try:
+    from grilly_core import Tensor as _CppTensor
+
+    CPP_AVAILABLE = True
+except (ImportError, AttributeError):
+    CPP_AVAILABLE = False
 
 
 @pytest.fixture

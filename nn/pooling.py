@@ -63,7 +63,11 @@ class MaxPool2d(Module):
 
         compute = self._get_backend()
         output, indices = compute.pooling.maxpool2d(
-            x, self.kernel_size, self.stride, self.padding, self.dilation,
+            x,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
             return_gpu_tensor=self._return_gpu_tensor,
         )
 

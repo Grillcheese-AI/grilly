@@ -118,8 +118,7 @@ class VulkanFNN(BufferMixin):
         if use_coopmat:
             return self._gemm_coopmat(A, B, M, K, N, return_gpu_tensor, cache_B)
         else:
-            return self._gemm_scalar(A, B, M, K, N, return_gpu_tensor, cache_B,
-                                     use_tiled)
+            return self._gemm_scalar(A, B, M, K, N, return_gpu_tensor, cache_B, use_tiled)
 
     def _gemm_coopmat(self, A, B, M, K, N, return_gpu_tensor, cache_B):
         """Cooperative matrix GEMM: fp16 inputs, fp32 accumulation."""
@@ -1574,13 +1573,19 @@ class VulkanFNN(BufferMixin):
         if "loss-cross-entropy" not in self.shaders:
             # CPU fallback
             logits_np = logits.numpy() if is_vt else logits
-            logits_3d = logits_np.reshape(batch_size, seq_len, vocab_size) if original_ndim != 3 else logits_np
+            logits_3d = (
+                logits_np.reshape(batch_size, seq_len, vocab_size)
+                if original_ndim != 3
+                else logits_np
+            )
             row_logits = logits_3d.reshape(-1, vocab_size).astype(np.float32, copy=False)
             row_targets = targets_u32.reshape(-1).astype(np.int64, copy=False)
             row_max = np.max(row_logits, axis=1, keepdims=True)
             shifted = np.clip(row_logits - row_max, -60.0, 60.0)
             with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-                lse = row_max.reshape(-1) + np.log(np.maximum(np.sum(np.exp(shifted), axis=1), 1e-12))
+                lse = row_max.reshape(-1) + np.log(
+                    np.maximum(np.sum(np.exp(shifted), axis=1), 1e-12)
+                )
             tlog = row_logits[np.arange(row_logits.shape[0]), row_targets]
             losses = (lse - tlog).astype(np.float32, copy=False).reshape(batch_size, seq_len)
             if reduction == "none":
@@ -1597,7 +1602,9 @@ class VulkanFNN(BufferMixin):
         if is_vt:
             buf_logits, release_logits = self._prepare_input(logits, size=logits_nbytes)
         else:
-            logits_3d = logits.reshape(batch_size, seq_len, vocab_size) if original_ndim != 3 else logits
+            logits_3d = (
+                logits.reshape(batch_size, seq_len, vocab_size) if original_ndim != 3 else logits
+            )
             logits_flat = np.ascontiguousarray(logits_3d, dtype=np.float32).reshape(-1)
             buf_logits = self._acquire_buffer(logits_flat.nbytes)
             self._upload_buffer(buf_logits, logits_flat)
@@ -1780,12 +1787,20 @@ class VulkanFNN(BufferMixin):
         if use_batched:
             with self.core.record_commands() as rec:
                 for pass_type in range(3):
-                    push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, pass_type)
+                    push_constants = struct.pack(
+                        "IIIfI", batch_size, seq_len, features, eps, pass_type
+                    )
                     if pass_type < 2:
                         workgroups = (total_positions + 255) // 256
                     else:
                         workgroups = (total_elements + 255) // 256
-                    rec.dispatch(pipeline, pipeline_layout, descriptor_set, (workgroups, 1, 1), push_constants)
+                    rec.dispatch(
+                        pipeline,
+                        pipeline_layout,
+                        descriptor_set,
+                        (workgroups, 1, 1),
+                        push_constants,
+                    )
                     if pass_type < 2:
                         rec.barrier()
         else:
@@ -2462,7 +2477,9 @@ class VulkanFNN(BufferMixin):
     # ------------------------------------------------------------------
     # Residual connection
     # ------------------------------------------------------------------
-    def residual(self, x: np.ndarray, module_output: np.ndarray, return_gpu_tensor: bool = False) -> np.ndarray:
+    def residual(
+        self, x: np.ndarray, module_output: np.ndarray, return_gpu_tensor: bool = False
+    ) -> np.ndarray:
         """
         Residual connection: output = x + module_output
 
@@ -2502,7 +2519,9 @@ class VulkanFNN(BufferMixin):
         if is_vt_m:
             buf_module, release_module = self._prepare_input(module_output, size=x_nbytes)
         else:
-            module_np = np.ascontiguousarray(np.asarray(module_output, dtype=np.float32)).reshape(-1)
+            module_np = np.ascontiguousarray(np.asarray(module_output, dtype=np.float32)).reshape(
+                -1
+            )
             buf_module = self._acquire_buffer(x_nbytes)
             self._upload_buffer(buf_module, module_np)
             release_module = True
@@ -3198,7 +3217,7 @@ class VulkanFNN(BufferMixin):
         # CPU fallback if shader unavailable
         if "rms-norm" not in self.shaders:
             x_np = x.numpy() if is_vt else np.asarray(x, dtype=np.float32)
-            mean_sq = np.mean(x_np ** 2, axis=-1, keepdims=True)
+            mean_sq = np.mean(x_np**2, axis=-1, keepdims=True)
             normed = x_np * (1.0 / np.sqrt(mean_sq + eps))
             return normed * weight
 
@@ -3209,7 +3228,9 @@ class VulkanFNN(BufferMixin):
             batch_size = original_shape[0]
             seq_len = 1
         else:
-            batch_size = int(np.prod(original_shape[:-2])) if len(original_shape) > 3 else original_shape[0]
+            batch_size = (
+                int(np.prod(original_shape[:-2])) if len(original_shape) > 3 else original_shape[0]
+            )
             seq_len = original_shape[-2] if len(original_shape) >= 3 else 1
 
         x_nbytes = int(batch_size * seq_len * features * 4)
@@ -3256,12 +3277,20 @@ class VulkanFNN(BufferMixin):
         if use_batched:
             with self.core.record_commands() as rec:
                 for pass_type in range(2):
-                    push_constants = struct.pack("IIIfI", batch_size, seq_len, features, eps, pass_type)
+                    push_constants = struct.pack(
+                        "IIIfI", batch_size, seq_len, features, eps, pass_type
+                    )
                     if pass_type == 0:
                         workgroups = (total_positions + 255) // 256
                     else:
                         workgroups = (total_elements + 255) // 256
-                    rec.dispatch(pipeline, pipeline_layout, descriptor_set, (workgroups, 1, 1), push_constants)
+                    rec.dispatch(
+                        pipeline,
+                        pipeline_layout,
+                        descriptor_set,
+                        (workgroups, 1, 1),
+                        push_constants,
+                    )
                     if pass_type == 0:
                         rec.barrier()
         else:
@@ -3428,7 +3457,9 @@ class VulkanFNN(BufferMixin):
             for g in range(num_groups):
                 k_start = g * group_size
                 k_end = min(k_start + group_size, K)
-                w_fp32[:, k_start:k_end] = weights_int8[:, k_start:k_end].astype(np.float32) * scales[:, g:g+1]
+                w_fp32[:, k_start:k_end] = (
+                    weights_int8[:, k_start:k_end].astype(np.float32) * scales[:, g : g + 1]
+                )
             return activations @ w_fp32.T
 
         # Pack int8 weights as uint32 (4 per uint32)

@@ -18,6 +18,15 @@ except ImportError:
     _PARAMETER_AVAILABLE = False
     ParameterClass = None
 
+# C++ bridge fast path (persistent-mapped VMA, zero vkMap/vkUnmap)
+try:
+    from ..backend import _bridge
+
+    _USE_CPP_BRIDGE = _bridge.is_available()
+except Exception:
+    _bridge = None
+    _USE_CPP_BRIDGE = False
+
 
 class Linear(Module):
     """
@@ -191,8 +200,7 @@ class Linear(Module):
             self.register_parameter("bias", self.bias)
 
     def forward(self, x) -> np.ndarray:
-        """Forward pass with GEMM fast path if available."""
-        backend = self._get_backend()
+        """Forward pass — always dispatches through GPU backend."""
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias) if self.bias is not None else None
 
@@ -204,45 +212,21 @@ class Linear(Module):
             x = np.asarray(x, dtype=np.float32)
         weight = np.asarray(weight, dtype=np.float32)
 
-        # Use fnn.linear() which handles x @ W^T + bias in a single dispatch
-        # without needing a CPU weight transpose copy
+        # C++ backend (primary path)
+        if _USE_CPP_BRIDGE and not is_vt:
+            result = _bridge.linear(x, weight, bias)
+            if result is not None:
+                return result
+
+        # Legacy Python Vulkan backend (fallback)
+        backend = self._get_backend()
         if hasattr(backend, "fnn") and hasattr(backend.fnn, "linear"):
-            try:
-                return backend.fnn.linear(
-                    x,
-                    weight,
-                    bias,
-                    return_gpu_tensor=self._return_gpu_tensor,
-                )
-            except Exception:
-                pass  # Fall back to CPU
-
-        # CPU fallback (force numpy for CPU path)
-        if is_vt:
-            x = x.numpy()
-
-        # x: (batch, in_features) or (batch, seq, in_features)
-        if x.ndim == 2:
-            batch_seq, in_features = x.shape
-            x_2d = x
-        elif x.ndim == 3:
-            b, s, in_features = x.shape
-            batch_seq = b * s
-            x_2d = x.reshape(batch_seq, in_features)
-        else:
-            raise ValueError(f"Linear expects 2D or 3D input, got shape {x.shape}")
-
-        out_features = self.out_features
-
-        out_2d = x_2d @ weight.T
-        if bias is not None:
-            out_2d += bias.reshape(1, out_features)
-
-        # Reshape back to original batch shape
-        if x.ndim == 2:
-            return out_2d
-        else:
-            return out_2d.reshape(b, s, out_features)
+            return backend.fnn.linear(
+                x,
+                weight,
+                bias,
+                return_gpu_tensor=self._return_gpu_tensor,
+            )
 
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """
@@ -457,9 +441,16 @@ class LayerNorm(Module):
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass using fnn-layernorm.glsl"""
-        backend = self._get_backend()
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias)
+
+        # C++ bridge fast path
+        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
+            result = _bridge.layernorm(x, weight, bias, self.eps)
+            if result is not None:
+                return result
+
+        backend = self._get_backend()
         return backend.fnn.layernorm(
             x,
             weight,
@@ -538,6 +529,73 @@ class LayerNorm(Module):
         """Return a debug representation."""
 
         return f"LayerNorm(normalized_shape={self.normalized_shape}, eps={self.eps})"
+
+
+class RMSNorm(Module):
+    """
+    RMS Normalization layer.
+    Unlike LayerNorm, RMSNorm has no mean subtraction and no bias.
+    Used by LLaMA, Mistral, T5, Qwen architectures.
+    Uses: rms-norm.glsl
+    """
+
+    def __init__(self, normalized_shape: int, eps: float = 1e-5):
+        """Initialize the instance."""
+
+        super().__init__()
+        self.normalized_shape = normalized_shape
+        self.eps = eps
+
+        weight_data = np.ones(normalized_shape, dtype=np.float32)
+        self.weight = _create_param_wrapper(weight_data)
+        self.register_parameter("weight", self.weight)
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        """Forward pass using rms-norm.glsl"""
+        weight = _get_param_array(self.weight)
+
+        # Try C++ bridge fast path
+        if _USE_CPP_BRIDGE:
+            result = _bridge.rmsnorm(x, weight, self.eps)
+            if result is not None:
+                return result
+
+        # CPU fallback
+        x = np.asarray(x, dtype=np.float32)
+        mean_sq = np.mean(x**2, axis=-1, keepdims=True)
+        normed = x * (1.0 / np.sqrt(mean_sq + self.eps))
+        return normed * weight
+
+    def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
+        """Backward pass for RMSNorm."""
+        weight = _get_param_array(self.weight)
+        x = np.asarray(x, dtype=np.float32)
+
+        # Recompute forward intermediates
+        mean_sq = np.mean(x**2, axis=-1, keepdims=True)
+        inv_rms = 1.0 / np.sqrt(mean_sq + self.eps)
+        normed = x * inv_rms
+
+        # Gradient w.r.t. weight
+        grad_weight = np.sum(grad_output * normed, axis=tuple(range(grad_output.ndim - 1)))
+        if hasattr(self.weight, "grad") and self.weight.grad is not None:
+            self.weight.grad += grad_weight
+        elif hasattr(self.weight, "grad"):
+            self.weight.grad = grad_weight
+
+        # Gradient w.r.t. input
+        grad_normed = grad_output * weight
+        normed.shape[-1]
+        grad_input = inv_rms * (
+            grad_normed - normed * np.mean(grad_normed * normed, axis=-1, keepdims=True)
+        )
+
+        return grad_input
+
+    def __repr__(self):
+        """Return a debug representation."""
+
+        return f"RMSNorm(normalized_shape={self.normalized_shape}, eps={self.eps})"
 
 
 class Dropout(Module):
@@ -624,6 +682,10 @@ class ReLU(Module):
 
     def forward(self, x) -> np.ndarray:
         """Forward pass using activation-relu.glsl"""
+        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
+            result = _bridge.relu(x)
+            if result is not None:
+                return result
         backend = self._get_backend()
         return backend.activation_relu(x, return_gpu_tensor=self._return_gpu_tensor)
 
@@ -655,6 +717,10 @@ class GELU(Module):
 
     def forward(self, x) -> np.ndarray:
         """Forward pass using activation-gelu.glsl"""
+        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
+            result = _bridge.gelu(x)
+            if result is not None:
+                return result
         backend = self._get_backend()
         return backend.activation_gelu(x, return_gpu_tensor=self._return_gpu_tensor)
 
@@ -706,6 +772,10 @@ class SiLU(Module):
 
     def forward(self, x) -> np.ndarray:
         """Forward pass using activation-silu.glsl"""
+        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
+            result = _bridge.silu(x)
+            if result is not None:
+                return result
         backend = self._get_backend()
         return backend.activation_silu(x, return_gpu_tensor=self._return_gpu_tensor)
 
@@ -1019,8 +1089,10 @@ class Embedding(Module):
             "false",
             "no",
         }
-        if gpu_lookup_enabled and hasattr(backend, "learning") and hasattr(
-            backend.learning, "embedding_lookup"
+        if (
+            gpu_lookup_enabled
+            and hasattr(backend, "learning")
+            and hasattr(backend.learning, "embedding_lookup")
         ):
             try:
                 return backend.learning.embedding_lookup(

@@ -32,10 +32,10 @@ from benchmarks.utils import (
 
 # ── Shapes to test ──────────────────────────────────────────────────────────
 SHAPES = [
-    {"name": "Small",  "batch": 32,  "in": 128,  "hidden": 256,  "out": 64},
-    {"name": "Medium", "batch": 64,  "in": 512,  "hidden": 1024, "out": 512},
-    {"name": "Large",  "batch": 256, "in": 1024, "hidden": 2048, "out": 1024},
-    {"name": "XL",     "batch": 512, "in": 2048, "hidden": 4096, "out": 2048},
+    {"name": "Small", "batch": 32, "in": 128, "hidden": 256, "out": 64},
+    {"name": "Medium", "batch": 64, "in": 512, "hidden": 1024, "out": 512},
+    {"name": "Large", "batch": 256, "in": 1024, "hidden": 2048, "out": 1024},
+    {"name": "XL", "batch": 512, "in": 2048, "hidden": 4096, "out": 2048},
 ]
 
 WARMUP = 3
@@ -61,9 +61,7 @@ def build_chain(in_f, hidden, out_f):
         def forward(self, x):
             backend = self.linear1._get_backend()
             h = self.linear1(x)
-            h = backend.fnn.activation_relu(
-                h, return_gpu_tensor=self.linear1._return_gpu_tensor
-            )
+            h = backend.fnn.activation_relu(h, return_gpu_tensor=self.linear1._return_gpu_tensor)
             return self.linear2(h)
 
         def gpu_mode(self, enable, device_local=True):
@@ -121,8 +119,10 @@ def verify_correctness():
 
         tag_hv = "PASS" if ok_hv else "FAIL"
         tag_dl = "PASS" if ok_dl else "FAIL"
-        print(f"  {s['name']:<8}  HOST_VISIBLE: {tag_hv} (diff={diff_hv:.2e})"
-              f"  DEVICE_LOCAL: {tag_dl} (diff={diff_dl:.2e})")
+        print(
+            f"  {s['name']:<8}  HOST_VISIBLE: {tag_hv} (diff={diff_hv:.2e})"
+            f"  DEVICE_LOCAL: {tag_dl} (diff={diff_dl:.2e})"
+        )
         if not (ok_hv and ok_dl):
             all_ok = False
 
@@ -134,8 +134,10 @@ def benchmark_all():
     from grilly.utils.tensor_conversion import VulkanTensor
 
     print_header("Linear -> ReLU -> Linear  Pipeline Benchmark")
-    print(f"  {'Shape':<28} {'CPU':>10} {'GPU(HV)':>10} {'GPU(DL)':>10}"
-          f" {'HV/CPU':>8} {'DL/CPU':>8} {'DL/HV':>8}")
+    print(
+        f"  {'Shape':<28} {'CPU':>10} {'GPU(HV)':>10} {'GPU(DL)':>10}"
+        f" {'HV/CPU':>8} {'DL/CPU':>8} {'DL/HV':>8}"
+    )
     print("  " + "-" * 88)
 
     summary = []
@@ -147,14 +149,14 @@ def benchmark_all():
         chain = build_chain(s["in"], s["hidden"], s["out"])
         w1, b1, w2, b2 = chain.weights()
 
-        label = (f"{s['name']} ({s['batch']},{s['in']})"
-                 f"->{s['hidden']}->{s['out']}")
+        label = f"{s['name']} ({s['batch']},{s['in']})->{s['hidden']}->{s['out']}"
         data_bytes = x_np.nbytes + w1.nbytes + w2.nbytes
 
         # ── CPU ─────────────────────────────────────────────────────
         cpu_stats = time_cpu(
             lambda w1=w1, b1=b1, w2=w2, b2=b2, inp=x_np: cpu_chain(inp, w1, b1, w2, b2),
-            warmup=WARMUP, repeats=REPEATS,
+            warmup=WARMUP,
+            repeats=REPEATS,
         )
         cpu_ms = cpu_stats["mean"]
 
@@ -174,31 +176,36 @@ def benchmark_all():
         dl_vs_cpu = f"{cpu_ms / dl_ms:.2f}x" if dl_ms > 0 else "N/A"
         dl_vs_hv = f"{hv_ms / dl_ms:.2f}x" if dl_ms > 0 else "N/A"
 
-        print(f"  {label:<28} {format_time(cpu_ms):>10} {format_time(hv_ms):>10}"
-              f" {format_time(dl_ms):>10} {hv_vs_cpu:>8} {dl_vs_cpu:>8} {dl_vs_hv:>8}")
+        print(
+            f"  {label:<28} {format_time(cpu_ms):>10} {format_time(hv_ms):>10}"
+            f" {format_time(dl_ms):>10} {hv_vs_cpu:>8} {dl_vs_cpu:>8} {dl_vs_hv:>8}"
+        )
 
-        summary.append({
-            "label": label,
-            "cpu_ms": cpu_ms,
-            "hv_ms": hv_ms,
-            "dl_ms": dl_ms,
-            "data": format_size(data_bytes),
-        })
+        summary.append(
+            {
+                "label": label,
+                "cpu_ms": cpu_ms,
+                "hv_ms": hv_ms,
+                "dl_ms": dl_ms,
+                "data": format_size(data_bytes),
+            }
+        )
 
     # ── Summary ─────────────────────────────────────────────────────
     print_header("Summary — DEVICE_LOCAL vs HOST_VISIBLE Speedup")
     for r in summary:
         speedup = r["hv_ms"] / r["dl_ms"] if r["dl_ms"] > 0 else 0
         saved = r["hv_ms"] - r["dl_ms"]
-        print(f"  {r['label']:<28}  {speedup:.2f}x faster  "
-              f"(saved {format_time(saved)} per call)  [{r['data']}]")
+        print(
+            f"  {r['label']:<28}  {speedup:.2f}x faster  "
+            f"(saved {format_time(saved)} per call)  [{r['data']}]"
+        )
 
 
 def benchmark_layernorm():
     """Benchmark layernorm 3-pass: single-shot vs batched CommandRecorder."""
     print_header("LayerNorm 3-Pass Benchmark (single-shot vs batched)")
-    print(f"  {'Shape':<28} {'CPU':>10} {'GPU(HV)':>10} {'GPU(DL)':>10}"
-          f" {'DL/HV':>8}")
+    print(f"  {'Shape':<28} {'CPU':>10} {'GPU(HV)':>10} {'GPU(DL)':>10} {'DL/HV':>8}")
     print("  " + "-" * 75)
 
     backend = get_gpu_backend()
@@ -225,23 +232,38 @@ def benchmark_layernorm():
 
         # GPU HOST_VISIBLE (3 separate dispatches)
         hv_stats = time_fn(
-            backend.fnn.layernorm, x, gamma, beta, 1e-5, False,
-            warmup=WARMUP, repeats=REPEATS,
+            backend.fnn.layernorm,
+            x,
+            gamma,
+            beta,
+            1e-5,
+            False,
+            warmup=WARMUP,
+            repeats=REPEATS,
         )
         hv_ms = hv_stats["mean"]
 
         # GPU batched (CommandRecorder, return_gpu_tensor=True)
         from grilly.utils.tensor_conversion import VulkanTensor
+
         x_vt = VulkanTensor(x)
         dl_stats = time_fn(
-            backend.fnn.layernorm, x_vt, gamma, beta, 1e-5, True,
-            warmup=WARMUP, repeats=REPEATS,
+            backend.fnn.layernorm,
+            x_vt,
+            gamma,
+            beta,
+            1e-5,
+            True,
+            warmup=WARMUP,
+            repeats=REPEATS,
         )
         dl_ms = dl_stats["mean"]
 
         dl_vs_hv = f"{hv_ms / dl_ms:.2f}x" if dl_ms > 0 else "N/A"
-        print(f"  {label:<28} {format_time(cpu_ms):>10} {format_time(hv_ms):>10}"
-              f" {format_time(dl_ms):>10} {dl_vs_hv:>8}")
+        print(
+            f"  {label:<28} {format_time(cpu_ms):>10} {format_time(hv_ms):>10}"
+            f" {format_time(dl_ms):>10} {dl_vs_hv:>8}"
+        )
 
 
 def main():

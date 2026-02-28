@@ -17,3 +17,14 @@ to run our tests on specific GPUs, open an Issue and tell us about it.
 
 READ: [SUPPORTED_DEVICES.md](./SUPPORTED_DEVICES.md)
 
+## INSTALLING VULKAN SUPPORT
+
+### For Windows
+
+- Install Visual Studio Community edition 2022
+- Make sure you install c++ dependencies and tools
+- Download the Vulkan SDK Installer file from https://vulkan.lunarg.com/sdk/home
+- Run setup and you should be all set. Environment variables should be set at the same time.
+
+### For Ubuntu 22.04 and 24.04
+

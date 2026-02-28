@@ -17,9 +17,10 @@ except ImportError:
 # Numpy reference helpers
 # ---------------------------------------------------------------------------
 
+
 def _ref_rms_norm(x, weight, eps):
     """Numpy reference: RMSNorm(x) = x * rsqrt(mean(x^2) + eps) * weight"""
-    mean_sq = np.mean(x ** 2, axis=-1, keepdims=True)
+    mean_sq = np.mean(x**2, axis=-1, keepdims=True)
     normed = x * (1.0 / np.sqrt(mean_sq + eps))
     return normed * weight
 
@@ -61,9 +62,9 @@ def _ref_gemm_int8(activations, weights_int8, scales, group_size):
     return activations @ w_fp32.T
 
 
-def _ref_gqa_decode_attention(query, k_cache, v_cache, num_q_heads,
-                              num_kv_heads, head_dim, cache_len=None,
-                              scale=None):
+def _ref_gqa_decode_attention(
+    query, k_cache, v_cache, num_q_heads, num_kv_heads, head_dim, cache_len=None, scale=None
+):
     """
     Numpy reference for GQA decode attention.
     query:   (batch, 1, num_q_heads, head_dim)
@@ -81,16 +82,11 @@ def _ref_gqa_decode_attention(query, k_cache, v_cache, num_q_heads,
     for b in range(batch_size):
         for qh in range(num_q_heads):
             kv_head = qh // kv_group_size
-            scores = (
-                np.einsum("d,sd->s", q_2d[b, qh], k_cache[b, :cache_len, kv_head])
-                * scale
-            )
+            scores = np.einsum("d,sd->s", q_2d[b, qh], k_cache[b, :cache_len, kv_head]) * scale
             scores_max = np.max(scores)
             exp_scores = np.exp(scores - scores_max)
             weights = exp_scores / np.sum(exp_scores)
-            output[b, qh] = np.einsum(
-                "s,sd->d", weights, v_cache[b, :cache_len, kv_head]
-            )
+            output[b, qh] = np.einsum("s,sd->d", weights, v_cache[b, :cache_len, kv_head])
     return output.reshape(batch_size, 1, num_q_heads, head_dim)
 
 
@@ -332,9 +328,7 @@ class TestGQADecodeAttentionGPU:
         result = gpu.attention.gqa_decode_attention(
             query, k_cache, v_cache, num_q, num_kv, head_dim
         )
-        expected = _ref_gqa_decode_attention(
-            query, k_cache, v_cache, num_q, num_kv, head_dim
-        )
+        expected = _ref_gqa_decode_attention(query, k_cache, v_cache, num_q, num_kv, head_dim)
         np.testing.assert_allclose(result, expected, atol=1e-3)
 
     def test_gqa_decode_numerical_correctness(self, gpu):
@@ -347,9 +341,7 @@ class TestGQADecodeAttentionGPU:
         result = gpu.attention.gqa_decode_attention(
             query, k_cache, v_cache, num_q, num_kv, head_dim
         )
-        expected = _ref_gqa_decode_attention(
-            query, k_cache, v_cache, num_q, num_kv, head_dim
-        )
+        expected = _ref_gqa_decode_attention(query, k_cache, v_cache, num_q, num_kv, head_dim)
         np.testing.assert_allclose(result, expected, atol=1e-3)
 
     def test_gqa_decode_different_cache_lengths(self, gpu):
@@ -363,9 +355,7 @@ class TestGQADecodeAttentionGPU:
             result = gpu.attention.gqa_decode_attention(
                 query, k_cache, v_cache, num_q, num_kv, head_dim
             )
-            expected = _ref_gqa_decode_attention(
-                query, k_cache, v_cache, num_q, num_kv, head_dim
-            )
+            expected = _ref_gqa_decode_attention(query, k_cache, v_cache, num_q, num_kv, head_dim)
             assert result.shape == (batch, 1, num_q, head_dim)
             np.testing.assert_allclose(result, expected, atol=1e-3)
 
@@ -379,9 +369,7 @@ class TestGQADecodeAttentionGPU:
         result = gpu.attention.gqa_decode_attention(
             query, k_cache, v_cache, num_q, num_kv, head_dim
         )
-        expected = _ref_gqa_decode_attention(
-            query, k_cache, v_cache, num_q, num_kv, head_dim
-        )
+        expected = _ref_gqa_decode_attention(query, k_cache, v_cache, num_q, num_kv, head_dim)
         assert result.shape == (batch, 1, num_q, head_dim)
         np.testing.assert_allclose(result, expected, atol=1e-3)
 
@@ -405,7 +393,7 @@ class TestRMSNormCPUFallback:
         expected = _ref_rms_norm(x, weight, eps)
 
         # Verify the reference implementation itself is mathematically sound
-        mean_sq = np.mean(x ** 2, axis=-1, keepdims=True)
+        mean_sq = np.mean(x**2, axis=-1, keepdims=True)
         manual = x * (1.0 / np.sqrt(mean_sq + eps)) * weight
         np.testing.assert_allclose(expected, manual, atol=1e-5)
 
@@ -435,7 +423,7 @@ class TestRMSNormCPUFallback:
         assert result.shape == (2, 8, 64)
         np.testing.assert_allclose(
             result,
-            x * (1.0 / np.sqrt(np.mean(x ** 2, axis=-1, keepdims=True) + eps)) * weight,
+            x * (1.0 / np.sqrt(np.mean(x**2, axis=-1, keepdims=True) + eps)) * weight,
             atol=1e-5,
         )
 
@@ -526,9 +514,7 @@ class TestGQADecodeAttentionCPUFallback:
         k_cache = np.random.randn(batch, cache_len, num_kv, head_dim).astype(np.float32) * 0.1
         v_cache = np.random.randn(batch, cache_len, num_kv, head_dim).astype(np.float32) * 0.1
 
-        result = _ref_gqa_decode_attention(
-            query, k_cache, v_cache, num_q, num_kv, head_dim
-        )
+        result = _ref_gqa_decode_attention(query, k_cache, v_cache, num_q, num_kv, head_dim)
         assert result.shape == (batch, 1, num_q, head_dim)
 
         # Verify softmax: output should be a weighted combination of values,
@@ -543,9 +529,7 @@ class TestGQADecodeAttentionCPUFallback:
         k_cache = np.random.randn(batch, cache_len, num_kv, head_dim).astype(np.float32) * 0.1
         v_cache = np.random.randn(batch, cache_len, num_kv, head_dim).astype(np.float32) * 0.1
 
-        result = _ref_gqa_decode_attention(
-            query, k_cache, v_cache, num_q, num_kv, head_dim
-        )
+        result = _ref_gqa_decode_attention(query, k_cache, v_cache, num_q, num_kv, head_dim)
         assert result.shape == (batch, 1, num_q, head_dim)
 
         # Each batch item should produce independent output
@@ -568,9 +552,7 @@ class TestGQADecodeAttentionCPUFallback:
         k_cache = np.random.randn(batch, cache_len, num_kv, head_dim).astype(np.float32) * 0.1
         v_cache = np.random.randn(batch, cache_len, num_kv, head_dim).astype(np.float32) * 0.1
 
-        result = _ref_gqa_decode_attention(
-            query, k_cache, v_cache, num_q, num_kv, head_dim
-        )
+        result = _ref_gqa_decode_attention(query, k_cache, v_cache, num_q, num_kv, head_dim)
 
         # Query heads 0,1,2 should all use KV head 0
         # Query heads 3,4,5 should all use KV head 1
@@ -584,9 +566,7 @@ class TestGQADecodeAttentionCPUFallback:
             exp_scores = np.exp(scores - scores_max)
             weights = exp_scores / np.sum(exp_scores)
             expected_head = np.einsum("s,sd->d", weights, v_cache[0, :cache_len, kv_head])
-            np.testing.assert_allclose(
-                result[0, 0, qh], expected_head, atol=1e-5
-            )
+            np.testing.assert_allclose(result[0, 0, qh], expected_head, atol=1e-5)
 
     def test_gqa_decode_cpu_different_cache_lengths(self):
         """Test GQA decode CPU fallback with various cache lengths"""
@@ -596,8 +576,6 @@ class TestGQADecodeAttentionCPUFallback:
             query = np.random.randn(batch, 1, num_q, head_dim).astype(np.float32) * 0.1
             k_cache = np.random.randn(batch, cache_len, num_kv, head_dim).astype(np.float32) * 0.1
             v_cache = np.random.randn(batch, cache_len, num_kv, head_dim).astype(np.float32) * 0.1
-            result = _ref_gqa_decode_attention(
-                query, k_cache, v_cache, num_q, num_kv, head_dim
-            )
+            result = _ref_gqa_decode_attention(query, k_cache, v_cache, num_q, num_kv, head_dim)
             assert result.shape == (batch, 1, num_q, head_dim)
             assert np.all(np.isfinite(result))

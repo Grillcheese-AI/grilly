@@ -706,9 +706,7 @@ class HuggingFaceBridge:
             # Default: try common projection names
             return ["q_proj", "v_proj", "query", "value"]
 
-    def _apply_lora_to_model(
-        self, model: Any, lora_model: LoRAModel, config: LoRAConfig
-    ) -> None:
+    def _apply_lora_to_model(self, model: Any, lora_model: LoRAModel, config: LoRAConfig) -> None:
         """
         Apply LoRA adapters to target modules in the model.
 
@@ -724,7 +722,10 @@ class HuggingFaceBridge:
                 if hasattr(module, "weight") and hasattr(module, "in_features"):
                     # Extract weight as float32 (NumPy does not support BF16 tensors directly).
                     weight_tensor = module.weight.data
-                    if hasattr(self.torch, "bfloat16") and weight_tensor.dtype == self.torch.bfloat16:
+                    if (
+                        hasattr(self.torch, "bfloat16")
+                        and weight_tensor.dtype == self.torch.bfloat16
+                    ):
                         weight_tensor = weight_tensor.to(dtype=self.torch.float32)
                     weight = weight_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
                     in_features = module.in_features
