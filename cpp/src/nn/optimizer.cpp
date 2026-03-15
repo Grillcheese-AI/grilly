@@ -1,8 +1,10 @@
 #include "grilly/nn/optimizer.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
+#include <vector>
 
 namespace grilly {
 namespace nn {
@@ -42,8 +44,17 @@ py::dict Optimizer::state_dict() const {
     py::dict state;
     py::list param_states;
 
-    for (const auto& [idx, pstate] : state_) {
+    std::vector<uintptr_t> keys;
+    keys.reserve(state_.size());
+    for (const auto& [key, _] : state_) {
+        keys.push_back(key);
+    }
+    std::sort(keys.begin(), keys.end());
+
+    for (uintptr_t key : keys) {
+        const auto& pstate = state_.at(key);
         py::dict ps;
+        ps["param_key"] = py::int_(static_cast<unsigned long long>(key));
         ps["step_count"] = pstate.step_count;
         if (pstate.exp_avg.numel() > 0) {
             ps["exp_avg"] = pstate.exp_avg.numpy();
@@ -125,12 +136,12 @@ void Adam::step() {
 
         backend_->beginBatch();
 
-        size_t idx = 0;
         for (auto& group : param_groups_) {
             for (auto* p : group.params) {
-                if (!p->has_grad()) { idx++; continue; }
+                if (!p || !p->has_grad()) { continue; }
 
-                auto& s = state_[idx];
+                uintptr_t key = reinterpret_cast<uintptr_t>(p);
+                auto& s = state_[key];
                 int64_t n = p->numel();
 
                 if (s.exp_avg.numel() == 0) {
@@ -166,12 +177,11 @@ void Adam::step() {
                      s.exp_avg.gpu_handle(), s.exp_avg_sq.gpu_handle()},
                     workgroups, 1, 1,
                     &push, sizeof(push));
-                backend_->barrier();
-                idx++;
             }
         }
 
         backend_->endBatch();
+        backend_->barrier();
 
         // Mark all parameters as GPU-modified
         for (auto& group : param_groups_) {
@@ -185,12 +195,12 @@ void Adam::step() {
     }
 
     // CPU fallback
-    size_t idx = 0;
     for (auto& group : param_groups_) {
         for (auto* p : group.params) {
-            if (!p->has_grad()) { idx++; continue; }
+            if (!p || !p->has_grad()) { continue; }
 
-            auto& s = state_[idx];
+            uintptr_t key = reinterpret_cast<uintptr_t>(p);
+            auto& s = state_[key];
             int64_t n = p->numel();
 
             if (s.exp_avg.numel() == 0) {
@@ -215,7 +225,6 @@ void Adam::step() {
                 float v_hat = v_data[i] / bc2;
                 param_data[i] -= lr_ * m_hat / (std::sqrt(v_hat) + eps_);
             }
-            idx++;
         }
     }
 }
@@ -245,12 +254,90 @@ void AdamW::step() {
     float bc1 = 1.0f - std::pow(beta1_, static_cast<float>(global_step_));
     float bc2 = 1.0f - std::pow(beta2_, static_cast<float>(global_step_));
 
-    size_t idx = 0;
+    // GPU-batched path
+    bool has_gpu = backend_ && backend_->hasShader("adamw-update");
+    if (has_gpu) {
+        struct AdamWPush {
+            uint32_t total_weights;
+            float learning_rate;
+            float beta1;
+            float beta2;
+            float epsilon;
+            float weight_decay;
+            float beta1_t;      // beta1^t (raw power)
+            float beta2_t;      // beta2^t (raw power)
+            uint32_t clear_grad; // 1 = zero gradients after update
+        };
+
+        float beta1_t = std::pow(beta1_, static_cast<float>(global_step_));
+        float beta2_t = std::pow(beta2_, static_cast<float>(global_step_));
+
+        backend_->beginBatch();
+
+        for (auto& group : param_groups_) {
+            for (auto* p : group.params) {
+                if (!p || !p->has_grad()) { continue; }
+
+                uintptr_t key = reinterpret_cast<uintptr_t>(p);
+                auto& s = state_[key];
+                int64_t n = p->numel();
+
+                if (s.exp_avg.numel() == 0) {
+                    s.exp_avg = Tensor::zeros(p->shape(), backend_);
+                    s.exp_avg.ensure_gpu();
+                    s.exp_avg_sq = Tensor::zeros(p->shape(), backend_);
+                    s.exp_avg_sq.ensure_gpu();
+                }
+                s.step_count = global_step_;
+
+                uint32_t workgroups = (static_cast<uint32_t>(n) + 255) / 256;
+
+                AdamWPush push{};
+                push.total_weights = static_cast<uint32_t>(n);
+                push.learning_rate = lr_;
+                push.beta1 = beta1_;
+                push.beta2 = beta2_;
+                push.epsilon = eps_;
+                push.weight_decay = weight_decay_;
+                push.beta1_t = beta1_t;
+                push.beta2_t = beta2_t;
+                push.clear_grad = 0;
+
+                if (!p->backend()) p->set_backend(backend_);
+                p->ensure_gpu();
+                if (!p->grad_ref().backend())
+                    p->grad_ref().set_backend(backend_);
+                p->grad_ref().ensure_gpu();
+
+                backend_->dispatch(
+                    "adamw-update",
+                    {p->gpu_handle(), p->grad_ref().gpu_handle(),
+                     s.exp_avg.gpu_handle(), s.exp_avg_sq.gpu_handle()},
+                    workgroups, 1, 1,
+                    &push, sizeof(push));
+            }
+        }
+
+        backend_->endBatch();
+        backend_->barrier();
+
+        for (auto& group : param_groups_) {
+            for (auto* p : group.params) {
+                if (p && p->has_grad()) {
+                    p->mark_gpu_modified();
+                }
+            }
+        }
+        return;
+    }
+
+    // CPU fallback
     for (auto& group : param_groups_) {
         for (auto* p : group.params) {
-            if (!p->has_grad()) { idx++; continue; }
+            if (!p || !p->has_grad()) { continue; }
 
-            auto& s = state_[idx];
+            uintptr_t key = reinterpret_cast<uintptr_t>(p);
+            auto& s = state_[key];
             int64_t n = p->numel();
 
             if (s.exp_avg.numel() == 0) {
@@ -275,7 +362,6 @@ void AdamW::step() {
                 float v_hat = v_data[i] / bc2;
                 param_data[i] -= lr_ * m_hat / (std::sqrt(v_hat) + eps_);
             }
-            idx++;
         }
     }
 }
@@ -298,12 +384,12 @@ SGD::SGD(std::vector<Parameter*> params, float lr, float momentum,
 void SGD::step() {
     refresh_params();
 
-    size_t idx = 0;
     for (auto& group : param_groups_) {
         for (auto* p : group.params) {
-            if (!p->has_grad()) { idx++; continue; }
+            if (!p || !p->has_grad()) { continue; }
 
-            auto& s = state_[idx];
+            uintptr_t key = reinterpret_cast<uintptr_t>(p);
+            auto& s = state_[key];
             int64_t n = p->numel();
 
             float* param_data = p->mutable_data();
@@ -336,7 +422,6 @@ void SGD::step() {
                     param_data[i] -= lr_ * g;
                 }
             }
-            idx++;
         }
     }
 }

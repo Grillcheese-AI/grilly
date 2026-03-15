@@ -11,10 +11,12 @@ Classes:
 """
 
 from .ops import BinaryOps, HolographicOps
+from .block_ops import BlockCodeOps
 from .resonator import ResonatorNetwork
 
 __all__ = [
     "BinaryOps",
     "HolographicOps",
+    "BlockCodeOps",
     "ResonatorNetwork",
 ]

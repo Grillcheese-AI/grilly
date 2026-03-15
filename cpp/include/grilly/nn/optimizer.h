@@ -61,7 +61,7 @@ protected:
         Tensor max_exp_avg_sq;  // For AMSGrad
         int step_count = 0;
     };
-    std::unordered_map<size_t, ParamState> state_;  // Key = param index
+    std::unordered_map<uintptr_t, ParamState> state_;  // Key = stable param pointer
 
     ComputeBackend* backend_ = nullptr;
 
