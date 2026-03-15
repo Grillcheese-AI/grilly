@@ -10,8 +10,8 @@ Classes:
     ResonatorNetwork: Factorization of composite vectors
 """
 
-from .ops import BinaryOps, HolographicOps
 from .block_ops import BlockCodeOps
+from .ops import BinaryOps, HolographicOps
 from .resonator import ResonatorNetwork
 
 __all__ = [
