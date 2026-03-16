@@ -207,6 +207,7 @@ add_library(grilly_core_lib STATIC
     cpp/src/experimental/fused_attention.cpp
     # ── CubeMind ──
     cpp/src/cubemind/vsa.cpp
+    cpp/src/cubemind/block_ops.cpp
     cpp/src/cubemind/cube.cpp
     cpp/src/cubemind/cache.cpp
     cpp/src/cubemind/text_encoder.cpp

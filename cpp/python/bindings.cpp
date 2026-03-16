@@ -37,6 +37,7 @@
 #include "grilly/experimental/fused_attention.h"
 #include "grilly/cubemind/types.h"
 #include "grilly/cubemind/vsa.h"
+#include "grilly/cubemind/block_ops.h"
 #include "grilly/cubemind/cube.h"
 #include "grilly/cubemind/cache.h"
 #include "grilly/cubemind/text_encoder.h"
@@ -1460,6 +1461,11 @@ PYBIND11_MODULE(grilly_core, m) {
         },
         py::arg("roles"), py::arg("fillers"), py::arg("dim"),
         "Full VSA encode pipeline: BLAKE3 roles + bind + bundle + bitpack");
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CUBEMIND: BLOCK CODE OPS (sparse block codes for NVSA)
+    // ═══════════════════════════════════════════════════════════════════════
+#include "block_ops_bindings.inc"
 
     // ═══════════════════════════════════════════════════════════════════════
     // CUBEMIND: HAMMING SEARCH
