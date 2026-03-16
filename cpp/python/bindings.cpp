@@ -38,6 +38,8 @@
 #include "grilly/cubemind/types.h"
 #include "grilly/cubemind/vsa.h"
 #include "grilly/cubemind/block_ops.h"
+#include "grilly/cubemind/hmm_ops.h"
+#include "grilly/cubemind/tensor_ops.h"
 #include "grilly/cubemind/cube.h"
 #include "grilly/cubemind/cache.h"
 #include "grilly/cubemind/text_encoder.h"
@@ -1466,6 +1468,12 @@ PYBIND11_MODULE(grilly_core, m) {
     // CUBEMIND: BLOCK CODE OPS (sparse block codes for NVSA)
     // ═══════════════════════════════════════════════════════════════════════
 #include "block_ops_bindings.inc"
+
+#include "hmm_ops_bindings.inc"
+
+#include "vsa_explore_bindings.inc"
+
+#include "tensor_ops_bindings.inc"
 
     // ═══════════════════════════════════════════════════════════════════════
     // CUBEMIND: HAMMING SEARCH

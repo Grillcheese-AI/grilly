@@ -208,6 +208,8 @@ add_library(grilly_core_lib STATIC
     # ── CubeMind ──
     cpp/src/cubemind/vsa.cpp
     cpp/src/cubemind/block_ops.cpp
+    cpp/src/cubemind/hmm_ops.cpp
+    cpp/src/cubemind/tensor_ops.cpp
     cpp/src/cubemind/cube.cpp
     cpp/src/cubemind/cache.cpp
     cpp/src/cubemind/text_encoder.cpp
