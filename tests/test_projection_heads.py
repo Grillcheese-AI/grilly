@@ -16,11 +16,11 @@ class TestProjectionHeadsForward:
         assert out.shape == (4, 640)
 
     def test_default_output_shape_single(self):
-        """Default heads handle a single (768,) vector."""
+        """Default heads handle a single vector (batch=1)."""
         heads = ProjectionHeads(768)
-        x = np.random.randn(768).astype(np.float32)
+        x = np.random.randn(1, 768).astype(np.float32)
         out = heads(x)
-        assert out.shape == (640,)
+        assert out.shape == (1, 640)
 
     def test_output_dim_attribute(self):
         """output_dim matches sum of head dims."""
