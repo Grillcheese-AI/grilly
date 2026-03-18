@@ -1074,3 +1074,55 @@ def tensor_bmm(a, b):
         return _core.tensor_bmm(dev, a, b)
     except Exception:
         return np.einsum("bik,bkj->bij", a, b).astype(np.float32)
+
+
+def q_similarity(queries):
+    """Compute q-similarity (TAPPA metric) for attention queries.
+
+    Measures how similar consecutive queries are in an attention head.
+    High q-similarity → predictable/compressible attention pattern.
+    Low q-similarity → retrieval head, needs full KV cache.
+
+    Args:
+        queries: shape (batch, seq_len, head_dim) or (batch, heads, seq_len, head_dim)
+
+    Returns:
+        q_sim: shape (batch,) or (batch, heads) — mean cosine similarity
+               between consecutive queries
+    """
+    try:
+        dev = _get_device()
+        if dev is not None:
+            return dev.q_similarity(queries)
+    except Exception:
+        pass
+    # numpy fallback
+    q = np.asarray(queries, dtype=np.float32)
+    if q.ndim == 4:
+        # (batch, heads, seq, dim) → compute per head
+        B, H, S, D = q.shape
+        sims = np.zeros((B, H), dtype=np.float32)
+        for b in range(B):
+            for h in range(H):
+                for t in range(S - 1):
+                    a = q[b, h, t]
+                    b_vec = q[b, h, t + 1]
+                    dot = np.dot(a, b_vec)
+                    denom = np.linalg.norm(a) * np.linalg.norm(b_vec)
+                    sims[b, h] += dot / max(denom, 1e-8)
+                sims[b, h] /= max(S - 1, 1)
+        return sims
+    elif q.ndim == 3:
+        B, S, D = q.shape
+        sims = np.zeros(B, dtype=np.float32)
+        for b_idx in range(B):
+            for t in range(S - 1):
+                a = q[b_idx, t]
+                b_vec = q[b_idx, t + 1]
+                dot = np.dot(a, b_vec)
+                denom = np.linalg.norm(a) * np.linalg.norm(b_vec)
+                sims[b_idx] += dot / max(denom, 1e-8)
+            sims[b_idx] /= max(S - 1, 1)
+        return sims
+    else:
+        raise ValueError(f"queries must be 3D or 4D, got {q.ndim}D")
