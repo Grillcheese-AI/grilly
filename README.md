@@ -8,13 +8,45 @@
 
 [![CI](https://github.com/grillcheese-ai/grilly/actions/workflows/ci.yml/badge.svg)](https://github.com/grillcheese-ai/grilly/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/grilly)](https://pypi.org/project/grilly/)
+[![Tests](https://img.shields.io/badge/tests-1820%20passing-brightgreen)](https://github.com/grillcheese-ai/grilly/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-GPU-accelerated neural network framework built on Vulkan compute shaders. Runs on **any GPU** — AMD, NVIDIA, Intel — no CUDA required. Provides a PyTorch-like `nn.Module` API backed by 161 SPIR-V shaders and a native C++ dispatch layer.
+GPU-accelerated neural network framework using Vulkan compute shaders. PyTorch-like API that runs on **any GPU** — AMD, NVIDIA, Intel — no CUDA dependency. 190 GLSL compute shaders compiled to SPIR-V, dispatched through a native C++ layer.
 
-> **Alpha software.** APIs may change between minor versions. We welcome early adopters and feedback.
+> **Alpha software.** APIs may change between minor versions.
 
-**Howto Guides:** [`howtos/`](howtos/) (self-contained HTML tutorials)
+---
+
+## Installation
+
+```bash
+pip install grilly
+```
+
+For GPU acceleration (requires [Vulkan SDK](https://vulkan.lunarg.com/sdk/home) and C++ toolchain):
+
+```bash
+git clone https://github.com/grillcheese-ai/grilly.git
+cd grilly
+pip install -e ".[dev]"
+cmake -B build -DPYBIND11_FINDPYTHON=ON
+cmake --build build --config Release
+cp build/Release/grilly_core.*.pyd .   # Windows
+# cp build/grilly_core.*.so .          # Linux
+```
+
+See [INSTALL.md](INSTALL.md) for full setup, Ubuntu instructions, and troubleshooting.
+
+### Requirements
+
+| | Minimum | Recommended |
+|---|---|---|
+| Python | 3.12+ | 3.12 |
+| GPU VRAM | 8 GB | 12 GB+ |
+| System RAM | 32 GB | 64 GB |
+| Vulkan | 1.1+ | Latest drivers |
+
+Supported GPUs: AMD (RX 5000+), NVIDIA (GTX 1060+), Intel (Arc A-series).
 
 ---
 
@@ -23,24 +55,21 @@ GPU-accelerated neural network framework built on Vulkan compute shaders. Runs o
 ```python
 import numpy as np
 from grilly import nn
+from grilly.optim import AdamW
 
-# Define a model — same patterns as PyTorch
 model = nn.Sequential(
     nn.Linear(784, 256),
     nn.ReLU(),
     nn.Linear(256, 10),
 )
 
-# Forward pass
-x = np.random.randn(32, 784).astype(np.float32)
-logits = model(x)
-print(logits.shape)  # (32, 10)
-
-# Loss + backward + optimizer
+optimizer = AdamW(model.parameters(), lr=1e-3)
 loss_fn = nn.CrossEntropyLoss()
-optimizer = nn.optim.AdamW(model.parameters(), lr=1e-3)
 
+x = np.random.randn(32, 784).astype(np.float32)
 targets = np.random.randint(0, 10, (32,))
+
+logits = model(x)
 loss = loss_fn(logits, targets)
 grad = loss_fn.backward(np.ones_like(loss), logits, targets)
 
@@ -52,145 +81,7 @@ optimizer.step()
 ### Autograd
 
 ```python
-from grilly import nn
-
-x = nn.Variable(nn.randn(32, 128), requires_grad=True)
-layer = nn.Linear(128, 10)
-
-logits = x @ nn.Variable(layer.weight.T) + nn.Variable(layer.bias)
-loss = logits.sum()
-loss.backward()
-
-print(x.grad.shape)  # (32, 128)
-```
-
----
-
-## Installation
-
-### From PyPI
-
-```bash
-pip install grilly
-```
-
-### From Source (with C++ backend)
-
-The C++ backend (`grilly_core`) is **required** — it provides the native Vulkan dispatch layer for all GPU operations.
-
-```bash
-git clone https://github.com/grillcheese-ai/grilly.git
-cd grilly
-pip install -e ".[dev]"
-
-# Build the C++ backend
-cmake -B build -DPYBIND11_FINDPYTHON=ON
-cmake --build build --config Release
-cp build/Release/grilly_core.*.pyd .   # Windows
-# cp build/grilly_core.*.so .          # Linux
-```
-
-Verify:
-
-```bash
-python -c "import grilly_core; print('C++ backend OK')"
-python -c "import grilly; b = grilly.Compute(); print('GPU:', b.device_name)"
-```
-
-See [INSTALL.md](INSTALL.md) for full setup (Vulkan SDK, Ubuntu, CI environments, troubleshooting).
-
-### Requirements
-
-| Requirement | Minimum | Recommended |
-|-------------|---------|-------------|
-| Python | 3.12+ | 3.12 |
-| GPU VRAM | 8 GB | 12 GB+ |
-| System RAM | 32 GB | 64 GB |
-| Vulkan | 1.2+ drivers | Latest drivers |
-
-Supported GPUs: **AMD** (RX 5000+), **NVIDIA** (GTX 1060+), **Intel** (Arc A-series).
-
----
-
-## Features
-
-### PyTorch-like nn.Module API
-
-Standard layers with GPU-accelerated forward and backward passes:
-
-| Category | Modules |
-|----------|---------|
-| **Linear** | `Linear`, `Embedding`, `Dropout` |
-| **Convolution** | `Conv1d`, `Conv2d` |
-| **Recurrent** | `LSTM`, `LSTMCell`, `GRU`, `GRUCell` |
-| **Pooling** | `MaxPool2d`, `AvgPool2d`, `AdaptiveMaxPool2d`, `AdaptiveAvgPool2d` |
-| **Normalization** | `LayerNorm`, `RMSNorm`, `BatchNorm1d`, `BatchNorm2d` |
-| **Activations** | `ReLU`, `GELU`, `SiLU`, `SwiGLU`, `GCU`, `RoSwish`, `Softmax`, `Softplus` |
-| **Attention** | `MultiheadAttention`, `FlashAttention2`, `RoPE` |
-| **Loss** | `MSELoss`, `CrossEntropyLoss`, `BCELoss` |
-| **Containers** | `Sequential`, `Residual` |
-
-### Spiking Neural Networks
-
-Full SNN framework with surrogate gradient training:
-
-- **Neuron models**: `IFNode`, `LIFNode`, `ParametricLIFNode`
-- **Surrogate gradients**: `ATan`, `Sigmoid`, `FastSigmoid`
-- **Temporal containers**: `SeqToANNContainer`, `MultiStepContainer`
-- **Normalization**: `BatchNormThroughTime`, `TemporalEffectiveBatchNorm`, `NeuNorm`
-- **Synapses**: `STPSynapse`, `DualTimescaleSynapse`, `SynapseFilter`
-- **Attention**: `SpikingSelfAttention`, `TemporalWiseAttention`, `QKAttention`
-- **ANN-to-SNN conversion**: `Converter`, `VoltageScaler`
-
-### Multimodal Fusion
-
-- `PerceiverIO` — Modality-agnostic input compression
-- `PerceiverResampler` — Flamingo-style visual token resampling
-- `FlamingoFusion` — Cross-attention VLM fusion
-- `CrossModalAttentionFusion` — Bidirectional cross-modal attention
-- `ImageBindFusion` — Joint embedding with contrastive loss
-- `BottleneckFusion` — Multimodal Bottleneck Transformer
-- `VisionLanguageModel` — Complete VLM with visual conditioning
-
-### Transformer Components
-
-- Flash Attention 2 (tiled, O(seq) memory)
-- Rotary Position Embeddings (RoPE)
-- LoRA fine-tuning (`LoRALinear`, `LoRAAttention`, `LoRAModel`)
-- Transformer encoder/decoder layers
-- Fused operations: SwiGLU FFN, RMSNorm+Linear, QKV projection
-
-### Inference Optimizations
-
-- Fused RMSNorm shader (Llama, Gemma)
-- Grouped Query Attention (GQA) decode against KV-cache
-- INT8 GEMM (weight-only, FP32 accumulation)
-- 4-bit block quantization (per-block scale + zero-point)
-
-### Optimizers
-
-`AdamW`, `Adam`, `SGD`, `NLMS`, `NaturalGradient`, `AutoHypergradientAdamW` (OSGM-style auto LR tuning), plus LR schedulers (`StepLR`, `CosineAnnealingLR`, `ReduceLROnPlateau`).
-
-### Functional API
-
-Stateless functions mirroring `torch.nn.functional`:
-
-```python
-import grilly.functional as F
-
-F.linear(x, weight, bias)
-F.relu(x)
-F.softmax(x, dim=-1)
-F.cross_entropy(logits, targets)
-F.flash_attention2(q, k, v)
-```
-
-### Autograd
-
-Full computation graph with automatic differentiation:
-
-```python
-from grilly.nn import Variable, no_grad, tensor
+from grilly.nn import Variable, tensor
 
 x = Variable(tensor([1.0, 2.0, 3.0]), requires_grad=True)
 y = (x * x).sum()
@@ -198,32 +89,89 @@ y.backward()
 print(x.grad)  # [2.0, 4.0, 6.0]
 ```
 
+### Functional API
+
+```python
+import grilly.functional as F
+
+F.linear(x, weight, bias)
+F.relu(x)
+F.softmax(x, dim=-1)
+F.flash_attention2(q, k, v)
+```
+
 ---
 
-## C++ Backend (grilly_core)
+## Architecture
 
-The native C++ extension (`grilly_core`) wraps all Vulkan compute dispatch via pybind11. It provides 16 operation modules:
+```
+Python (VulkanTensor) → C++ Bridge (grilly_core) → Vulkan Compute Shaders
+  nn/ modules            pybind11 bindings           190 SPIR-V shaders
+  functional/ ops        dual-validity GPU/CPU        AMD / NVIDIA / Intel
+  optim/                 zero CPU↔GPU ping-pong       No CUDA needed
+```
 
-| Op | Description |
-|----|-------------|
-| `linear` | Dense matrix multiply (GEMM) |
-| `conv` | 2D convolution (im2col + GEMM) |
-| `activations` | ReLU, GELU, SiLU, Tanh |
-| `layernorm` | Layer normalization |
-| `rmsnorm` | Root mean square normalization |
-| `batchnorm` | Batch normalization (2D) |
-| `attention` | Flash Attention 2 |
-| `attention_ops` | RoPE, KV-cache ops |
-| `embedding` | Token + position embeddings |
-| `pooling` | MaxPool2d, AvgPool2d |
-| `loss` | Cross-entropy, MSE, BCE |
-| `snn` | LIF/IF neuron step kernels |
-| `optimizer` | Adam, AdamW, SGD step kernels |
-| `learning` | STDP, Hebbian, EWC |
-| `kv_cache` | Paged KV-cache management |
-| `swizzle` | Memory layout transforms |
+**Package layout:**
 
-Build instructions: see [INSTALL.md](INSTALL.md#c-backend-grilly_core).
+```
+grilly/
+├── backend/        # Vulkan GPU dispatch (core, compute, pipelines, autograd)
+├── cpp/            # C++ pybind11 extension — grilly_core native ops
+├── nn/             # nn.Module layers, SNN framework, multimodal fusion, autograd
+├── functional/     # Stateless F.* API (mirrors torch.nn.functional)
+├── optim/          # Optimizers and LR schedulers
+├── utils/          # DataLoader, VulkanTensor, HuggingFaceBridge, checkpointing
+├── shaders/        # 190 GLSL compute shaders + compiled SPIR-V
+├── experimental/   # VSA, MoE routing, temporal reasoning, cognitive controller
+└── tests/          # 1,820 tests
+```
+
+---
+
+## What's New in 0.5.0 "GPU-First"
+
+- **C++ Tensor with dual-validity tracking** — data stays GPU-resident between ops; no CPU ping-pong
+- **Flash Attention 3** with subgroup acceleration
+- **HYLAAttention** (softmax-free), **FNetMixing**, **SympFormerBlock**
+- **TAPPA q-similarity** for adaptive KV cache eviction
+- **HDC packed ops** — 32x memory compression + block-code circular convolution
+- **Sanger GHA** for neurogenesis
+- **DisARM gradient estimator**
+- **JIT compilation framework** (`@grilly.jit`)
+- **Automatic Mixed Precision** (`autocast` + `GradScaler`)
+- **ProjectionHeads** for structured embeddings
+- **StreamingPipeline** for batched embed + upload
+- `bindings.cpp` refactored into 11 focused files
+
+---
+
+## Features
+
+### Layers
+
+| Category | Modules |
+|----------|---------|
+| Linear | `Linear`, `Embedding`, `Dropout` |
+| Convolution | `Conv1d`, `Conv2d` |
+| Recurrent | `LSTM`, `LSTMCell`, `GRU`, `GRUCell` |
+| Normalization | `LayerNorm`, `RMSNorm`, `BatchNorm1d`, `BatchNorm2d` |
+| Activations | `ReLU`, `GELU`, `SiLU`, `SwiGLU`, `GCU`, `RoSwish` |
+| Attention | `FlashAttention2/3`, `HYLAAttention`, `MultiheadAttention`, `RoPE` |
+| LoRA | `LoRALinear`, `LoRAAttention`, `LoRAModel` |
+| Pooling | `MaxPool2d`, `AvgPool2d`, `AdaptiveMaxPool2d` |
+| Loss | `MSELoss`, `CrossEntropyLoss`, `BCELoss` |
+| Containers | `Sequential`, `Residual` |
+
+### Spiking Neural Networks
+
+- Neuron models: `IFNode`, `LIFNode`, `ParametricLIFNode`
+- Surrogate gradients: `ATan`, `Sigmoid`, `FastSigmoid`
+- Temporal containers: `SeqToANNContainer`, `MultiStepContainer`
+- ANN-to-SNN conversion: `Converter`, `VoltageScaler`
+
+### Optimizers
+
+`AdamW`, `Adam`, `SGD`, `NLMS`, `NaturalGradient`, `AutoHypergradientAdamW` (OSGM-style auto LR), plus schedulers: `StepLR`, `CosineAnnealingLR`, `ReduceLROnPlateau`.
 
 ---
 
@@ -231,51 +179,18 @@ Build instructions: see [INSTALL.md](INSTALL.md#c-backend-grilly_core).
 
 | Package | Description |
 |---------|-------------|
-| [optimum-grilly](https://github.com/grillcheese-ai/optimum-grilly) | HuggingFace Optimum backend — `from_pretrained` → Vulkan inference (Llama, Mistral, BERT, GPT-2) |
+| [optimum-grilly](https://github.com/grillcheese-ai/optimum-grilly) | HuggingFace Optimum backend — `from_pretrained` → Vulkan inference |
+| [CubeMind](https://github.com/grillcheese-ai/cubemind) | Neuro-vector-symbolic reasoning powered by grilly 0.5.0 |
+
+---
+
+## Testing
 
 ```bash
-pip install grilly optimum-grilly
+uv run pytest tests/ -v                          # all tests (requires Vulkan)
+uv run pytest tests/ -m "not gpu" -v             # CPU-only
+uv run pytest tests/ --cov=. --cov-report=term   # with coverage
 ```
-
----
-
-## Examples
-
-See [`examples/`](examples/) for runnable scripts:
-
-- `hello_grilly.py` — Autograd forward + backward
-- `train_mlp.py` — Full training loop with AdamW and cross-entropy
-- `benchmark_gemm.py` — GPU vs CPU GEMM throughput
-- `classifier.py` — Simple classifier example
-- 13 experimental examples (VSA, MoE, capsules, cognitive control, and more)
-
----
-
-## Architecture
-
-```
-grilly/
-├── backend/        # Vulkan GPU dispatch (core.py, compute.py, pipelines.py, autograd_core.py)
-├── cpp/            # C++ pybind11 extension (grilly_core) — 16 native ops
-├── nn/             # PyTorch-like nn.Module layers, SNN framework, multimodal fusion
-├── functional/     # Stateless F.* API (mirrors torch.nn.functional)
-├── optim/          # Optimizers (AdamW, Adam, SGD, NLMS, NaturalGradient, Hypergradient)
-├── utils/          # DataLoader, Dataset, HuggingFaceBridge, VulkanTensor, checkpointing
-├── shaders/        # 161 GLSL compute shaders
-│   └── spv/        # Compiled SPIR-V bytecode
-├── experimental/   # Unstable: VSA, MoE routing, temporal reasoning, cognitive controller
-├── howtos/         # 8 self-contained HTML tutorials
-├── examples/       # Runnable example scripts
-└── tests/          # Test suite (1000+ tests)
-```
-
-### Design Principles
-
-- **Pure Vulkan** — no CUDA, no vendor lock-in
-- **Hardware-agnostic** — AMD, NVIDIA, Intel on the same codebase
-- **C++ dispatch layer** — pybind11 extension for low-overhead GPU calls
-- **Zero-copy GPU memory** — `VulkanTensor` keeps data GPU-resident between ops
-- **All data is `np.float32`** — numpy arrays in, numpy arrays out
 
 ---
 
@@ -283,44 +198,18 @@ grilly/
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VK_GPU_INDEX` | Select GPU by index (multi-GPU systems) | `0` |
+| `VK_GPU_INDEX` | Select GPU by index | `0` |
 | `GRILLY_DEBUG` | Enable debug logging (`1` = on) | off |
-| `ALLOW_CPU_VULKAN` | Allow Mesa llvmpipe software Vulkan (CI) | off |
-
----
-
-## Testing
-
-```bash
-# All tests (requires Vulkan)
-uv run pytest tests/ -v
-
-# CPU-only (no GPU required)
-uv run pytest tests/ -m "not gpu" -v
-
-# With coverage
-uv run pytest tests/ --cov=. --cov-report=term
-
-# Single test
-pytest tests/test_snn.py -k "test_lif"
-```
-
----
-
-## CI/CD
-
-- **CI** (on push/PR): Lint (ruff, black), test (CPU-only on Mesa llvmpipe), build
-- **CD** (on GitHub Release): Build and publish to PyPI via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC, no API tokens)
+| `ALLOW_CPU_VULKAN` | Allow Mesa llvmpipe software Vulkan | off |
 
 ---
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new features
-4. Run `ruff check .` and `pytest tests/ -v`
-5. Submit a pull request
+1. Fork the repo and create a feature branch
+2. Add tests for new features
+3. Run `ruff check .` and `uv run pytest tests/ -v`
+4. Submit a pull request
 
 ---
 
