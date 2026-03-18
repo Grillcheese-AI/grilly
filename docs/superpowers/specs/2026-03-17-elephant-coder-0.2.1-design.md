@@ -22,6 +22,7 @@ elephant-coder 0.2.1 transforms from a manual toolkit into invisible infrastruct
 9. **Idea validation** — Research-grounded planning with confidence thresholds
 10. **External model validation** — Anti-bias check via OpenRouter, adversarial review from a different model
 11. **Research engine & creative notes** — Paper search, persistent notes, cross-reference sparks for novel ideas
+12. **RSS news feed reader** — Auto-fetch tech/AI/news feeds on session start, follow links to full articles, store as searchable notes
 
 ---
 
@@ -556,6 +557,68 @@ Decision Required:
 
 ---
 
+## Section 9.5: The Reddit Test (Self-Critic)
+
+### Problem
+
+AI-generated code has telltale patterns that experienced developers spot instantly: unnecessary abstractions, over-commented obvious things, enterprise-fizzbuzz patterns, generic names, "technically works but misses the point" solutions. This is "AI slop" — code that a model produces because it pattern-matches training data rather than thinking about the actual problem.
+
+### The Test
+
+Before reporting any task as complete, Claude must ask itself:
+
+> "Am I confident enough about this code that I could post it on Reddit without triggering the redditpocalypse / AI-slop insults?"
+
+### Self-Critic Checklist
+
+This runs as an internal check before the external Gemini auditor (Section 10). It's faster and catches the most obvious issues:
+
+```
+REDDIT TEST — Self-Critic Checklist:
+
+1. SLOP DETECTION
+   - [ ] No unnecessary abstractions (does every class/function earn its existence?)
+   - [ ] No over-commenting (no "# increment counter" above counter += 1)
+   - [ ] No enterprise-fizzbuzz (simple problems solved simply?)
+   - [ ] No generic names (no "data", "result", "handler", "manager" without context)
+   - [ ] No cargo-cult patterns (using patterns because "best practice" not because they help?)
+
+2. WOULD A HUMAN WRITE THIS?
+   - [ ] Does it read like a skilled developer wrote it, not a model?
+   - [ ] Is the solution approach what an expert in this domain would choose?
+   - [ ] Are there any "technically correct but nobody would actually do this" patterns?
+   - [ ] Does it handle the real problem or just the surface-level description?
+
+3. QUALITY BAR
+   - [ ] Would I be proud to put my name on this in a PR review?
+   - [ ] If someone saw this code without knowing AI wrote it, would they suspect?
+   - [ ] Does it follow the project's actual patterns, not generic "clean code" dogma?
+
+VERDICT: SHIP IT | NEEDS WORK | AI SLOP - REDO
+```
+
+### Integration
+
+**When it runs:**
+- After every task completion, before reporting to the user
+- The self-critic is a prompt injected via the scope guard system
+- If verdict is "AI SLOP - REDO", Claude must rewrite before proceeding
+- If verdict is "NEEDS WORK", Claude fixes the specific issues
+- Only "SHIP IT" proceeds to the external auditor (Section 10)
+
+**In the external auditor prompt (Gemini 3.1 Flash Lite):**
+The auditor also gets a version of this checklist. One of its review criteria is: "Does this code look like competent human-written code, or does it have AI-generated patterns?"
+
+### Settings
+
+```yaml
+---
+reddit_test: true  # enabled by default — can be disabled for speed
+---
+```
+
+---
+
 ## Section 10: External Model Validation (Anti-Bias Check)
 
 ### Problem
@@ -860,6 +923,84 @@ Claude doesn't wait to be asked — during normal work, if it encounters somethi
 3. **While validating ideas:** Research findings are automatically saved as notes, not thrown away after validation
 
 The notes build up over time into a **personal research library** that makes Claude increasingly creative and well-informed across sessions.
+
+---
+
+## Section 12: RSS News Feed Reader
+
+### Purpose
+
+Claude should start every session aware of current events in tech, AI, and news. This gives contextual awareness — when working on grilly features, Claude knows about recent Vulkan developments, new ML papers, and industry trends without being told.
+
+### Feed List (configurable in settings)
+
+```yaml
+---
+rss_feeds:
+  - https://hackernoon.com/feed
+  - https://globalnews.ca/feed/
+  - https://feedx.net/rss/ap.xml
+  - https://www.theverge.com/rss/index.xml
+  - https://feeds.arstechnica.com/arstechnica/index
+  - https://techcrunch.com/feed/
+  - https://blog.bytebytego.com/feed
+  - https://www.wired.com/feed/tag/ai/latest/rss
+  - https://www.wired.com/feed/category/ideas/latest/rss
+  - https://rss.arxiv.org/rss/math.QA
+  - https://rss.arxiv.org/rss/cs.ai
+  - https://www.reddit.com/r/news/.rss
+  - https://www.reddit.com/r/LocalLLaMA/.rss
+  - https://www.reddit.com/r/singularity/.rss
+rss_max_articles_per_feed: 5
+rss_fetch_full_articles: true
+---
+```
+
+### Flow (SessionStart)
+
+```
+1. Fetch all RSS feeds in parallel (httpx async or concurrent)
+2. For each feed:
+   a. Parse XML → extract title, link, summary, published date
+   b. Deduplicate against already-stored articles (by link URL)
+   c. If summary is truncated or < 200 chars AND rss_fetch_full_articles=true:
+      → Follow the link, fetch the full HTML page
+      → Extract article text (strip HTML tags, scripts, nav)
+      → Store full text instead of summary
+3. Store new articles as research notes in global knowledge:
+   {
+     kind: "news",
+     topic: article title,
+     summary: article text (full or excerpt),
+     source: article URL,
+     tags: [feed_name, auto-detected topics],
+     timestamp: published date
+   }
+4. Generate a brief "Today's Briefing" summary injected into context
+```
+
+### Article Text Extraction
+
+For following links to full articles, use a simple HTML-to-text approach:
+- Fetch page with httpx
+- Strip `<script>`, `<style>`, `<nav>`, `<header>`, `<footer>` tags
+- Extract text from `<article>` or `<main>` if present, else `<body>`
+- Clean up whitespace
+- Truncate to ~2000 chars per article (enough for context, not overwhelming)
+
+No heavy dependencies like BeautifulSoup — just regex-based HTML stripping to keep the plugin light.
+
+### Deduplication
+
+Articles are deduped by URL. The global knowledge store's `notes` table is checked before storing. Only new articles since last session are fetched and stored.
+
+### MCP Tool
+
+`get_news_briefing(topics=None)` — returns today's relevant articles, optionally filtered by topic tags. Called automatically by SessionStart hook but also available on demand.
+
+### Privacy
+
+Feeds are fetched directly — no proxy or third-party service. Only public RSS feeds. URLs are configurable per-project via settings file.
 
 ---
 
