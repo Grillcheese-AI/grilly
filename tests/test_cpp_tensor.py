@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 
 try:
-    from grilly_core import DType, Parameter, Tensor
     import grilly_core
+    from grilly_core import DType, Parameter, Tensor
 
     CPP_AVAILABLE = True
 except ImportError:

@@ -5,7 +5,6 @@ import pytest
 
 from backend.adaptive_kv import classify_heads, compute_head_budgets, eviction_priority
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 

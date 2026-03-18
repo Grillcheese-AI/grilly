@@ -10,9 +10,7 @@ from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pytest
-
 from grilly.utils.streaming_pipeline import StreamingPipeline
-
 
 # --------------------------------------------------------------------------- #
 # Helpers                                                                      #

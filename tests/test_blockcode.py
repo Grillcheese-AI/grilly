@@ -8,7 +8,6 @@ Similarity is the fraction of matching block positions (in [0, 1]).
 
 import numpy as np
 import pytest
-
 from grilly.backend._bridge import blockcode_bind, blockcode_similarity, blockcode_unbind
 
 # Default small config used across most tests

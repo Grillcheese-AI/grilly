@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-
 from grilly.nn.projection_heads import ProjectionHeads
 
 

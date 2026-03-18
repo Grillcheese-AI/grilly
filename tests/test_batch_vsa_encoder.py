@@ -7,10 +7,8 @@ a Vulkan device is available.
 
 import numpy as np
 import pytest
-
 from grilly.experimental.language.batch_encoder import BatchVSAEncoder
 from grilly.experimental.vsa.ops import HolographicOps
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

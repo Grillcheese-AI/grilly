@@ -522,8 +522,6 @@ __all__.extend(
 )
 
 # Multi-head subspace projection embeddings
-from .projection_heads import ProjectionHeads
-
 # LoRA (Low-Rank Adaptation) for efficient fine-tuning
 from .lora import (
     LoRAAttention,
@@ -534,6 +532,7 @@ from .lora import (
     apply_lora_to_linear,
     calculate_lora_params,
 )
+from .projection_heads import ProjectionHeads
 
 __all__.extend(
     [

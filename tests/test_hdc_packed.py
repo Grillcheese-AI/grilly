@@ -10,9 +10,7 @@ All tests use the numpy fallback path (no GPU required).
 
 import numpy as np
 import pytest
-
 from grilly.backend import _bridge
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
