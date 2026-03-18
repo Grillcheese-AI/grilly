@@ -948,3 +948,129 @@ def kv_cache_evict_h2o(kv_cache, attention_scores=None, num_evict=0):
         return True
     except Exception:
         return None
+
+
+# ── Tensor Ops (transpose, cat, where, index_select, bmm) ────────────────
+# These bridge functions call the GPU shaders compiled from:
+#   shaders/tensor-transpose.glsl, tensor-cat.glsl, tensor-where.glsl,
+#   tensor-index-select.glsl, tensor-bmm.glsl
+# If the C++ binding is unavailable they fall back to numpy so callers never
+# need to guard against None — they always get a valid numpy array back.
+
+
+def tensor_transpose(x):
+    """Transpose a 2D matrix on GPU. Falls back to numpy for non-2D or no GPU.
+
+    Args:
+        x: 2-D numpy array of shape (rows, cols).
+
+    Returns:
+        numpy array of shape (cols, rows).
+    """
+    x = _ensure_f32_contiguous(x)
+    if x.ndim != 2:
+        return np.ascontiguousarray(x.T, dtype=np.float32)
+    dev = _get_device()
+    if dev is None:
+        return np.ascontiguousarray(x.T, dtype=np.float32)
+    try:
+        return _core.tensor_transpose(dev, x)
+    except Exception:
+        return np.ascontiguousarray(x.T, dtype=np.float32)
+
+
+def tensor_cat(a, b, axis=-1):
+    """Concatenate two tensors along their last axis on GPU.
+
+    Args:
+        a: numpy array.
+        b: numpy array with same shape except last dim.
+        axis: concatenation axis; only last-axis (-1 / ndim-1) uses the GPU
+              shader — other axes fall through to numpy.
+
+    Returns:
+        numpy array with last dimension equal to a.shape[-1] + b.shape[-1].
+    """
+    a = _ensure_f32_contiguous(a)
+    b = _ensure_f32_contiguous(b)
+    # Normalise axis
+    ndim = a.ndim
+    if axis < 0:
+        axis = ndim + axis
+    if axis != ndim - 1:
+        # Non-last-axis concatenation: numpy fallback
+        return np.concatenate([a, b], axis=axis)
+    dev = _get_device()
+    if dev is None:
+        return np.concatenate([a, b], axis=-1)
+    try:
+        return _core.tensor_cat(dev, a, b)
+    except Exception:
+        return np.concatenate([a, b], axis=-1)
+
+
+def tensor_where(cond, a, b):
+    """Elementwise conditional select: out[i] = cond[i] > 0 ? a[i] : b[i].
+
+    Args:
+        cond: float32 condition array (positive = True).
+        a:    float32 array selected when cond > 0.
+        b:    float32 array selected when cond <= 0.
+
+    Returns:
+        numpy float32 array of same shape.
+    """
+    cond = _ensure_f32_contiguous(cond)
+    a = _ensure_f32_contiguous(a)
+    b = _ensure_f32_contiguous(b)
+    dev = _get_device()
+    if dev is None:
+        return np.where(cond > 0, a, b).astype(np.float32)
+    try:
+        return _core.tensor_where(dev, cond, a, b)
+    except Exception:
+        return np.where(cond > 0, a, b).astype(np.float32)
+
+
+def tensor_index_select(x, indices):
+    """Gather rows by integer indices: out[i] = x[indices[i]].
+
+    Args:
+        x:       2-D float32 array of shape (num_rows, row_size).
+        indices: 1-D integer array of row indices to select.
+
+    Returns:
+        numpy float32 array of shape (len(indices), row_size).
+    """
+    x = _ensure_f32_contiguous(x)
+    indices = np.asarray(indices, dtype=np.uint32)
+    if not indices.flags["C_CONTIGUOUS"]:
+        indices = np.ascontiguousarray(indices)
+    dev = _get_device()
+    if dev is None:
+        return x[indices]
+    try:
+        return _core.tensor_index_select(dev, x, indices)
+    except Exception:
+        return x[indices]
+
+
+def tensor_bmm(a, b):
+    """Batched matrix multiply: out[i] = a[i] @ b[i].
+
+    Args:
+        a: float32 array of shape (batch, M, K).
+        b: float32 array of shape (batch, K, N).
+
+    Returns:
+        numpy float32 array of shape (batch, M, N).
+    """
+    a = _ensure_f32_contiguous(a)
+    b = _ensure_f32_contiguous(b)
+    dev = _get_device()
+    if dev is None:
+        return np.einsum("bik,bkj->bij", a, b).astype(np.float32)
+    try:
+        return _core.tensor_bmm(dev, a, b)
+    except Exception:
+        return np.einsum("bik,bkj->bij", a, b).astype(np.float32)

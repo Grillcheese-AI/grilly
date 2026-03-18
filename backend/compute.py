@@ -20,6 +20,7 @@ from .normalization import VulkanNormalization
 from .pipelines import VulkanPipelines
 from .pooling import VulkanPooling
 from .snn import VulkanSNN
+from .tensor_ops import VulkanTensorOps
 
 
 class VulkanCompute:
@@ -52,6 +53,7 @@ class VulkanCompute:
         self.conv = VulkanConv(self.core, self.pipelines, self.core.shaders)
         self.normalization = VulkanNormalization(self.core, self.pipelines, self.core.shaders)
         self.lora = VulkanLoRA(self.core, self.pipelines, self.core.shaders)
+        self.tensor_ops = VulkanTensorOps(self.core, self.pipelines, self.core.shaders)
 
         # Expose core device/queue for convenience
         self.device = self.core.device
