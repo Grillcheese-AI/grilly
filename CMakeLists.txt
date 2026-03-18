@@ -14,11 +14,18 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 include(FetchContent)
 
-# ── Find Vulkan SDK ──────────────────────────────────────────────────────
-# Vulkan SDK must be installed — no FetchContent fallback (needs drivers).
-find_package(Vulkan REQUIRED)
-message(STATUS "Vulkan found: ${Vulkan_LIBRARIES}")
-message(STATUS "Vulkan include: ${Vulkan_INCLUDE_DIRS}")
+# ── Find Vulkan SDK (optional for pure-Python PyPI builds) ───────────────
+find_package(Vulkan QUIET)
+if(Vulkan_FOUND)
+    message(STATUS "Vulkan found: ${Vulkan_LIBRARIES}")
+    message(STATUS "Vulkan include: ${Vulkan_INCLUDE_DIRS}")
+else()
+    message(WARNING "Vulkan SDK not found — building without GPU support. "
+                    "Install Vulkan SDK from https://vulkan.lunarg.com/sdk/home "
+                    "for GPU acceleration.")
+    # Create a stub target so downstream targets don't break
+    add_library(Vulkan::Vulkan INTERFACE IMPORTED)
+endif()
 
 # ── Boost REMOVED ───────────────────────────────────────────────────────
 # Was only used for boost::container::flat_map in vk_pipeline_cache.h.
