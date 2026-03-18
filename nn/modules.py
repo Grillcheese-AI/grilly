@@ -19,7 +19,7 @@ from .activations import ReLU, GELU, SiLU, GCU, RoSwish, SwiGLU, Softmax, Softpl
 from .dropout import Dropout
 from .embedding import Embedding
 from .containers import Sequential, Residual
-from .attention import MultiheadAttention, FlashAttention2
+from .attention import MultiheadAttention, FlashAttention2, FNetMixing, HYLAAttention, SympFormerBlock
 
 # Also re-export shared helpers so any code doing
 # `from nn.modules import _get_param_array` keeps working.
@@ -54,4 +54,7 @@ __all__ = [
     "Residual",
     "MultiheadAttention",
     "FlashAttention2",
+    "FNetMixing",
+    "HYLAAttention",
+    "SympFormerBlock",
 ]

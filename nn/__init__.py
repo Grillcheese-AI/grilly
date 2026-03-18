@@ -148,6 +148,8 @@ from .modules import (
     Dropout,
     Embedding,
     FlashAttention2,
+    FNetMixing,
+    HYLAAttention,
     LayerNorm,
     Linear,
     MultiheadAttention,
@@ -160,6 +162,7 @@ from .modules import (
     Softmax,
     Softplus,
     SwiGLU,
+    SympFormerBlock,
 )
 
 # Normalization layers
@@ -292,6 +295,9 @@ __all__ = [
     "Softplus",
     "MultiheadAttention",
     "FlashAttention2",
+    "FNetMixing",
+    "HYLAAttention",
+    "SympFormerBlock",
     "Embedding",
     "Sequential",
     "Residual",
