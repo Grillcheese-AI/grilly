@@ -28,6 +28,18 @@ except Exception:
     _USE_CPP_BRIDGE = False
 
 
+def _bridge_to_numpy(result):
+    """Ensure bridge result is numpy array (C++ core may return grilly_core.Tensor)."""
+    if result is None:
+        return None
+    if isinstance(result, np.ndarray):
+        return result
+    # grilly_core.Tensor — convert to numpy via buffer protocol or .numpy()
+    if hasattr(result, "numpy"):
+        return result.numpy()
+    return np.asarray(result, dtype=np.float32)
+
+
 class Linear(Module):
     """
     Linear (fully connected) layer
@@ -200,24 +212,13 @@ class Linear(Module):
             self.register_parameter("bias", self.bias)
 
     def forward(self, x) -> np.ndarray:
-        """Forward pass — always dispatches through GPU backend."""
+        """Forward pass — GPU-first, always dispatches through GPU backend."""
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias) if self.bias is not None else None
 
-        try:
-            from ..utils.tensor_conversion import VulkanTensor
-
-            is_vt = isinstance(x, VulkanTensor)
-        except (ImportError, SystemError):
-            is_vt = False
-
-        if not is_vt:
-            x = np.asarray(x, dtype=np.float32)
-        weight = np.asarray(weight, dtype=np.float32)
-
-        # C++ backend (primary path)
-        if _USE_CPP_BRIDGE and not is_vt:
-            result = _bridge.linear(x, weight, bias)
+        # C++ bridge fast path (handles both numpy and VulkanTensor via __array__)
+        if _USE_CPP_BRIDGE:
+            result = _bridge_to_numpy(_bridge.linear(x, weight, bias))
             if result is not None:
                 return result
 
@@ -443,13 +444,13 @@ class LayerNorm(Module):
         self.register_parameter("bias", self.bias)
 
     def forward(self, x: np.ndarray) -> np.ndarray:
-        """Forward pass using fnn-layernorm.glsl"""
+        """Forward pass using fnn-layernorm.glsl (GPU-first)"""
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias)
 
-        # C++ bridge fast path
-        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
-            result = _bridge.layernorm(x, weight, bias, self.eps)
+        # C++ bridge fast path (handles both numpy and VulkanTensor via __array__)
+        if _USE_CPP_BRIDGE:
+            result = _bridge_to_numpy(_bridge.layernorm(x, weight, bias, self.eps))
             if result is not None:
                 return result
 
@@ -554,12 +555,12 @@ class RMSNorm(Module):
         self.register_parameter("weight", self.weight)
 
     def forward(self, x: np.ndarray) -> np.ndarray:
-        """Forward pass using rms-norm.glsl"""
+        """Forward pass using rms-norm.glsl (GPU-first)"""
         weight = _get_param_array(self.weight)
 
         # Try C++ bridge fast path
         if _USE_CPP_BRIDGE:
-            result = _bridge.rmsnorm(x, weight, self.eps)
+            result = _bridge_to_numpy(_bridge.rmsnorm(x, weight, self.eps))
             if result is not None:
                 return result
 
@@ -684,9 +685,9 @@ class ReLU(Module):
         self.inplace = inplace
 
     def forward(self, x) -> np.ndarray:
-        """Forward pass using activation-relu.glsl"""
-        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
-            result = _bridge.relu(x)
+        """Forward pass using activation-relu.glsl (GPU-first)"""
+        if _USE_CPP_BRIDGE:
+            result = _bridge_to_numpy(_bridge.relu(x))
             if result is not None:
                 return result
         backend = self._get_backend()
@@ -704,7 +705,7 @@ class ReLU(Module):
             grad_input: Gradient w.r.t. input
         """
         # ReLU backward: gradient is 0 where x < 0, else grad_output
-        return grad_output * (x > 0).astype(np.float32)
+        return grad_output * (np.asarray(x) > 0).astype(np.float32)
 
     def __repr__(self):
         """Return a debug representation."""
@@ -719,9 +720,9 @@ class GELU(Module):
     """
 
     def forward(self, x) -> np.ndarray:
-        """Forward pass using activation-gelu.glsl"""
-        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
-            result = _bridge.gelu(x)
+        """Forward pass using activation-gelu.glsl (GPU-first)"""
+        if _USE_CPP_BRIDGE:
+            result = _bridge_to_numpy(_bridge.gelu(x))
             if result is not None:
                 return result
         backend = self._get_backend()
@@ -774,9 +775,9 @@ class SiLU(Module):
     """
 
     def forward(self, x) -> np.ndarray:
-        """Forward pass using activation-silu.glsl"""
-        if _USE_CPP_BRIDGE and isinstance(x, np.ndarray):
-            result = _bridge.silu(x)
+        """Forward pass using activation-silu.glsl (GPU-first)"""
+        if _USE_CPP_BRIDGE:
+            result = _bridge_to_numpy(_bridge.silu(x))
             if result is not None:
                 return result
         backend = self._get_backend()

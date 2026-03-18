@@ -75,28 +75,25 @@ class Module:
 
     def _convert_input(self, x: np.ndarray | Any):
         """
-        Convert input to Vulkan-compatible format.
+        Convert input to Vulkan-compatible format (GPU-first).
 
-        Automatically handles PyTorch tensors, converting them to numpy.
-        When GPU-resident mode is enabled, VulkanTensor inputs are passed
-        through without downloading to CPU, avoiding unnecessary round-trips.
+        VulkanTensor inputs always pass through without downloading to CPU.
+        numpy/PyTorch inputs are converted to VulkanTensor when the C++ backend
+        is available, otherwise to float32 numpy arrays.
         Preserves integer dtypes for index arrays (e.g., token IDs).
 
         Args:
             x: Input (PyTorch tensor, numpy array, VulkanTensor, or other)
 
         Returns:
-            numpy array or VulkanTensor (when GPU-resident mode is active)
+            VulkanTensor or numpy array
         """
-        # Handle VulkanTensor (GPU-resident)
+        # GPU-first: always pass VulkanTensor through without CPU round-trip
         if TENSOR_CONVERSION_AVAILABLE:
             from ..utils.tensor_conversion import VulkanTensor
 
             if isinstance(x, VulkanTensor):
-                # In GPU mode, pass VulkanTensor through to avoid CPU round-trip
-                if self._return_gpu_tensor:
-                    return x
-                return x.numpy()
+                return x  # GPU-first: always pass through
             return ensure_vulkan_compatible(x)
         else:
             # Fallback conversion - preserve integer types for indexing
@@ -235,10 +232,17 @@ class Module:
         state = {}
         for name, param in self._parameters.items():
             # Extract underlying array for state dict
-            if isinstance(param, Parameter):
+            # Handles VulkanTensor (.numpy()), Parameter (np subclass), ParamWrapper (.data)
+            if hasattr(param, "numpy") and not isinstance(param, np.ndarray):
+                state[name] = param.numpy().copy()  # VulkanTensor
+            elif isinstance(param, Parameter):
                 state[name] = np.array(param, copy=True)
+            elif isinstance(param, np.ndarray):
+                state[name] = param.copy()
+            elif hasattr(param, "data") and isinstance(param.data, np.ndarray):
+                state[name] = param.data.copy()  # ParamWrapper
             else:
-                state[name] = param.copy() if isinstance(param, np.ndarray) else param
+                state[name] = param
         for name, module in self._modules.items():
             state[name] = module.state_dict()
         return state
