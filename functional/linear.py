@@ -6,11 +6,15 @@ Uses: fnn-linear.glsl, fnn-linear-backward.glsl
 import numpy as np
 
 
-def _get_backend():
-    """Get compute backend"""
-    from grilly import Compute
-
-    return Compute()
+def _to_numpy(result):
+    """Convert bridge result to numpy if it's a C++ Tensor."""
+    if result is None:
+        return None
+    if isinstance(result, np.ndarray):
+        return result
+    if hasattr(result, "numpy"):
+        return result.numpy()
+    return np.asarray(result)
 
 
 def linear(input: np.ndarray, weight: np.ndarray, bias: np.ndarray | None = None) -> np.ndarray:
@@ -26,5 +30,15 @@ def linear(input: np.ndarray, weight: np.ndarray, bias: np.ndarray | None = None
     Returns:
         Output tensor of shape (..., out_features)
     """
-    backend = _get_backend()
-    return backend.fnn.linear(input, weight, bias)
+    try:
+        from grilly.backend import _bridge
+
+        result = _bridge.linear(input, weight, bias)
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+    # Fallback to legacy Compute() path
+    from grilly import Compute
+
+    return Compute().fnn.linear(input, weight, bias)

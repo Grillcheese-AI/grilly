@@ -6,11 +6,15 @@ Uses: fnn-layernorm.glsl, snn-rmsnorm.glsl
 import numpy as np
 
 
-def _get_backend():
-    """Get compute backend"""
-    from grilly import Compute
-
-    return Compute()
+def _to_numpy(result):
+    """Convert bridge result to numpy if it's a C++ Tensor."""
+    if result is None:
+        return None
+    if isinstance(result, np.ndarray):
+        return result
+    if hasattr(result, "numpy"):
+        return result.numpy()
+    return np.asarray(result)
 
 
 def layer_norm(
@@ -34,11 +38,20 @@ def layer_norm(
     Returns:
         Normalized tensor
     """
-    backend = _get_backend()
-
     if weight is None:
         weight = np.ones(normalized_shape, dtype=np.float32)
     if bias is None:
         bias = np.zeros(normalized_shape, dtype=np.float32)
 
-    return backend.layernorm(input, weight, bias, eps=eps)
+    try:
+        from grilly.backend import _bridge
+
+        result = _bridge.layernorm(input, weight, bias, eps)
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+    # Fallback to legacy Compute() path
+    from grilly import Compute
+
+    return Compute().layernorm(input, weight, bias, eps=eps)
