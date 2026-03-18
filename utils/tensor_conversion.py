@@ -117,9 +117,10 @@ if _CPP_AVAILABLE:
         __slots__ = (
             "_t", "_pooled_buffer", "_gpu_buffer", "_gpu_memory",
             "_core", "_is_device_local", "_gpu_valid", "_cpu_valid", "_uploaded",
+            "grad", "grad_fn", "_is_leaf", "_retain_grad",
         )
 
-        def __init__(self, data=None, lazy: bool = True, *, _cpp_tensor=None):
+        def __init__(self, data=None, lazy: bool = True, *, _cpp_tensor=None, **kwargs):
             self._pooled_buffer = None
             self._gpu_buffer = None
             self._gpu_memory = None
@@ -128,6 +129,10 @@ if _CPP_AVAILABLE:
             self._gpu_valid = False
             self._cpu_valid = True
             self._uploaded = False
+            self.grad = None
+            self.grad_fn = None
+            self._is_leaf = True
+            self._retain_grad = False
 
             if _cpp_tensor is not None:
                 self._t = _cpp_tensor
@@ -168,6 +173,10 @@ if _CPP_AVAILABLE:
             t._is_device_local = False
             t._gpu_valid = t._cpu_valid = False
             t._uploaded = False
+            t.grad = None
+            t.grad_fn = None
+            t._is_leaf = True
+            t._retain_grad = False
             return t
 
         @classmethod
@@ -251,6 +260,35 @@ if _CPP_AVAILABLE:
         @requires_grad.setter
         def requires_grad(self, val):
             self._t.requires_grad = val
+
+        @property
+        def is_leaf(self) -> bool:
+            """True if this tensor was created directly (not by an operation)."""
+            return self._is_leaf
+
+        def detach(self) -> "VulkanTensor":
+            """Return a new VulkanTensor detached from the computation graph."""
+            t = VulkanTensor(self.numpy())
+            t.grad_fn = None
+            t._is_leaf = True
+            return t
+
+        def retain_grad(self):
+            """Request gradient retention for non-leaf tensors."""
+            self._retain_grad = True
+
+        def backward(self, grad_output=None, retain_graph: bool = False):
+            """Run backward pass through the computation graph."""
+            if self.grad_fn is None:
+                return
+            if grad_output is None:
+                if self.numpy().size == 1:
+                    grad_output = np.ones_like(self.numpy())
+                else:
+                    raise RuntimeError(
+                        "backward() requires grad_output for non-scalar tensors"
+                    )
+            self.grad_fn.backward(grad_output, retain_graph=retain_graph)
 
         def numpy(self) -> np.ndarray:
             """Convert to numpy array (downloads from GPU if needed)."""
@@ -510,7 +548,7 @@ else:
         - PyTorch bridge: Seamless conversion to/from PyTorch tensors
         """
 
-        def __init__(self, data: np.ndarray, lazy: bool = True):
+        def __init__(self, data: np.ndarray, lazy: bool = True, **kwargs):
             # Handle integer types - preserve them
             if np.issubdtype(data.dtype, np.integer):
                 self._cpu_data = np.ascontiguousarray(data)
@@ -528,6 +566,13 @@ else:
             self._gpu_valid = False
             self._cpu_valid = True
             self._uploaded = False
+
+            # Autograd fields
+            self.requires_grad = kwargs.get('requires_grad', False)
+            self.grad = None
+            self.grad_fn = None
+            self._is_leaf = True
+            self._retain_grad = False
 
             if not lazy:
                 self._ensure_uploaded()
@@ -666,6 +711,36 @@ else:
         def mark_cpu_modified(self):
             self._cpu_valid = True
             self._gpu_valid = False
+
+        @property
+        def is_leaf(self) -> bool:
+            """True if this tensor was created directly (not by an operation)."""
+            return self._is_leaf
+
+        def detach(self) -> "VulkanTensor":
+            """Return a new VulkanTensor detached from the computation graph."""
+            t = VulkanTensor(self.numpy())
+            t.requires_grad = False
+            t.grad_fn = None
+            t._is_leaf = True
+            return t
+
+        def retain_grad(self):
+            """Request gradient retention for non-leaf tensors."""
+            self._retain_grad = True
+
+        def backward(self, grad_output=None, retain_graph: bool = False):
+            """Run backward pass through the computation graph."""
+            if self.grad_fn is None:
+                return
+            if grad_output is None:
+                if self._cpu_data.size == 1:
+                    grad_output = np.ones_like(self._cpu_data)
+                else:
+                    raise RuntimeError(
+                        "backward() requires grad_output for non-scalar tensors"
+                    )
+            self.grad_fn.backward(grad_output, retain_graph=retain_graph)
 
         @property
         def shape(self):

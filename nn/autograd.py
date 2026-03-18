@@ -17,6 +17,12 @@ from typing import Optional
 
 import numpy as np
 
+try:
+    from ..utils.tensor_conversion import VulkanTensor
+    _HAS_VULKAN_TENSOR = True
+except ImportError:
+    _HAS_VULKAN_TENSOR = False
+
 # Global flag to disable gradient computation
 _grad_enabled = True
 
@@ -178,6 +184,16 @@ class Variable:
     def detach(self) -> "Variable":
         """Return a new Variable detached from the computation graph."""
         return Variable(self.data.copy(), requires_grad=False)
+
+    def to_vulkan_tensor(self):
+        """Convert to VulkanTensor (preserving requires_grad, grad, and grad_fn)."""
+        if _HAS_VULKAN_TENSOR:
+            vt = VulkanTensor(self.data)
+            vt.requires_grad = self.requires_grad
+            vt.grad = self.grad
+            vt.grad_fn = self.grad_fn
+            return vt
+        return self
 
     def zero_grad(self):
         """Clear the gradient."""
