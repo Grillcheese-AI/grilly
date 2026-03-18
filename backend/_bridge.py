@@ -17,6 +17,17 @@ import os
 
 import numpy as np
 
+
+def _maybe_trace(op_name, inputs, output, **kwargs):
+    """Record an op if JIT tracing is active."""
+    try:
+        from .jit import Tracer
+        tracer = Tracer.current()
+        if tracer is not None:
+            tracer.record_op(op_name, inputs, output, **kwargs)
+    except ImportError:
+        pass
+
 try:
     import grilly_core as _core
 
@@ -83,7 +94,9 @@ def linear(x, weight, bias=None):
         x = _ensure_f32_contiguous(x)
         weight = _ensure_f32_contiguous(weight)
         bias = _ensure_f32_contiguous(bias)
-        return _core.linear(dev, x, weight, bias)
+        result = _core.linear(dev, x, weight, bias)
+        _maybe_trace("linear", [x, weight, bias], result)
+        return result
     except Exception:
         return None
 
