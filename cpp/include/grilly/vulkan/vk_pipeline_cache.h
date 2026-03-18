@@ -3,8 +3,6 @@
 
 #include <vulkan/vulkan.h>
 
-#include <boost/container/flat_map.hpp>
-
 #include <cstdint>
 #include <list>
 #include <mutex>
@@ -68,7 +66,7 @@ private:
     VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
 
     std::unordered_map<std::string, std::vector<uint8_t>> spirvCode_;
-    boost::container::flat_map<std::string, PipelineEntry> pipelines_;
+    std::unordered_map<std::string, PipelineEntry> pipelines_;
 
     struct DescCacheKey {
         std::string shaderName;

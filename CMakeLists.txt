@@ -4,11 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 if(POLICY CMP0144)
     cmake_policy(SET CMP0144 NEW)
 endif()
-# CMake 4.x policy: FindBoost — use legacy FindBoost module if available,
-# so find_package(Boost) works with older non-CMake Boost installs
-if(POLICY CMP0167)
-    cmake_policy(SET CMP0167 OLD)
-endif()
+# Boost removed in 0.5.1 — was only used for flat_map
 
 project(grilly_core LANGUAGES C CXX)
 
@@ -24,32 +20,10 @@ find_package(Vulkan REQUIRED)
 message(STATUS "Vulkan found: ${Vulkan_LIBRARIES}")
 message(STATUS "Vulkan include: ${Vulkan_INCLUDE_DIRS}")
 
-# ── Boost (header-only + atomic) ────────────────────────────────────────
-# Uses: container (flat_map), lockfree, pool, atomic
-find_package(Boost 1.74 QUIET COMPONENTS headers atomic container)
-if(Boost_FOUND)
-    message(STATUS "Boost found: ${Boost_VERSION} at ${Boost_INCLUDE_DIRS}")
-    if(NOT TARGET Boost::atomic)
-        message(STATUS "Boost::atomic not found as library — aliasing to headers")
-        add_library(Boost::atomic ALIAS Boost::headers)
-    endif()
-    # container, lockfree, pool are header-only — create targets if missing
-    foreach(_comp container lockfree pool)
-        if(NOT TARGET Boost::${_comp})
-            add_library(Boost::${_comp} ALIAS Boost::headers)
-        endif()
-    endforeach()
-else()
-    message(STATUS "Boost not found — fetching via FetchContent (header-only subset)")
-    FetchContent_Declare(Boost
-        GIT_REPOSITORY https://github.com/boostorg/boost.git
-        GIT_TAG        boost-1.86.0
-        GIT_SHALLOW    ON
-        EXCLUDE_FROM_ALL
-    )
-    set(BOOST_INCLUDE_LIBRARIES headers atomic container lockfree pool)
-    FetchContent_MakeAvailable(Boost)
-endif()
+# ── Boost REMOVED ───────────────────────────────────────────────────────
+# Was only used for boost::container::flat_map in vk_pipeline_cache.h.
+# Replaced with std::unordered_map to eliminate the 100MB Boost download
+# that was the #1 build time bottleneck.
 
 # ── Eigen (header-only) ─────────────────────────────────────────────────
 find_package(Eigen3 3.4 CONFIG QUIET)
@@ -240,11 +214,6 @@ target_include_directories(grilly_core_lib PUBLIC
 
 target_link_libraries(grilly_core_lib PUBLIC
     Vulkan::Vulkan
-    Boost::headers
-    Boost::atomic
-    Boost::container
-    Boost::lockfree
-    Boost::pool
     Eigen3::Eigen
     blake3
     pybind11::pybind11    # NN framework classes use py::array_t, py::dict
