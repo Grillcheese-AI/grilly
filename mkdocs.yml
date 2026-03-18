@@ -1,0 +1,54 @@
+site_name: Grilly
+site_description: GPU-accelerated neural networks via Vulkan compute shaders
+site_url: https://grillcheese-ai.github.io/grilly
+repo_url: https://github.com/Grillcheese-AI/grilly
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: deep orange
+    accent: orange
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
+    - search.suggest
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - GPU Setup: getting-started/gpu-setup.md
+  - Guide:
+    - Architecture: guide/architecture.md
+    - GPU-First Design: guide/gpu-first.md
+    - Neural Network Modules: guide/nn-modules.md
+    - Optimizers: guide/optimizers.md
+    - Autograd: guide/autograd.md
+    - JIT Compilation: guide/jit.md
+    - Mixed Precision: guide/amp.md
+    - Compute Shaders: guide/shaders.md
+  - Advanced:
+    - Flash Attention: advanced/flash-attention.md
+    - HYLA Attention: advanced/hyla.md
+    - SympFormer: advanced/sympformer.md
+    - TAPPA & KV Cache: advanced/tappa.md
+    - HDC & Block Codes: advanced/hdc-ops.md
+    - Spiking Networks: advanced/snn.md
+    - CubeMind: advanced/cubemind.md
+  - API Reference:
+    - nn: api/nn.md
+    - functional: api/functional.md
+    - optim: api/optim.md
+    - backend: api/backend.md
+    - utils: api/utils.md
+  - Contributing: contributing.md
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.tabbed:
+      alternate_style: true

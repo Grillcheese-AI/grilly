@@ -54,6 +54,7 @@ dev = [
     "black>=23.7.0",
     "isort>=5.12.0",
     "mypy>=1.5.0",
+    "mkdocs-material>=9.0",
 ]
 accel = [
     "numba>=0.59.0",  # JIT-compiled CPU fallbacks
@@ -63,9 +64,9 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://grillcheeseai.com"
+Homepage = "https://grilly.com"
 Repository = "https://github.com/grillcheese-ai/grilly"
-Documentation = "https://grillcheeseai.com"
+Documentation = "https://grilly.com/docs"
 
 # Explicit package mapping since pyproject.toml is inside the package directory
 [tool.setuptools]
