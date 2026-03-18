@@ -204,10 +204,11 @@ exclude_lines = [
 fail_under = 40
 
 [tool.pytest.ini_options]
-testpaths = ["grilly/tests"]
+testpaths = ["tests"]
 pythonpath = ["."]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
+importmode = "importlib"
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
