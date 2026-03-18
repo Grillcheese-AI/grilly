@@ -559,3 +559,119 @@ class FlashAttention2(Module):
         """Return a debug representation."""
 
         return f"FlashAttention2(embed_dim={self.embed_dim}, num_heads={self.num_heads}, use_rope={self.use_rope})"
+
+
+class HYLAAttention(Module):
+    """Hypernetwork Linear Attention (HYLA) — softmax-free attention.
+
+    From the HYLA framework: attention scores generate weights for a local
+    value network with nonlinearity (RMSNorm + ReLU). Eliminates the global
+    softmax bottleneck — normalization is per-query, requiring no cross-key
+    synchronization.
+
+    Architecture:
+        scores = Q @ K^T / sqrt(d)           # standard
+        v_weights = scores @ V               # linear combination (no softmax)
+        output = ReLU(RMSNorm(v_weights))    # local nonlinearity
+        output = out_proj(output)
+
+    This is O(L*d) per head when using kernel approximation, vs O(L^2*d) for softmax.
+    For standard computation it's the same FLOPs but avoids the softmax sync barrier,
+    enabling better GPU utilization on Vulkan.
+
+    References:
+        - Vulkan HDC Transformer paper (grillcheese)
+        - HYLA: Hypernetwork Linear Attention (2024)
+
+    Uses: attention-scores.glsl, fnn-linear.glsl, snn-rmsnorm.glsl, activation-relu.glsl
+    """
+
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.0, eps: float = 1e-6):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.dropout = dropout
+        self.eps = eps
+        self.scale = self.head_dim ** -0.5
+
+        if embed_dim % num_heads != 0:
+            raise ValueError(f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})")
+
+        from .linear import Linear
+        from .normalization_modules import RMSNorm
+
+        self.q_proj = Linear(embed_dim, embed_dim)
+        self.k_proj = Linear(embed_dim, embed_dim)
+        self.v_proj = Linear(embed_dim, embed_dim)
+        self.out_proj = Linear(embed_dim, embed_dim)
+        self.value_norm = RMSNorm(self.head_dim, eps=eps)
+
+        self._modules["q_proj"] = self.q_proj
+        self._modules["k_proj"] = self.k_proj
+        self._modules["v_proj"] = self.v_proj
+        self._modules["out_proj"] = self.out_proj
+        self._modules["value_norm"] = self.value_norm
+
+    def forward(
+        self, query: np.ndarray, key: np.ndarray, value: np.ndarray, mask: np.ndarray | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """HYLA forward pass — linear attention with local nonlinearity.
+
+        Args:
+            query: (batch, seq_q, embed_dim)
+            key: (batch, seq_k, embed_dim)
+            value: (batch, seq_k, embed_dim)
+            mask: optional attention mask
+
+        Returns:
+            (output, attention_scores) — scores are pre-nonlinearity for analysis
+        """
+        q = self.q_proj(query)
+        k = self.k_proj(key)
+        v = self.v_proj(value)
+
+        batch_size, seq_q, _ = q.shape
+        _, seq_k, _ = k.shape
+
+        # Reshape to (batch, heads, seq, head_dim)
+        q = q.reshape(batch_size, seq_q, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        k = k.reshape(batch_size, seq_k, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        v = v.reshape(batch_size, seq_k, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+
+        # Attention scores (no softmax)
+        scores = np.einsum("bhqd,bhkd->bhqk", q, k) * self.scale
+
+        # Apply mask if provided
+        if mask is not None:
+            scores = np.where(mask, scores, -1e9)
+
+        # HYLA: linear combination of values (no softmax normalization)
+        # Instead, normalize per-query by the sum of absolute scores
+        score_abs_sum = np.abs(scores).sum(axis=-1, keepdims=True) + self.eps
+        normalized_scores = scores / score_abs_sum
+
+        # Value aggregation
+        v_agg = np.einsum("bhqk,bhkd->bhqd", normalized_scores, v)
+
+        # Local nonlinearity: RMSNorm + ReLU (per head, per position)
+        # RMSNorm operates on last dim (head_dim)
+        rms = np.sqrt(np.mean(v_agg ** 2, axis=-1, keepdims=True) + self.eps)
+        v_normed = v_agg / rms
+
+        # Apply learned RMSNorm weight if available
+        weight = _get_param_array(self.value_norm.weight)
+        if weight is not None:
+            v_normed = v_normed * weight
+
+        # ReLU nonlinearity
+        v_activated = np.maximum(v_normed, 0.0)
+
+        # Reshape back: (batch, heads, seq_q, head_dim) -> (batch, seq_q, embed_dim)
+        output = v_activated.transpose(0, 2, 1, 3).reshape(batch_size, seq_q, self.embed_dim)
+        output = self.out_proj(output)
+
+        return output, scores
+
+    def __repr__(self):
+        return f"HYLAAttention(embed_dim={self.embed_dim}, num_heads={self.num_heads})"
