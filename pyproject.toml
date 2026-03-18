@@ -208,7 +208,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
-importmode = "importlib"
+# importmode = "importlib"  # requires pytest >= 9.x
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
