@@ -135,12 +135,16 @@ if(MSVC)
     )
     target_compile_options(blake3 PRIVATE /wd4244 /wd4100 /wd4127)
 else()
-    target_sources(blake3 PRIVATE
-        "${BLAKE3_DIR}/blake3_sse2.c"
-        "${BLAKE3_DIR}/blake3_sse41.c"
-        "${BLAKE3_DIR}/blake3_avx2.c"
-        "${BLAKE3_DIR}/blake3_avx512.c"
-    )
+    # GCC/Clang need per-file SIMD flags — without them, intrinsics fail
+    set(_blake3_sse2 "${BLAKE3_DIR}/blake3_sse2.c")
+    set(_blake3_sse41 "${BLAKE3_DIR}/blake3_sse41.c")
+    set(_blake3_avx2 "${BLAKE3_DIR}/blake3_avx2.c")
+    set(_blake3_avx512 "${BLAKE3_DIR}/blake3_avx512.c")
+    target_sources(blake3 PRIVATE ${_blake3_sse2} ${_blake3_sse41} ${_blake3_avx2} ${_blake3_avx512})
+    set_source_files_properties(${_blake3_sse2} PROPERTIES COMPILE_FLAGS "-msse2")
+    set_source_files_properties(${_blake3_sse41} PROPERTIES COMPILE_FLAGS "-msse4.1")
+    set_source_files_properties(${_blake3_avx2} PROPERTIES COMPILE_FLAGS "-mavx2")
+    set_source_files_properties(${_blake3_avx512} PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512vl")
 endif()
 message(STATUS "BLAKE3 configured at ${BLAKE3_DIR}")
 
