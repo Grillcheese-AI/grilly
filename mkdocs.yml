@@ -1,6 +1,6 @@
 site_name: Grilly
 site_description: GPU-accelerated neural networks via Vulkan compute shaders
-site_url: https://grilly.com
+site_url: https://grilly.org
 repo_url: https://github.com/Grillcheese-AI/grilly
 
 theme:

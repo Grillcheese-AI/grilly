@@ -64,9 +64,9 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://grilly.com"
+Homepage = "https://grilly.org"
 Repository = "https://github.com/grillcheese-ai/grilly"
-Documentation = "https://grilly.com/docs"
+Documentation = "https://grilly.org/docs"
 
 # Explicit package mapping since pyproject.toml is inside the package directory
 [tool.setuptools]
