@@ -35,6 +35,19 @@ cp build/Release/grilly_core.*.pyd .   # Windows
 # cp build/grilly_core.*.so .          # Linux
 ```
 
+**Pre-built C++ extension (Windows x64 only):**
+
+Download `grilly_core.cp312-win_amd64.pyd` from the [latest release](https://github.com/grillcheese-ai/grilly/releases) and place it in your grilly install directory:
+
+```bash
+# Find where grilly is installed
+python -c "import grilly; print(grilly.__file__)"
+# Copy the .pyd to that directory
+cp grilly_core.cp312-win_amd64.pyd /path/to/grilly/
+```
+
+Without the C++ extension, grilly works fully via pure Python + numpy fallbacks — just without GPU acceleration.
+
 See [INSTALL.md](INSTALL.md) for full setup, Ubuntu instructions, and troubleshooting.
 
 ### Requirements

@@ -1,6 +1,12 @@
 [build-system]
-requires = ["setuptools>=61.0", "setuptools-scm>=8.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.10", "pybind11>=2.13", "setuptools>=61.0", "setuptools-scm>=8.0"]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+build.targets = ["grilly_core"]
+cmake.version = ">=3.20"
+wheel.packages = ["."]
 
 [project]
 name = "grilly"
