@@ -1076,6 +1076,121 @@ def tensor_bmm(a, b):
         return np.einsum("bik,bkj->bij", a, b).astype(np.float32)
 
 
+# ── HDC Packed Binary Hypervector Ops ────────────────────────────────────
+
+
+def _ensure_uint32_contiguous(arr):
+    """Ensure array is uint32 and C-contiguous for the C++ side."""
+    arr = np.asarray(arr)
+    if arr.dtype != np.uint32:
+        arr = arr.astype(np.uint32)
+    if not arr.flags["C_CONTIGUOUS"]:
+        arr = np.ascontiguousarray(arr)
+    return arr
+
+
+def hdc_bind_packed(a, b):
+    """Binding of two packed binary hypervectors: element-wise XOR on uint32 arrays.
+
+    Binary hypervectors are packed 32 bits per uint32 word (32x memory compression
+    over float32). Binding = XOR, which is its own inverse.
+
+    Args:
+        a: uint32 numpy array of shape (num_words,) or (batch, words_per_vec).
+        b: uint32 numpy array, same shape as a.
+
+    Returns:
+        uint32 numpy array, same shape as a.
+    """
+    a = _ensure_uint32_contiguous(a)
+    b = _ensure_uint32_contiguous(b)
+    # numpy fallback (GPU path not yet wired into grilly_core)
+    return np.bitwise_xor(a, b)
+
+
+def hdc_bundle_packed(vectors, words_per_vec):
+    """Bundle N packed binary hypervectors via majority vote.
+
+    For each bit position across N vectors, the output bit is 1 if more than
+    half the input vectors have that bit set. Ties (even N) are resolved toward 0.
+
+    Args:
+        vectors: uint32 numpy array of shape (num_vectors, words_per_vec), laid
+                 out as vec0_word0, vec0_word1, ..., vecN_wordK (row-major).
+        words_per_vec: int, number of uint32 words per hypervector (dim // 32).
+
+    Returns:
+        uint32 numpy array of shape (words_per_vec,).
+    """
+    vectors = _ensure_uint32_contiguous(vectors)
+    num_vectors = vectors.shape[0]
+    threshold = num_vectors / 2.0
+    # Count set-bits across vectors for each bit position using popcount trick:
+    # broadcast each bit mask across all words, then sum
+    result = np.zeros(words_per_vec, dtype=np.uint32)
+    for bit in range(32):
+        mask = np.uint32(1 << bit)
+        counts = np.sum((vectors & mask) != 0, axis=0)  # shape (words_per_vec,)
+        result |= np.where(counts > threshold, mask, np.uint32(0)).astype(np.uint32)
+    return result
+
+
+def hdc_similarity_packed(query, codebook, dim):
+    """Hamming similarity between a packed query and each entry in a packed codebook.
+
+    Hamming similarity = 1 - hamming_distance / dim, where hamming distance is the
+    number of differing bits. Uses popcount (bitCount in GLSL) on XOR'd words for
+    fast packed computation.
+
+    Args:
+        query:    uint32 numpy array of shape (words_per_vec,).
+        codebook: uint32 numpy array of shape (num_entries, words_per_vec).
+        dim:      int, original hypervector dimension (words_per_vec * 32).
+
+    Returns:
+        float32 numpy array of shape (num_entries,) with similarities in [0, 1].
+        Value 1.0 = identical vectors, 0.5 = random/uncorrelated, 0.0 = complement.
+    """
+    query = _ensure_uint32_contiguous(query)
+    codebook = _ensure_uint32_contiguous(codebook)
+    # XOR each codebook entry with the query, then count differing bits via popcount
+    xored = np.bitwise_xor(codebook, query[np.newaxis, :])  # (num_entries, words_per_vec)
+    # popcount per word: unpack bits and sum
+    hamming = np.zeros(xored.shape[0], dtype=np.int32)
+    for shift in range(32):
+        hamming += ((xored >> np.uint32(shift)) & np.uint32(1)).astype(np.int32).sum(axis=1)
+    return (1.0 - hamming.astype(np.float32) / float(dim)).astype(np.float32)
+
+
+def hdc_permute_packed(data, words_per_vec, shift):
+    """Cyclic bit permutation of a packed binary hypervector.
+
+    Shifts all bits by `shift` positions cyclically within the hypervector.
+    Used for positional encoding in HDC — each position in a sequence gets a
+    distinct role-filler binding via permutation.
+
+    Args:
+        data:         uint32 numpy array of shape (words_per_vec,).
+        words_per_vec: int, number of uint32 words (dim // 32).
+        shift:        int, number of bit positions to shift (cyclic, mod dim).
+
+    Returns:
+        uint32 numpy array of shape (words_per_vec,).
+    """
+    data = _ensure_uint32_contiguous(data)
+    total_bits = words_per_vec * 32
+    shift = int(shift) % total_bits
+    if shift == 0:
+        return data.copy()
+
+    # Unpack all bits into a bool array, rotate, repack
+    bits = np.unpackbits(data.view(np.uint8), bitorder="little")  # shape (total_bits,)
+    rotated = np.roll(bits, shift)
+    # repack back to uint32
+    packed_bytes = np.packbits(rotated, bitorder="little")
+    return packed_bytes.view(np.uint32)
+
+
 def q_similarity(queries):
     """Compute q-similarity (TAPPA metric) for attention queries.
 
@@ -1126,3 +1241,132 @@ def q_similarity(queries):
         return sims
     else:
         raise ValueError(f"queries must be 3D or 4D, got {q.ndim}D")
+
+
+# ── Block Code (NVSA sparse block codes) ─────────────────────────────────
+
+
+def blockcode_bind(a, b, num_blocks, block_size):
+    """Per-block circular convolution: bind two sparse block-code vectors.
+
+    For each block, if a has its hot position at index i and b at index j,
+    the result has hot position at (i + j) % block_size.
+
+    Args:
+        a: np.ndarray, shape (batch_size, num_blocks * block_size) or (num_blocks * block_size,)
+        b: np.ndarray, same shape as a
+        num_blocks: int, number of blocks (k)
+        block_size: int, size of each block (l)
+
+    Returns:
+        np.ndarray, same shape as a — bound block-code vector
+    """
+    a_in = np.atleast_2d(np.asarray(a, dtype=np.float32))
+    b_in = np.atleast_2d(np.asarray(b, dtype=np.float32))
+    squeezed = np.ndim(a) == 1
+    a_in = _ensure_f32_contiguous(a_in)
+    b_in = _ensure_f32_contiguous(b_in)
+    batch_size = a_in.shape[0]
+
+    dev = _get_device()
+    if dev is not None:
+        try:
+            result = dev.blockcode_bind(a_in, b_in, num_blocks, block_size)
+            if result is not None:
+                return result.squeeze(0) if squeezed else result
+        except Exception:
+            pass
+
+    # Numpy fallback: per-block circular shift
+    out = np.zeros_like(a_in)
+    for batch_idx in range(batch_size):
+        for block_idx in range(num_blocks):
+            base = block_idx * block_size
+            hot_a = int(np.argmax(a_in[batch_idx, base : base + block_size]))
+            hot_b = int(np.argmax(b_in[batch_idx, base : base + block_size]))
+            hot_out = (hot_a + hot_b) % block_size
+            out[batch_idx, base + hot_out] = 1.0
+    return out.squeeze(0) if squeezed else out
+
+
+def blockcode_unbind(composite, key, num_blocks, block_size):
+    """Inverse binding via circular correlation: recover a vector from composite ⊛ key.
+
+    For each block: hot position = (hot_composite - hot_key + block_size) % block_size.
+
+    Args:
+        composite: np.ndarray, shape (batch_size, num_blocks * block_size) or flat
+        key: np.ndarray, same shape as composite
+        num_blocks: int, number of blocks (k)
+        block_size: int, size of each block (l)
+
+    Returns:
+        np.ndarray, same shape — unbound block-code vector
+    """
+    c_in = np.atleast_2d(np.asarray(composite, dtype=np.float32))
+    k_in = np.atleast_2d(np.asarray(key, dtype=np.float32))
+    squeezed = np.ndim(composite) == 1
+    c_in = _ensure_f32_contiguous(c_in)
+    k_in = _ensure_f32_contiguous(k_in)
+    batch_size = c_in.shape[0]
+
+    dev = _get_device()
+    if dev is not None:
+        try:
+            result = dev.blockcode_unbind(c_in, k_in, num_blocks, block_size)
+            if result is not None:
+                return result.squeeze(0) if squeezed else result
+        except Exception:
+            pass
+
+    # Numpy fallback
+    out = np.zeros_like(c_in)
+    for batch_idx in range(batch_size):
+        for block_idx in range(num_blocks):
+            base = block_idx * block_size
+            hot_c = int(np.argmax(c_in[batch_idx, base : base + block_size]))
+            hot_k = int(np.argmax(k_in[batch_idx, base : base + block_size]))
+            hot_out = (hot_c - hot_k + block_size) % block_size
+            out[batch_idx, base + hot_out] = 1.0
+    return out.squeeze(0) if squeezed else out
+
+
+def blockcode_similarity(query, codebook, num_blocks, block_size):
+    """Block-code similarity: normalised sum of per-block dot products.
+
+    For one-hot blocks the dot product is 1 if hot positions match, 0 otherwise,
+    so the result is the fraction of matching blocks (in [0, 1]).
+
+    Args:
+        query: np.ndarray, shape (num_blocks * block_size,) — single query vector
+        codebook: np.ndarray, shape (num_entries, num_blocks * block_size)
+        num_blocks: int, number of blocks (k)
+        block_size: int, size of each block (l)
+
+    Returns:
+        np.ndarray, shape (num_entries,) — similarity scores in [0, 1]
+    """
+    q = _ensure_f32_contiguous(np.asarray(query, dtype=np.float32).ravel())
+    cb = _ensure_f32_contiguous(np.atleast_2d(np.asarray(codebook, dtype=np.float32)))
+    num_entries = cb.shape[0]
+
+    dev = _get_device()
+    if dev is not None:
+        try:
+            result = dev.blockcode_similarity(q, cb, num_blocks, block_size)
+            if result is not None:
+                return result
+        except Exception:
+            pass
+
+    # Numpy fallback
+    sims = np.zeros(num_entries, dtype=np.float32)
+    for entry_idx in range(num_entries):
+        dot_sum = 0.0
+        for b in range(num_blocks):
+            base = b * block_size
+            dot_sum += float(
+                np.dot(q[base : base + block_size], cb[entry_idx, base : base + block_size])
+            )
+        sims[entry_idx] = dot_sum / num_blocks
+    return sims
