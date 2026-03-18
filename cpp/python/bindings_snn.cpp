@@ -1,12 +1,349 @@
 /// bindings_snn.cpp — SNN standalone op bindings.
 ///
-/// Stub: will be populated with lif_step, snn_node_forward,
-/// snn_node_backward, hebbian_learning, stdp_learning, etc.
-/// from the monolithic bindings.cpp in a later task.
+/// Migrated from monolithic bindings.cpp to use Tensor-based I/O.
 
 #include "bindings_core.h"
+#include "grilly/ops/snn.h"
+#include "grilly/ops/learning.h"
 
 void register_snn_ops(py::module_& m) {
-    // TODO: Move SNN standalone ops from bindings.cpp
-    (void)m;
+    using namespace grilly::nn;
+
+    // ── LIF neuron step ──────────────────────────────────────────────────
+    m.def(
+        "lif_step",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input, py::array_t<float> v_mem,
+           py::array_t<float> t_refrac,
+           float dt, float tau_mem, float v_rest, float v_reset,
+           float v_thresh, float r_mem,
+           float t_refrac_period) -> py::dict {
+            auto inBuf = input.request();
+            uint32_t n = 1;
+            for (int i = 0; i < inBuf.ndim; ++i)
+                n *= static_cast<uint32_t>(inBuf.shape[i]);
+
+            py::array_t<float> vMemOut(v_mem.request().shape);
+            py::array_t<float> refracOut(t_refrac.request().shape);
+            py::array_t<float> spikes(inBuf.shape);
+
+            std::memcpy(vMemOut.request().ptr, v_mem.request().ptr,
+                        n * sizeof(float));
+            std::memcpy(refracOut.request().ptr,
+                        t_refrac.request().ptr, n * sizeof(float));
+
+            grilly::ops::LIFParams p{n, dt, tau_mem, v_rest, v_reset,
+                                     v_thresh, r_mem, t_refrac_period};
+
+            grilly::ops::lifStep(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(vMemOut.request().ptr),
+                static_cast<float*>(refracOut.request().ptr),
+                static_cast<float*>(spikes.request().ptr), p);
+
+            py::dict result;
+            result["spikes"] = Tensor::from_numpy(spikes);
+            result["v_mem"] = Tensor::from_numpy(vMemOut);
+            result["t_refrac"] = Tensor::from_numpy(refracOut);
+            return result;
+        },
+        py::arg("device"), py::arg("input"), py::arg("v_mem"),
+        py::arg("t_refrac"),
+        py::arg("dt") = 1.0f, py::arg("tau_mem") = 20.0f,
+        py::arg("v_rest") = 0.0f, py::arg("v_reset") = 0.0f,
+        py::arg("v_thresh") = 1.0f, py::arg("r_mem") = 1.0f,
+        py::arg("t_refrac_period") = 0.0f,
+        "GPU LIF neuron step");
+
+    // ── SNN node forward (IF/LIF/PLIF) ──────────────────────────────────
+    m.def(
+        "snn_node_forward",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> x_in, py::array_t<float> v_mem,
+           py::array_t<float> tau_param,
+           uint32_t neuron_type, float tau, float v_threshold,
+           float v_reset, uint32_t reset_mode,
+           uint32_t decay_input) -> py::dict {
+            auto xBuf = x_in.request();
+            uint32_t n = 1;
+            for (int i = 0; i < xBuf.ndim; ++i)
+                n *= static_cast<uint32_t>(xBuf.shape[i]);
+
+            py::array_t<float> vMemOut(v_mem.request().shape);
+            py::array_t<float> spikes(xBuf.shape);
+            py::array_t<float> hOut(xBuf.shape);
+
+            std::memcpy(vMemOut.request().ptr, v_mem.request().ptr,
+                        n * sizeof(float));
+
+            grilly::ops::SNNNodeForwardParams p{
+                n, neuron_type, tau, v_threshold, v_reset,
+                reset_mode, decay_input};
+
+            grilly::ops::snnNodeForward(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(xBuf.ptr),
+                static_cast<float*>(vMemOut.request().ptr),
+                static_cast<float*>(spikes.request().ptr),
+                static_cast<float*>(hOut.request().ptr),
+                static_cast<const float*>(
+                    tau_param.request().ptr), p);
+
+            py::dict result;
+            result["spikes"] = Tensor::from_numpy(spikes);
+            result["v_mem"] = Tensor::from_numpy(vMemOut);
+            result["h_out"] = Tensor::from_numpy(hOut);
+            return result;
+        },
+        py::arg("device"), py::arg("x_in"), py::arg("v_mem"),
+        py::arg("tau_param"),
+        py::arg("neuron_type") = 1,
+        py::arg("tau") = 2.0f, py::arg("v_threshold") = 1.0f,
+        py::arg("v_reset") = 0.0f, py::arg("reset_mode") = 0,
+        py::arg("decay_input") = 0,
+        "GPU SNN node forward (IF/LIF/PLIF)");
+
+    // ── SNN node backward (surrogate gradient) ──────────────────────────
+    m.def(
+        "snn_node_backward",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> grad_spike, py::array_t<float> h_cache,
+           float alpha, uint32_t surrogate_type,
+           float v_threshold) -> Tensor {
+            auto gBuf = grad_spike.request();
+            uint32_t n = 1;
+            for (int i = 0; i < gBuf.ndim; ++i)
+                n *= static_cast<uint32_t>(gBuf.shape[i]);
+
+            py::array_t<float> gradX(gBuf.shape);
+
+            grilly::ops::SNNNodeBackwardParams p{
+                n, alpha, surrogate_type, v_threshold};
+
+            grilly::ops::snnNodeBackward(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(gBuf.ptr),
+                static_cast<const float*>(
+                    h_cache.request().ptr),
+                static_cast<float*>(gradX.request().ptr), p);
+
+            return Tensor::from_numpy(gradX);
+        },
+        py::arg("device"), py::arg("grad_spike"), py::arg("h_cache"),
+        py::arg("alpha") = 2.0f, py::arg("surrogate_type") = 0,
+        py::arg("v_threshold") = 1.0f,
+        "GPU SNN node backward (surrogate gradient)");
+
+    // ── Hebbian learning ─────────────────────────────────────────────────
+    m.def(
+        "hebbian_learning",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> pre, py::array_t<float> post,
+           py::array_t<float> weights,
+           uint32_t batch_size, uint32_t time_steps,
+           float learning_rate,
+           float weight_decay) -> Tensor {
+            auto preBuf = pre.request();
+            auto postBuf = post.request();
+            auto wBuf = weights.request();
+
+            uint32_t pre_dim = static_cast<uint32_t>(
+                preBuf.shape[preBuf.ndim - 1]);
+            uint32_t post_dim = static_cast<uint32_t>(
+                postBuf.shape[postBuf.ndim - 1]);
+
+            py::array_t<float> wOut(wBuf.shape);
+            std::memcpy(wOut.request().ptr, wBuf.ptr,
+                        size_t(pre_dim) * post_dim * sizeof(float));
+
+            grilly::ops::HebbianParams p{batch_size, time_steps,
+                                         pre_dim, post_dim,
+                                         learning_rate, weight_decay};
+
+            grilly::ops::hebbianLearning(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(preBuf.ptr),
+                static_cast<const float*>(postBuf.ptr),
+                static_cast<float*>(wOut.request().ptr), p);
+
+            return Tensor::from_numpy(wOut);
+        },
+        py::arg("device"), py::arg("pre"), py::arg("post"),
+        py::arg("weights"),
+        py::arg("batch_size") = 1, py::arg("time_steps") = 1,
+        py::arg("learning_rate") = 0.01f,
+        py::arg("weight_decay") = 0.0f,
+        "GPU Hebbian learning rule");
+
+    // ── STDP learning ────────────────────────────────────────────────────
+    m.def(
+        "stdp_learning",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> pre, py::array_t<float> post,
+           py::array_t<float> weights,
+           py::array_t<float> pre_trace, py::array_t<float> post_trace,
+           uint32_t batch_size, uint32_t time_steps,
+           float lr_pot, float lr_dep,
+           float trace_decay) -> py::dict {
+            auto preBuf = pre.request();
+            auto postBuf = post.request();
+            auto wBuf = weights.request();
+
+            uint32_t pre_dim = static_cast<uint32_t>(
+                preBuf.shape[preBuf.ndim - 1]);
+            uint32_t post_dim = static_cast<uint32_t>(
+                postBuf.shape[postBuf.ndim - 1]);
+
+            py::array_t<float> wOut(wBuf.shape);
+            py::array_t<float> preTraceOut(
+                pre_trace.request().shape);
+            py::array_t<float> postTraceOut(
+                post_trace.request().shape);
+
+            std::memcpy(wOut.request().ptr, wBuf.ptr,
+                        size_t(pre_dim) * post_dim * sizeof(float));
+            std::memcpy(preTraceOut.request().ptr,
+                        pre_trace.request().ptr,
+                        size_t(batch_size) * pre_dim * sizeof(float));
+            std::memcpy(postTraceOut.request().ptr,
+                        post_trace.request().ptr,
+                        size_t(batch_size) * post_dim * sizeof(float));
+
+            grilly::ops::STDPParams p{batch_size, time_steps,
+                                      pre_dim, post_dim,
+                                      lr_pot, lr_dep, trace_decay, 0};
+
+            grilly::ops::stdpLearning(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(preBuf.ptr),
+                static_cast<const float*>(postBuf.ptr),
+                static_cast<float*>(wOut.request().ptr),
+                static_cast<float*>(preTraceOut.request().ptr),
+                static_cast<float*>(postTraceOut.request().ptr), p);
+
+            py::dict result;
+            result["weights"] = Tensor::from_numpy(wOut);
+            result["pre_trace"] = Tensor::from_numpy(preTraceOut);
+            result["post_trace"] = Tensor::from_numpy(postTraceOut);
+            return result;
+        },
+        py::arg("device"), py::arg("pre"), py::arg("post"),
+        py::arg("weights"), py::arg("pre_trace"),
+        py::arg("post_trace"),
+        py::arg("batch_size") = 1, py::arg("time_steps") = 1,
+        py::arg("lr_pot") = 0.01f, py::arg("lr_dep") = 0.01f,
+        py::arg("trace_decay") = 0.95f,
+        "GPU STDP learning (2-pass: traces then weights)");
+
+    // ── Synapse filter ───────────────────────────────────────────────────
+    m.def(
+        "synapse_filter",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> x_in,
+           py::array_t<float> y_state,
+           float decay) -> Tensor {
+            auto xBuf = x_in.request();
+            uint32_t n = 1;
+            for (int i = 0; i < xBuf.ndim; ++i)
+                n *= static_cast<uint32_t>(xBuf.shape[i]);
+
+            py::array_t<float> yOut(y_state.request().shape);
+            std::memcpy(yOut.request().ptr,
+                        y_state.request().ptr,
+                        n * sizeof(float));
+
+            grilly::ops::SynapseFilterParams p{n, decay};
+
+            grilly::ops::synapseFilter(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(xBuf.ptr),
+                static_cast<float*>(yOut.request().ptr), p);
+
+            return Tensor::from_numpy(yOut);
+        },
+        py::arg("device"), py::arg("x_in"), py::arg("y_state"),
+        py::arg("decay") = 0.95f,
+        "GPU exponential synapse filter");
+
+    // ── GIF neuron step ──────────────────────────────────────────────────
+    m.def(
+        "gif_neuron_step",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input, py::array_t<float> v_mem,
+           py::array_t<float> i_adapt,
+           py::array_t<float> g_input, py::array_t<float> g_forget,
+           py::array_t<float> t_refrac,
+           py::array_t<float> t_last_spike,
+           float dt, float current_time,
+           float tau_mem, float v_rest, float v_reset, float v_thresh,
+           float r_mem, float tau_adapt, float delta_adapt,
+           float b_adapt, float tau_gate, float gate_strength,
+           float t_refrac_period) -> py::dict {
+            auto inBuf = input.request();
+            uint32_t n = 1;
+            for (int i = 0; i < inBuf.ndim; ++i)
+                n *= static_cast<uint32_t>(inBuf.shape[i]);
+
+            py::array_t<float> vMemOut(v_mem.request().shape);
+            py::array_t<float> iAdaptOut(i_adapt.request().shape);
+            py::array_t<float> gInputOut(g_input.request().shape);
+            py::array_t<float> gForgetOut(g_forget.request().shape);
+            py::array_t<float> refracOut(t_refrac.request().shape);
+            py::array_t<float> spikes(inBuf.shape);
+            py::array_t<float> tLastOut(
+                t_last_spike.request().shape);
+
+            std::memcpy(vMemOut.request().ptr,
+                        v_mem.request().ptr, n * sizeof(float));
+            std::memcpy(iAdaptOut.request().ptr,
+                        i_adapt.request().ptr, n * sizeof(float));
+            std::memcpy(gInputOut.request().ptr,
+                        g_input.request().ptr, n * sizeof(float));
+            std::memcpy(gForgetOut.request().ptr,
+                        g_forget.request().ptr, n * sizeof(float));
+            std::memcpy(refracOut.request().ptr,
+                        t_refrac.request().ptr, n * sizeof(float));
+            std::memcpy(tLastOut.request().ptr,
+                        t_last_spike.request().ptr,
+                        n * sizeof(float));
+
+            grilly::ops::GIFParams p{
+                n, dt, current_time, tau_mem, v_rest, v_reset,
+                v_thresh, r_mem, tau_adapt, delta_adapt, b_adapt,
+                tau_gate, gate_strength, t_refrac_period};
+
+            grilly::ops::gifNeuronStep(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(inBuf.ptr),
+                static_cast<float*>(vMemOut.request().ptr),
+                static_cast<float*>(iAdaptOut.request().ptr),
+                static_cast<float*>(gInputOut.request().ptr),
+                static_cast<float*>(gForgetOut.request().ptr),
+                static_cast<float*>(refracOut.request().ptr),
+                static_cast<float*>(spikes.request().ptr),
+                static_cast<float*>(tLastOut.request().ptr), p);
+
+            py::dict result;
+            result["spikes"] = Tensor::from_numpy(spikes);
+            result["v_mem"] = Tensor::from_numpy(vMemOut);
+            result["i_adapt"] = Tensor::from_numpy(iAdaptOut);
+            result["g_input"] = Tensor::from_numpy(gInputOut);
+            result["g_forget"] = Tensor::from_numpy(gForgetOut);
+            result["t_refrac"] = Tensor::from_numpy(refracOut);
+            result["t_last_spike"] = Tensor::from_numpy(tLastOut);
+            return result;
+        },
+        py::arg("device"), py::arg("input"), py::arg("v_mem"),
+        py::arg("i_adapt"), py::arg("g_input"), py::arg("g_forget"),
+        py::arg("t_refrac"), py::arg("t_last_spike"),
+        py::arg("dt") = 1.0f, py::arg("current_time") = 0.0f,
+        py::arg("tau_mem") = 20.0f, py::arg("v_rest") = 0.0f,
+        py::arg("v_reset") = 0.0f, py::arg("v_thresh") = 1.0f,
+        py::arg("r_mem") = 1.0f, py::arg("tau_adapt") = 100.0f,
+        py::arg("delta_adapt") = 0.1f, py::arg("b_adapt") = 0.0f,
+        py::arg("tau_gate") = 50.0f,
+        py::arg("gate_strength") = 1.0f,
+        py::arg("t_refrac_period") = 0.0f,
+        "GPU GIF (Generalized Integrate-and-Fire) neuron step");
 }
