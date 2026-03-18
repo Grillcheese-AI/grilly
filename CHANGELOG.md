@@ -6,6 +6,62 @@ This changelog follows the spirit of **Keep a Changelog** and uses the terms **A
 
 ---
 
+## [0.5.0] — 2026-03-18 — "GPU-First"
+
+### Added
+
+#### GPU-First Architecture
+- **C++ Tensor exposed to Python** — `grilly_core.Tensor` with dual-validity GPU/CPU tracking, lazy sync, autograd support (`requires_grad`, `grad`, `grad_fn`, `backward()`)
+- **VulkanTensor wraps C++ Tensor** — data stays on GPU between operations, `.numpy()` for explicit download
+- **bindings.cpp split** — 4,221-line monolith → 11 focused files (core, linear, activations, conv, attention, normalization, optim, loss, snn, pooling, misc)
+- **JIT compilation framework** — `@grilly.jit` decorator, trace-based graph capture with `TracedGraph`, auto-retrace on shape change
+- **Automatic Mixed Precision** — `autocast` context manager + `GradScaler` for float16 compute paths
+
+#### New Attention Architectures
+- **Flash Attention 3** — subgroup-accelerated online softmax (wave64), double-buffered shared memory, register-resident queries
+- **HYLAAttention** — Hypernetwork Linear Attention with local nonlinearity (RMSNorm + ReLU), no global softmax sync
+- **FNetMixing** — parameter-free FFT token mixing, O(d log d)
+- **SympFormerBlock** — Nesterov-accelerated attention with momentum stream and learned step sizes
+- **SelectiveMomentumAttention** — TAPPA + SympFormer: momentum only on unpredictable heads
+
+#### TAPPA Integration (ICLR 2026)
+- **q-similarity shader** — cosine similarity between consecutive queries per attention head
+- **Adaptive KV cache** — `compute_head_budgets()`, `classify_heads()`, `eviction_priority()` blending H2O with q-similarity
+
+#### CubeMind / NVSA Support
+- **Bit-packed HDC ops** — uint32 XOR bind, popcount bundle/similarity, cyclic permute (32x memory compression)
+- **Block-code circular convolution** — per-block one-hot binding with zero magnitude drift after 1000+ chained ops
+- **Sanger GHA shader** — streaming O(d) PCA for neurogenesis whitening at 75% capacity
+- **DisARM gradient estimator** — antithetic sampling through discrete block-code ops (7.5x lower variance vs REINFORCE)
+- **BatchVSAEncoder** — GPU batch text→hypervector encoding via VulkanVSA
+- **BatchEmbedder** — batch ONNX inference for 1000+ sentences/call
+
+#### New GLSL Compute Shaders (16 new, 190 total)
+- `flash-attention3.glsl`, `attention-q-similarity.glsl`
+- `tensor-transpose.glsl`, `tensor-cat.glsl`, `tensor-where.glsl`, `tensor-index-select.glsl`, `tensor-bmm.glsl`
+- `hdc-bind-packed.glsl`, `hdc-bundle-packed.glsl`, `hdc-similarity-packed.glsl`, `hdc-permute-packed.glsl`
+- `blockcode-bind.glsl`, `blockcode-unbind.glsl`, `blockcode-similarity.glsl`
+- `sanger-gha.glsl`
+
+#### Framework Features
+- **ProjectionHeads** — multi-head structured embeddings (semantic 256D + emotion 128D + intent 128D + context 128D = 640D)
+- **StreamingPipeline** — producer-consumer GPU embed + parallel upload to vector stores
+
+### Changed
+- **nn/modules.py split** — 1,939 lines → 8 focused files + re-export shim
+- **nn/ modules GPU-first** — `_convert_input()` always passes VulkanTensor through
+- **functional/ uses C++ bridge** — `_bridge.linear()` etc. with `_to_numpy()` safety
+
+### Deprecated
+- **`Compute()`** — emits `DeprecationWarning`. Use `nn.*` modules or `backend._bridge` functions. Removal planned for 0.6.0.
+
+### Performance
+- 1,820 tests passing (up from 1,528), 0 regressions
+- Eliminated CPU↔GPU ping-pong at C++ binding boundary
+- JIT trace captures op graph for future OpGraph fusion
+
+---
+
 ## [0.4.0] - 2026-02-22
 
 ### Added

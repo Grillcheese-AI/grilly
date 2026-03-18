@@ -5,14 +5,14 @@ Uses: activation-relu.glsl, activation-gelu.glsl, activation-silu.glsl, etc.
 
 import numpy as np
 
-from .module import Module
 from ._helpers import (
     _PARAMETER_AVAILABLE,
-    ParameterClass,
     _USE_CPP_BRIDGE,
+    ParameterClass,
     _bridge,
     _bridge_to_numpy,
 )
+from .module import Module
 
 
 class ReLU(Module):

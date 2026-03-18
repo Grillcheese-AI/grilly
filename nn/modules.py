@@ -13,28 +13,23 @@ All class implementations have been split into focused files:
 Existing code that does `from nn.modules import Linear` (or any other name) still works.
 """
 
-from .linear import Linear
-from .normalization_modules import LayerNorm, RMSNorm
-from .activations import ReLU, GELU, SiLU, GCU, RoSwish, SwiGLU, Softmax, Softplus
-from .dropout import Dropout
-from .embedding import Embedding
-from .containers import Sequential, Residual
-from .attention import MultiheadAttention, FlashAttention2, FNetMixing, HYLAAttention, SympFormerBlock
-
 # Also re-export shared helpers so any code doing
 # `from nn.modules import _get_param_array` keeps working.
-from ._helpers import (
-    _PARAMETER_AVAILABLE,
-    ParameterClass,
-    _USE_CPP_BRIDGE,
-    _bridge,
-    _bridge_to_numpy,
-    _get_param_array,
-    _create_param_wrapper,
+from .activations import GCU, GELU, ReLU, RoSwish, SiLU, Softmax, Softplus, SwiGLU
+from .attention import (
+    FlashAttention2,
+    FNetMixing,
+    HYLAAttention,
+    MultiheadAttention,
+    SympFormerBlock,
 )
 
 # _FUSED_ACTIVATION_MAP was previously a module-level dict in modules.py
-from .containers import _FUSED_ACTIVATION_MAP
+from .containers import Residual, Sequential
+from .dropout import Dropout
+from .embedding import Embedding
+from .linear import Linear
+from .normalization_modules import LayerNorm, RMSNorm
 
 __all__ = [
     "Linear",

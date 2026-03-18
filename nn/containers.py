@@ -4,8 +4,8 @@ Container modules — Sequential and Residual.
 
 import numpy as np
 
-from .module import Module
 from ._helpers import _get_param_array
+from .module import Module
 
 # Fused activation map for Sequential auto-fusion
 _FUSED_ACTIVATION_MAP = {
@@ -63,7 +63,6 @@ class Sequential(Module):
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Forward pass with automatic Linear+Activation fusion."""
         # Import Linear here to avoid circular imports
-        from .linear import Linear
 
         # Clear cached activations
         self._cached_activations = [x]  # Store initial input

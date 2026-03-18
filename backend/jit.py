@@ -24,10 +24,6 @@ Or with explicit tracing:
 
 import functools
 import logging
-import time
-from collections import OrderedDict
-
-import numpy as np
 
 logger = logging.getLogger("grilly.jit")
 

@@ -18,9 +18,7 @@ import logging
 import queue
 import threading
 import time
-from typing import Callable
-
-import numpy as np
+from collections.abc import Callable
 
 logger = logging.getLogger("grilly.streaming_pipeline")
 

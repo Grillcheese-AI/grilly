@@ -12,7 +12,7 @@ Usage:
 import numpy as np
 
 from grilly.experimental.language.encoder import SentenceEncoder, WordEncoder
-from grilly.experimental.vsa.ops import BinaryOps, HolographicOps
+from grilly.experimental.vsa.ops import HolographicOps
 
 
 def _try_init_gpu():

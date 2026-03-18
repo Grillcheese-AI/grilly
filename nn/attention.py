@@ -5,8 +5,8 @@ Uses: attention-scores.glsl, attention-output.glsl, flash-attention2.glsl, etc.
 
 import numpy as np
 
-from .module import Module
 from ._helpers import _get_param_array
+from .module import Module
 
 
 class MultiheadAttention(Module):

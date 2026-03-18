@@ -24,7 +24,6 @@ import numpy as np
 
 from .onnx_loader import GrillyOnnxModel, OnnxModelLoader
 
-
 # ---------------------------------------------------------------------------
 # Simple whitespace tokenizer
 # ---------------------------------------------------------------------------

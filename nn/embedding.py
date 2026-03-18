@@ -7,11 +7,11 @@ import os
 
 import numpy as np
 
-from .module import Module
 from ._helpers import (
-    _get_param_array,
     _create_param_wrapper,
+    _get_param_array,
 )
+from .module import Module
 
 
 class Embedding(Module):

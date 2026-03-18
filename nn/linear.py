@@ -5,16 +5,15 @@ Uses: fnn-linear.glsl, fnn-linear-backward.glsl
 
 import numpy as np
 
-from .module import Module
 from ._helpers import (
     _PARAMETER_AVAILABLE,
-    ParameterClass,
     _USE_CPP_BRIDGE,
+    ParameterClass,
     _bridge,
     _bridge_to_numpy,
     _get_param_array,
-    _create_param_wrapper,
 )
+from .module import Module
 
 
 class Linear(Module):

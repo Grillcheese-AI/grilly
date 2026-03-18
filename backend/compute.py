@@ -2,7 +2,11 @@
 Main VulkanCompute class that composes all operation modules.
 """
 
+import warnings
+
 import numpy as np
+
+_DEPRECATION_WARNED = False
 
 from .affect import VulkanAffect
 from .attention import VulkanAttention
@@ -28,6 +32,17 @@ class VulkanCompute:
 
     def __init__(self, shader_dir: str = None):
         """Initialize Vulkan compute backend"""
+        global _DEPRECATION_WARNED
+        if not _DEPRECATION_WARNED:
+            warnings.warn(
+                "grilly.Compute() is deprecated. Use grilly.backend._bridge functions directly "
+                "or grilly.nn modules (which route through the C++ backend automatically). "
+                "Compute() will be removed in grilly 0.4.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            _DEPRECATION_WARNED = True
+
         # Initialize core
         self.core = VulkanCore(shader_dir)
 

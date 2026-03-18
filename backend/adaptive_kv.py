@@ -33,8 +33,6 @@ def compute_head_budgets(
     else:
         qsim_per_head = qsim  # already 1D
 
-    num_heads = len(qsim_per_head)
-
     # Invert: low q-sim → high weight (needs more budget)
     # Transform from [-1,1] or [0,1] to positive weights
     weights = 1.0 - np.clip(qsim_per_head, 0.0, 1.0)

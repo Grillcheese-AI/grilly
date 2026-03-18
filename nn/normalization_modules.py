@@ -6,14 +6,14 @@ Uses: fnn-layernorm.glsl, rms-norm.glsl
 
 import numpy as np
 
-from .module import Module
 from ._helpers import (
     _USE_CPP_BRIDGE,
     _bridge,
     _bridge_to_numpy,
-    _get_param_array,
     _create_param_wrapper,
+    _get_param_array,
 )
+from .module import Module
 
 
 class LayerNorm(Module):

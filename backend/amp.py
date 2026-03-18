@@ -24,7 +24,7 @@ Usage::
 import threading
 import warnings
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 
@@ -79,7 +79,7 @@ class autocast:
 
     def __init__(self, enabled: bool = True) -> None:
         self._enabled = enabled
-        self._prev_enabled: Optional[bool] = None
+        self._prev_enabled: bool | None = None
 
     def __enter__(self) -> "autocast":
         self._prev_enabled = getattr(_autocast_local, "enabled", False)
@@ -276,7 +276,7 @@ class GradScaler:
                             pass
         return False
 
-    def step(self, optimizer: Any, *args: Any, **kwargs: Any) -> Optional[Any]:
+    def step(self, optimizer: Any, *args: Any, **kwargs: Any) -> Any | None:
         """Unscale gradients and call ``optimizer.step()``.
 
         If inf or NaN values are found in the unscaled gradients the
@@ -301,7 +301,7 @@ class GradScaler:
         self._last_step_was_skipped = False
         return optimizer.step(*args, **kwargs)
 
-    def update(self, new_scale: Optional[float] = None) -> None:
+    def update(self, new_scale: float | None = None) -> None:
         """Update the scale factor after each training iteration.
 
         * If the last step was skipped (inf/NaN detected), multiply the
