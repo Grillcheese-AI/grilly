@@ -561,6 +561,37 @@ class FlashAttention2(Module):
         return f"FlashAttention2(embed_dim={self.embed_dim}, num_heads={self.num_heads}, use_rope={self.use_rope})"
 
 
+class FNetMixing(Module):
+    """FNet mixing layer — replaces attention with parameter-free FFT.
+
+    Applies 2D FFT along (seq, hidden) dimensions and takes the real part.
+    Achieves 92-97% of BERT accuracy at 80% faster training.
+    For block codes, per-block FFT is equivalent to binding — making
+    block-code binding a structured FNet mixer.
+
+    References:
+        - FNet: Mixing Tokens with Fourier Transforms (Lee-Thorp et al., 2022)
+        - HMM-VSA paper (grillcheese)
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x: np.ndarray) -> np.ndarray:
+        """Apply FFT mixing: real(FFT2D(x)) along (seq, hidden) dims.
+
+        Args:
+            x: (batch, seq_len, hidden_dim) or (seq_len, hidden_dim)
+
+        Returns:
+            Mixed tensor of same shape
+        """
+        return np.fft.fft2(x, axes=(-2, -1)).real.astype(np.float32)
+
+    def __repr__(self):
+        return "FNetMixing()"
+
+
 class HYLAAttention(Module):
     """Hypernetwork Linear Attention (HYLA) — softmax-free attention.
 
