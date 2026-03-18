@@ -15,7 +15,6 @@ Existing code that does `from nn.modules import Linear` (or any other name) stil
 
 # Also re-export shared helpers so any code doing
 # `from nn.modules import _get_param_array` keeps working.
-from ._helpers import _bridge_to_numpy, _create_param_wrapper, _get_param_array
 from .activations import GCU, GELU, ReLU, RoSwish, SiLU, Softmax, Softplus, SwiGLU
 from .attention import (
     FlashAttention2,
