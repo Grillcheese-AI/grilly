@@ -706,3 +706,118 @@ class HYLAAttention(Module):
 
     def __repr__(self):
         return f"HYLAAttention(embed_dim={self.embed_dim}, num_heads={self.num_heads})"
+
+
+class SympFormerBlock(Module):
+    """SympFormer accelerated attention block.
+
+    Adds momentum stream (Y) to standard attention layers.
+    Tokens carry both features (X) and velocities (Y).
+    Uses Nesterov-type damping with learned step sizes.
+
+    Per-layer update (forward Euler, simplified):
+        F = attention(X)
+        G = F                          # momentum force (simplified)
+        zeta1 = exp(-alpha * h_Y)      # Nesterov damping
+        Y = zeta1 * Y + h_Y * G       # momentum update
+        X = X + h_X * F               # position update
+        Y = LayerNorm(Y)               # stabilise momentum
+
+    where alpha(t) = c_log / t + c_lin is the log-linear damping schedule.
+
+    References:
+        SympFormer: Hamiltonian-accelerated transformers (arXiv:2603.16535)
+
+    Args:
+        attention: Any attention module (MultiheadAttention, HYLAAttention, etc.)
+        embed_dim: Embedding dimension
+        h_x_init: Initial position step size (default: 0.1)
+        h_y_init: Initial momentum step size (default: 0.1)
+        c_log: Logarithmic damping coefficient (default: 3.0)
+        c_lin: Linear damping coefficient (default: 0.1)
+    """
+
+    def __init__(
+        self,
+        attention: Module,
+        embed_dim: int,
+        h_x_init: float = 0.1,
+        h_y_init: float = 0.1,
+        c_log: float = 3.0,
+        c_lin: float = 0.1,
+    ):
+        super().__init__()
+        self.attention = attention
+        self.embed_dim = embed_dim
+        self.c_log = c_log
+        self.c_lin = c_lin
+
+        # Learnable scalar step sizes stored as 1-element float32 arrays
+        self.h_x = np.array([h_x_init], dtype=np.float32)
+        self.h_y = np.array([h_y_init], dtype=np.float32)
+
+        self._modules["attention"] = attention
+        self._parameters["h_x"] = self.h_x
+        self._parameters["h_y"] = self.h_y
+
+        # Layer normalisation for momentum stream
+        from .normalization_modules import LayerNorm
+
+        self.momentum_norm = LayerNorm(embed_dim)
+        self._modules["momentum_norm"] = self.momentum_norm
+
+    def forward(
+        self,
+        X: np.ndarray,
+        Y: np.ndarray | None = None,
+        depth: int = 1,
+        mask: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """SympFormer forward pass.
+
+        Args:
+            X: Feature tokens (batch, seq_len, embed_dim)
+            Y: Momentum tokens (batch, seq_len, embed_dim). Initialised to zeros if None.
+            depth: Layer depth t >= 1, used for damping schedule alpha(t)
+            mask: Optional attention mask forwarded to the inner attention module
+
+        Returns:
+            (X_new, Y_new) — updated feature and momentum tensors
+        """
+        batch, seq_len, _ = X.shape
+        if Y is None:
+            Y = np.zeros_like(X)
+
+        h_x = float(self.h_x[0])
+        h_y = float(self.h_y[0])
+
+        # Damping schedule: alpha(t) = c_log / t + c_lin
+        t = max(depth, 1)
+        alpha = self.c_log / t + self.c_lin
+
+        # Nesterov damping coefficient
+        zeta1 = float(np.exp(-alpha * h_y))
+
+        # Evaluate attention oracle F = attention(X)
+        attn_out = self.attention(X, X, X, mask)
+        F = attn_out[0] if isinstance(attn_out, tuple) else attn_out
+
+        # Momentum force G = F (simplified — full version uses attention gradient)
+        G = F
+
+        # Momentum update: Y = zeta1 * Y + h_Y * G
+        Y = zeta1 * Y + h_y * G
+
+        # Position update: X = X + h_X * F
+        X = X + h_x * F
+
+        # Normalise momentum stream
+        Y = self.momentum_norm(Y)
+
+        return X, Y
+
+    def __repr__(self):
+        return (
+            f"SympFormerBlock(attention={self.attention!r}, embed_dim={self.embed_dim}, "
+            f"h_x={float(self.h_x[0]):.3f}, h_y={float(self.h_y[0]):.3f})"
+        )
