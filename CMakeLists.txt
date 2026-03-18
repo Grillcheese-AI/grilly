@@ -20,11 +20,18 @@ if(Vulkan_FOUND)
     message(STATUS "Vulkan found: ${Vulkan_LIBRARIES}")
     message(STATUS "Vulkan include: ${Vulkan_INCLUDE_DIRS}")
 else()
-    message(WARNING "Vulkan SDK not found — building without GPU support. "
-                    "Install Vulkan SDK from https://vulkan.lunarg.com/sdk/home "
-                    "for GPU acceleration.")
-    # Create a stub target so downstream targets don't break
+    message(WARNING "Vulkan SDK not found — fetching headers only for compilation. "
+                    "GPU acceleration requires Vulkan runtime at execution time.")
+    # Fetch Vulkan-Headers so VMA and our code can compile without the full SDK
+    FetchContent_Declare(VulkanHeaders
+        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+        GIT_TAG        v1.3.283
+        GIT_SHALLOW    ON
+    )
+    FetchContent_MakeAvailable(VulkanHeaders)
+    # Create a stub Vulkan::Vulkan target (headers only, no library)
     add_library(Vulkan::Vulkan INTERFACE IMPORTED)
+    target_include_directories(Vulkan::Vulkan INTERFACE "${vulkanheaders_SOURCE_DIR}/include")
 endif()
 
 # ── Boost REMOVED ───────────────────────────────────────────────────────
