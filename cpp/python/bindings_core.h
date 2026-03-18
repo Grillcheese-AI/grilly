@@ -1,0 +1,123 @@
+#pragma once
+/// Shared header for split pybind11 binding files.
+///
+/// Provides common includes, the GrillyCoreContext struct, helper functions,
+/// and forward declarations for all register_*_ops() functions that each
+/// split file implements.
+
+#include <pybind11/numpy.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+
+#include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <iostream>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include "grilly/compute_backend.h"
+#include "grilly/buffer_pool.h"
+#include "grilly/command_batch.h"
+#include "grilly/device.h"
+#include "grilly/pipeline_cache.h"
+
+// ── NN framework ──
+#include "grilly/nn/tensor.h"
+#include "grilly/nn/parameter.h"
+#include "grilly/nn/module.h"
+
+namespace py = pybind11;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GrillyCoreContext — holds all Vulkan state so Python sees one object.
+// Internally owns GrillyDevice -> BufferPool -> PipelineCache -> CommandBatch.
+// ═══════════════════════════════════════════════════════════════════════════
+
+struct GrillyCoreContext {
+    grilly::GrillyDevice device;
+    grilly::BufferPool pool;
+    grilly::PipelineCache cache;
+    grilly::CommandBatch batch;
+    bool shadersLoaded = false;
+
+    GrillyCoreContext()
+        : device(), pool(device), cache(device), batch(device) {}
+
+    /// Load all .spv shaders from a directory into the pipeline cache.
+    void loadShaders(const std::string& shaderDir) {
+        namespace fs = std::filesystem;
+        fs::path dir(shaderDir);
+
+        if (!fs::exists(dir))
+            throw std::runtime_error("Shader directory not found: " +
+                                     shaderDir);
+
+        int count = 0;
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            if (entry.path().extension() == ".spv") {
+                std::string name = entry.path().stem().string();
+                cache.loadSPIRVFile(name, entry.path().string());
+                count++;
+            }
+        }
+        shadersLoaded = true;
+
+        // Try to find sibling grilly repo shaders as fallback
+        if (count == 0) {
+            fs::path grillyShaders =
+                fs::path(shaderDir).parent_path().parent_path() / "grilly" /
+                "shaders" / "spv";
+            if (fs::exists(grillyShaders)) {
+                for (const auto& entry :
+                     fs::directory_iterator(grillyShaders)) {
+                    if (entry.path().extension() == ".spv") {
+                        std::string name = entry.path().stem().string();
+                        cache.loadSPIRVFile(name, entry.path().string());
+                        count++;
+                    }
+                }
+            }
+        }
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Helper utilities shared across binding files
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Extract flat batch*seq and last-dim from a numpy buffer_info.
+inline std::pair<uint32_t, uint32_t> extractBatchAndLastDim(
+    const py::buffer_info& buf) {
+    uint32_t lastDim = static_cast<uint32_t>(buf.shape[buf.ndim - 1]);
+    uint32_t batch = 1;
+    for (int i = 0; i < buf.ndim - 1; ++i)
+        batch *= static_cast<uint32_t>(buf.shape[i]);
+    if (buf.ndim == 1) batch = 1;
+    return {batch, lastDim};
+}
+
+/// Convert a numpy array to a grilly::nn::Tensor (CPU copy).
+inline grilly::nn::Tensor to_tensor(py::array_t<float> arr,
+                                    grilly::ComputeBackend* backend = nullptr) {
+    return grilly::nn::Tensor::from_numpy(arr, backend);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Forward declarations for split binding registration functions.
+// Each bindings_*.cpp implements one of these.
+// ═══════════════════════════════════════════════════════════════════════════
+
+void register_linear_ops(py::module_& m);
+void register_activations_ops(py::module_& m);
+void register_conv_ops(py::module_& m);
+void register_attention_ops(py::module_& m);
+void register_normalization_ops(py::module_& m);
+void register_optim_ops(py::module_& m);
+void register_loss_ops(py::module_& m);
+void register_snn_ops(py::module_& m);
+void register_pooling_ops(py::module_& m);
+void register_misc_ops(py::module_& m);

@@ -259,8 +259,22 @@ else()
     target_compile_options(grilly_core_lib PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# ── Python module ────────────────────────────────────────────────────────
-pybind11_add_module(grilly_core cpp/python/bindings.cpp)
+# ── Python module (split bindings for parallel compilation) ──────────────
+# NOTE: bindings.cpp is the legacy monolithic file — kept for reference but
+# not compiled. bindings_core.cpp is the new entry point.
+pybind11_add_module(grilly_core
+    cpp/python/bindings_core.cpp
+    cpp/python/bindings_linear.cpp
+    cpp/python/bindings_activations.cpp
+    cpp/python/bindings_conv.cpp
+    cpp/python/bindings_attention.cpp
+    cpp/python/bindings_normalization.cpp
+    cpp/python/bindings_optim.cpp
+    cpp/python/bindings_loss.cpp
+    cpp/python/bindings_snn.cpp
+    cpp/python/bindings_pooling.cpp
+    cpp/python/bindings_misc.cpp
+)
 target_link_libraries(grilly_core PRIVATE grilly_core_lib)
 
 # Install the extension module into the grilly package

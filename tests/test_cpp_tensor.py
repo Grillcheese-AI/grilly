@@ -8,10 +8,12 @@ import pytest
 
 try:
     from grilly_core import DType, Parameter, Tensor
+    import grilly_core
 
     CPP_AVAILABLE = True
 except ImportError:
     CPP_AVAILABLE = False
+    grilly_core = None
 
 pytestmark = pytest.mark.skipif(not CPP_AVAILABLE, reason="C++ backend not available")
 
@@ -218,6 +220,67 @@ class TestParameter:
         p2 = p.reshape([2, 3])
         assert p2.shape == [2, 3]
         np.testing.assert_array_equal(p2.numpy().ravel(), np.arange(6, dtype=np.float32))
+
+
+class TestSplitBindings:
+    """Test that the split binding registration functions are working."""
+
+    def test_to_tensor_function_exists(self):
+        """to_tensor() helper should be exposed in grilly_core."""
+        assert hasattr(grilly_core, "to_tensor")
+
+    def test_to_tensor_roundtrip(self):
+        """to_tensor should produce a valid Tensor from numpy."""
+        arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        t = grilly_core.to_tensor(arr)
+        assert t.shape == [3]
+        np.testing.assert_array_almost_equal(t.numpy(), arr)
+
+    def test_module_class_exists(self):
+        """Module class should be exposed for Python subclassing."""
+        assert hasattr(grilly_core, "Module")
+
+    def test_create_backend_function_exists(self):
+        """create_backend() should be exposed."""
+        assert hasattr(grilly_core, "create_backend")
+
+    def test_compute_backend_class_exists(self):
+        """ComputeBackend class should be exposed."""
+        assert hasattr(grilly_core, "ComputeBackend")
+
+    def test_device_class_exists(self):
+        """Device (GrillyCoreContext) should be exposed."""
+        assert hasattr(grilly_core, "Device")
+
+    def test_opgraph_class_exists(self):
+        """OpGraph should be exposed."""
+        assert hasattr(grilly_core, "OpGraph")
+
+    def test_snn_classes_exist(self):
+        """SNN node classes should be exposed."""
+        for cls_name in ["IFNode", "LIFNode", "ParametricLIFNode",
+                         "BaseNode", "MemoryModule"]:
+            assert hasattr(grilly_core, cls_name), f"Missing: {cls_name}"
+
+    def test_optimizer_classes_exist(self):
+        """Optimizer classes should be exposed."""
+        for cls_name in ["Optimizer", "Adam", "AdamW", "SGD"]:
+            assert hasattr(grilly_core, cls_name), f"Missing: {cls_name}"
+
+    def test_dataloader_classes_exist(self):
+        """DataLoader and Batch should be exposed."""
+        assert hasattr(grilly_core, "DataLoader")
+        assert hasattr(grilly_core, "Batch")
+
+    def test_surrogate_classes_exist(self):
+        """SurrogateFunction and SurrogateType should be exposed."""
+        assert hasattr(grilly_core, "SurrogateFunction")
+        assert hasattr(grilly_core, "SurrogateType")
+
+    def test_container_classes_exist(self):
+        """Container classes should be exposed."""
+        for cls_name in ["MultiStepContainer", "SeqToANNContainer", "Flatten"]:
+            assert hasattr(grilly_core, cls_name), f"Missing: {cls_name}"
 
 
 if __name__ == "__main__":
