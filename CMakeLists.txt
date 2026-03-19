@@ -264,5 +264,6 @@ pybind11_add_module(grilly_core
 )
 target_link_libraries(grilly_core PRIVATE grilly_core_lib)
 
-# Install the extension module into the grilly package
-install(TARGETS grilly_core DESTINATION grilly)
+# Install the extension module at site-packages root so `import grilly_core` works.
+# The bridge (backend/_bridge.py) and tensor_conversion.py use top-level imports.
+install(TARGETS grilly_core DESTINATION .)
