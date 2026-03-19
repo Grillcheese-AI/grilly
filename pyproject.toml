@@ -10,7 +10,7 @@ wheel.packages = ["."]
 
 [project]
 name = "grilly"
-version = "0.5.3"
+version = "0.5.4"
 description = "GPU-accelerated neural network operations using Vulkan compute shaders"
 readme = "README.md"
 license = {text = "MIT"}
