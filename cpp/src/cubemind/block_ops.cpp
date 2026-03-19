@@ -1,4 +1,5 @@
 #include "grilly/cubemind/block_ops.h"
+#include "grilly/cubemind/tensor_ops.h"
 
 #include <algorithm>
 #include <cmath>
@@ -338,6 +339,127 @@ std::vector<float> blockCodeCosineTopmf(const float* similarities, uint32_t n,
     }
 
     return pmf;
+}
+
+// ── FFT-Accelerated Binding (Circular Convolution) ──────────────────────
+//
+// Convolution Theorem: conv(a, b) = IFFT(FFT(a) ⊙ FFT(b))
+// where ⊙ is complex element-wise multiplication.
+// Complexity: O(k * l * log(l)) vs O(k * l^2) for direct.
+
+std::vector<float> blockCodeBindFFT(const float* a, const float* b,
+                                     uint32_t k, uint32_t l) {
+    if (k == 0 || l == 0)
+        throw std::invalid_argument("blockCodeBindFFT: k and l must be > 0");
+
+    const uint32_t d = k * l;
+    std::vector<float> result(d, 0.0f);
+
+    // Temp buffers for FFT
+    std::vector<float> a_re(l), a_im(l);
+    std::vector<float> b_re(l), b_im(l);
+    std::vector<float> c_re(l), c_im(l);
+
+    for (uint32_t j = 0; j < k; ++j) {
+        const float* aj = a + j * l;
+        const float* bj = b + j * l;
+        float* cj = result.data() + j * l;
+
+        // Forward FFT both blocks
+        fft_1d(aj, a_re.data(), a_im.data(), l);
+        fft_1d(bj, b_re.data(), b_im.data(), l);
+
+        // Complex multiply: C = A * B
+        for (uint32_t i = 0; i < l; ++i) {
+            c_re[i] = a_re[i] * b_re[i] - a_im[i] * b_im[i];
+            c_im[i] = a_re[i] * b_im[i] + a_im[i] * b_re[i];
+        }
+
+        // Inverse FFT → result block
+        ifft_1d(c_re.data(), c_im.data(), cj, l);
+    }
+
+    return result;
+}
+
+// ── FFT-Accelerated Unbinding (Circular Correlation) ────────────────────
+//
+// Correlation Theorem: corr(a, b) = IFFT(FFT(a) ⊙ conj(FFT(b)))
+// where conj flips the imaginary part.
+
+std::vector<float> blockCodeUnbindFFT(const float* composite, const float* known,
+                                       uint32_t k, uint32_t l) {
+    if (k == 0 || l == 0)
+        throw std::invalid_argument("blockCodeUnbindFFT: k and l must be > 0");
+
+    const uint32_t d = k * l;
+    std::vector<float> result(d, 0.0f);
+
+    std::vector<float> c_re(l), c_im(l);
+    std::vector<float> k_re(l), k_im(l);
+    std::vector<float> r_re(l), r_im(l);
+
+    for (uint32_t j = 0; j < k; ++j) {
+        const float* cj = composite + j * l;
+        const float* kj = known + j * l;
+        float* rj = result.data() + j * l;
+
+        // Forward FFT both blocks
+        fft_1d(cj, c_re.data(), c_im.data(), l);
+        fft_1d(kj, k_re.data(), k_im.data(), l);
+
+        // Complex conjugate of known (negate imaginary)
+        for (uint32_t i = 0; i < l; ++i)
+            k_im[i] = -k_im[i];
+
+        // Complex multiply: R = C * conj(K)
+        for (uint32_t i = 0; i < l; ++i) {
+            r_re[i] = c_re[i] * k_re[i] - c_im[i] * k_im[i];
+            r_im[i] = c_re[i] * k_im[i] + c_im[i] * k_re[i];
+        }
+
+        // Inverse FFT → result block
+        ifft_1d(r_re.data(), r_im.data(), rj, l);
+    }
+
+    return result;
+}
+
+// ── Block-Wise Softmax (Perception Bridge) ──────────────────────────────
+//
+// Applies softmax independently to each of k blocks of length l.
+// Each block becomes a valid probability simplex (sums to 1.0).
+// This is the neural-to-VSA bridge for the PerceptionBridge.
+
+std::vector<float> blockSoftmax(const float* logits, uint32_t k, uint32_t l) {
+    if (k == 0 || l == 0)
+        throw std::invalid_argument("blockSoftmax: k and l must be > 0");
+
+    std::vector<float> probs(k * l, 0.0f);
+
+    for (uint32_t j = 0; j < k; ++j) {
+        const float* block_in = logits + j * l;
+        float* block_out = probs.data() + j * l;
+
+        // Max for numerical stability
+        float max_val = block_in[0];
+        for (uint32_t i = 1; i < l; ++i)
+            max_val = std::max(max_val, block_in[i]);
+
+        // exp(x - max) and sum
+        float sum_exp = 0.0f;
+        for (uint32_t i = 0; i < l; ++i) {
+            block_out[i] = std::exp(block_in[i] - max_val);
+            sum_exp += block_out[i];
+        }
+
+        // Normalize
+        float inv_sum = 1.0f / sum_exp;
+        for (uint32_t i = 0; i < l; ++i)
+            block_out[i] *= inv_sum;
+    }
+
+    return probs;
 }
 
 }  // namespace cubemind

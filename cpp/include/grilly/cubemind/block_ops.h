@@ -121,5 +121,49 @@ std::vector<float> blockCodeDiscretize(const float* v, uint32_t k, uint32_t l);
 std::vector<float> blockCodeCosineTopmf(const float* similarities, uint32_t n,
                                          float temperature = 40.0f);
 
+// ── FFT-Accelerated Binding/Unbinding ────────────────────────────────
+//
+// Uses the Convolution Theorem: conv(a, b) = IFFT(FFT(a) * FFT(b))
+// and correlation: corr(a, b) = IFFT(FFT(a) * conj(FFT(b)))
+//
+// Complexity: O(k * l * log(l)) vs O(k * l^2) for direct methods.
+// For k=16, l=128: FFT = ~18K ops vs direct = ~262K ops (14x speedup).
+
+/// FFT-accelerated per-block circular convolution binding.
+/// Uses tensor_ops::fft_1d / ifft_1d for O(k * l * log(l)) complexity.
+std::vector<float> blockCodeBindFFT(const float* a, const float* b,
+                                     uint32_t k, uint32_t l);
+
+/// FFT-accelerated per-block circular correlation unbinding.
+std::vector<float> blockCodeUnbindFFT(const float* composite, const float* known,
+                                       uint32_t k, uint32_t l);
+
+// ── Block-Wise Softmax (Perception Bridge) ──────────────────────────
+//
+// Applies softmax independently to each of the k blocks, constraining
+// the output to k independent probability simplexes. This is the
+// neural-to-VSA bridge: CNN logits → block-wise softmax → valid block-code.
+
+/// Apply softmax independently to each of k blocks of length l.
+/// Output: k blocks where each block sums to 1.0.
+///
+/// @param logits  Raw neural network output (k * l floats)
+/// @param k       Number of blocks
+/// @param l       Block length
+/// @return Probability simplexes (k * l floats, each block sums to 1)
+std::vector<float> blockSoftmax(const float* logits, uint32_t k, uint32_t l);
+
+// ── GPU-Accelerated FFT Bind/Unbind (Vulkan Compute) ────────────────
+//
+// Dispatches the fft-bind.glsl shader: entire FFT + complex multiply +
+// IFFT pipeline runs in GPU shared memory. One workgroup per block.
+// Requires CommandBatch/BufferPool/PipelineCache (same pattern as linear ops).
+
+struct FFTBindParams {
+    uint32_t k;
+    uint32_t l;
+    uint32_t is_unbind;
+};
+
 }  // namespace cubemind
 }  // namespace grilly
