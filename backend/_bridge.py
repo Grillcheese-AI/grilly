@@ -70,11 +70,24 @@ def is_available():
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
+def _extract_cpp_tensor(obj):
+    """Extract the C++ grilly_core.Tensor from a VulkanTensor. Returns None otherwise."""
+    if obj is None:
+        return None
+    if hasattr(obj, '_t') and _NATIVE and isinstance(obj._t, _core.Tensor):
+        return obj._t
+    return None
+
+
 def _ensure_f32_contiguous(arr):
     """Ensure array is float32 and C-contiguous for the C++ side."""
     if arr is None:
         return None
-    arr = np.asarray(arr)
+    # VulkanTensor: access C++ Tensor's numpy() directly (1 copy instead of 2)
+    if hasattr(arr, '_t') and hasattr(arr._t, 'numpy'):
+        arr = arr._t.numpy()
+    else:
+        arr = np.asarray(arr)
     if arr.dtype != np.float32:
         arr = arr.astype(np.float32)
     if not arr.flags["C_CONTIGUOUS"]:
@@ -90,6 +103,19 @@ def linear(x, weight, bias=None):
     dev = _get_device()
     if dev is None:
         return None
+    # Fast path: Tensor I/O (zero numpy copies)
+    if hasattr(_core, 'linear_t'):
+        x_t = _extract_cpp_tensor(x)
+        w_t = _extract_cpp_tensor(weight)
+        if x_t is not None and w_t is not None:
+            try:
+                b_t = _extract_cpp_tensor(bias)
+                result = _core.linear_t(dev, x_t, w_t, b_t)
+                _maybe_trace("linear", [x, weight, bias], result)
+                return result
+            except Exception:
+                pass  # fall through to numpy path
+    # Standard path: numpy arrays
     try:
         x = _ensure_f32_contiguous(x)
         weight = _ensure_f32_contiguous(weight)

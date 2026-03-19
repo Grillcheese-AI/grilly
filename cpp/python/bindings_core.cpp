@@ -161,6 +161,10 @@ PYBIND11_MODULE(grilly_core, m) {
         .def_property_readonly("valid", &Tensor::valid)
         .def_property("requires_grad", &Tensor::requires_grad,
                       &Tensor::set_requires_grad)
+        .def("__array__", [](const Tensor& t, py::object /*dtype*/) {
+            return t.numpy();
+        }, py::arg("dtype") = py::none(),
+           "Support np.asarray(tensor) — downloads from GPU if needed")
         .def("__repr__", [](const Tensor& t) {
             std::string s = "Tensor(shape=[";
             for (size_t i = 0; i < t.shape().size(); i++) {

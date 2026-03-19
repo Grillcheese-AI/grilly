@@ -71,6 +71,71 @@ void register_linear_ops(py::module_& m) {
         py::arg("bias") = py::none(),
         "GPU linear projection: output = x @ W^T + bias");
 
+    // ── GPU linear forward (Tensor I/O — no numpy copies) ──────────────
+    m.def(
+        "linear_t",
+        [](GrillyCoreContext& ctx, Tensor& x, Tensor& weights,
+           std::optional<Tensor> bias) -> Tensor {
+            auto& xShape = x.shape();
+            auto& wShape = weights.shape();
+
+            if (xShape.size() < 1 || xShape.size() > 3)
+                throw std::runtime_error(
+                    "x must be 1D, 2D, or 3D (batch, seq, input_dim)");
+            if (wShape.size() != 2)
+                throw std::runtime_error(
+                    "weights must be 2D (output_dim, input_dim)");
+
+            uint32_t inputDim = static_cast<uint32_t>(xShape.back());
+            uint32_t outputDim = static_cast<uint32_t>(wShape[0]);
+            uint32_t batchSeq = 1;
+            for (size_t i = 0; i + 1 < xShape.size(); i++)
+                batchSeq *= static_cast<uint32_t>(xShape[i]);
+            if (xShape.size() == 1) batchSeq = 1;
+
+            if (static_cast<uint32_t>(wShape[1]) != inputDim)
+                throw std::runtime_error(
+                    "Weight input_dim mismatch: " +
+                    std::to_string(wShape[1]) + " vs " +
+                    std::to_string(inputDim));
+
+            // Direct CPU data access (no numpy allocation/copy)
+            const float* xPtr = x.data();
+            const float* wPtr = weights.data();
+
+            const float* biasPtr = nullptr;
+            uint32_t hasBias = 0;
+            if (bias.has_value()) {
+                biasPtr = bias->data();
+                hasBias = 1;
+            }
+
+            grilly::ops::LinearParams p{batchSeq, inputDim, outputDim, hasBias};
+
+            // Allocate output tensor (CPU-valid)
+            std::vector<int64_t> outShape;
+            for (size_t i = 0; i + 1 < xShape.size(); i++)
+                outShape.push_back(xShape[i]);
+            if (xShape.size() == 1) outShape.push_back(1);
+            outShape.push_back(static_cast<int64_t>(outputDim));
+
+            Tensor result(outShape);
+
+            grilly::ops::linear(
+                ctx.batch, ctx.pool, ctx.cache,
+                xPtr, wPtr, biasPtr,
+                result.mutable_data(), p);
+
+            if (xShape.size() == 1)
+                result = result.reshape(
+                    {static_cast<int64_t>(outputDim)});
+
+            return result;
+        },
+        py::arg("device"), py::arg("x"), py::arg("weights"),
+        py::arg("bias") = py::none(),
+        "GPU linear with Tensor I/O (avoids numpy allocation/copy overhead)");
+
     // ── CPU linear forward (verification) ────────────────────────────────
     m.def(
         "linear_cpu",
