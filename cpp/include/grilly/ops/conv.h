@@ -172,5 +172,68 @@ void conv2dBackwardWeight(CommandBatch& batch, BufferPool& pool,
                           float* gradWeight, float* gradBias,
                           const Conv2dBackwardWeightParams& p);
 
+// ── VSA-CNN Fused Ops ───────────────────────────────────────────────────
+//
+// Optimized shaders for the CubeMind perception frontend.
+// All are simpler and faster than the general-purpose versions above
+// because they target fixed configurations (3x3 kernel, 2x2 pool, 3x3 grid).
+
+/// Fused 3x3 Conv2D + GELU push constants — matches conv2d-3x3-gelu.glsl.
+/// GELU is computed in-place after convolution, eliminating the intermediate
+/// VRAM write. ~2x memory bandwidth savings vs separate Conv + GELU.
+struct Conv2d3x3GeluParams {
+    uint32_t width;
+    uint32_t height;
+    uint32_t inChannels;
+    uint32_t outChannels;
+};
+
+/// Fused 3x3 Conv2D + GELU forward.
+/// Shader: conv2d-3x3-gelu.spv
+/// 4 buffers: input(0), weights(1), bias(2), output(3).
+/// Dispatch: ((W+15)/16, (H+15)/16, outChannels).
+void conv2d3x3Gelu(CommandBatch& batch, BufferPool& pool,
+                    PipelineCache& cache,
+                    const float* input, const float* weight,
+                    const float* bias, float* output,
+                    uint32_t width, uint32_t height,
+                    uint32_t inChannels, uint32_t outChannels);
+
+/// MaxPool 2x2 push constants — matches maxpool-2x2.glsl.
+struct MaxPool2x2Params {
+    uint32_t outWidth;
+    uint32_t outHeight;
+    uint32_t channels;
+    uint32_t inWidth;
+};
+
+/// MaxPool 2x2 stride 2 forward.
+/// Shader: maxpool-2x2.spv
+/// 2 buffers: input(0), output(1).
+/// Dispatch: ((outW+15)/16, (outH+15)/16, channels).
+void maxpool2x2(CommandBatch& batch, BufferPool& pool,
+                PipelineCache& cache,
+                const float* input, float* output,
+                uint32_t inWidth, uint32_t inHeight,
+                uint32_t channels);
+
+/// Adaptive Average Pool to 3x3 push constants — matches adaptive-avgpool-3x3.glsl.
+struct AdaptiveAvgPool3x3Params {
+    uint32_t inWidth;
+    uint32_t inHeight;
+    uint32_t channels;
+};
+
+/// Adaptive Average Pool to fixed 3x3 spatial grid.
+/// Converts any spatial feature map into exactly 9 vectors (one per grid position).
+/// Shader: adaptive-avgpool-3x3.spv
+/// 2 buffers: input(0), output(1).
+/// Dispatch: (1, 1, (channels+15)/16).
+void adaptiveAvgPool3x3(CommandBatch& batch, BufferPool& pool,
+                         PipelineCache& cache,
+                         const float* input, float* output,
+                         uint32_t inWidth, uint32_t inHeight,
+                         uint32_t channels);
+
 }  // namespace ops
 }  // namespace grilly

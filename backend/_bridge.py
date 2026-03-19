@@ -359,6 +359,38 @@ def stdp_learning(
         return None
 
 
+def oja_learning(memories, inputs, num_vectors, dim, eta=0.01):
+    """GPU Oja learning. Updates memory vectors via Oja's self-normalizing rule.
+
+    Dispatches oja-learning.spv: Δm = η·y·(x - y·m) where y = m·x.
+    Returns updated memory vectors.
+
+    Args:
+        memories: Memory vectors (num_vectors * dim) float32.
+        inputs: Input vectors (num_vectors * dim) float32.
+        num_vectors: Number of vector pairs to update.
+        dim: VSA dimension per vector.
+        eta: Learning rate.
+
+    Returns:
+        Updated memory vectors, or None on failure.
+    """
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.oja_learning(
+            dev,
+            _ensure_f32_contiguous(memories),
+            _ensure_f32_contiguous(inputs),
+            num_vectors,
+            dim,
+            eta,
+        )
+    except Exception:
+        return None
+
+
 def synapse_filter(x_in, y_state, decay=0.95):
     """GPU synapse filter. Returns updated y_state."""
     dev = _get_device()
@@ -441,6 +473,47 @@ def conv2d(x, weight, bias=None, stride=(1, 1), padding=(0, 0), dilation=(1, 1),
         return _core.conv2d(
             dev, x, weight, bias, list(stride), list(padding), list(dilation), groups
         )
+    except Exception:
+        return None
+
+
+# ── VSA-CNN Fused Ops ────────────────────────────────────────────────────
+
+
+def conv2d_3x3_gelu(x, weight, bias):
+    """Fused 3x3 Conv2D + GELU via conv2d-3x3-gelu.spv. Returns None on failure."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.conv2d_3x3_gelu(
+            dev,
+            _ensure_f32_contiguous(x),
+            _ensure_f32_contiguous(weight),
+            _ensure_f32_contiguous(bias),
+        )
+    except Exception:
+        return None
+
+
+def maxpool2x2(x):
+    """2x2 MaxPool stride 2 via maxpool-2x2.spv. Returns None on failure."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.maxpool2x2(dev, _ensure_f32_contiguous(x))
+    except Exception:
+        return None
+
+
+def adaptive_avgpool_3x3(x):
+    """Adaptive AvgPool to 3x3 via adaptive-avgpool-3x3.spv. Returns None on failure."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.adaptive_avgpool_3x3(dev, _ensure_f32_contiguous(x))
     except Exception:
         return None
 

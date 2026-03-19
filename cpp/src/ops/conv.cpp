@@ -400,5 +400,103 @@ void conv2dBackwardWeight(CommandBatch& batch, BufferPool& pool,
     pool.release(bufGradBias);
 }
 
+// ── VSA-CNN Fused Ops ────────────────────────────────────────────────────
+
+void conv2d3x3Gelu(CommandBatch& batch, BufferPool& pool,
+                    PipelineCache& cache,
+                    const float* input, const float* weight,
+                    const float* bias, float* output,
+                    uint32_t width, uint32_t height,
+                    uint32_t inChannels, uint32_t outChannels) {
+    const size_t inBytes  = size_t(inChannels) * height * width * sizeof(float);
+    const size_t wBytes   = size_t(outChannels) * inChannels * 3 * 3 * sizeof(float);
+    const size_t bBytes   = size_t(outChannels) * sizeof(float);
+    const size_t outBytes = size_t(outChannels) * height * width * sizeof(float);
+
+    auto bufIn  = pool.acquire(inBytes);
+    auto bufW   = pool.acquire(wBytes);
+    auto bufB   = pool.acquire(bBytes);
+    auto bufOut = pool.acquire(outBytes);
+
+    bufIn.upload(input, inBytes);
+    bufW.upload(weight, wBytes);
+    bufB.upload(bias, bBytes);
+
+    Conv2d3x3GeluParams pc = {width, height, inChannels, outChannels};
+
+    auto pipeline = cache.get("conv2d-3x3-gelu");
+    batch.bindPipeline(pipeline);
+    batch.bindBuffers({bufIn.buffer(), bufW.buffer(), bufB.buffer(), bufOut.buffer()});
+    batch.pushConstants(&pc, sizeof(pc));
+    batch.dispatch((width + 15) / 16, (height + 15) / 16, outChannels);
+    batch.barrier();
+
+    bufOut.download(output, outBytes);
+
+    pool.release(bufIn);
+    pool.release(bufW);
+    pool.release(bufB);
+    pool.release(bufOut);
+}
+
+void maxpool2x2(CommandBatch& batch, BufferPool& pool,
+                PipelineCache& cache,
+                const float* input, float* output,
+                uint32_t inWidth, uint32_t inHeight,
+                uint32_t channels) {
+    uint32_t outW = inWidth / 2;
+    uint32_t outH = inHeight / 2;
+
+    const size_t inBytes  = size_t(channels) * inHeight * inWidth * sizeof(float);
+    const size_t outBytes = size_t(channels) * outH * outW * sizeof(float);
+
+    auto bufIn  = pool.acquire(inBytes);
+    auto bufOut = pool.acquire(outBytes);
+
+    bufIn.upload(input, inBytes);
+
+    MaxPool2x2Params pc = {outW, outH, channels, inWidth};
+
+    auto pipeline = cache.get("maxpool-2x2");
+    batch.bindPipeline(pipeline);
+    batch.bindBuffers({bufIn.buffer(), bufOut.buffer()});
+    batch.pushConstants(&pc, sizeof(pc));
+    batch.dispatch((outW + 15) / 16, (outH + 15) / 16, channels);
+    batch.barrier();
+
+    bufOut.download(output, outBytes);
+
+    pool.release(bufIn);
+    pool.release(bufOut);
+}
+
+void adaptiveAvgPool3x3(CommandBatch& batch, BufferPool& pool,
+                         PipelineCache& cache,
+                         const float* input, float* output,
+                         uint32_t inWidth, uint32_t inHeight,
+                         uint32_t channels) {
+    const size_t inBytes  = size_t(channels) * inHeight * inWidth * sizeof(float);
+    const size_t outBytes = size_t(channels) * 3 * 3 * sizeof(float);
+
+    auto bufIn  = pool.acquire(inBytes);
+    auto bufOut = pool.acquire(outBytes);
+
+    bufIn.upload(input, inBytes);
+
+    AdaptiveAvgPool3x3Params pc = {inWidth, inHeight, channels};
+
+    auto pipeline = cache.get("adaptive-avgpool-3x3");
+    batch.bindPipeline(pipeline);
+    batch.bindBuffers({bufIn.buffer(), bufOut.buffer()});
+    batch.pushConstants(&pc, sizeof(pc));
+    batch.dispatch(1, 1, (channels + 15) / 16);
+    batch.barrier();
+
+    bufOut.download(output, outBytes);
+
+    pool.release(bufIn);
+    pool.release(bufOut);
+}
+
 }  // namespace ops
 }  // namespace grilly
