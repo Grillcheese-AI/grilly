@@ -148,6 +148,7 @@ class TestHuggingFaceBridgeVulkanOnly:
             raise
 
 
+@pytest.mark.skipif(not HUGGINGFACE_BRIDGE_AVAILABLE, reason="HuggingFace bridge not available")
 class TestHuggingFaceBridgeLoRA:
     """Test LoRA support in HuggingFace bridge (no external dependencies required)"""
 
