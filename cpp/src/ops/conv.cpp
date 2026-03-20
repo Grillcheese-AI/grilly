@@ -413,25 +413,35 @@ void conv2d3x3Gelu(CommandBatch& batch, BufferPool& pool,
     const size_t bBytes   = size_t(outChannels) * sizeof(float);
     const size_t outBytes = size_t(outChannels) * height * width * sizeof(float);
 
-    auto bufIn  = pool.acquire(inBytes);
-    auto bufW   = pool.acquire(wBytes);
-    auto bufB   = pool.acquire(bBytes);
-    auto bufOut = pool.acquire(outBytes);
+    GrillyBuffer bufIn  = pool.acquire(inBytes);
+    GrillyBuffer bufW   = pool.acquire(wBytes);
+    GrillyBuffer bufB   = pool.acquire(bBytes);
+    GrillyBuffer bufOut = pool.acquire(outBytes);
 
-    bufIn.upload(input, inBytes);
-    bufW.upload(weight, wBytes);
-    bufB.upload(bias, bBytes);
+    pool.upload(bufIn, input, inBytes);
+    pool.upload(bufW, weight, wBytes);
+    pool.upload(bufB, bias, bBytes);
+
+    PipelineEntry pipe = cache.getOrCreate("conv2d-3x3-gelu", 4,
+                                            sizeof(Conv2d3x3GeluParams));
+
+    std::vector<VkDescriptorBufferInfo> bufs = {
+        {bufIn.handle,  0, inBytes},
+        {bufW.handle,   0, wBytes},
+        {bufB.handle,   0, bBytes},
+        {bufOut.handle, 0, outBytes},
+    };
+    VkDescriptorSet desc = cache.allocDescriptorSet("conv2d-3x3-gelu", bufs);
 
     Conv2d3x3GeluParams pc = {width, height, inChannels, outChannels};
 
-    auto pipeline = cache.get("conv2d-3x3-gelu");
-    batch.bindPipeline(pipeline);
-    batch.bindBuffers({bufIn.buffer(), bufW.buffer(), bufB.buffer(), bufOut.buffer()});
-    batch.pushConstants(&pc, sizeof(pc));
-    batch.dispatch((width + 15) / 16, (height + 15) / 16, outChannels);
-    batch.barrier();
+    batch.begin();
+    batch.dispatch(pipe.pipeline, pipe.layout, desc,
+                   (width + 15) / 16, (height + 15) / 16, outChannels,
+                   &pc, sizeof(pc));
+    batch.submit();
 
-    bufOut.download(output, outBytes);
+    pool.download(bufOut, output, outBytes);
 
     pool.release(bufIn);
     pool.release(bufW);
@@ -450,21 +460,29 @@ void maxpool2x2(CommandBatch& batch, BufferPool& pool,
     const size_t inBytes  = size_t(channels) * inHeight * inWidth * sizeof(float);
     const size_t outBytes = size_t(channels) * outH * outW * sizeof(float);
 
-    auto bufIn  = pool.acquire(inBytes);
-    auto bufOut = pool.acquire(outBytes);
+    GrillyBuffer bufIn  = pool.acquire(inBytes);
+    GrillyBuffer bufOut = pool.acquire(outBytes);
 
-    bufIn.upload(input, inBytes);
+    pool.upload(bufIn, input, inBytes);
+
+    PipelineEntry pipe = cache.getOrCreate("maxpool-2x2", 2,
+                                            sizeof(MaxPool2x2Params));
+
+    std::vector<VkDescriptorBufferInfo> bufs = {
+        {bufIn.handle,  0, inBytes},
+        {bufOut.handle, 0, outBytes},
+    };
+    VkDescriptorSet desc = cache.allocDescriptorSet("maxpool-2x2", bufs);
 
     MaxPool2x2Params pc = {outW, outH, channels, inWidth};
 
-    auto pipeline = cache.get("maxpool-2x2");
-    batch.bindPipeline(pipeline);
-    batch.bindBuffers({bufIn.buffer(), bufOut.buffer()});
-    batch.pushConstants(&pc, sizeof(pc));
-    batch.dispatch((outW + 15) / 16, (outH + 15) / 16, channels);
-    batch.barrier();
+    batch.begin();
+    batch.dispatch(pipe.pipeline, pipe.layout, desc,
+                   (outW + 15) / 16, (outH + 15) / 16, channels,
+                   &pc, sizeof(pc));
+    batch.submit();
 
-    bufOut.download(output, outBytes);
+    pool.download(bufOut, output, outBytes);
 
     pool.release(bufIn);
     pool.release(bufOut);
@@ -478,21 +496,29 @@ void adaptiveAvgPool3x3(CommandBatch& batch, BufferPool& pool,
     const size_t inBytes  = size_t(channels) * inHeight * inWidth * sizeof(float);
     const size_t outBytes = size_t(channels) * 3 * 3 * sizeof(float);
 
-    auto bufIn  = pool.acquire(inBytes);
-    auto bufOut = pool.acquire(outBytes);
+    GrillyBuffer bufIn  = pool.acquire(inBytes);
+    GrillyBuffer bufOut = pool.acquire(outBytes);
 
-    bufIn.upload(input, inBytes);
+    pool.upload(bufIn, input, inBytes);
+
+    PipelineEntry pipe = cache.getOrCreate("adaptive-avgpool-3x3", 2,
+                                            sizeof(AdaptiveAvgPool3x3Params));
+
+    std::vector<VkDescriptorBufferInfo> bufs = {
+        {bufIn.handle,  0, inBytes},
+        {bufOut.handle, 0, outBytes},
+    };
+    VkDescriptorSet desc = cache.allocDescriptorSet("adaptive-avgpool-3x3", bufs);
 
     AdaptiveAvgPool3x3Params pc = {inWidth, inHeight, channels};
 
-    auto pipeline = cache.get("adaptive-avgpool-3x3");
-    batch.bindPipeline(pipeline);
-    batch.bindBuffers({bufIn.buffer(), bufOut.buffer()});
-    batch.pushConstants(&pc, sizeof(pc));
-    batch.dispatch(1, 1, (channels + 15) / 16);
-    batch.barrier();
+    batch.begin();
+    batch.dispatch(pipe.pipeline, pipe.layout, desc,
+                   1, 1, (channels + 15) / 16,
+                   &pc, sizeof(pc));
+    batch.submit();
 
-    bufOut.download(output, outBytes);
+    pool.download(bufOut, output, outBytes);
 
     pool.release(bufIn);
     pool.release(bufOut);
