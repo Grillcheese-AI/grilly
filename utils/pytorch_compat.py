@@ -7,7 +7,7 @@ integration with PyTorch workflows while using Vulkan backend.
 
 from __future__ import annotations
 
-from typing import Any, Union
+from typing import Any
 
 import numpy as np
 
@@ -29,7 +29,7 @@ class Tensor:
     Provides PyTorch-like API while using Vulkan for computation.
     """
 
-    def __init__(self, data: Union[np.ndarray, "Tensor", Any], device: str | None = None):
+    def __init__(self, data: np.ndarray | Tensor | Any, device: str | None = None):
         """
         Initialize tensor.
 
@@ -57,7 +57,7 @@ class Tensor:
         """Convert to numpy array"""
         return self._data
 
-    def cpu(self) -> "Tensor":
+    def cpu(self) -> Tensor:
         """Move to CPU"""
         return Tensor(self._data, device="cpu")
 
@@ -67,7 +67,7 @@ class Tensor:
             raise RuntimeError("PyTorch is required for CUDA operations")
         return self.device_manager.to_cuda(self._data)
 
-    def to(self, device: str | torch.device) -> Union["Tensor", torch.Tensor]:
+    def to(self, device: str | torch.device) -> Tensor | torch.Tensor:
         """Move to device"""
         if isinstance(device, str):
             if device == "cpu":
@@ -115,11 +115,11 @@ class Tensor:
 
         return f"Tensor(shape={self.shape}, dtype={self.dtype}, device={self.device})"
 
-    def detach(self) -> "Tensor":
+    def detach(self) -> Tensor:
         """Detach (no-op for numpy backend)"""
         return Tensor(self._data.copy(), device=self.device)
 
-    def requires_grad_(self, requires_grad: bool = True) -> "Tensor":
+    def requires_grad_(self, requires_grad: bool = True) -> Tensor:
         """Set requires_grad (no-op for numpy backend)"""
         return self
 
