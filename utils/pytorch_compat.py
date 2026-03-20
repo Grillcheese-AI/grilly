@@ -5,6 +5,8 @@ Provides PyTorch-like tensor operations and utilities for seamless
 integration with PyTorch workflows while using Vulkan backend.
 """
 
+from __future__ import annotations
+
 from typing import Any, Union
 
 import numpy as np
@@ -59,7 +61,7 @@ class Tensor:
         """Move to CPU"""
         return Tensor(self._data, device="cpu")
 
-    def cuda(self, device: int | None = None) -> "Any":
+    def cuda(self, device: int | None = None) -> torch.Tensor:
         """Move to CUDA (returns PyTorch tensor)"""
         if not TORCH_AVAILABLE:
             raise RuntimeError("PyTorch is required for CUDA operations")
