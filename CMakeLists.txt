@@ -1,8 +1,11 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.20...4.2)
 
-# CMake 4.x policy: honor <PACKAGE>_ROOT variables
+# CMake 4.x policies
 if(POLICY CMP0144)
-    cmake_policy(SET CMP0144 NEW)
+    cmake_policy(SET CMP0144 NEW)  # honor <PACKAGE>_ROOT variables
+endif()
+if(POLICY CMP0169)
+    cmake_policy(SET CMP0169 OLD)  # allow FetchContent_Populate
 endif()
 # Boost removed in 0.5.1 — was only used for flat_map
 
@@ -62,6 +65,8 @@ else()
     )
     set(EIGEN_BUILD_DOC OFF CACHE BOOL "" FORCE)
     set(EIGEN_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(EIGEN_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
+    set(EIGEN_BUILD_CMAKE_PACKAGE OFF CACHE BOOL "" FORCE)
     set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(Eigen3)
 endif()
