@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 
 class TestMultiStepContainer:
     """Test MultiStepContainer wrapping single-step modules."""

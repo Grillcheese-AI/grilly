@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 try:
     from grilly.nn.decoding import GreedyDecoder, SampleDecoder
 except ImportError:

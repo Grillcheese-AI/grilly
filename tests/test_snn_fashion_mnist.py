@@ -10,6 +10,8 @@ Also includes a GIF neuron variant for comparison.
 
 import numpy as np
 import pytest
+
+pytestmark = pytest.mark.gpu
 from grilly.functional.snn import reset_net
 from grilly.nn.conv import Conv2d
 from grilly.nn.module import Module

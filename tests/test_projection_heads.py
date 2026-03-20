@@ -2,6 +2,8 @@
 
 import numpy as np
 import pytest
+
+pytestmark = pytest.mark.gpu
 from grilly.nn.projection_heads import ProjectionHeads
 
 

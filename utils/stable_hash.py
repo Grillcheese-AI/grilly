@@ -67,7 +67,7 @@ def digest(parts: Iterable[Part], *, domain: str = "grilly", out_len: int = 32) 
     _warn_once()
     # BLAKE2s output is max 32 bytes; chain if longer requested
     if out_len <= 32:
-        return hashlib.blake2s(msg).digest(out_len)
+        return hashlib.blake2s(msg, digest_size=out_len).digest()
     out = bytearray()
     ctr = 0
     while len(out) < out_len:

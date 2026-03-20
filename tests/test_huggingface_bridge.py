@@ -9,10 +9,10 @@ import numpy as np
 import pytest
 
 try:
+    import torch
     from grilly.utils.huggingface_bridge import HuggingFaceBridge, get_huggingface_bridge
-
     HUGGINGFACE_BRIDGE_AVAILABLE = True
-except ImportError:
+except (ImportError, RuntimeError):
     HUGGINGFACE_BRIDGE_AVAILABLE = False
 
 

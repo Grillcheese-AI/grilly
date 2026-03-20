@@ -6,6 +6,13 @@ Tests multi-backend device management (Vulkan, CUDA, CPU)
 
 import numpy as np
 import pytest
+
+try:
+    import torch
+    _HAS_TORCH = True
+except ImportError:
+    _HAS_TORCH = False
+
 from grilly.utils.device_manager import (
     DeviceManager,
     get_cuda_backend,
@@ -36,6 +43,7 @@ class TestDeviceManager:
         manager.set_device("cpu")
         assert manager.get_device() == "cpu"
 
+    @pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
     def test_set_device_cuda(self):
         """Test setting device to CUDA (if available)"""
         manager = DeviceManager()
@@ -67,6 +75,7 @@ class TestDeviceManager:
         except ImportError:
             pytest.skip("PyTorch not available")
 
+    @pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
     def test_to_cuda(self):
         """Test converting numpy to CUDA tensor"""
         manager = DeviceManager()
@@ -131,6 +140,7 @@ class TestDeviceManagerGlobal:
         except (ImportError, RuntimeError):
             pytest.skip("CUDA/PyTorch not available")
 
+    @pytest.mark.skipif(not _HAS_TORCH, reason="torch not installed")
     def test_get_torch(self):
         """Test getting PyTorch module (if available)"""
         try:
