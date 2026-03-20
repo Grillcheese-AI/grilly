@@ -1,16 +1,18 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "pybind11>=2.13", "setuptools>=61.0", "setuptools-scm>=8.0"]
-build-backend = "scikit_build_core.build"
+requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
 
-[tool.scikit-build]
-cmake.build-type = "Release"
-build.targets = ["grilly_core"]
-cmake.version = ">=3.20"
-wheel.packages = ["."]
+# C++ extension is NOT built by pip install. It's pre-built and distributed
+# via GitHub releases. To build from source, use:
+#   pip install scikit-build-core pybind11
+#   python -m scikit_build_core.build --wheel
+#
+# Or just download grilly_core.cpXYZ-win_amd64.pyd from:
+#   https://github.com/Grillcheese-AI/grilly/releases
 
 [project]
 name = "grilly"
-version = "0.5.5"
+version = "0.5.6"
 description = "GPU-accelerated neural network operations using Vulkan compute shaders"
 readme = "README.md"
 license = {text = "MIT"}
@@ -76,7 +78,7 @@ Documentation = "https://grilly.org/docs"
 packages = [
     "grilly",
     "grilly.backend",
-    "grilly.datasets",
+    "grilly.grilly_datasets",
     "grilly.examples",
     "grilly.experimental_datasets",
     "grilly.nn",
@@ -101,7 +103,7 @@ packages = [
 "grilly.tests" = "tests"
 "grilly.experimental" = "experimental"
 "grilly.experimental_datasets" = "experimental_datasets"
-"grilly.datasets" = "datasets"
+"grilly.grilly_datasets" = "grilly_datasets"
 "grilly.examples" = "examples"
 
 [tool.setuptools.package-data]
@@ -109,6 +111,8 @@ grilly = [
     "shaders/**/*.glsl",
     "shaders/**/*.comp",
     "shaders/**/*.spv",
+    "*.pyd",
+    "*.so",
 ]
 
 [tool.setuptools_scm]
