@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+
+pytest.importorskip("onnx")
 from grilly.utils.batch_embedder import BatchEmbedder, WhitespaceTokenizer, _pad_batch
 
 # ---------------------------------------------------------------------------

@@ -59,7 +59,7 @@ class Tensor:
         """Move to CPU"""
         return Tensor(self._data, device="cpu")
 
-    def cuda(self, device: int | None = None) -> torch.Tensor:
+    def cuda(self, device: int | None = None) -> "Any":
         """Move to CUDA (returns PyTorch tensor)"""
         if not TORCH_AVAILABLE:
             raise RuntimeError("PyTorch is required for CUDA operations")

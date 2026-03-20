@@ -9,8 +9,9 @@ import os
 import tempfile
 
 import numpy as np
-import onnx
 import pytest
+
+onnx = pytest.importorskip("onnx")
 from grilly.nn.lora import LoRAConfig
 from grilly.nn.modules import LayerNorm, Linear
 from grilly.utils.onnx_exporter import OnnxExporter
