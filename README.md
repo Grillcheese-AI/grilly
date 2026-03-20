@@ -10,6 +10,7 @@
 [![PyPI](https://img.shields.io/pypi/v/grilly)](https://pypi.org/project/grilly/)
 [![Tests](https://img.shields.io/badge/tests-1820%20passing-brightgreen)](https://github.com/grillcheese-ai/grilly/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docs](https://img.shields.io/badge/docs-grilly.org-blue)](https://grillcheese-ai.github.io/grilly/getting-started/installation/)
 
 GPU-accelerated neural network framework using Vulkan compute shaders. PyTorch-like API that runs on **any GPU** — AMD, NVIDIA, Intel — no CUDA dependency. 190 GLSL compute shaders compiled to SPIR-V, dispatched through a native C++ layer.
 
