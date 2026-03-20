@@ -80,8 +80,6 @@ def vsa_vq_loss(
     Returns:
         (total_loss, gradient w.r.t. continuous_logits)
     """
-    d = k * l
-
     # 1. Quantize
     quantized, commit_loss = vsa_quantize(continuous_logits, k, l)
 

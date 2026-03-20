@@ -221,8 +221,6 @@ def additive_ce_loss_var(
     """
     query = _ensure_variable(query)
     q = query.data.ravel().astype(np.float32)
-    d = q.shape[0]
-    n = codebook_W.shape[0]
 
     # Normalized
     q_norm = np.linalg.norm(q) + 1e-8
