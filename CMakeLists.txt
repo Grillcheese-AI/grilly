@@ -40,11 +40,21 @@ endif()
 # that was the #1 build time bottleneck.
 
 # ── Eigen (header-only) ─────────────────────────────────────────────────
+# Try system Eigen3 first, but verify the targets file actually exists.
+# On Windows, partial installs can have Eigen3Config.cmake without
+# Eigen3Targets.cmake, causing a confusing CMake error.
 find_package(Eigen3 3.4 CONFIG QUIET)
-if(Eigen3_FOUND)
+if(Eigen3_FOUND AND TARGET Eigen3::Eigen)
     message(STATUS "Eigen3 found: ${Eigen3_VERSION}")
 else()
-    message(STATUS "Eigen3 not found — fetching via FetchContent")
+    if(Eigen3_FOUND)
+        message(STATUS "Eigen3 config found but Eigen3::Eigen target missing — fetching instead")
+    else()
+        message(STATUS "Eigen3 not found — fetching via FetchContent")
+    endif()
+    # Reset to prevent stale config from interfering
+    unset(Eigen3_FOUND)
+    unset(Eigen3_DIR CACHE)
     FetchContent_Declare(Eigen3
         GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
         GIT_TAG        3.4.0
