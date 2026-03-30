@@ -34,20 +34,28 @@ void main() {
     
     float x = input_data[gID];
     float grad_out = grad_output[gID];
-    
-    // GELU derivative
-    // d/dx GELU(x) = 0.5 * (1 + tanh(z) + x * sech²(z) * dz/dx)
+
+    // GELU derivative: d/dx GELU(x) = 0.5 * (1 + tanh(z) + x * sech²(z) * dz/dx)
     // where z = sqrt(2/π) * (x + 0.044715 * x³)
-    
-    float x_cubed = x * x * x;
-    float z = SQRT_2_OVER_PI * (x + COEFF * x_cubed);
-    float tanh_z = tanh(z);
-    float sech_z = 1.0 / cosh(z);
-    float sech_sq = sech_z * sech_z;
-    
-    float dz_dx = SQRT_2_OVER_PI * (1.0 + 3.0 * COEFF * x * x);
-    
-    float gelu_grad = 0.5 * (1.0 + tanh_z + x * sech_sq * dz_dx);
-    
+    //
+    // Asymptotic behavior (same overflow protection as forward pass):
+    //   x > 10  → GELU'(x) ≈ 1   (gradient passes through)
+    //   x < -10 → GELU'(x) ≈ 0   (gradient blocked)
+
+    float gelu_grad;
+    if (x > 10.0) {
+        gelu_grad = 1.0;
+    } else if (x < -10.0) {
+        gelu_grad = 0.0;
+    } else {
+        float x_cubed = x * x * x;
+        float z = SQRT_2_OVER_PI * (x + COEFF * x_cubed);
+        float tanh_z = tanh(z);
+        float sech_z = 1.0 / cosh(z);
+        float sech_sq = sech_z * sech_z;
+        float dz_dx = SQRT_2_OVER_PI * (1.0 + 3.0 * COEFF * x * x);
+        gelu_grad = 0.5 * (1.0 + tanh_z + x * sech_sq * dz_dx);
+    }
+
     grad_input[gID] = grad_out * gelu_grad;
 }
