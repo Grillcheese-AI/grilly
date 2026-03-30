@@ -55,5 +55,10 @@ void batchedFlashAttention2(CommandBatch& batch, PipelineCache& cache,
                             uint32_t batchSize, uint32_t numHeads,
                             uint32_t seqLen, uint32_t headDim, float scale);
 
+/// Element-wise add: a[i] += b[i]. In-place on buffer A.
+void batchedAdd(CommandBatch& batch, PipelineCache& cache,
+                GrillyBuffer& a, const GrillyBuffer& b,
+                uint32_t totalElements);
+
 }  // namespace ops
 }  // namespace grilly

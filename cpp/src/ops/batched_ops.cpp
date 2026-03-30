@@ -168,5 +168,25 @@ void batchedFlashAttention2(CommandBatch& batch, PipelineCache& cache,
     }
 }
 
+void batchedAdd(CommandBatch& batch, PipelineCache& cache,
+                GrillyBuffer& a, const GrillyBuffer& b,
+                uint32_t totalElements) {
+
+    PipelineEntry pipe = cache.getOrCreate("elementwise-add", 2, sizeof(uint32_t));
+
+    size_t bytes = size_t(totalElements) * sizeof(float);
+    std::vector<VkDescriptorBufferInfo> bufs = {
+        {a.handle, 0, bytes},
+        {b.handle, 0, bytes},
+    };
+    VkDescriptorSet desc = cache.allocDescriptorSet("elementwise-add", bufs);
+
+    uint32_t push = totalElements;
+    uint32_t gx = (totalElements + 255) / 256;
+
+    batch.dispatch(pipe.pipeline, pipe.layout, desc, gx, 1, 1,
+                   &push, sizeof(push));
+}
+
 }  // namespace ops
 }  // namespace grilly
