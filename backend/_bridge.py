@@ -810,6 +810,100 @@ def flash_attention2(Q, K, V, mask=None, scale=0.0, tile_size_q=64, tile_size_k=
         return None
 
 
+# ── Fused Transformer Ops ────────────────────────────────────────────────
+
+
+def fused_mlp_gelu(x, w1, b1, w2, b2):
+    """Fused MLP: Linear(d_in→d_hidden) → GELU → Linear(d_hidden→d_out).
+
+    GPU shader: fused-mlp-gelu.spv — intermediate hidden stays in LDS,
+    never hits VRAM. Eliminates 2 read/write cycles per layer.
+
+    Args:
+        x:  (seq_len, d_in) float32 input.
+        w1: (d_hidden, d_in) float32 fc1 weights.
+        b1: (d_hidden,) float32 fc1 bias.
+        w2: (d_out, d_hidden) float32 fc2 weights.
+        b2: (d_out,) float32 fc2 bias.
+
+    Returns:
+        (seq_len, d_out) float32 output, or None on failure.
+    """
+    # Try native fused dispatch
+    dev = _get_device()
+    if dev is not None:
+        try:
+            result = _core.fused_mlp_gelu(
+                dev,
+                _ensure_f32_contiguous(x),
+                _ensure_f32_contiguous(w1),
+                _ensure_f32_contiguous(b1),
+                _ensure_f32_contiguous(w2),
+                _ensure_f32_contiguous(b2),
+            )
+            if result is not None:
+                return result
+        except (AttributeError, Exception):
+            pass
+
+    # Fallback: 3 separate ops via bridge
+    x = _ensure_f32_contiguous(x)
+    h = linear(x, w1, b1)
+    if h is None:
+        h = (x @ w1.T + b1).astype(np.float32)
+    h_gelu = gelu(h)
+    if h_gelu is None:
+        h = np.clip(h, -10, 10)
+        h_gelu = (0.5 * h * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (h + 0.044715 * h ** 3)))).astype(np.float32)
+    out = linear(h_gelu, w2, b2)
+    if out is None:
+        out = (h_gelu @ w2.T + b2).astype(np.float32)
+    return out
+
+
+def fused_layernorm_linear(x, ln_weight, ln_bias, proj_weight, proj_bias, eps=1e-6):
+    """Fused LayerNorm + Linear projection.
+
+    GPU shader: fused-layernorm-linear.spv — normalized values stay in LDS.
+    Saves 1 VRAM round-trip per pre-norm attention layer.
+
+    Args:
+        x:           (seq_len, d_in) float32 input.
+        ln_weight:   (d_in,) float32 LayerNorm weight.
+        ln_bias:     (d_in,) float32 LayerNorm bias.
+        proj_weight: (d_out, d_in) float32 projection weights.
+        proj_bias:   (d_out,) float32 projection bias.
+
+    Returns:
+        (seq_len, d_out) float32 output, or None on failure.
+    """
+    dev = _get_device()
+    if dev is not None:
+        try:
+            result = _core.fused_layernorm_linear(
+                dev,
+                _ensure_f32_contiguous(x),
+                _ensure_f32_contiguous(ln_weight),
+                _ensure_f32_contiguous(ln_bias),
+                _ensure_f32_contiguous(proj_weight),
+                _ensure_f32_contiguous(proj_bias),
+            )
+            if result is not None:
+                return result
+        except (AttributeError, Exception):
+            pass
+
+    # Fallback: separate layernorm + linear
+    x = _ensure_f32_contiguous(x)
+    mean = np.mean(x, axis=-1, keepdims=True)
+    var = np.var(x, axis=-1, keepdims=True)
+    normed = ((x - mean) / np.sqrt(var + eps) * ln_weight + ln_bias).astype(np.float32)
+    out = linear(normed, proj_weight, proj_bias)
+    if out is None:
+        out = (normed @ proj_weight.T + proj_bias).astype(np.float32)
+    return out
+
+
 # ── Pooling Ops ──────────────────────────────────────────────────────────
 
 
