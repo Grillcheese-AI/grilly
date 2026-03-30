@@ -53,7 +53,7 @@ struct GrillyCoreContext {
     /// Call between inference steps to prevent race conditions on
     /// descriptor sets and buffer overwrites.
     void waitIdle() {
-        device.waitIdle();
+        vkQueueWaitIdle(device.computeQueue());
     }
 
     /// Load all .spv shaders from a directory into the pipeline cache.
