@@ -69,4 +69,3 @@ void batchedTiledLinear(CommandBatch& batch, PipelineCache& cache,
 }  // namespace ops
 }  // namespace grilly
 
-// Append before closing namespace

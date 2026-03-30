@@ -188,8 +188,6 @@ void batchedAdd(CommandBatch& batch, PipelineCache& cache,
                    &push, sizeof(push));
 }
 
-}  // namespace ops
-}  // namespace grilly
 
 void batchedTiledLinear(CommandBatch& batch, PipelineCache& cache,
                         const GrillyBuffer& input, const GrillyBuffer& weight,
@@ -213,10 +211,12 @@ void batchedTiledLinear(CommandBatch& batch, PipelineCache& cache,
 
     struct { uint32_t M, K, N, has_bias; } push = {M, K, N, bias ? 1u : 0u};
 
-    // Dispatch: workgroups cover the output in 32×32 tiles
     uint32_t gx = (N + 31) / 32;
     uint32_t gy = (M + 31) / 32;
 
     batch.dispatch(pipe.pipeline, pipe.layout, desc, gx, gy, 1,
                    &push, sizeof(push));
 }
+
+}  // namespace ops
+}  // namespace grilly
