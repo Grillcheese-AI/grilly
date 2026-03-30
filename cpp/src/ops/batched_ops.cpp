@@ -15,8 +15,8 @@ namespace grilly {
 namespace ops {
 
 void batchedLinear(CommandBatch& batch, PipelineCache& cache,
-                   GrillyBuffer& input, GrillyBuffer& weight,
-                   GrillyBuffer* bias, GrillyBuffer& output,
+                   const GrillyBuffer& input, const GrillyBuffer& weight,
+                   const GrillyBuffer* bias, GrillyBuffer& output,
                    uint32_t M, uint32_t K, uint32_t N) {
 
     PipelineEntry pipe = cache.getOrCreate("fnn-linear", 4, 16);
@@ -44,7 +44,7 @@ void batchedLinear(CommandBatch& batch, PipelineCache& cache,
 }
 
 void batchedGelu(CommandBatch& batch, PipelineCache& cache,
-                 GrillyBuffer& input, GrillyBuffer& output,
+                 const GrillyBuffer& input, GrillyBuffer& output,
                  uint32_t totalElements) {
 
     PipelineEntry pipe = cache.getOrCreate("activation-gelu", 2, sizeof(uint32_t));
@@ -65,8 +65,8 @@ void batchedGelu(CommandBatch& batch, PipelineCache& cache,
 
 void batchedFusedMlpGelu(CommandBatch& batch, PipelineCache& cache,
                           GrillyBuffer& input,
-                          GrillyBuffer& w1, GrillyBuffer& b1,
-                          GrillyBuffer& w2, GrillyBuffer& b2,
+                          const GrillyBuffer& w1, const GrillyBuffer& b1,
+                          const GrillyBuffer& w2, const GrillyBuffer& b2,
                           GrillyBuffer& output,
                           uint32_t seqLen) {
 
@@ -89,8 +89,8 @@ void batchedFusedMlpGelu(CommandBatch& batch, PipelineCache& cache,
 
 void batchedFusedLnLinear(CommandBatch& batch, PipelineCache& cache,
                            GrillyBuffer& input,
-                           GrillyBuffer& lnW, GrillyBuffer& lnB,
-                           GrillyBuffer& projW, GrillyBuffer& projB,
+                           const GrillyBuffer& lnW, const GrillyBuffer& lnB,
+                           const GrillyBuffer& projW, const GrillyBuffer& projB,
                            GrillyBuffer& output,
                            uint32_t seqLen) {
 
@@ -111,7 +111,7 @@ void batchedFusedLnLinear(CommandBatch& batch, PipelineCache& cache,
 }
 
 void batchedFlashAttention2(CommandBatch& batch, PipelineCache& cache,
-                            GrillyBuffer& Q, GrillyBuffer& K, GrillyBuffer& V,
+                            const GrillyBuffer& Q, const GrillyBuffer& K, const GrillyBuffer& V,
                             GrillyBuffer& output,
                             GrillyBuffer& runMax, GrillyBuffer& runSum,
                             GrillyBuffer& accum,

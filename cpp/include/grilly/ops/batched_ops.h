@@ -21,34 +21,34 @@ namespace ops {
 /// Record a linear dispatch into batch (does NOT begin/submit).
 /// Buffers must already be uploaded.
 void batchedLinear(CommandBatch& batch, PipelineCache& cache,
-                   GrillyBuffer& input, GrillyBuffer& weight,
-                   GrillyBuffer* bias, GrillyBuffer& output,
+                   const GrillyBuffer& input, const GrillyBuffer& weight,
+                   const GrillyBuffer* bias, GrillyBuffer& output,
                    uint32_t M, uint32_t K, uint32_t N);
 
 /// Record a GELU dispatch into batch.
 void batchedGelu(CommandBatch& batch, PipelineCache& cache,
-                 GrillyBuffer& input, GrillyBuffer& output,
+                 const GrillyBuffer& input, GrillyBuffer& output,
                  uint32_t totalElements);
 
 /// Record a fused MLP (fc1→GELU→fc2) dispatch into batch.
 void batchedFusedMlpGelu(CommandBatch& batch, PipelineCache& cache,
                           GrillyBuffer& input,
-                          GrillyBuffer& w1, GrillyBuffer& b1,
-                          GrillyBuffer& w2, GrillyBuffer& b2,
+                          const GrillyBuffer& w1, const GrillyBuffer& b1,
+                          const GrillyBuffer& w2, const GrillyBuffer& b2,
                           GrillyBuffer& output,
                           uint32_t seqLen);
 
 /// Record a fused LayerNorm+Linear dispatch into batch.
 void batchedFusedLnLinear(CommandBatch& batch, PipelineCache& cache,
                            GrillyBuffer& input,
-                           GrillyBuffer& lnW, GrillyBuffer& lnB,
-                           GrillyBuffer& projW, GrillyBuffer& projB,
+                           const GrillyBuffer& lnW, const GrillyBuffer& lnB,
+                           const GrillyBuffer& projW, const GrillyBuffer& projB,
                            GrillyBuffer& output,
                            uint32_t seqLen);
 
 /// Record a flash attention dispatch into batch.
 void batchedFlashAttention2(CommandBatch& batch, PipelineCache& cache,
-                            GrillyBuffer& Q, GrillyBuffer& K, GrillyBuffer& V,
+                            const GrillyBuffer& Q, const GrillyBuffer& K, const GrillyBuffer& V,
                             GrillyBuffer& output,
                             GrillyBuffer& runMax, GrillyBuffer& runSum,
                             GrillyBuffer& accum,

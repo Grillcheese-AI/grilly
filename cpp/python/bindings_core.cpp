@@ -13,6 +13,9 @@
 #include "grilly/nn/optimizer.h"
 #include "grilly/nn/dataloader.h"
 
+// Forward declarations for split binding files
+void register_siglip_ops(py::module_& m);
+
 PYBIND11_MODULE(grilly_core, m) {
     m.doc() = "grilly C++ Vulkan backend — eliminates Python->C boundary "
               "crossings for GPU dispatch";
