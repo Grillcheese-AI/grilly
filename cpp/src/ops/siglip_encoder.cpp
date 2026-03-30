@@ -12,6 +12,10 @@
 #include <cstring>
 #include <vector>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace grilly {
 namespace ops {
 
@@ -111,30 +115,38 @@ static void transformerLayer(
     float* V = qkv + 2 * seqLen * hidden;
     float scale = 1.0f / sqrtf(float(headDim));
 
-    // Per-head attention
+    // Per-head attention — OpenMP parallel across heads
     std::memset(attn_out, 0, seqLen * hidden * sizeof(float));
-    for (uint32_t h = 0; h < numHeads; ++h) {
-        // Extract head slices (strided access)
-        // Q[s][h*headDim : (h+1)*headDim] for each s
-        // scores[seq, seq] = Q_h @ K_h^T / sqrt(d)
+
+    // Each head needs its own scores buffer for parallel execution
+    std::vector<float> allScores(numHeads * seqLen * seqLen);
+
+    #pragma omp parallel for schedule(dynamic)
+    for (int h = 0; h < (int)numHeads; ++h) {
+        float* hScores = allScores.data() + h * seqLen * seqLen;
+
+        // Q_h @ K_h^T / sqrt(d)
         for (uint32_t sq = 0; sq < seqLen; ++sq) {
             for (uint32_t sk = 0; sk < seqLen; ++sk) {
                 float dot = 0.0f;
+                const float* qRow = Q + sq * hidden + h * headDim;
+                const float* kRow = K + sk * hidden + h * headDim;
                 for (uint32_t d = 0; d < headDim; ++d)
-                    dot += Q[sq * hidden + h * headDim + d] * K[sk * hidden + h * headDim + d];
-                scores[sq * seqLen + sk] = dot * scale;
+                    dot += qRow[d] * kRow[d];
+                hScores[sq * seqLen + sk] = dot * scale;
             }
         }
 
-        // Softmax per row
-        softmaxRows(scores, seqLen, seqLen);
+        // Softmax
+        softmaxRows(hScores, seqLen, seqLen);
 
-        // attn_out_h = scores @ V_h
+        // scores @ V_h
         for (uint32_t sq = 0; sq < seqLen; ++sq) {
             for (uint32_t d = 0; d < headDim; ++d) {
                 float acc = 0.0f;
+                const float* sRow = hScores + sq * seqLen;
                 for (uint32_t sk = 0; sk < seqLen; ++sk)
-                    acc += scores[sq * seqLen + sk] * V[sk * hidden + h * headDim + d];
+                    acc += sRow[sk] * V[sk * hidden + h * headDim + d];
                 attn_out[sq * hidden + h * headDim + d] = acc;
             }
         }
