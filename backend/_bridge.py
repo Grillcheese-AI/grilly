@@ -142,12 +142,44 @@ def relu(x):
 
 
 def gelu(x):
-    """GPU GELU. Returns None on failure."""
+    """GPU GELU. Returns None on failure.
+
+    Clamps input to [-10, 10] before dispatch — the GELU tanh approximation
+    uses exp(2*inner) which overflows float32 for |x| > ~10. For |x| > 10:
+      GELU(x) ≈ x (positive) or 0 (negative), so clamping loses no precision.
+    """
+    x = _ensure_f32_contiguous(x)
+    # Pre-clamp: handle asymptotic values before GPU dispatch
+    large_pos = x > 10.0
+    large_neg = x < -10.0
+    needs_clamp = np.any(large_pos) or np.any(large_neg)
+    if needs_clamp:
+        result = np.empty_like(x)
+        result[large_pos] = x[large_pos]  # GELU → x for large positive
+        result[large_neg] = 0.0            # GELU → 0 for large negative
+        mask = ~(large_pos | large_neg)
+        if np.any(mask):
+            dev = _get_device()
+            if dev is not None:
+                try:
+                    gpu_result = _core.gelu(dev, np.ascontiguousarray(x[mask]))
+                    if gpu_result is not None:
+                        result[mask] = np.asarray(gpu_result, dtype=np.float32)
+                        return result
+                except Exception:
+                    pass
+            # CPU fallback for middle range
+            xm = x[mask]
+            result[mask] = (0.5 * xm * (1.0 + np.tanh(
+                np.sqrt(2.0 / np.pi) * (xm + 0.044715 * xm ** 3)
+            ))).astype(np.float32)
+        return result
+
     dev = _get_device()
     if dev is None:
         return None
     try:
-        return _core.gelu(dev, _ensure_f32_contiguous(x))
+        return _core.gelu(dev, x)
     except Exception:
         return None
 
@@ -778,6 +810,100 @@ def flash_attention2(Q, K, V, mask=None, scale=0.0, tile_size_q=64, tile_size_k=
         return None
 
 
+# ── Fused Transformer Ops ────────────────────────────────────────────────
+
+
+def fused_mlp_gelu(x, w1, b1, w2, b2):
+    """Fused MLP: Linear(d_in→d_hidden) → GELU → Linear(d_hidden→d_out).
+
+    GPU shader: fused-mlp-gelu.spv — intermediate hidden stays in LDS,
+    never hits VRAM. Eliminates 2 read/write cycles per layer.
+
+    Args:
+        x:  (seq_len, d_in) float32 input.
+        w1: (d_hidden, d_in) float32 fc1 weights.
+        b1: (d_hidden,) float32 fc1 bias.
+        w2: (d_out, d_hidden) float32 fc2 weights.
+        b2: (d_out,) float32 fc2 bias.
+
+    Returns:
+        (seq_len, d_out) float32 output, or None on failure.
+    """
+    # Try native fused dispatch
+    dev = _get_device()
+    if dev is not None:
+        try:
+            result = _core.fused_mlp_gelu(
+                dev,
+                _ensure_f32_contiguous(x),
+                _ensure_f32_contiguous(w1),
+                _ensure_f32_contiguous(b1),
+                _ensure_f32_contiguous(w2),
+                _ensure_f32_contiguous(b2),
+            )
+            if result is not None:
+                return result
+        except (AttributeError, Exception):
+            pass
+
+    # Fallback: 3 separate ops via bridge
+    x = _ensure_f32_contiguous(x)
+    h = linear(x, w1, b1)
+    if h is None:
+        h = (x @ w1.T + b1).astype(np.float32)
+    h_gelu = gelu(h)
+    if h_gelu is None:
+        h = np.clip(h, -10, 10)
+        h_gelu = (0.5 * h * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (h + 0.044715 * h ** 3)))).astype(np.float32)
+    out = linear(h_gelu, w2, b2)
+    if out is None:
+        out = (h_gelu @ w2.T + b2).astype(np.float32)
+    return out
+
+
+def fused_layernorm_linear(x, ln_weight, ln_bias, proj_weight, proj_bias, eps=1e-6):
+    """Fused LayerNorm + Linear projection.
+
+    GPU shader: fused-layernorm-linear.spv — normalized values stay in LDS.
+    Saves 1 VRAM round-trip per pre-norm attention layer.
+
+    Args:
+        x:           (seq_len, d_in) float32 input.
+        ln_weight:   (d_in,) float32 LayerNorm weight.
+        ln_bias:     (d_in,) float32 LayerNorm bias.
+        proj_weight: (d_out, d_in) float32 projection weights.
+        proj_bias:   (d_out,) float32 projection bias.
+
+    Returns:
+        (seq_len, d_out) float32 output, or None on failure.
+    """
+    dev = _get_device()
+    if dev is not None:
+        try:
+            result = _core.fused_layernorm_linear(
+                dev,
+                _ensure_f32_contiguous(x),
+                _ensure_f32_contiguous(ln_weight),
+                _ensure_f32_contiguous(ln_bias),
+                _ensure_f32_contiguous(proj_weight),
+                _ensure_f32_contiguous(proj_bias),
+            )
+            if result is not None:
+                return result
+        except (AttributeError, Exception):
+            pass
+
+    # Fallback: separate layernorm + linear
+    x = _ensure_f32_contiguous(x)
+    mean = np.mean(x, axis=-1, keepdims=True)
+    var = np.var(x, axis=-1, keepdims=True)
+    normed = ((x - mean) / np.sqrt(var + eps) * ln_weight + ln_bias).astype(np.float32)
+    out = linear(normed, proj_weight, proj_bias)
+    if out is None:
+        out = (normed @ proj_weight.T + proj_bias).astype(np.float32)
+    return out
+
+
 # ── Pooling Ops ──────────────────────────────────────────────────────────
 
 
@@ -1301,6 +1427,214 @@ def hdc_permute_packed(data, words_per_vec, shift):
     # repack back to uint32
     packed_bytes = np.packbits(rotated, bitorder="little")
     return packed_bytes.view(np.uint32)
+
+
+def hdc_overlap_metrics(query, codebook, dim):
+    """Overlap, Jaccard, and overlap-coefficient for packed binary hypervectors.
+
+    GPU shader: hdc-overlap-metrics.glsl (bitCount + subgroupAdd).
+    CPU fallback: numpy popcount via bit-shifting.
+
+    Args:
+        query:    uint32 numpy array of shape (words_per_vec,).
+        codebook: uint32 numpy array of shape (num_entries, words_per_vec).
+        dim:      int, original hypervector dimension (words_per_vec * 32).
+
+    Returns:
+        Dict with keys:
+          'overlap':      float32 (num_entries,) — |A&B| / dim
+          'jaccard':      float32 (num_entries,) — |A&B| / |A|B|
+          'overlap_coef': float32 (num_entries,) — |A&B| / min(|A|, |B|)
+    """
+    query = _ensure_uint32_contiguous(query)
+    codebook = _ensure_uint32_contiguous(codebook)
+
+    def _popcount_axis1(arr):
+        """Popcount each row of a uint32 array."""
+        total = np.zeros(arr.shape[0], dtype=np.int32)
+        for shift in range(32):
+            total += ((arr >> np.uint32(shift)) & np.uint32(1)).astype(np.int32).sum(axis=1)
+        return total
+
+    and_bits = np.bitwise_and(codebook, query[np.newaxis, :])
+    or_bits = np.bitwise_or(codebook, query[np.newaxis, :])
+
+    count_and = _popcount_axis1(and_bits).astype(np.float32)
+    count_or = _popcount_axis1(or_bits).astype(np.float32)
+
+    # Query popcount (same for all entries)
+    q_pop = 0
+    for shift in range(32):
+        q_pop += int(np.sum((query >> np.uint32(shift)) & np.uint32(1)))
+    count_a = np.full(codebook.shape[0], q_pop, dtype=np.float32)
+
+    # Per-entry popcount
+    count_b = _popcount_axis1(codebook).astype(np.float32)
+
+    overlap = count_and / float(dim)
+    jaccard = np.where(count_or > 0, count_and / count_or, 0.0).astype(np.float32)
+    min_ab = np.minimum(count_a, count_b)
+    overlap_coef = np.where(min_ab > 0, count_and / min_ab, 0.0).astype(np.float32)
+
+    return {
+        'overlap': overlap,
+        'jaccard': jaccard,
+        'overlap_coef': overlap_coef,
+    }
+
+
+def hamming_topk(query, cache, dim, k=10):
+    """Return the K nearest entries by Hamming distance from a packed binary cache.
+
+    GPU shader: hamming-topk.glsl (bitCount + subgroupAdd, all distances written).
+    CPU fallback: numpy popcount + argpartition.
+
+    Args:
+        query: uint32 numpy array of shape (words_per_vec,).
+        cache: uint32 numpy array of shape (num_entries, words_per_vec).
+        dim:   int, original hypervector dimension.
+        k:     int, number of nearest entries to return.
+
+    Returns:
+        Dict with keys:
+          'indices':    int32 (k,) — indices of the k nearest entries.
+          'distances':  int32 (k,) — Hamming distances (ascending).
+          'similarities': float32 (k,) — 1 - distance/dim (descending).
+    """
+    query = _ensure_uint32_contiguous(query)
+    cache = _ensure_uint32_contiguous(cache)
+    n = cache.shape[0]
+    k = min(k, n)
+
+    # Compute all Hamming distances
+    xored = np.bitwise_xor(cache, query[np.newaxis, :])
+    distances = np.zeros(n, dtype=np.int32)
+    for shift in range(32):
+        distances += ((xored >> np.uint32(shift)) & np.uint32(1)).astype(np.int32).sum(axis=1)
+
+    # Top-k via argpartition (O(n) average, no full sort)
+    if k < n:
+        topk_idx = np.argpartition(distances, k)[:k]
+    else:
+        topk_idx = np.arange(n)
+
+    # Sort the top-k by distance
+    sorted_order = np.argsort(distances[topk_idx])
+    topk_idx = topk_idx[sorted_order]
+    topk_dist = distances[topk_idx]
+
+    return {
+        'indices': topk_idx.astype(np.int32),
+        'distances': topk_dist.astype(np.int32),
+        'similarities': (1.0 - topk_dist.astype(np.float32) / float(dim)),
+    }
+
+
+def moqe_dynamic_quantize(activations, block_size=32):
+    """Dynamic block-wise symmetric quantization: FP32 → INT8.
+
+    GPU shader: moqe-dynamic-quant.glsl (subgroupMax for absmax).
+    CPU fallback: numpy block-wise quantization.
+
+    Args:
+        activations: float32 numpy array of shape (dim,) or (batch, dim).
+        block_size:  int, quantization block size (default 32).
+
+    Returns:
+        Dict with keys:
+          'quantized': int8 array, same shape as activations.
+          'scales':    float32 array of shape (num_blocks,) — one scale per block.
+    """
+    activations = np.asarray(activations, dtype=np.float32)
+    flat = activations.ravel()
+    n = len(flat)
+
+    # Pad to multiple of block_size
+    pad = (block_size - n % block_size) % block_size
+    if pad > 0:
+        flat = np.concatenate([flat, np.zeros(pad, dtype=np.float32)])
+
+    blocks = flat.reshape(-1, block_size)
+    absmax = np.max(np.abs(blocks), axis=1)
+    absmax = np.where(absmax < 1e-7, 1e-7, absmax)
+    scales = absmax / 127.0
+
+    quantized = np.clip(
+        np.round(blocks / scales[:, np.newaxis]),
+        -127, 127,
+    ).astype(np.int8)
+
+    # Remove padding
+    quantized = quantized.ravel()[:n].reshape(activations.shape)
+    num_blocks = (n + block_size - 1) // block_size
+    scales = scales[:num_blocks]
+
+    return {'quantized': quantized, 'scales': scales.astype(np.float32)}
+
+
+def moqe_fused_gemv(activations, weights_int8, weight_scales, block_size=32):
+    """Fused dynamic quantization + GEMV (no VRAM round-trip for activations).
+
+    GPU shader: moqe-fused-gemv.glsl (register-level quant + integer dot + subgroupAdd).
+    CPU fallback: quantize activations, integer matmul, scale.
+
+    Args:
+        activations:   float32 (dim,) — input activation vector.
+        weights_int8:  int8 (out_dim, dim) — pre-quantized weight matrix.
+        weight_scales: float32 (out_dim, num_blocks) — per-block weight scales.
+        block_size:    int, quantization block size.
+
+    Returns:
+        float32 (out_dim,) — output vector.
+    """
+    activations = np.asarray(activations, dtype=np.float32)
+    dim = len(activations)
+    out_dim = weights_int8.shape[0]
+
+    # Quantize activations (in a real GPU kernel this stays in registers)
+    q = moqe_dynamic_quantize(activations, block_size)
+    q_act = q['quantized'].astype(np.int32)
+    a_scales = q['scales']
+
+    # Block-wise integer dot product
+    num_blocks = len(a_scales)
+    output = np.zeros(out_dim, dtype=np.float32)
+
+    for b in range(num_blocks):
+        start = b * block_size
+        end = min(start + block_size, dim)
+        act_block = q_act[start:end]
+
+        for row in range(out_dim):
+            w_block = weights_int8[row, start:end].astype(np.int32)
+            idot = int(np.dot(act_block, w_block))
+            output[row] += float(idot) * a_scales[b] * weight_scales[row, b]
+
+    return output.astype(np.float32)
+
+
+def moqe_route_and_gemv(activations, choice, expert_weights, expert_scales, block_size=32):
+    """MoQE: route to expert, then fused GEMV.
+
+    GPU shader: moqe-fused-gemv-dp4a.glsl (hard routing + DP4a).
+    CPU fallback: pick expert, then moqe_fused_gemv.
+
+    Args:
+        activations:    float32 (dim,) — input activation vector.
+        choice:         int — expert index (0 or 1).
+        expert_weights: list of int8 (out_dim, dim) — one per expert.
+        expert_scales:  list of float32 (out_dim, num_blocks) — one per expert.
+        block_size:     int, quantization block size.
+
+    Returns:
+        float32 (out_dim,) — output vector from the chosen expert.
+    """
+    return moqe_fused_gemv(
+        activations,
+        expert_weights[choice],
+        expert_scales[choice],
+        block_size,
+    )
 
 
 def q_similarity(queries):

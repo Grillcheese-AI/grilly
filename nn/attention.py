@@ -821,3 +821,149 @@ class SympFormerBlock(Module):
             f"SympFormerBlock(attention={self.attention!r}, embed_dim={self.embed_dim}, "
             f"h_x={float(self.h_x[0]):.3f}, h_y={float(self.h_y[0]):.3f})"
         )
+
+
+class HyperAttention(Module):
+    """
+    Causal HyperAttention — O(L) Complexity with Temporal Consistency.
+    
+    Uses original index tracking to apply causal masking after LSH sorting.
+    """
+
+    def __init__(
+        self, 
+        embed_dim: int, 
+        num_heads: int, 
+        bucket_size: int = 256, 
+        sample_size: int = 128,
+        num_projections: int = 32
+    ):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.bucket_size = bucket_size
+        self.sample_size = sample_size
+        self.num_projections = num_projections
+        self.scale = self.head_dim ** -0.5
+
+        from .linear import Linear
+        self.q_proj = Linear(embed_dim, embed_dim)
+        self.k_proj = Linear(embed_dim, embed_dim)
+        self.v_proj = Linear(embed_dim, embed_dim)
+        self.out_proj = Linear(embed_dim, embed_dim)
+
+        self._modules.update({
+            "q_proj": self.q_proj, "k_proj": self.k_proj,
+            "v_proj": self.v_proj, "out_proj": self.out_proj
+        })
+
+        self.rng = np.random.default_rng(42)
+        # Random projections for SimHash
+        self.projections = self.rng.standard_normal((self.head_dim, num_projections))
+
+    def _hash_vectors(self, x: np.ndarray) -> np.ndarray:
+        projections = (x @ self.projections) > 0
+        powers = 2 ** np.arange(self.num_projections)
+        return np.sum(projections * powers, axis=-1)
+
+    def forward(
+        self, query: np.ndarray, key: np.ndarray, value: np.ndarray, causal: bool = True
+    ) -> tuple[np.ndarray, np.ndarray]:
+        q = self.q_proj(query)
+        k = self.k_proj(key)
+        v = self.v_proj(value)
+
+        batch_size, seq_len, _ = q.shape
+        q = q.reshape(batch_size, seq_len, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        k = k.reshape(batch_size, seq_len, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        v = v.reshape(batch_size, seq_len, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+
+        # Track original temporal indices: (seq_len,)
+        orig_indices = np.arange(seq_len)
+
+        # 1. Hashing and Sorting
+        q_hashes = self._hash_vectors(q)
+        k_hashes = self._hash_vectors(k)
+        
+        q_idx = np.argsort(q_hashes, axis=-1)
+        k_idx = np.argsort(k_hashes, axis=-1)
+        
+        # Sort data AND their original indices
+        q_sorted = np.take_along_axis(q, q_idx[..., None], axis=-2)
+        k_sorted = np.take_along_axis(k, k_idx[..., None], axis=-2)
+        v_sorted = np.take_along_axis(v, k_idx[..., None], axis=-2)
+        
+        # Original positions after sorting: (batch, heads, seq)
+        q_orig_pos = np.take_along_axis(np.broadcast_to(orig_indices, q_idx.shape), q_idx, axis=-1)
+        k_orig_pos = np.take_along_axis(np.broadcast_to(orig_indices, k_idx.shape), k_idx, axis=-1)
+
+        # 2. Bucket Attention with Causal Masking
+        num_buckets = seq_len // self.bucket_size
+        L_trunc = num_buckets * self.bucket_size
+        
+        # Reshape into buckets
+        q_b = q_sorted[..., :L_trunc, :].reshape(-1, self.bucket_size, self.head_dim)
+        k_b = k_sorted[..., :L_trunc, :].reshape(-1, self.bucket_size, self.head_dim)
+        v_b = v_sorted[..., :L_trunc, :].reshape(-1, self.bucket_size, self.head_dim)
+        
+        # Reshape original indices to build the mask: (TotalBuckets, bucket_size)
+        q_pos_b = q_orig_pos[..., :L_trunc].reshape(-1, self.bucket_size)
+        k_pos_b = k_orig_pos[..., :L_trunc].reshape(-1, self.bucket_size)
+
+        # Compute scores: (TotalBuckets, bucket_size, bucket_size)
+        scores_b = (q_b @ k_b.transpose(0, 2, 1)) * self.scale
+        
+        if causal:
+            # Mask: True where Query index >= Key index
+            causal_mask_b = q_pos_b[:, :, None] >= k_pos_b[:, None, :]
+            scores_b = np.where(causal_mask_b, scores_b, -1e9)
+
+        # Softmax + LSE
+        m_b = np.max(scores_b, axis=-1, keepdims=True)
+        exp_s_b = np.exp(scores_b - m_b)
+        sum_exp_b = np.sum(exp_s_b, axis=-1, keepdims=True) + 1e-6
+        lse_b = np.log(sum_exp_b) + m_b
+        
+        attn_local = (exp_s_b / sum_exp_b) @ v_b
+        attn_local = attn_local.reshape(batch_size, self.num_heads, L_trunc, self.head_dim)
+        lse_local = lse_b.reshape(batch_size, self.num_heads, L_trunc, 1)
+
+        # 3. Global Sampling with Causal Masking
+        sample_indices = self.rng.choice(seq_len, self.sample_size, replace=False)
+        k_samp = k[..., sample_indices, :]
+        v_samp = v[..., sample_indices, :]
+        
+        # scores: (batch, heads, L_trunc, sample_size)
+        scores_s = (q_sorted[..., :L_trunc, :] @ k_samp.transpose(0, 1, 3, 2)) * self.scale
+        
+        if causal:
+            # Compare sorted Query original indices vs random Key original indices
+            # q_orig_pos: (batch, heads, L_trunc)
+            # sample_indices: (sample_size,)
+            causal_mask_s = q_orig_pos[..., :L_trunc, None] >= sample_indices[None, None, None, :]
+            scores_s = np.where(causal_mask_s, scores_s, -1e9)
+
+        m_s = np.max(scores_s, axis=-1, keepdims=True)
+        exp_s_s = np.exp(scores_s - m_s)
+        sum_exp_s = np.sum(exp_s_s, axis=-1, keepdims=True) + 1e-6
+        lse_samp = np.log(sum_exp_s) + m_s
+        
+        attn_samp = (exp_s_s / sum_exp_s) @ v_samp
+
+        # 4. Numerically Stable Merge (LSE Merge)
+        max_lse = np.maximum(lse_local, lse_samp)
+        w_l = np.exp(lse_local - max_lse)
+        w_s = np.exp(lse_samp - max_lse)
+        
+        attn_merged = (attn_local * w_l + attn_samp * w_s) / (w_l + w_s)
+
+        # 5. Un-sort
+        inv_q_idx = np.argsort(q_idx[..., :L_trunc], axis=-1)
+        output = np.take_along_axis(attn_merged, inv_q_idx[..., None], axis=-2)
+        
+        output = output.transpose(0, 2, 1, 3).reshape(batch_size, L_trunc, self.embed_dim)
+        return self.out_proj(output), q_hashes
+
+    def __repr__(self):
+        return f"CausalHyperAttention(dim={self.embed_dim}, heads={self.num_heads})"

@@ -1,128 +1,73 @@
 #version 450
+#extension GL_KHR_shader_subgroup_arithmetic : require
 
-/*
- * Fused LayerNorm + Linear Shader
- *
- * Combines layer normalization and linear transformation.
- * Common pattern in pre-norm transformers: Linear(LayerNorm(x))
- *
- * Multi-pass operation:
- * - Pass 0: Compute mean across feature dimension
- * - Pass 1: Compute variance
- * - Pass 2: Normalize and apply linear transformation (fused)
- */
+// Fused LayerNorm + Linear projection.
+//
+// normalize in registers -> project directly -> write output.
+// Saves one full VRAM round-trip per transformer layer.
+//
+// Dispatch: workgroups_x = seq_len
 
-layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(constant_id = 0) const uint D_IN = 768;
+layout(constant_id = 1) const uint D_OUT = 768;
 
-// Input tensor (batch * seq, features)
-layout(set = 0, binding = 0) readonly buffer Input {
-    float input_data[];
-};
+layout(local_size_x = 256) in;
 
-// Gamma (scale) parameters for LayerNorm (features)
-layout(set = 0, binding = 1) readonly buffer Gamma {
-    float gamma[];
-};
+layout(std430, set = 0, binding = 0) readonly buffer Input     { float input_data[]; };
+layout(std430, set = 0, binding = 1) readonly buffer LNWeight  { float ln_weight[]; };
+layout(std430, set = 0, binding = 2) readonly buffer LNBias    { float ln_bias[]; };
+layout(std430, set = 0, binding = 3) readonly buffer ProjW     { float proj_w[]; };
+layout(std430, set = 0, binding = 4) readonly buffer ProjB     { float proj_b[]; };
+layout(std430, set = 0, binding = 5) writeonly buffer Output   { float output_data[]; };
 
-// Beta (shift) parameters for LayerNorm (features)
-layout(set = 0, binding = 2) readonly buffer Beta {
-    float beta[];
-};
-
-// Linear weight matrix (output_dim, features)
-layout(set = 0, binding = 3) readonly buffer Weights {
-    float W[];
-};
-
-// Linear bias vector (output_dim)
-layout(set = 0, binding = 4) readonly buffer Bias {
-    float b[];
-};
-
-// Output (batch * seq, output_dim)
-layout(set = 0, binding = 5) buffer Output {
-    float output_data[];
-};
-
-// Mean buffer (batch * seq)
-layout(set = 0, binding = 6) buffer MeanBuffer {
-    float mean_vals[];
-};
-
-// Variance buffer (batch * seq)
-layout(set = 0, binding = 7) buffer VarianceBuffer {
-    float var_vals[];
-};
-
-// Parameters
-layout(push_constant) uniform PushConsts {
-    uint batch_seq;       // batch_size * seq_len
-    uint input_dim;       // features (for LayerNorm)
-    uint output_dim;      // output dimension (for Linear)
-    float eps;            // LayerNorm epsilon
-    uint pass_type;       // 0 = mean, 1 = variance, 2 = normalize + linear
-    uint has_bias;        // 1 if linear bias exists
-};
+shared float shared_normed[768];
+shared float shared_sum;
+shared float shared_sq_sum;
 
 void main() {
-    if (pass_type == 0) {
-        // Pass 1: Compute mean along feature dimension
-        uint pos = gl_GlobalInvocationID.x;
-        if (pos >= batch_seq) return;
+    uint token_idx = gl_WorkGroupID.x;
+    uint tid = gl_LocalInvocationID.x;
+    uint input_offset = token_idx * D_IN;
+    uint output_offset = token_idx * D_OUT;
 
-        float sum = 0.0;
-        for (uint f = 0; f < input_dim; f++) {
-            sum += input_data[pos * input_dim + f];
+    // Init shared atomics
+    if (tid == 0u) { shared_sum = 0.0; shared_sq_sum = 0.0; }
+    barrier();
+
+    // Mean
+    float local_sum = 0.0;
+    for (uint i = tid; i < D_IN; i += gl_WorkGroupSize.x) {
+        local_sum += input_data[input_offset + i];
+    }
+    float sg_sum = subgroupAdd(local_sum);
+    if (subgroupElect()) { atomicAdd(shared_sum, sg_sum); }
+    barrier();
+    float mean = shared_sum / float(D_IN);
+
+    // Variance
+    float local_sq = 0.0;
+    for (uint i = tid; i < D_IN; i += gl_WorkGroupSize.x) {
+        float diff = input_data[input_offset + i] - mean;
+        local_sq += diff * diff;
+    }
+    float sg_sq = subgroupAdd(local_sq);
+    if (subgroupElect()) { atomicAdd(shared_sq_sum, sg_sq); }
+    barrier();
+    float inv_std = inversesqrt(shared_sq_sum / float(D_IN) + 1e-6);
+
+    // Normalize + affine -> shared memory (no VRAM write)
+    for (uint i = tid; i < D_IN; i += gl_WorkGroupSize.x) {
+        float normed = (input_data[input_offset + i] - mean) * inv_std;
+        shared_normed[i] = normed * ln_weight[i] + ln_bias[i];
+    }
+    barrier();
+
+    // Linear projection from shared memory
+    for (uint o = tid; o < D_OUT; o += gl_WorkGroupSize.x) {
+        float acc = proj_b[o];
+        for (uint i = 0u; i < D_IN; i++) {
+            acc += proj_w[o * D_IN + i] * shared_normed[i];
         }
-        mean_vals[pos] = sum / float(input_dim);
-
-    } else if (pass_type == 1) {
-        // Pass 2: Compute variance
-        uint pos = gl_GlobalInvocationID.x;
-        if (pos >= batch_seq) return;
-
-        float mean = mean_vals[pos];
-        float sum_sq = 0.0;
-        for (uint f = 0; f < input_dim; f++) {
-            float diff = input_data[pos * input_dim + f] - mean;
-            sum_sq += diff * diff;
-        }
-        var_vals[pos] = sum_sq / float(input_dim);
-
-    } else if (pass_type == 2) {
-        // Pass 3: Fused Normalize + Linear
-        // Each thread computes one output element
-        uint row = gl_GlobalInvocationID.y;  // Sample index
-        uint col = gl_GlobalInvocationID.x;  // Output feature index
-
-        if (row >= batch_seq || col >= output_dim) {
-            return;
-        }
-
-        // Get mean and std for this position
-        float mean = mean_vals[row];
-        float variance = var_vals[row];
-        float inv_std = 1.0 / sqrt(variance + eps);
-
-        // Compute: output = Linear(LayerNorm(x))
-        // = sum_k[ W[col][k] * (gamma[k] * (x[k] - mean) / std + beta[k]) ]
-        float sum = 0.0;
-
-        for (uint k = 0; k < input_dim; k++) {
-            // Normalize input
-            float x = input_data[row * input_dim + k];
-            float normalized = (x - mean) * inv_std;
-            float ln_out = gamma[k] * normalized + beta[k];
-
-            // Apply linear weight
-            sum += W[col * input_dim + k] * ln_out;
-        }
-
-        // Add linear bias if present
-        if (has_bias == 1) {
-            sum += b[col];
-        }
-
-        output_data[row * output_dim + col] = sum;
+        output_data[output_offset + o] = acc;
     }
 }

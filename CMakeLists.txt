@@ -195,6 +195,8 @@ add_library(grilly_core_lib STATIC
     # ── Ops ──
     cpp/src/ops/linear.cpp
     cpp/src/ops/activations.cpp
+    cpp/src/ops/fused.cpp
+    cpp/src/ops/batched_ops.cpp
     cpp/src/ops/layernorm.cpp
     cpp/src/ops/rmsnorm.cpp
     cpp/src/ops/attention.cpp
@@ -276,6 +278,7 @@ pybind11_add_module(grilly_core
     cpp/python/bindings_snn.cpp
     cpp/python/bindings_pooling.cpp
     cpp/python/bindings_misc.cpp
+    cpp/python/bindings_siglip.cpp
 )
 target_link_libraries(grilly_core PRIVATE grilly_core_lib)
 
