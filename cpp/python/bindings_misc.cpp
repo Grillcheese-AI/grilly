@@ -545,11 +545,14 @@ void register_misc_ops(py::module_& m) {
                 std::vector<uint32_t> cachePacked(
                     size_t(numEntries) * wordsPerVec);
 
-                // Bitpack all entries directly into contiguous buffer
+                // Bitpack all entries — copy directly into contiguous buffer
                 for (uint32_t i = 0; i < numEntries; ++i) {
-                    grilly::cubemind::vsaBitpack(
-                        cPtr + i * dim, dim,
-                        cachePacked.data() + size_t(i) * wordsPerVec);
+                    auto packed = grilly::cubemind::vsaBitpack(
+                        cPtr + i * dim, dim);
+                    std::memcpy(
+                        cachePacked.data() + size_t(i) * wordsPerVec,
+                        packed.data.data(),
+                        wordsPerVec * sizeof(uint32_t));
                 }
 
                 grilly::cubemind::hammingSearch(

@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -42,10 +43,18 @@ struct GrillyCoreContext {
     grilly::BufferPool pool;
     grilly::PipelineCache cache;
     grilly::CommandBatch batch;
+    std::mutex ctx_mutex;  // Protects Vulkan command recording (not thread-safe)
     bool shadersLoaded = false;
 
     GrillyCoreContext()
         : device(), pool(device), cache(device), batch(device) {}
+
+    /// Wait for all submitted GPU work to complete.
+    /// Call between inference steps to prevent race conditions on
+    /// descriptor sets and buffer overwrites.
+    void waitIdle() {
+        vkQueueWaitIdle(device.computeQueue());
+    }
 
     /// Load all .spv shaders from a directory into the pipeline cache.
     void loadShaders(const std::string& shaderDir) {
@@ -121,3 +130,6 @@ void register_loss_ops(py::module_& m);
 void register_snn_ops(py::module_& m);
 void register_pooling_ops(py::module_& m);
 void register_misc_ops(py::module_& m);
+void register_perceiver_ops(py::module_& m);
+void register_moqe_train_ops(py::module_& m);
+void register_fusion_ops(py::module_& m);

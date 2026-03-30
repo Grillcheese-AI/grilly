@@ -56,11 +56,18 @@ void register_linear_ops(py::module_& m) {
             py::array_t<float> result(outShape);
             auto rBuf = result.request();
 
-            grilly::ops::linear(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(xBuf.ptr),
-                static_cast<const float*>(wBuf.ptr), biasPtr,
-                static_cast<float*>(rBuf.ptr), p);
+            // Extract raw pointers before GIL release
+            const float* xPtr = static_cast<const float*>(xBuf.ptr);
+            const float* wPtr = static_cast<const float*>(wBuf.ptr);
+            float* oPtr = static_cast<float*>(rBuf.ptr);
+
+            {
+                // Release GIL during GPU GEMM dispatch
+                py::gil_scoped_release release;
+                grilly::ops::linear(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    xPtr, wPtr, biasPtr, oPtr, p);
+            }
 
             if (xBuf.ndim == 1)
                 result = result.reshape({static_cast<py::ssize_t>(outputDim)});

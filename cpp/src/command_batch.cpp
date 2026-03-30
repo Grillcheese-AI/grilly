@@ -121,6 +121,17 @@ void CommandBatch::barrier() {
                          0, nullptr);      // image memory barriers
 }
 
+void CommandBatch::copyBuffer(const GrillyBuffer& src, GrillyBuffer& dst, size_t bytes) {
+    if (!recording_)
+        throw std::runtime_error("CommandBatch::copyBuffer() called without begin()");
+
+    VkBufferCopy region{};
+    region.srcOffset = 0;
+    region.dstOffset = 0;
+    region.size = bytes;
+    vkCmdCopyBuffer(cmd_, src.handle, dst.handle, 1, &region);
+}
+
 // ── Submission ──────────────────────────────────────────────────────────────
 
 void CommandBatch::submit() {
