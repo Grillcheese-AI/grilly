@@ -194,25 +194,30 @@ void batchedTiledLinear(CommandBatch& batch, PipelineCache& cache,
                         const GrillyBuffer* bias, GrillyBuffer& output,
                         uint32_t M, uint32_t K, uint32_t N) {
 
-    PipelineEntry pipe = cache.getOrCreate("gemm-tiled", 4, 16);
+    // Push constants now include padded dimensions (28 bytes)
+    PipelineEntry pipe = cache.getOrCreate("gemm-tiled", 4, 28);
 
-    size_t inputBytes  = size_t(M) * K * sizeof(float);
-    size_t weightBytes = size_t(N) * K * sizeof(float);
-    size_t biasBytes   = bias ? size_t(N) * sizeof(float) : sizeof(float);
-    size_t outputBytes = size_t(M) * N * sizeof(float);
-
+    // Use buffer.size for descriptor (buffers may be padded larger than M×K)
     std::vector<VkDescriptorBufferInfo> bufs = {
-        {input.handle,  0, inputBytes},
-        {weight.handle, 0, weightBytes},
-        {bias ? bias->handle : input.handle, 0, biasBytes},
-        {output.handle, 0, outputBytes},
+        {input.handle,  0, input.size},
+        {weight.handle, 0, weight.size},
+        {bias ? bias->handle : input.handle, 0, bias ? bias->size : sizeof(float)},
+        {output.handle, 0, output.size},
     };
     VkDescriptorSet desc = cache.allocDescriptorSet("gemm-tiled", bufs);
 
-    struct { uint32_t M, K, N, has_bias; } push = {M, K, N, bias ? 1u : 0u};
+    // Padded dimensions: round up to next multiple of 32
+    uint32_t M_pad = (M + 31) & ~31u;
+    uint32_t K_pad = (K + 31) & ~31u;
+    uint32_t N_pad = (N + 31) & ~31u;
 
-    uint32_t gx = (N + 31) / 32;
-    uint32_t gy = (M + 31) / 32;
+    struct {
+        uint32_t M, K, N, has_bias;
+        uint32_t M_padded, K_padded, N_padded;
+    } push = {M, K, N, bias ? 1u : 0u, M_pad, K_pad, N_pad};
+
+    uint32_t gx = N_pad / 32;
+    uint32_t gy = M_pad / 32;
 
     batch.dispatch(pipe.pipeline, pipe.layout, desc, gx, gy, 1,
                    &push, sizeof(push));

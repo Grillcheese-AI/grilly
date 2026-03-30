@@ -109,11 +109,16 @@ void register_siglip_ops(py::module_& m) {
             wc.post_ln_b = uploadPersistent(ctx.pool, weights[idx++].cast<py::array_t<float>>());
 
             // Pre-allocate persistent working buffers
-            size_t seqBytes = size_t(seqLen) * hidden * sizeof(float);
+            // Pad to 32 multiples for tiled GEMM
+            uint32_t S_pad = (seqLen + 31) & ~31u;
+            uint32_t H_pad = (hidden + 31) & ~31u;
+            uint32_t H3_pad = (hidden * 3 + 31) & ~31u;
+            uint32_t M_pad = (mlpDim + 31) & ~31u;
+            size_t seqBytes = size_t(S_pad) * H_pad * sizeof(float);
             wc.bufX    = ctx.pool.acquire(seqBytes);
-            wc.bufQKV  = ctx.pool.acquire(seqLen * hidden * 3 * sizeof(float));
+            wc.bufQKV  = ctx.pool.acquire(size_t(S_pad) * H3_pad * sizeof(float));
             wc.bufAttn = ctx.pool.acquire(seqBytes);
-            wc.bufMLP1 = ctx.pool.acquire(size_t(seqLen) * mlpDim * sizeof(float));
+            wc.bufMLP1 = ctx.pool.acquire(size_t(S_pad) * M_pad * sizeof(float));
             wc.bufMLP2 = ctx.pool.acquire(seqBytes);
             wc.workBufsAllocated = true;
 
