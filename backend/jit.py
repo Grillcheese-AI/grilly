@@ -83,6 +83,10 @@ class Tracer:
         self._tensor_map: dict[int, int] = {}  # id(array) -> trace_id
         self._shapes: dict[int, tuple] = {}
         self._input_ids: list[int] = []
+        # Fix #1: Keep all traced objects alive so their id()s can't be reused
+        # by Python's GC during tracing. Without this, freed intermediate tensors
+        # can get the same id() as new ones → corrupted graph wiring.
+        self._keepalive: list = []
 
     def __enter__(self):
         if Tracer._active is not None:
@@ -112,6 +116,10 @@ class Tracer:
 
     def record_op(self, op_name: str, inputs: list, output, **kwargs) -> int:
         """Record an operation and return the output's trace ID."""
+        # Keep references alive to prevent id() reuse
+        self._keepalive.append(output)
+        self._keepalive.extend(inp for inp in inputs if not isinstance(inp, (int, float)))
+
         input_ids = []
         for inp in inputs:
             arr_id = id(inp) if not isinstance(inp, (int, float)) else None
@@ -212,50 +220,70 @@ def jit(fn=None, *, warmup=1):
 
 
 class _JitWrapper:
-    """Wrapper that traces on first call and replays on subsequent calls."""
+    """Wrapper that traces on first call and replays on subsequent calls.
+
+    Fix #3: LRU cache of traced graphs keyed by (shapes, scalar_kwargs).
+    Prevents retrace thrashing when batch/sequence sizes alternate.
+
+    Fix #4: Scalar kwargs are hashed alongside shapes so temperature/scale
+    changes trigger a new trace instead of silently replaying stale values.
+    """
+
+    _MAX_CACHED_GRAPHS = 8  # LRU eviction after this many shape variants
 
     def __init__(self, fn, warmup: int = 1):
         self._fn = fn
         self._warmup = warmup
-        self._call_count = 0
-        self._graph: TracedGraph | None = None
-        self._input_shapes: tuple | None = None
+        self._graphs: dict[tuple, TracedGraph] = {}  # cache_key → graph
+        self._warmup_counts: dict[tuple, int] = {}
         functools.update_wrapper(self, fn)
 
-    def __call__(self, *args, **kwargs):
-        self._call_count += 1
-
-        # Check if input shapes changed (need retrace)
-        current_shapes = tuple(
-            a.shape for a in args if hasattr(a, "shape")
+    def _cache_key(self, args, kwargs) -> tuple:
+        """Build a hashable key from tensor shapes + scalar kwargs."""
+        shapes = tuple(a.shape for a in args if hasattr(a, "shape"))
+        scalars = tuple(
+            (k, v) for k, v in sorted(kwargs.items())
+            if isinstance(v, (int, float, bool, str))
         )
-        if self._input_shapes is not None and current_shapes != self._input_shapes:
-            logger.info("Input shapes changed (%s -> %s), retracing",
-                       self._input_shapes, current_shapes)
-            self._graph = None
-            self._call_count = 1
+        return shapes + scalars
 
-        self._input_shapes = current_shapes
+    def __call__(self, *args, **kwargs):
+        key = self._cache_key(args, kwargs)
 
-        if self._call_count <= self._warmup or self._graph is None:
-            # Trace phase — execute normally
-            result = self._fn(*args, **kwargs)
-            if self._call_count == self._warmup:
-                # Capture the graph on the last warmup call
-                self._graph = trace(self._fn, args)
-                logger.info("JIT compiled: %d ops captured", self._graph.num_ops)
-            return result
+        # Check if we have a compiled graph for this shape+kwargs combo
+        if key in self._graphs:
+            # Replay (for now, execute normally — C++ OpGraph replay TBD)
+            return self._fn(*args, **kwargs)
 
-        # Replay phase — use the traced graph
-        # For now, just execute normally (graph replay via OpGraph TBD)
-        # The graph is captured and ready for C++ OpGraph integration
-        return self._fn(*args, **kwargs)
+        # Warmup phase
+        count = self._warmup_counts.get(key, 0) + 1
+        self._warmup_counts[key] = count
+
+        result = self._fn(*args, **kwargs)
+
+        if count >= self._warmup:
+            # Trace and cache
+            graph = trace(self._fn, args)
+            self._graphs[key] = graph
+            logger.info("JIT compiled: %d ops captured (key=%s)", graph.num_ops, key[:2])
+
+            # LRU eviction
+            if len(self._graphs) > self._MAX_CACHED_GRAPHS:
+                oldest_key = next(iter(self._graphs))
+                del self._graphs[oldest_key]
+                logger.info("JIT evicted oldest graph (cache size=%d)", len(self._graphs))
+
+        return result
 
     @property
     def graph(self) -> TracedGraph | None:
-        return self._graph
+        """Return the most recently compiled graph (if any)."""
+        if self._graphs:
+            return next(reversed(self._graphs.values()))
+        return None
 
     def __repr__(self):
-        status = "compiled" if self._graph else f"warmup ({self._call_count}/{self._warmup})"
-        ops = self._graph.num_ops if self._graph else 0
+        n = len(self._graphs)
+        status = f"compiled ({n} graphs)" if n > 0 else "warmup"
+        ops = sum(g.num_ops for g in self._graphs.values())
         return f"JitWrapper({self._fn.__name__}, {status}, {ops} ops)"
