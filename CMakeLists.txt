@@ -213,6 +213,8 @@ add_library(grilly_core_lib STATIC
     cpp/src/ops/learning.cpp
     cpp/src/ops/perceiver.cpp
     cpp/src/ops/perceiver_encoder.cpp
+    cpp/src/ops/moqe_train.cpp
+    cpp/src/shader_fusion.cpp
     # ── Experimental ──
     cpp/src/experimental/paged_latent_pool.cpp
     cpp/src/experimental/fused_attention.cpp
@@ -249,12 +251,26 @@ target_include_directories(grilly_core_lib PUBLIC
     "${VMA_INCLUDE_DIR}"
 )
 
+# Find shaderc for JIT shader fusion (ships with Vulkan SDK)
+find_library(SHADERC_LIB shaderc_combined
+    HINTS "$ENV{VULKAN_SDK}/Lib" "$ENV{VULKAN_SDK}/lib")
+if(SHADERC_LIB)
+    message(STATUS "Found shaderc: ${SHADERC_LIB}")
+else()
+    message(WARNING "shaderc not found — JIT shader fusion disabled")
+endif()
+
 target_link_libraries(grilly_core_lib PUBLIC
     Vulkan::Vulkan
     Eigen3::Eigen
     blake3
     pybind11::pybind11    # NN framework classes use py::array_t, py::dict
 )
+if(SHADERC_LIB)
+    target_link_libraries(grilly_core_lib PUBLIC ${SHADERC_LIB})
+    target_include_directories(grilly_core_lib PUBLIC "$ENV{VULKAN_SDK}/Include")
+    target_compile_definitions(grilly_core_lib PUBLIC GRILLY_HAS_SHADERC=1)
+endif()
 
 # VMA implementation compiled in device.cpp
 # Platform-specific flags
@@ -282,6 +298,8 @@ pybind11_add_module(grilly_core
     cpp/python/bindings_misc.cpp
     cpp/python/bindings_siglip.cpp
     cpp/python/bindings_perceiver.cpp
+    cpp/python/bindings_moqe_train.cpp
+    cpp/python/bindings_fusion.cpp
 )
 target_link_libraries(grilly_core PRIVATE grilly_core_lib)
 
