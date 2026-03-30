@@ -35,6 +35,11 @@ struct SigLIPWeightCache {
     GrillyBuffer post_ln_w, post_ln_b;
     uint32_t numLayers = 0, seqLen = 0, hidden = 0;
     uint32_t numHeads = 0, headDim = 0, mlpDim = 0;
+
+    // Persistent working buffers — allocated ONCE, reused every encode.
+    // Same buffer handles → descriptor set cache hits → zero Vulkan overhead.
+    GrillyBuffer bufX, bufQKV, bufAttn, bufMLP1, bufMLP2;
+    bool workBufsAllocated = false;
 };
 
 static std::unordered_map<int, SigLIPWeightCache> g_caches;
@@ -103,6 +108,15 @@ void register_siglip_ops(py::module_& m) {
             wc.post_ln_w = uploadPersistent(ctx.pool, weights[idx++].cast<py::array_t<float>>());
             wc.post_ln_b = uploadPersistent(ctx.pool, weights[idx++].cast<py::array_t<float>>());
 
+            // Pre-allocate persistent working buffers
+            size_t seqBytes = size_t(seqLen) * hidden * sizeof(float);
+            wc.bufX    = ctx.pool.acquire(seqBytes);
+            wc.bufQKV  = ctx.pool.acquire(seqLen * hidden * 3 * sizeof(float));
+            wc.bufAttn = ctx.pool.acquire(seqBytes);
+            wc.bufMLP1 = ctx.pool.acquire(size_t(seqLen) * mlpDim * sizeof(float));
+            wc.bufMLP2 = ctx.pool.acquire(seqBytes);
+            wc.workBufsAllocated = true;
+
             int handle = g_nextHandle++;
             g_caches[handle] = std::move(wc);
             return handle;
@@ -122,16 +136,16 @@ void register_siglip_ops(py::module_& m) {
             const uint32_t S = wc.seqLen;
             const uint32_t H = wc.hidden;
             const uint32_t H3 = H * 3;
-            const uint32_t M = wc.mlpDim;  // 3072
+            const uint32_t M = wc.mlpDim;
             const size_t seqBytes = size_t(S) * H * sizeof(float);
 
-            // ── Pre-allocate ALL working buffers on GPU ──
-            GrillyBuffer bufX     = ctx.pool.acquire(seqBytes);       // (S, H)
-            GrillyBuffer bufNorm  = ctx.pool.acquire(seqBytes);       // (S, H) normalized
-            GrillyBuffer bufQKV   = ctx.pool.acquire(S * H3 * 4);    // (S, 3H)
-            GrillyBuffer bufAttn  = ctx.pool.acquire(seqBytes);       // (S, H) attention out
-            GrillyBuffer bufMLP1  = ctx.pool.acquire(S * M * 4);     // (S, 4H) MLP hidden
-            GrillyBuffer bufMLP2  = ctx.pool.acquire(seqBytes);       // (S, H) MLP out
+            // Use PERSISTENT working buffers (allocated once at upload time)
+            // Same handles every call → descriptor set cache hits → zero overhead
+            auto& bufX    = const_cast<SigLIPWeightCache&>(wc).bufX;
+            auto& bufQKV  = const_cast<SigLIPWeightCache&>(wc).bufQKV;
+            auto& bufAttn = const_cast<SigLIPWeightCache&>(wc).bufAttn;
+            auto& bufMLP1 = const_cast<SigLIPWeightCache&>(wc).bufMLP1;
+            auto& bufMLP2 = const_cast<SigLIPWeightCache&>(wc).bufMLP2;
 
             // ── UPLOAD patches ONCE ──
             ctx.pool.upload(bufX, static_cast<const float*>(pBuf.ptr), seqBytes);
@@ -215,13 +229,8 @@ void register_siglip_ops(py::module_& m) {
             norm = sqrtf(norm + 1e-8f);
             for (uint32_t i = 0; i < H; ++i) emb[i] /= norm;
 
-            // ── Release working buffers ──
-            ctx.pool.release(bufX);
-            ctx.pool.release(bufNorm);
-            ctx.pool.release(bufQKV);
-            ctx.pool.release(bufAttn);
-            ctx.pool.release(bufMLP1);
-            ctx.pool.release(bufMLP2);
+            // Working buffers are PERSISTENT — not released.
+            // Same handles every call = descriptor set cache hits.
 
             py::array_t<float> out({(py::ssize_t)H});
             std::memcpy(out.mutable_data(), emb.data(), H * sizeof(float));
