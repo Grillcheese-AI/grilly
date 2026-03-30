@@ -190,3 +190,33 @@ void batchedAdd(CommandBatch& batch, PipelineCache& cache,
 
 }  // namespace ops
 }  // namespace grilly
+
+void batchedTiledLinear(CommandBatch& batch, PipelineCache& cache,
+                        const GrillyBuffer& input, const GrillyBuffer& weight,
+                        const GrillyBuffer* bias, GrillyBuffer& output,
+                        uint32_t M, uint32_t K, uint32_t N) {
+
+    PipelineEntry pipe = cache.getOrCreate("gemm-tiled", 4, 16);
+
+    size_t inputBytes  = size_t(M) * K * sizeof(float);
+    size_t weightBytes = size_t(N) * K * sizeof(float);
+    size_t biasBytes   = bias ? size_t(N) * sizeof(float) : sizeof(float);
+    size_t outputBytes = size_t(M) * N * sizeof(float);
+
+    std::vector<VkDescriptorBufferInfo> bufs = {
+        {input.handle,  0, inputBytes},
+        {weight.handle, 0, weightBytes},
+        {bias ? bias->handle : input.handle, 0, biasBytes},
+        {output.handle, 0, outputBytes},
+    };
+    VkDescriptorSet desc = cache.allocDescriptorSet("gemm-tiled", bufs);
+
+    struct { uint32_t M, K, N, has_bias; } push = {M, K, N, bias ? 1u : 0u};
+
+    // Dispatch: workgroups cover the output in 32×32 tiles
+    uint32_t gx = (N + 31) / 32;
+    uint32_t gy = (M + 31) / 32;
+
+    batch.dispatch(pipe.pipeline, pipe.layout, desc, gx, gy, 1,
+                   &push, sizeof(push));
+}

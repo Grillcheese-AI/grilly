@@ -155,7 +155,7 @@ void register_siglip_ops(py::module_& m) {
                 //    This computes: attn_out = QKV @ out_w.T + out_b
                 //    which is mathematically wrong for attention but exercises the
                 //    full batched pipeline. Replace with batchedFlashAttention2 + reshape.
-                ops::batchedLinear(ctx.batch, ctx.cache,
+                ops::batchedTiledLinear(ctx.batch, ctx.cache,
                     bufQKV, lw.out_w, &lw.out_b, bufAttn,
                     S, H3, H);
                 ctx.batch.barrier();
@@ -177,7 +177,7 @@ void register_siglip_ops(py::module_& m) {
                 ctx.batch.barrier();
 
                 // 6. MLP fc2
-                ops::batchedLinear(ctx.batch, ctx.cache,
+                ops::batchedTiledLinear(ctx.batch, ctx.cache,
                     bufMLP1, lw.mlp_w2, &lw.mlp_b2, bufMLP2,
                     S, M, H);
                 ctx.batch.barrier();

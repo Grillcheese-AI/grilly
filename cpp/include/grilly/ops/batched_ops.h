@@ -60,5 +60,13 @@ void batchedAdd(CommandBatch& batch, PipelineCache& cache,
                 GrillyBuffer& a, const GrillyBuffer& b,
                 uint32_t totalElements);
 
+/// Tiled GEMM: C[M,N] = A[M,K] @ B[N,K]^T + bias[N]
+/// Uses 32x32 shared memory tiles, 2x2 per-thread sub-tiles.
+void batchedTiledLinear(CommandBatch& batch, PipelineCache& cache,
+                        const GrillyBuffer& input, const GrillyBuffer& weight,
+                        const GrillyBuffer* bias, GrillyBuffer& output,
+                        uint32_t M, uint32_t K, uint32_t N);
 }  // namespace ops
 }  // namespace grilly
+
+// Append before closing namespace
