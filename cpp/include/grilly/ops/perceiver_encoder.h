@@ -57,6 +57,12 @@ struct PerceiverCache {
     GrillyBuffer selfOut;       // (N, D)
     GrillyBuffer inputBuf;      // (M, D)
 
+    // IndexCache: pre-projected K/V per layer (computed once per encode)
+    // Eliminates 2 * nLayers GEMM dispatches from the main loop by
+    // batching all K_cross and V_cross projections upfront.
+    std::vector<GrillyBuffer> allCrossK;  // [nLayers] × (M, D)
+    std::vector<GrillyBuffer> allCrossV;  // [nLayers] × (M, D)
+
     uint32_t maxPatches = 0;
 };
 
