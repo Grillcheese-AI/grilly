@@ -420,5 +420,6 @@ PYBIND11_MODULE(grilly_core, m) {
     register_loss_ops(m);
     register_snn_ops(m);
     register_pooling_ops(m);
+    register_siglip_ops(m);
     register_misc_ops(m);
 }
