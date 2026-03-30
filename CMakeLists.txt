@@ -212,6 +212,7 @@ add_library(grilly_core_lib STATIC
     cpp/src/ops/embedding.cpp
     cpp/src/ops/learning.cpp
     cpp/src/ops/perceiver.cpp
+    cpp/src/ops/perceiver_encoder.cpp
     # ── Experimental ──
     cpp/src/experimental/paged_latent_pool.cpp
     cpp/src/experimental/fused_attention.cpp

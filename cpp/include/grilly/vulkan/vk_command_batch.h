@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "grilly/vulkan/vk_device.h"
+#include "grilly/vulkan/vk_buffer_pool.h"
 
 namespace grilly {
 
@@ -26,6 +27,11 @@ public:
                   const void* pushData = nullptr, uint32_t pushSize = 0);
 
     void barrier();
+
+    /// GPU-to-GPU buffer copy (no CPU involvement).
+    /// Must be called between begin() and submit().
+    void copyBuffer(const GrillyBuffer& src, GrillyBuffer& dst, size_t bytes);
+
     void submit();
     void submitAsync(VkSemaphore timeline, uint64_t signalValue);
 
