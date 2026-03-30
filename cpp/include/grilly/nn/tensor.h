@@ -53,6 +53,39 @@ ComputeBackend* default_backend();
 /// Set a custom default backend (e.g., for testing).
 void set_default_backend(ComputeBackend* backend);
 
+/// Reference-counted backing storage for CPU+GPU data.
+///
+/// Shared between reshape()/view() tensors — O(1) reshape with no memcpy.
+/// Destructor releases GPU buffer automatically (no leaks).
+struct TensorStorage {
+    std::vector<float> cpu_data;
+    uint64_t buffer_handle = 0;
+    bool cpu_valid = true;
+    bool gpu_valid = false;
+    ComputeBackend* backend = nullptr;
+    DType dtype = DType::Float32;
+
+    TensorStorage() = default;
+
+    /// Releases GPU buffer on destruction (ref-counted via shared_ptr).
+    ~TensorStorage() {
+        if (buffer_handle != 0 && backend) {
+            // Ensure CPU has a copy if GPU was the only valid source
+            // (though at destruction this is likely unused — defensive)
+            try {
+                backend->destroyBuffer(buffer_handle);
+            } catch (...) {
+                // Vulkan teardown can throw during process exit
+            }
+            buffer_handle = 0;
+        }
+    }
+
+    // Non-copyable (always shared via shared_ptr)
+    TensorStorage(const TensorStorage&) = delete;
+    TensorStorage& operator=(const TensorStorage&) = delete;
+};
+
 class Tensor {
 public:
     Tensor() = default;
@@ -109,7 +142,7 @@ public:
     const std::vector<int64_t>& shape() const { return shape_; }
     int64_t shape(int dim) const;
     size_t ndim() const { return shape_.size(); }
-    DType dtype() const { return dtype_; }
+    DType dtype() const { return storage_ ? storage_->dtype : DType::Float32; }
 
     /// Total number of elements.
     int64_t numel() const;
@@ -117,10 +150,10 @@ public:
     /// Total size in bytes.
     size_t nbytes() const;
 
-    /// Reshape (no data copy, shares underlying storage).
+    /// Reshape — O(1), shares underlying TensorStorage via shared_ptr.
     Tensor reshape(std::vector<int64_t> new_shape) const;
 
-    /// View (alias for reshape, no data copy).
+    /// View (alias for reshape, shares storage).
     Tensor view(std::vector<int64_t> new_shape) const;
 
     // -- GPU lifecycle --
@@ -132,13 +165,13 @@ public:
     void release_gpu();
 
     /// Check if tensor has a valid GPU buffer.
-    bool on_gpu() const { return gpu_valid_; }
+    bool on_gpu() const { return storage_ && storage_->gpu_valid; }
 
     /// Check if tensor has valid CPU data.
-    bool on_cpu() const { return cpu_valid_; }
+    bool on_cpu() const { return storage_ && storage_->cpu_valid; }
 
     /// Whether this tensor has any data at all.
-    bool valid() const { return cpu_valid_ || gpu_valid_; }
+    bool valid() const { return storage_ && (storage_->cpu_valid || storage_->gpu_valid); }
 
     // -- Autograd --
 
@@ -150,23 +183,20 @@ public:
 
     // -- Backend --
 
-    ComputeBackend* backend() const { return backend_; }
-    void set_backend(ComputeBackend* b) { backend_ = b; }
+    ComputeBackend* backend() const { return storage_ ? storage_->backend : nullptr; }
+    void set_backend(ComputeBackend* b) { ensure_storage(); storage_->backend = b; }
+
+    /// Number of tensors sharing the same underlying storage.
+    long use_count() const { return storage_ ? storage_.use_count() : 0; }
 
 private:
     void ensure_cpu() const;
+    void ensure_storage();
 
-    ComputeBackend* backend_ = nullptr;  // Non-owning
-    uint64_t buffer_handle_ = 0;         // GPU buffer (0 = CPU-only)
+    std::shared_ptr<TensorStorage> storage_;
     std::vector<int64_t> shape_;
-    DType dtype_ = DType::Float32;
 
-    // Lazy sync state
-    mutable std::vector<float> cpu_data_;
-    mutable bool gpu_valid_ = false;
-    mutable bool cpu_valid_ = true;
-
-    // Autograd
+    // Autograd (per-tensor, not per-storage)
     bool requires_grad_ = false;
     std::shared_ptr<Tensor> grad_;
 };

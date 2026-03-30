@@ -130,3 +130,4 @@ void register_loss_ops(py::module_& m);
 void register_snn_ops(py::module_& m);
 void register_pooling_ops(py::module_& m);
 void register_misc_ops(py::module_& m);
+void register_perceiver_ops(py::module_& m);

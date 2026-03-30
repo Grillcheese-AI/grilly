@@ -211,6 +211,7 @@ add_library(grilly_core_lib STATIC
     cpp/src/ops/optimizer.cpp
     cpp/src/ops/embedding.cpp
     cpp/src/ops/learning.cpp
+    cpp/src/ops/perceiver.cpp
     # ── Experimental ──
     cpp/src/experimental/paged_latent_pool.cpp
     cpp/src/experimental/fused_attention.cpp
@@ -279,6 +280,7 @@ pybind11_add_module(grilly_core
     cpp/python/bindings_pooling.cpp
     cpp/python/bindings_misc.cpp
     cpp/python/bindings_siglip.cpp
+    cpp/python/bindings_perceiver.cpp
 )
 target_link_libraries(grilly_core PRIVATE grilly_core_lib)
 
