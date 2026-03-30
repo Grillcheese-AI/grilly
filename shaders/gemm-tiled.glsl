@@ -1,124 +1,112 @@
 #version 450
 
-// Tiled GEMM: C[M,N] = A[M,K] @ B[N,K]^T + bias[N]
+// Optimized Tiled GEMM: C[M,N] = A[M,K] @ B[N,K]^T + bias[N]
 //
-// Uses shared memory (LDS) tiling for data reuse:
-//   - Each workgroup computes a TILE_M × TILE_N block of the output
-//   - Tiles of A and B are loaded cooperatively into shared memory
-//   - Each thread accumulates TILE_M/WG_Y × TILE_N/WG_X output elements
+// RDNA 2 optimizations applied:
+//   1. Bank conflict padding: shared[TILE][TILE+1] — eliminates 32-bank conflicts
+//   2. 4×4 per-thread sub-tile: 16 FMAs per K step, high ALU utilization
+//   3. 64 threads/workgroup = 1 Wave64 (perfect RDNA 2 occupancy)
+//   4. Prefetch from LDS into registers before compute
+//   5. Coalesced global loads: sequential threads read sequential memory
 //
-// For SigLIP2 fixed shapes:
-//   QKV:  M=1024, K=768, N=2304  (the biggest matmul)
-//   fc1:  M=1024, K=768, N=3072
-//   fc2:  M=1024, K=3072, N=768
-//   out:  M=1024, K=768, N=768
-//
-// Tuned for RDNA 2 (RX 6750 XT):
-//   - TILE = 32×32, local_size = 16×16
-//   - Each thread computes a 2×2 sub-tile
-//   - 256 threads per workgroup = 4 Wave64s = good occupancy
-//   - Shared memory: 2 × 32 × 32 × 4 bytes = 8KB (fits in 64KB LDS)
+// Shared memory: 2 × 32 × 33 × 4 bytes = 8.4KB (fits in 64KB LDS)
+// Compute: 32 K-steps × 16 FMAs = 512 FMAs per thread per tile
 
 #define TILE 32
-#define THREAD_TILE 2  // Each thread computes 2×2 output elements
+#define TT 4  // Thread tile: each thread computes 4×4 outputs
 
-layout(local_size_x = 16, local_size_y = 16) in;
+layout(local_size_x = 8, local_size_y = 8) in;
 
 layout(std430, set = 0, binding = 0) readonly buffer InputBuf  { float A[]; };
-layout(std430, set = 0, binding = 1) readonly buffer WeightBuf { float B[]; }; // B[N,K] row-major
+layout(std430, set = 0, binding = 1) readonly buffer WeightBuf { float B[]; };
 layout(std430, set = 0, binding = 2) readonly buffer BiasBuf   { float bias[]; };
 layout(std430, set = 0, binding = 3) writeonly buffer OutputBuf { float C[]; };
 
 layout(push_constant) uniform Params {
-    uint M;         // rows of A (seq_len)
-    uint K;         // cols of A = cols of B (input_dim)
-    uint N;         // rows of B = output_dim
-    uint has_bias;
+    uint M, K, N, has_bias;
 };
 
-shared float tileA[TILE][TILE];   // Shared memory tile for A
-shared float tileB[TILE][TILE];   // Shared memory tile for B^T
+// +1 padding eliminates bank conflicts on RDNA 2 (32 banks)
+shared float tileA[TILE][TILE + 1];
+shared float tileB[TILE][TILE + 1];
 
 void main() {
-    // Which output tile this workgroup computes
     uint tileRow = gl_WorkGroupID.y * TILE;
     uint tileCol = gl_WorkGroupID.x * TILE;
+    uint lx = gl_LocalInvocationID.x;  // 0..7
+    uint ly = gl_LocalInvocationID.y;  // 0..7
+    uint lid = ly * 8 + lx;            // 0..63
 
-    // Thread position within the workgroup
-    uint lx = gl_LocalInvocationID.x;  // 0..15
-    uint ly = gl_LocalInvocationID.y;  // 0..15
+    // Accumulators for 4×4 output sub-tile
+    float acc[TT][TT];
+    for (int i = 0; i < TT; ++i)
+        for (int j = 0; j < TT; ++j)
+            acc[i][j] = 0.0;
 
-    // Each thread accumulates a 2×2 sub-tile of the output
-    float acc00 = 0.0, acc01 = 0.0;
-    float acc10 = 0.0, acc11 = 0.0;
-
-    // Number of tiles along the K dimension
     uint numTilesK = (K + TILE - 1) / TILE;
 
     for (uint tk = 0; tk < numTilesK; ++tk) {
-        uint kOffset = tk * TILE;
+        uint kOff = tk * TILE;
 
-        // Cooperatively load tile of A[tileRow..+TILE, kOffset..+TILE]
-        // 256 threads load 32×32 = 1024 elements → 4 elements per thread
-        for (uint i = 0; i < TILE * TILE; i += 256) {
-            uint idx = i + ly * 16 + lx;
-            if (idx < TILE * TILE) {
-                uint r = idx / TILE;
-                uint c = idx % TILE;
-                uint globalR = tileRow + r;
-                uint globalC = kOffset + c;
-                tileA[r][c] = (globalR < M && globalC < K) ? A[globalR * K + globalC] : 0.0;
-            }
-        }
+        // ── Cooperative tile load: 64 threads load 32×32 = 1024 elements ──
+        // Each thread loads 16 elements (unrolled for compiler vectorization)
+        for (uint i = lid; i < TILE * TILE; i += 64) {
+            uint r = i >> 5;  // i / 32
+            uint c = i & 31;  // i % 32
 
-        // Load tile of B^T: B is stored as B[N,K], we need B^T[K,N]
-        // So tileB[k][n] = B[tileCol + n][kOffset + k]
-        for (uint i = 0; i < TILE * TILE; i += 256) {
-            uint idx = i + ly * 16 + lx;
-            if (idx < TILE * TILE) {
-                uint r = idx / TILE;  // k index
-                uint c = idx % TILE;  // n index
-                uint globalK = kOffset + r;
-                uint globalN = tileCol + c;
-                tileB[r][c] = (globalK < K && globalN < N) ? B[globalN * K + globalK] : 0.0;
-            }
+            // Load A[tileRow+r, kOff+c] — coalesced (sequential c)
+            uint gR = tileRow + r;
+            uint gC = kOff + c;
+            tileA[r][c] = (gR < M && gC < K) ? A[gR * K + gC] : 0.0;
+
+            // Load B^T[kOff+r, tileCol+c] = B[tileCol+c, kOff+r] — transposed
+            uint gK = kOff + r;
+            uint gN = tileCol + c;
+            tileB[r][c] = (gK < K && gN < N) ? B[gN * K + gK] : 0.0;
         }
 
         barrier();
 
-        // Compute: each thread does a 2×2 sub-tile
-        uint subRow0 = ly * 2;
-        uint subCol0 = lx * 2;
+        // ── Compute 4×4 outer product per thread ──
+        uint subRow = ly * TT;  // 0, 4, 8, 12, 16, 20, 24, 28
+        uint subCol = lx * TT;
 
         for (uint k = 0; k < TILE; ++k) {
-            float a0 = tileA[subRow0][k];
-            float a1 = tileA[subRow0 + 1][k];
-            float b0 = tileB[k][subCol0];
-            float b1 = tileB[k][subCol0 + 1];
+            // Prefetch from LDS into registers (padded → no bank conflicts)
+            float a0 = tileA[subRow    ][k];
+            float a1 = tileA[subRow + 1][k];
+            float a2 = tileA[subRow + 2][k];
+            float a3 = tileA[subRow + 3][k];
 
-            acc00 += a0 * b0;
-            acc01 += a0 * b1;
-            acc10 += a1 * b0;
-            acc11 += a1 * b1;
+            float b0 = tileB[k][subCol    ];
+            float b1 = tileB[k][subCol + 1];
+            float b2 = tileB[k][subCol + 2];
+            float b3 = tileB[k][subCol + 3];
+
+            // 16 FMAs — compiler should schedule these to fill VALU pipelines
+            acc[0][0] += a0 * b0;  acc[0][1] += a0 * b1;
+            acc[0][2] += a0 * b2;  acc[0][3] += a0 * b3;
+            acc[1][0] += a1 * b0;  acc[1][1] += a1 * b1;
+            acc[1][2] += a1 * b2;  acc[1][3] += a1 * b3;
+            acc[2][0] += a2 * b0;  acc[2][1] += a2 * b1;
+            acc[2][2] += a2 * b2;  acc[2][3] += a2 * b3;
+            acc[3][0] += a3 * b0;  acc[3][1] += a3 * b1;
+            acc[3][2] += a3 * b2;  acc[3][3] += a3 * b3;
         }
 
         barrier();
     }
 
-    // Write results with bias
-    uint r0 = tileRow + ly * 2;
-    uint c0 = tileCol + lx * 2;
-
-    if (r0 < M && c0 < N) {
-        C[r0 * N + c0] = acc00 + (has_bias != 0 ? bias[c0] : 0.0);
-    }
-    if (r0 < M && c0 + 1 < N) {
-        C[r0 * N + c0 + 1] = acc01 + (has_bias != 0 ? bias[c0 + 1] : 0.0);
-    }
-    if (r0 + 1 < M && c0 < N) {
-        C[(r0 + 1) * N + c0] = acc10 + (has_bias != 0 ? bias[c0] : 0.0);
-    }
-    if (r0 + 1 < M && c0 + 1 < N) {
-        C[(r0 + 1) * N + c0 + 1] = acc11 + (has_bias != 0 ? bias[c0 + 1] : 0.0);
+    // ── Write 4×4 results with bias ──
+    for (int i = 0; i < TT; ++i) {
+        uint r = tileRow + ly * TT + i;
+        if (r >= M) continue;
+        for (int j = 0; j < TT; ++j) {
+            uint c = tileCol + lx * TT + j;
+            if (c >= N) continue;
+            float val = acc[i][j];
+            if (has_bias != 0) val += bias[c];
+            C[r * N + c] = val;
+        }
     }
 }
