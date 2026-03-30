@@ -19,9 +19,7 @@ void register_activations_ops(py::module_& m) {
             [fn](GrillyCoreContext& ctx,
                  py::array_t<float> input) -> Tensor {
                 auto inBuf = input.request();
-                uint32_t total = 1;
-                for (int i = 0; i < inBuf.ndim; ++i)
-                    total *= static_cast<uint32_t>(inBuf.shape[i]);
+                uint32_t total = static_cast<uint32_t>(inBuf.size);
 
                 py::array_t<float> result(input.request().shape);
                 auto rBuf = result.request();

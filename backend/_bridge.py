@@ -13,9 +13,12 @@ bridge functions with a try/fallback pattern:
     # else fall through to legacy backend
 """
 
+import logging
 import os
 
 import numpy as np
+
+logger = logging.getLogger("grilly.bridge")
 
 
 def _maybe_trace(op_name, inputs, output, **kwargs):
@@ -71,12 +74,17 @@ def is_available():
 
 
 def _extract_cpp_tensor(obj):
-    """Extract the C++ grilly_core.Tensor from a VulkanTensor. Returns None otherwise."""
+    """Extract the C++ grilly_core.Tensor from a VulkanTensor. Returns None otherwise.
+
+    Fix #4: Duck typing with try/except — avoids hasattr+isinstance+_NATIVE
+    check overhead on every call (measurable at hundreds of calls per forward).
+    """
     if obj is None:
         return None
-    if hasattr(obj, '_t') and _NATIVE and isinstance(obj._t, _core.Tensor):
+    try:
         return obj._t
-    return None
+    except AttributeError:
+        return None
 
 
 def _ensure_f32_contiguous(arr):
@@ -123,7 +131,8 @@ def linear(x, weight, bias=None):
         result = _core.linear(dev, x, weight, bias)
         _maybe_trace("linear", [x, weight, bias], result)
         return result
-    except Exception:
+    except Exception as e:
+        logger.debug("linear GPU failed (%s), caller will use CPU fallback", e)
         return None
 
 
@@ -137,7 +146,10 @@ def relu(x):
         return None
     try:
         return _core.relu(dev, _ensure_f32_contiguous(x))
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -180,7 +192,10 @@ def gelu(x):
         return None
     try:
         return _core.gelu(dev, x)
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -191,7 +206,10 @@ def silu(x):
         return None
     try:
         return _core.silu(dev, _ensure_f32_contiguous(x))
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -202,7 +220,10 @@ def tanh(x):
         return None
     try:
         return _core.tanh_act(dev, _ensure_f32_contiguous(x))
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -218,7 +239,10 @@ def relu_backward(grad_output, input):
         return _core.relu_backward(
             dev, _ensure_f32_contiguous(grad_output), _ensure_f32_contiguous(input)
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -231,7 +255,10 @@ def gelu_backward(grad_output, input):
         return _core.gelu_backward(
             dev, _ensure_f32_contiguous(grad_output), _ensure_f32_contiguous(input)
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -244,7 +271,10 @@ def silu_backward(grad_output, input):
         return _core.silu_backward(
             dev, _ensure_f32_contiguous(grad_output), _ensure_f32_contiguous(input)
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -281,7 +311,10 @@ def lif_step(
             r_mem,
             t_refrac_period,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -313,7 +346,10 @@ def snn_node_forward(
             reset_mode,
             decay_input,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -331,7 +367,10 @@ def snn_node_backward(grad_spike, h_cache, alpha=2.0, surrogate_type=0, v_thresh
             surrogate_type,
             v_threshold,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -353,7 +392,10 @@ def hebbian_learning(
             learning_rate,
             weight_decay,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -387,7 +429,10 @@ def stdp_learning(
             lr_dep,
             trace_decay,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -419,7 +464,10 @@ def oja_learning(memories, inputs, num_vectors, dim, eta=0.01):
             dim,
             eta,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -432,7 +480,10 @@ def synapse_filter(x_in, y_state, decay=0.95):
         return _core.synapse_filter(
             dev, _ensure_f32_contiguous(x_in), _ensure_f32_contiguous(y_state), decay
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -486,7 +537,10 @@ def gif_neuron_step(
             gate_strength,
             t_refrac_period,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -505,7 +559,10 @@ def conv2d(x, weight, bias=None, stride=(1, 1), padding=(0, 0), dilation=(1, 1),
         return _core.conv2d(
             dev, x, weight, bias, list(stride), list(padding), list(dilation), groups
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -524,7 +581,10 @@ def conv2d_3x3_gelu(x, weight, bias):
             _ensure_f32_contiguous(weight),
             _ensure_f32_contiguous(bias),
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -535,7 +595,10 @@ def maxpool2x2(x):
         return None
     try:
         return _core.maxpool2x2(dev, _ensure_f32_contiguous(x))
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -546,7 +609,10 @@ def adaptive_avgpool_3x3(x):
         return None
     try:
         return _core.adaptive_avgpool_3x3(dev, _ensure_f32_contiguous(x))
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -563,7 +629,10 @@ def layernorm(x, gamma, beta, eps=1e-5):
         gamma = _ensure_f32_contiguous(gamma)
         beta = _ensure_f32_contiguous(beta)
         return _core.layernorm(dev, x, gamma, beta, eps)
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -582,7 +651,10 @@ def layernorm_backward(grad_output, input, gamma, mean, var, eps=1e-5):
             _ensure_f32_contiguous(var),
             eps,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -598,7 +670,10 @@ def rmsnorm(x, weight, eps=1e-5):
         x = _ensure_f32_contiguous(x)
         weight = _ensure_f32_contiguous(weight)
         return _core.rmsnorm(dev, x, weight, eps)
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -614,7 +689,10 @@ def tanh_backward(grad_output, tanh_output):
         return _core.tanh_backward(
             dev, _ensure_f32_contiguous(grad_output), _ensure_f32_contiguous(tanh_output)
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -625,7 +703,10 @@ def softmax(x, dim=-1):
         return None
     try:
         return _core.softmax(dev, _ensure_f32_contiguous(x), dim)
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -638,7 +719,10 @@ def softmax_backward(grad_output, softmax_output):
         return _core.softmax_backward(
             dev, _ensure_f32_contiguous(grad_output), _ensure_f32_contiguous(softmax_output)
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -657,7 +741,10 @@ def linear_backward(grad_output, input, weights):
             _ensure_f32_contiguous(input),
             _ensure_f32_contiguous(weights),
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -670,7 +757,10 @@ def dropout(x, random_mask, p=0.5, training=True):
         return _core.dropout(
             dev, _ensure_f32_contiguous(x), _ensure_f32_contiguous(random_mask), p, training
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -695,7 +785,10 @@ def conv2d_backward_input(
             list(dilation),
             groups,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -725,7 +818,10 @@ def conv2d_backward_weight(
             groups,
             has_bias,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -741,7 +837,10 @@ def attention_scores(Q, K, scale=0.0):
         return _core.attention_scores(
             dev, _ensure_f32_contiguous(Q), _ensure_f32_contiguous(K), scale
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -753,7 +852,10 @@ def attention_mask(scores, mask=None, causal=True, mask_value=-1e9):
     try:
         m = _ensure_f32_contiguous(mask) if mask is not None else None
         return _core.attention_mask(dev, _ensure_f32_contiguous(scores), m, causal, mask_value)
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -766,7 +868,10 @@ def attention_output(weights, V):
         return _core.attention_output(
             dev, _ensure_f32_contiguous(weights), _ensure_f32_contiguous(V)
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -777,7 +882,10 @@ def attention_concat_heads(mh_output):
         return None
     try:
         return _core.attention_concat_heads(dev, _ensure_f32_contiguous(mh_output))
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -790,7 +898,10 @@ def rope(x, cos_table=None, sin_table=None, base=10000.0, scaling=1.0):
         ct = _ensure_f32_contiguous(cos_table) if cos_table is not None else None
         st = _ensure_f32_contiguous(sin_table) if sin_table is not None else None
         return _core.rope(dev, _ensure_f32_contiguous(x), ct, st, base, scaling)
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -806,7 +917,10 @@ def flash_attention2(Q, K, V, mask=None, scale=0.0, tile_size_q=64, tile_size_k=
         V = _ensure_f32_contiguous(V)
         m = _ensure_f32_contiguous(mask) if mask is not None else None
         return _core.flash_attention2(dev, Q, K, V, m, scale, tile_size_q, tile_size_k)
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -921,7 +1035,10 @@ def maxpool2d(x, kernel_size, stride=(2, 2), padding=(0, 0), dilation=(1, 1)):
             list(padding),
             list(dilation),
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -939,7 +1056,10 @@ def avgpool2d(x, kernel_size, stride=(2, 2), padding=(0, 0), count_include_pad=T
             list(padding),
             count_include_pad,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -950,7 +1070,10 @@ def mean_pool(x):
         return None
     try:
         return _core.mean_pool(dev, _ensure_f32_contiguous(x))
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -976,7 +1099,10 @@ def batchnorm2d_forward(
             momentum,
             training,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -995,7 +1121,10 @@ def cross_entropy_loss(logits, targets, label_smoothing=0.0):
         return _core.cross_entropy_loss(
             dev, _ensure_f32_contiguous(logits), targets, label_smoothing
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -1009,7 +1138,10 @@ def cross_entropy_backward(logits, targets):
         if targets.dtype != np.uint32:
             targets = targets.astype(np.uint32)
         return _core.cross_entropy_backward(dev, _ensure_f32_contiguous(logits), targets)
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -1048,7 +1180,10 @@ def adam_update(
             beta2_t,
             clear_grad,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -1086,7 +1221,10 @@ def adamw_update(
             beta2_t,
             clear_grad,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -1103,7 +1241,10 @@ def embedding_lookup(token_ids, embeddings):
         if token_ids.dtype != np.uint32:
             token_ids = token_ids.astype(np.uint32)
         return _core.embedding_lookup(dev, token_ids, _ensure_f32_contiguous(embeddings))
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -1146,7 +1287,10 @@ def create_kv_cache(
             use_speculative_eviction,
             eviction_threshold,
         )
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -1160,7 +1304,10 @@ def kv_cache_append(kv_cache, new_keys, new_values):
         new_values = _ensure_f32_contiguous(new_values)
         _core.kv_cache_append(dev, kv_cache, new_keys, new_values)
         return True
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -1171,7 +1318,10 @@ def kv_cache_decode(kv_cache):
         return None
     try:
         return _core.kv_cache_decode(dev, kv_cache)
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
@@ -1184,7 +1334,10 @@ def kv_cache_evict_h2o(kv_cache, attention_scores=None, num_evict=0):
         scores = _ensure_f32_contiguous(attention_scores) if attention_scores is not None else None
         _core.kv_cache_evict_h2o(dev, kv_cache, scores, num_evict)
         return True
-    except Exception:
+    except Exception as e:
+
+        logger.debug("GPU op failed: %s", e)
+
         return None
 
 
