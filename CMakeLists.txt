@@ -195,6 +195,7 @@ add_library(grilly_core_lib STATIC
     # ── Ops ──
     cpp/src/ops/linear.cpp
     cpp/src/ops/activations.cpp
+    cpp/src/ops/fused.cpp
     cpp/src/ops/layernorm.cpp
     cpp/src/ops/rmsnorm.cpp
     cpp/src/ops/attention.cpp
