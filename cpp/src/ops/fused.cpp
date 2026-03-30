@@ -41,9 +41,10 @@ void fusedMlpGelu(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     pool.upload(bufW2, w2, w2Bytes);
     pool.upload(bufB2, b2, b2Bytes);
 
-    // Specialization constants: D_IN, D_HIDDEN, D_OUT
-    uint32_t specData[3] = {dIn, dHidden, dOut};
-    PipelineEntry pipe = cache.getOrCreate("fused-mlp-gelu", 6, 0, specData, 3);
+    // Note: specialization constants (D_IN, D_HIDDEN, D_OUT) are baked into
+    // the SPIR-V at compile time with defaults matching SigLIP2 (768, 3072, 768).
+    // For different dimensions, recompile the shader with new constants.
+    PipelineEntry pipe = cache.getOrCreate("fused-mlp-gelu", 6, 0);
 
     std::vector<VkDescriptorBufferInfo> bufInfos = {
         {bufInput.handle,  0, inputBytes},
@@ -102,8 +103,8 @@ void fusedLayernormLinear(CommandBatch& batch, BufferPool& pool, PipelineCache& 
     pool.upload(bufProjW, projW, projWBytes);
     pool.upload(bufProjB, projB, projBBytes);
 
-    uint32_t specData[2] = {dIn, dOut};
-    PipelineEntry pipe = cache.getOrCreate("fused-layernorm-linear", 6, 0, specData, 2);
+    // Specialization constants baked at compile time (defaults: 768, 768).
+    PipelineEntry pipe = cache.getOrCreate("fused-layernorm-linear", 6, 0);
 
     std::vector<VkDescriptorBufferInfo> bufInfos = {
         {bufInput.handle,  0, inputBytes},

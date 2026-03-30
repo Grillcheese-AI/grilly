@@ -93,7 +93,7 @@ void register_activations_ops(py::module_& m) {
             uint32_t dHidden = static_cast<uint32_t>(w1Buf.shape[0]);
             uint32_t dOut    = static_cast<uint32_t>(w2Buf.shape[0]);
 
-            std::vector<ssize_t> outShape = {seqLen, dOut};
+            std::vector<py::ssize_t> outShape = {seqLen, dOut};
             py::array_t<float> result(outShape);
             auto rBuf = result.request();
 
@@ -129,7 +129,7 @@ void register_activations_ops(py::module_& m) {
             uint32_t dIn    = static_cast<uint32_t>(inBuf.shape[1]);
             uint32_t dOut   = static_cast<uint32_t>(pWBuf.shape[0]);
 
-            std::vector<ssize_t> outShape = {seqLen, dOut};
+            std::vector<py::ssize_t> outShape = {seqLen, dOut};
             py::array_t<float> result(outShape);
             auto rBuf = result.request();
 
