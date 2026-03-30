@@ -526,30 +526,42 @@ void register_misc_ops(py::module_& m) {
             } else {
                 numEntries = static_cast<uint32_t>(cBuf.size) / dim;
             }
-            auto queryPacked = grilly::cubemind::vsaBitpack(
-                static_cast<const int8_t*>(qBuf.ptr), dim);
-            uint32_t wordsPerVec = queryPacked.numWords();
-            std::vector<uint32_t> cachePacked(
-                size_t(numEntries) * wordsPerVec);
-            for (uint32_t i = 0; i < numEntries; ++i) {
-                auto packed = grilly::cubemind::vsaBitpack(
-                    static_cast<const int8_t*>(cBuf.ptr) + i * dim,
-                    dim);
-                std::memcpy(
-                    cachePacked.data() + size_t(i) * wordsPerVec,
-                    packed.data.data(),
-                    wordsPerVec * sizeof(uint32_t));
-            }
+
+            // Extract raw pointers before releasing GIL
+            const int8_t* qPtr = static_cast<const int8_t*>(qBuf.ptr);
+            const int8_t* cPtr = static_cast<const int8_t*>(cBuf.ptr);
+
             py::array_t<uint32_t> result(numEntries);
-            grilly::cubemind::hammingSearch(
-                ctx.batch, ctx.pool, ctx.cache,
-                queryPacked.data.data(), cachePacked.data(),
-                static_cast<uint32_t*>(result.request().ptr),
-                numEntries, wordsPerVec);
+            uint32_t* resultPtr = static_cast<uint32_t*>(result.request().ptr);
+
+            // Release GIL during heavy compute
+            {
+                py::gil_scoped_release release;
+
+                auto queryPacked = grilly::cubemind::vsaBitpack(qPtr, dim);
+                uint32_t wordsPerVec = queryPacked.numWords();
+
+                // Pre-allocate ONE output buffer (not N separate vectors)
+                std::vector<uint32_t> cachePacked(
+                    size_t(numEntries) * wordsPerVec);
+
+                // Bitpack all entries directly into contiguous buffer
+                for (uint32_t i = 0; i < numEntries; ++i) {
+                    grilly::cubemind::vsaBitpack(
+                        cPtr + i * dim, dim,
+                        cachePacked.data() + size_t(i) * wordsPerVec);
+                }
+
+                grilly::cubemind::hammingSearch(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    queryPacked.data.data(), cachePacked.data(),
+                    resultPtr, numEntries, wordsPerVec);
+            }
+
             return result;
         },
         py::arg("device"), py::arg("query"), py::arg("cache"),
-        "GPU Hamming search: distances from query to all entries");
+        "GPU Hamming search: distances from query to all entries (GIL released)");
 
     m.def("hamming_search_cpu",
         [](py::array_t<int8_t> query,
