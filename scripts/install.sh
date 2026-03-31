@@ -55,6 +55,18 @@ if [ "$PLATFORM" = "linux" ]; then
             libwayland-dev libxrandr-dev libxcb-randr0-dev \
             libxcb-ewmh-dev libx11-xcb-dev liblz4-dev libzstd-dev \
             wayland-protocols xz-utils 2>/dev/null
+
+        # Vulkan runtime + ICD (needed for GPU access on Colab / headless servers)
+        sudo apt-get install -y -qq libvulkan1 libvulkan-dev vulkan-tools 2>/dev/null
+
+        # Colab/cloud: install NVIDIA Vulkan ICD if NVIDIA GPU detected
+        if [ -d /proc/driver/nvidia ] || command -v nvidia-smi &>/dev/null; then
+            info "NVIDIA GPU detected — installing Vulkan ICD driver..."
+            sudo apt-get install -y -qq nvidia-driver-550 2>/dev/null || \
+            sudo apt-get install -y -qq nvidia-drivers-550 2>/dev/null || \
+                warn "Could not install nvidia-driver-550 — Vulkan may not see GPU"
+        fi
+
         ok "System deps installed (apt)"
     else
         warn "No apt-get found — assuming deps are installed"
