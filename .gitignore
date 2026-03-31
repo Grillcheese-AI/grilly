@@ -199,3 +199,5 @@ docs/seer.md
 docs/symp_former.md
 /build2
 /third_party
+third_party/BLAKE3
+third_party/VulkanMemoryAllocator
