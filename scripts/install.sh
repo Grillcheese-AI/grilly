@@ -13,7 +13,9 @@
 
 set -euo pipefail
 
-VULKAN_SDK_VERSION="1.4.341.1"
+VULKAN_SDK_VERSION_14="1.4.341.1"
+VULKAN_SDK_VERSION_13="1.3.296.0"
+VULKAN_SDK_VERSION="$VULKAN_SDK_VERSION_14"
 GRILLY_DIR="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd || echo "$(pwd)")"
 BUILD_DIR="${GRILLY_DIR}/build"
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
@@ -23,7 +25,15 @@ FAST_MODE=false
 for arg in "$@"; do
     case "$arg" in
         --fast|-f) FAST_MODE=true ;;
-        --help|-h) echo "Usage: $0 [--fast]"; echo "  --fast  Only build shaderc + loader (5 min vs 30 min)"; exit 0 ;;
+        --colab) FAST_MODE=true; VULKAN_SDK_VERSION="$VULKAN_SDK_VERSION_13" ;;
+        --vulkan-13|--v13) VULKAN_SDK_VERSION="$VULKAN_SDK_VERSION_13" ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo "  --fast    Only build shaderc + loader (~5 min vs ~30 min)"
+            echo "  --colab   Colab mode: Vulkan 1.3 + fast build + NVIDIA ICD"
+            echo "  --v13     Use Vulkan SDK 1.3 (for older drivers)"
+            exit 0
+            ;;
     esac
 done
 
@@ -97,8 +107,13 @@ install_vulkan_linux() {
     info "Downloading Vulkan SDK ${VULKAN_SDK_VERSION}..."
     local TMP_DIR=$(mktemp -d)
     local TAR="vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.xz"
+    # Try xz first, fall back to gz for older SDK versions
     wget -q "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/${TAR}" \
-        -O "${TMP_DIR}/${TAR}" || fail "Failed to download Vulkan SDK"
+        -O "${TMP_DIR}/${TAR}" 2>/dev/null || {
+        TAR="vulkansdk-linux-x86_64-${VULKAN_SDK_VERSION}.tar.gz"
+        wget -q "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/${TAR}" \
+            -O "${TMP_DIR}/${TAR}" || fail "Failed to download Vulkan SDK ${VULKAN_SDK_VERSION}"
+    }
 
     info "Extracting Vulkan SDK..."
     sudo mkdir -p /opt/vulkan
