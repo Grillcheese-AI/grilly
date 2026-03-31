@@ -151,15 +151,18 @@ if [ ! -f "${GRILLY_DIR}/CMakeLists.txt" ]; then
     info "Cloning grilly..."
     GRILLY_DIR="$(pwd)/grilly"
     git clone --recurse-submodules https://github.com/Grillcheese-AI/grilly.git "$GRILLY_DIR"
-    cd "$GRILLY_DIR"
 fi
+
+# Update BUILD_DIR now that GRILLY_DIR is resolved
+BUILD_DIR="${GRILLY_DIR}/build"
+cd "$GRILLY_DIR"
+info "Source directory: $GRILLY_DIR"
 
 # ── Step 4: Build C++ extension ──────────────────────────────────────────────
 info "Building grilly C++ extension (Vulkan compute backend)..."
 mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
 
-cmake .. \
+cmake -S "$GRILLY_DIR" -B "$BUILD_DIR" \
     -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DPYTHON_EXECUTABLE="$(python3 -c 'import sys; print(sys.executable)')" \
@@ -167,7 +170,7 @@ cmake .. \
     ${VULKAN_SDK:+-DVulkan_LIBRARY="${VULKAN_SDK}/lib/libvulkan.so"} \
     2>&1 | tail -10
 
-cmake --build . --parallel "$JOBS" 2>&1 | tail -10
+cmake --build "$BUILD_DIR" --parallel "$JOBS" 2>&1 | tail -10
 
 # Find the built .so/.pyd
 BUILT_LIB=$(find "$BUILD_DIR" -name "grilly_core*.so" -o -name "grilly_core*.pyd" 2>/dev/null | head -1)
