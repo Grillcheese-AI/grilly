@@ -72,9 +72,8 @@ if [ "$PLATFORM" = "linux" ]; then
         # Colab/cloud: install NVIDIA Vulkan ICD if NVIDIA GPU detected
         if [ -d /proc/driver/nvidia ] || command -v nvidia-smi &>/dev/null; then
             info "NVIDIA GPU detected — installing Vulkan ICD driver..."
-            sudo apt-get install -y -qq nvidia-driver-550 2>/dev/null || \
-            sudo apt-get install -y -qq nvidia-drivers-550 2>/dev/null || \
-                warn "Could not install nvidia-driver-550 — Vulkan may not see GPU"
+            sudo apt-get install -y -qq nvidia-driver 2>/dev/null || \
+                warn "Could not install nvidia-driver — Vulkan may not see GPU"
         fi
 
         ok "System deps installed (apt)"
