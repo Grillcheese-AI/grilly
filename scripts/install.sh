@@ -5,6 +5,7 @@
 #   curl -sSL https://raw.githubusercontent.com/Grillcheese-AI/grilly/main/scripts/install.sh | bash
 #   # or locally:
 #   ./scripts/install.sh
+#   ./scripts/install.sh --fast    # Colab/CI: skip validation layers (~5 min vs ~30 min)
 #
 # Installs: system deps → Vulkan SDK 1.4 → builds grilly C++ → installs Python package
 # Supports: Ubuntu/Debian (incl. Colab), macOS (via MoltenVK)
@@ -16,6 +17,15 @@ VULKAN_SDK_VERSION="1.4.341.1"
 GRILLY_DIR="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd || echo "$(pwd)")"
 BUILD_DIR="${GRILLY_DIR}/build"
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+FAST_MODE=false
+
+# Parse flags
+for arg in "$@"; do
+    case "$arg" in
+        --fast|-f) FAST_MODE=true ;;
+        --help|-h) echo "Usage: $0 [--fast]"; echo "  --fast  Only build shaderc + loader (5 min vs 30 min)"; exit 0 ;;
+    esac
+done
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -86,9 +96,15 @@ install_vulkan_linux() {
     export VULKAN_SDK="/opt/vulkan/${VULKAN_SDK_VERSION}/x86_64"
 
     if [ -f "/opt/vulkan/${VULKAN_SDK_VERSION}/vulkansdk" ]; then
-        info "Building Vulkan SDK components (this takes a few minutes)..."
         cd "/opt/vulkan/${VULKAN_SDK_VERSION}"
-        sudo bash ./vulkansdk all -j "$JOBS" 2>&1 | tail -5
+        if [ "$FAST_MODE" = true ]; then
+            info "Building Vulkan SDK (fast mode: shaderc + loader only, ~5 min)..."
+            sudo bash ./vulkansdk -j "$JOBS" vulkan-headers vulkan-loader shaderc 2>&1 | tail -5
+        else
+            info "Building Vulkan SDK (full: all components, ~30 min)..."
+            info "  Tip: use --fast to skip validation layers and build in ~5 min"
+            sudo bash ./vulkansdk all -j "$JOBS" 2>&1 | tail -5
+        fi
         cd "$GRILLY_DIR"
     fi
 
@@ -197,6 +213,3 @@ print('  NumPy fallback: always available')
 
 echo ""
 ok "grilly installed successfully!"
-echo ""
-info "Next: pip install cubemind"
-info "  or: pip install git+https://github.com/Grillcheese-AI/cubemind.git@dev"
