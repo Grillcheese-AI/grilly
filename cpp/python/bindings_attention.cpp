@@ -41,15 +41,18 @@ void register_attention_ops(py::module_& m) {
             });
             auto rBuf = result.request();
 
-            grilly::ops::flashAttention2(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(qBuf.ptr),
-                static_cast<const float*>(K.request().ptr),
-                static_cast<const float*>(V.request().ptr),
-                maskPtr,
-                static_cast<float*>(rBuf.ptr),
-                batchSize, seqLen, numHeads, headDim,
-                scale, tileSizeQ, tileSizeK);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::flashAttention2(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(qBuf.ptr),
+                    static_cast<const float*>(K.request().ptr),
+                    static_cast<const float*>(V.request().ptr),
+                    maskPtr,
+                    static_cast<float*>(rBuf.ptr),
+                    batchSize, seqLen, numHeads, headDim,
+                    scale, tileSizeQ, tileSizeK);
+            }
 
             return Tensor::from_numpy(result);
         },
@@ -78,13 +81,17 @@ void register_attention_ops(py::module_& m) {
             py::array_t<float> result({
                 static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(H),
                 static_cast<py::ssize_t>(S), static_cast<py::ssize_t>(S)});
+            auto resBuf = result.request();
 
             grilly::ops::AttentionScoresParams p{B, S, H, D, scale, 0};
-            grilly::ops::attentionScores(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(qBuf.ptr),
-                static_cast<const float*>(K.request().ptr),
-                static_cast<float*>(result.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::attentionScores(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(qBuf.ptr),
+                    static_cast<const float*>(K.request().ptr),
+                    static_cast<float*>(resBuf.ptr), p);
+            }
             return Tensor::from_numpy(result);
         },
         py::arg("device"), py::arg("Q"), py::arg("K"),
