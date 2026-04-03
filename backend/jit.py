@@ -24,6 +24,7 @@ Or with explicit tracing:
 
 import functools
 import logging
+from collections import OrderedDict
 
 logger = logging.getLogger("grilly.jit")
 
@@ -234,7 +235,7 @@ class _JitWrapper:
     def __init__(self, fn, warmup: int = 1):
         self._fn = fn
         self._warmup = warmup
-        self._graphs: dict[tuple, TracedGraph] = {}  # cache_key → graph
+        self._graphs: OrderedDict[tuple, TracedGraph] = OrderedDict()  # cache_key → graph (LRU)
         self._warmup_counts: dict[tuple, int] = {}
         functools.update_wrapper(self, fn)
 
@@ -252,6 +253,7 @@ class _JitWrapper:
 
         # Check if we have a compiled graph for this shape+kwargs combo
         if key in self._graphs:
+            self._graphs.move_to_end(key)
             # Replay (for now, execute normally — C++ OpGraph replay TBD)
             return self._fn(*args, **kwargs)
 
@@ -263,14 +265,14 @@ class _JitWrapper:
 
         if count >= self._warmup:
             # Trace and cache
-            graph = trace(self._fn, args)
+            graph = trace(lambda *a: self._fn(*a, **kwargs), args)
             self._graphs[key] = graph
+            self._graphs.move_to_end(key)
             logger.info("JIT compiled: %d ops captured (key=%s)", graph.num_ops, key[:2])
 
             # LRU eviction
             if len(self._graphs) > self._MAX_CACHED_GRAPHS:
-                oldest_key = next(iter(self._graphs))
-                del self._graphs[oldest_key]
+                self._graphs.popitem(last=False)
                 logger.info("JIT evicted oldest graph (cache size=%d)", len(self._graphs))
 
         return result

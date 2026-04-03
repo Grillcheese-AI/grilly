@@ -40,25 +40,27 @@ void main() {
 
     float acc = 0.0;
     uint numTiles = (input_dim + 15) / 16;
+    uint row_base = row * input_dim;
+    uint col_base = col * input_dim;
 
     for (uint t = 0; t < numTiles; t++) {
         uint k_base = t * 16;
 
         uint k_a = k_base + tx;
         tileA[ty][tx] = (row < batch_seq && k_a < input_dim)
-            ? input_data[row * input_dim + k_a] : 0.0;
+            ? input_data[row_base + k_a] : 0.0;
 
         uint k_b = k_base + ty;
         tileB[ty][tx] = (col < output_dim && k_b < input_dim)
-            ? W[col * input_dim + k_b] : 0.0;
+            ? W[col_base + k_b] : 0.0;
 
         barrier();
 
         for (uint k = 0; k < 16; k += 4) {
-            acc += tileA[ty][k]     * tileB[k][tx];
-            acc += tileA[ty][k + 1] * tileB[k + 1][tx];
-            acc += tileA[ty][k + 2] * tileB[k + 2][tx];
-            acc += tileA[ty][k + 3] * tileB[k + 3][tx];
+            acc = fma(tileA[ty][k],     tileB[k][tx],     acc);
+            acc = fma(tileA[ty][k + 1], tileB[k + 1][tx], acc);
+            acc = fma(tileA[ty][k + 2], tileB[k + 2][tx], acc);
+            acc = fma(tileA[ty][k + 3], tileB[k + 3][tx], acc);
         }
 
         barrier();

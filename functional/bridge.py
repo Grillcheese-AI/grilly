@@ -8,14 +8,14 @@ Uses: bridge-continuous-to-spike.glsl, bridge-spike-to-continuous.glsl,
 import numpy as np
 
 
-def _get_backend():
-    """Get backend instance"""
-    try:
-        from ..backend.compute import Compute
-
-        return Compute()
-    except Exception:
+def _to_numpy(result):
+    if result is None:
         return None
+    if isinstance(result, np.ndarray):
+        return result
+    if hasattr(result, "numpy"):
+        return result.numpy()
+    return np.asarray(result)
 
 
 def continuous_to_spikes(
@@ -40,16 +40,30 @@ def continuous_to_spikes(
     Returns:
         Spike trains (batch, num_timesteps, spike_dim)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.continuous_to_spikes(
-        continuous,
-        num_timesteps=num_timesteps,
-        encoding_type=encoding_type,
-        projection_weights=projection_weights,
-        projection_bias=projection_bias,
-    )
+        result = _bridge.continuous_to_spikes(
+            continuous,
+            num_timesteps=num_timesteps,
+            encoding_type=encoding_type,
+            projection_weights=projection_weights,
+            projection_bias=projection_bias,
+        )
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+    x = np.asarray(continuous, dtype=np.float32)
+    if x.ndim == 1:
+        x = x[None, :]
+    if projection_weights is not None:
+        x = x @ np.asarray(projection_weights, dtype=np.float32).T
+        if projection_bias is not None:
+            x = x + np.asarray(projection_bias, dtype=np.float32)
+    x = np.clip(x, 0.0, 1.0)
+    t = int(num_timesteps)
+    return (np.random.rand(x.shape[0], t, x.shape[1]).astype(np.float32) < x[:, None, :]).astype(np.float32)
 
 
 def spikes_to_continuous(
@@ -76,17 +90,29 @@ def spikes_to_continuous(
     Returns:
         Continuous values (batch, output_dim)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.spikes_to_continuous(
-        spikes,
-        encoding_type=encoding_type,
-        time_window=time_window,
-        temporal_weights=temporal_weights,
-        projection_weights=projection_weights,
-        projection_bias=projection_bias,
-    )
+        result = _bridge.spikes_to_continuous(
+            spikes,
+            encoding_type=encoding_type,
+            time_window=time_window,
+            temporal_weights=temporal_weights,
+            projection_weights=projection_weights,
+            projection_bias=projection_bias,
+        )
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+    s = np.asarray(spikes, dtype=np.float32)
+    window = max(1, min(int(time_window), s.shape[1]))
+    cont = np.mean(s[:, -window:, :], axis=1)
+    if projection_weights is not None:
+        cont = cont @ np.asarray(projection_weights, dtype=np.float32).T
+        if projection_bias is not None:
+            cont = cont + np.asarray(projection_bias, dtype=np.float32)
+    return cont.astype(np.float32)
 
 
 def bridge_temporal_weights(weights: np.ndarray, temporal_window: int = 10) -> np.ndarray:
@@ -102,17 +128,6 @@ def bridge_temporal_weights(weights: np.ndarray, temporal_window: int = 10) -> n
     Returns:
         Temporally weighted weights
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "bridge-temporal-weights" in backend.shaders:
-        try:
-            # GPU temporal weights would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback - Apply temporal decay to weights
     temporal_decay = np.exp(-np.arange(temporal_window) / temporal_window)
     # Simple implementation: return weights with temporal scaling

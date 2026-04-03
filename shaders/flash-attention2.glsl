@@ -81,6 +81,9 @@ void update_online_softmax(
 void main() {
     uint row = gl_GlobalInvocationID.y;
     uint col = gl_GlobalInvocationID.x;
+    uint seq_heads = seq_len * num_heads;
+    uint head_stride = num_heads * head_dim;
+    uint bsh_stride = seq_len * head_stride;
     
     if (pass_type == 0) {
         // Pass 0: Initialize running max and sum for each query position
@@ -130,19 +133,11 @@ void main() {
         
         // Compute attention score: Q[q_pos] @ K[k_pos]^T / sqrt(head_dim)
         float score = 0.0;
+        uint q_base = batch_idx * bsh_stride + q_pos * head_stride + head_idx * head_dim;
+        uint k_base = batch_idx * bsh_stride + k_pos * head_stride + head_idx * head_dim;
         
         for (uint d = 0; d < head_dim; d++) {
-            // Q index: [batch, seq, head, head_dim]
-            uint q_idx = batch_idx * seq_len * num_heads * head_dim +
-                        q_pos * num_heads * head_dim +
-                        head_idx * head_dim + d;
-            
-            // K index: [batch, seq, head, head_dim]
-            uint k_idx = batch_idx * seq_len * num_heads * head_dim +
-                        k_pos * num_heads * head_dim +
-                        head_idx * head_dim + d;
-            
-            score += Q[q_idx] * K[k_idx];
+            score = fma(Q[q_base + d], K[k_base + d], score);
         }
         
         score *= scale;
@@ -154,9 +149,7 @@ void main() {
         }
         
         // Get running max and sum for this query position
-        uint q_flat_idx = batch_idx * seq_len * num_heads +
-                         q_pos * num_heads +
-                         head_idx;
+        uint q_flat_idx = batch_idx * seq_heads + q_pos * num_heads + head_idx;
         
         float old_max = running_max[q_flat_idx];
         float old_sum = running_sum[q_flat_idx];
@@ -176,23 +169,17 @@ void main() {
         // Rescale existing accumulator if max changed
         if (new_max > old_max) {
             float rescale = exp(old_max - new_max);
+            uint accum_base = q_flat_idx * head_dim;
             for (uint d = 0; d < head_dim; d++) {
-                uint accum_idx = q_flat_idx * head_dim + d;
-                output_accum[accum_idx] *= rescale;
+                output_accum[accum_base + d] *= rescale;
             }
         }
         
         // Accumulate weighted value: output += weight * V[k_pos]
+        uint accum_base = q_flat_idx * head_dim;
+        uint v_base = batch_idx * bsh_stride + k_pos * head_stride + head_idx * head_dim;
         for (uint d = 0; d < head_dim; d++) {
-            uint accum_idx = q_flat_idx * head_dim + d;
-            
-            // V index: [batch, seq, head, head_dim]
-            uint v_idx = batch_idx * seq_len * num_heads * head_dim +
-                        k_pos * num_heads * head_dim +
-                        head_idx * head_dim + d;
-            
-            // Accumulate: output[q_pos] += weight * V[k_pos]
-            output_accum[accum_idx] += weight * V[v_idx];
+            output_accum[accum_base + d] = fma(weight, V[v_base + d], output_accum[accum_base + d]);
         }
         
     } else if (pass_type == 2) {
