@@ -60,3 +60,19 @@ class TestAttentionOperations:
         # Output shape: (batch, seq_len, num_heads, head_dim)
         assert output.shape == (batch_size, seq_len, num_heads, head_dim)
         assert np.all(np.isfinite(output))
+
+    def test_flash_attention2(self, gpu):
+        """Flash Attention 2 path (batched command buffer)."""
+        batch_size = 1
+        seq_len = 16
+        num_heads = 4
+        head_dim = 32
+        q = np.random.randn(batch_size, seq_len, num_heads * head_dim).astype(np.float32)
+        k = np.random.randn(batch_size, seq_len, num_heads * head_dim).astype(np.float32)
+        v = np.random.randn(batch_size, seq_len, num_heads * head_dim).astype(np.float32)
+
+        out = gpu.flash_attention2(
+            q, k, v, num_heads, head_dim, tile_size_q=16, tile_size_k=16
+        )
+        assert out.shape == (batch_size, seq_len, num_heads, head_dim)
+        assert np.all(np.isfinite(out))

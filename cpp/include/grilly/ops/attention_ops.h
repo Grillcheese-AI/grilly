@@ -32,9 +32,27 @@ struct AttentionScoresParams {
     uint32_t passType;  // 0 = compute scores
 };
 
+// Used by attentionOutput and attentionScoresSoftmaxOutput (declare before fused API).
+struct AttentionOutputParams {
+    uint32_t batchSize;
+    uint32_t seqLen;
+    uint32_t numHeads;
+    uint32_t headDim;
+};
+
 void attentionScores(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
                      const float* Q, const float* K,
                      float* scores, const AttentionScoresParams& p);
+
+/// Fused: attention scores → softmax (last dim) → attention output (weights @ V).
+/// Single submit/wait; no host round-trip between scores and softmax.
+/// Q, K, V: (B, H, S, D). Writes output (B, H, S, D) and softmaxWeights (B, H, S, S).
+void attentionScoresSoftmaxOutput(CommandBatch& batch, BufferPool& pool,
+                                  PipelineCache& cache, const float* Q,
+                                  const float* K, const float* V, float* output,
+                                  float* softmaxWeights,
+                                  const AttentionScoresParams& scoreParams,
+                                  const AttentionOutputParams& outParams);
 
 // ── Attention mask ───────────────────────────────────────────────────────
 // Shader: attention-mask.spv
@@ -57,13 +75,6 @@ void attentionMask(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
 // Shader: attention-output.spv
 // local_size: (256, 1, 1)
 // Buffers: weights(0) readonly, V(1) readonly, output(2) write
-
-struct AttentionOutputParams {
-    uint32_t batchSize;
-    uint32_t seqLen;
-    uint32_t numHeads;
-    uint32_t headDim;
-};
 
 void attentionOutput(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
                      const float* weights, const float* V,

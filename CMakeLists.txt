@@ -90,6 +90,10 @@ else()
 endif()
 
 # ── pybind11 ─────────────────────────────────────────────────────────────
+# Silence "Using compatibility mode for Python, set PYBIND11_FINDPYTHON to NEW/OLD"
+if(NOT DEFINED PYBIND11_FINDPYTHON)
+    set(PYBIND11_FINDPYTHON NEW)
+endif()
 set(PYBIND11_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pybind11")
 if(EXISTS "${PYBIND11_DIR}/CMakeLists.txt")
     add_subdirectory("${PYBIND11_DIR}" pybind11)

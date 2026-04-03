@@ -31,6 +31,20 @@ except ImportError:
 
 from .device_manager import get_device_manager
 
+_vulkan_backend_cache = None
+
+
+def _get_vulkan_backend():
+    """Get cached Vulkan backend without using deprecated Compute()."""
+    global _vulkan_backend_cache
+    if _vulkan_backend_cache is not None:
+        return _vulkan_backend_cache
+    try:
+        _vulkan_backend_cache = get_device_manager().vulkan
+        return _vulkan_backend_cache
+    except Exception:
+        return None
+
 
 def to_vulkan(
     tensor: np.ndarray | Any, keep_on_gpu: bool = False
@@ -360,9 +374,9 @@ if _CPP_AVAILABLE:
             except Exception:
                 # C++ Tensor may not have Vulkan backend — fall back to Python path
                 try:
-                    from grilly import Compute
-
-                    backend = Compute()
+                    backend = _get_vulkan_backend()
+                    if backend is None:
+                        raise RuntimeError("Vulkan backend is unavailable")
                     cpu_data = self._t.numpy()
                     size = cpu_data.nbytes
 
@@ -425,9 +439,9 @@ if _CPP_AVAILABLE:
             core = self._core
             if core is None:
                 try:
-                    from grilly import Compute
-
-                    backend = Compute()
+                    backend = _get_vulkan_backend()
+                    if backend is None:
+                        raise RuntimeError("Vulkan backend is unavailable")
                     core = backend.core
                     self._core = core
                 except Exception:
@@ -453,9 +467,9 @@ if _CPP_AVAILABLE:
         def _download_via_staging(self):
             core = self._core
             if core is None:
-                from grilly import Compute
-
-                backend = Compute()
+                backend = _get_vulkan_backend()
+                if backend is None:
+                    raise RuntimeError("Vulkan backend is unavailable")
                 core = backend.core
                 self._core = core
 
@@ -611,9 +625,9 @@ else:
             if not self._cpu_valid:
                 raise RuntimeError("Cannot upload: no valid CPU data")
             try:
-                from grilly import Compute
-
-                backend = Compute()
+                backend = _get_vulkan_backend()
+                if backend is None:
+                    raise RuntimeError("Vulkan backend is unavailable")
                 size = self._cpu_data.nbytes
                 try:
                     from grilly.backend.buffer_pool import acquire_buffer
@@ -663,9 +677,9 @@ else:
                     return
                 core = self._core
                 if core is None:
-                    from grilly import Compute
-
-                    backend = Compute()
+                    backend = _get_vulkan_backend()
+                    if backend is None:
+                        raise RuntimeError("Vulkan backend is unavailable")
                     core = backend.core
                     self._core = core
                 self._cpu_data = core._download_buffer(
@@ -678,9 +692,9 @@ else:
         def _download_via_staging(self):
             core = self._core
             if core is None:
-                from grilly import Compute
-
-                backend = Compute()
+                backend = _get_vulkan_backend()
+                if backend is None:
+                    raise RuntimeError("Vulkan backend is unavailable")
                 core = backend.core
                 self._core = core
             pooled = getattr(self, "_pooled_buffer", None)

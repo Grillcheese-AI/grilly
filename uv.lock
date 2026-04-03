@@ -522,7 +522,7 @@ wheels = [
 
 [[package]]
 name = "grilly"
-version = "0.5.6"
+version = "0.6.1"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },

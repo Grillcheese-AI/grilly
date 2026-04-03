@@ -91,6 +91,52 @@ void register_attention_ops(py::module_& m) {
         py::arg("scale") = 0.0f,
         "GPU attention scores: Q @ K^T / sqrt(d_h)");
 
+    // ── Fused: scores + softmax + output (single GPU submit) ────────────
+    m.def(
+        "attention_scores_softmax_output",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> Q, py::array_t<float> K, py::array_t<float> V,
+           float scale) -> py::tuple {
+            auto qBuf = Q.request();
+            auto kBuf = K.request();
+            auto vBuf = V.request();
+            if (qBuf.ndim != 4 || kBuf.ndim != 4 || vBuf.ndim != 4)
+                throw std::runtime_error("Q, K, V must be 4D (B, H, S, D)");
+
+            uint32_t B = static_cast<uint32_t>(qBuf.shape[0]);
+            uint32_t H = static_cast<uint32_t>(qBuf.shape[1]);
+            uint32_t S = static_cast<uint32_t>(qBuf.shape[2]);
+            uint32_t D = static_cast<uint32_t>(qBuf.shape[3]);
+
+            if (kBuf.shape[0] != B || kBuf.shape[1] != H || kBuf.shape[2] != S ||
+                kBuf.shape[3] != D || vBuf.shape[0] != B || vBuf.shape[1] != H ||
+                vBuf.shape[2] != S || vBuf.shape[3] != D)
+                throw std::runtime_error("Q, K, V shapes must match");
+
+            if (scale == 0.0f) scale = 1.0f / std::sqrt(float(D));
+
+            py::array_t<float> outArr({
+                static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(H),
+                static_cast<py::ssize_t>(S), static_cast<py::ssize_t>(D)});
+            py::array_t<float> wArr({
+                static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(H),
+                static_cast<py::ssize_t>(S), static_cast<py::ssize_t>(S)});
+
+            grilly::ops::AttentionScoresParams sp{B, S, H, D, scale, 0};
+            grilly::ops::AttentionOutputParams outp{B, S, H, D};
+            grilly::ops::attentionScoresSoftmaxOutput(
+                ctx.batch, ctx.pool, ctx.cache,
+                static_cast<const float*>(qBuf.ptr),
+                static_cast<const float*>(kBuf.ptr),
+                static_cast<const float*>(vBuf.ptr),
+                static_cast<float*>(outArr.request().ptr),
+                static_cast<float*>(wArr.request().ptr), sp, outp);
+            return py::make_tuple(Tensor::from_numpy(outArr), Tensor::from_numpy(wArr));
+        },
+        py::arg("device"), py::arg("Q"), py::arg("K"), py::arg("V"),
+        py::arg("scale") = 0.0f,
+        "GPU fused attention: scores + softmax + output (one submit); returns (output, softmax_weights)");
+
     // ── Attention mask (causal or custom) ────────────────────────────────
     m.def(
         "attention_mask",

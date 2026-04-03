@@ -14,6 +14,7 @@ from ._helpers import (
     _get_param_array,
 )
 from .module import Module
+from ._perf_policy import choose_fastest
 
 
 class Linear(Module):
@@ -192,9 +193,27 @@ class Linear(Module):
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias) if self.bias is not None else None
 
+        def cpu_linear():
+            x_arr = np.asarray(x, dtype=np.float32)
+            w_arr = np.asarray(weight, dtype=np.float32)
+            out = x_arr @ w_arr.T
+            if bias is not None:
+                out = out + np.asarray(bias, dtype=np.float32)
+            return np.asarray(out, dtype=np.float32)
+
         # C++ bridge fast path (handles both numpy and VulkanTensor via __array__)
         if _USE_CPP_BRIDGE:
-            result = _bridge_to_numpy(_bridge.linear(x, weight, bias))
+            def gpu_linear():
+                return _bridge_to_numpy(_bridge.linear(x, weight, bias))
+
+            # Auto-fastest policy only for numpy-in/numpy-out path.
+            if isinstance(x, np.ndarray) and not self._return_gpu_tensor:
+                batch = int(np.prod(x.shape[:-1])) if x.ndim > 1 else 1
+                in_features = int(x.shape[-1]) if x.ndim > 0 else self.in_features
+                op_key = f"linear:{batch}x{in_features}x{self.out_features}"
+                return choose_fastest(op_key, gpu_linear, cpu_linear)
+
+            result = gpu_linear()
             if result is not None:
                 return result
 
@@ -207,6 +226,8 @@ class Linear(Module):
                 bias,
                 return_gpu_tensor=self._return_gpu_tensor,
             )
+
+        return cpu_linear()
 
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """

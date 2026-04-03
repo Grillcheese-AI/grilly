@@ -68,9 +68,9 @@ class Module:
         """Execute get backend."""
 
         if self._backend is None:
-            from grilly import Compute
+            from ..utils.device_manager import get_device_manager
 
-            self._backend = Compute()
+            self._backend = get_device_manager().vulkan
         return self._backend
 
     def _convert_input(self, x: np.ndarray | Any):
