@@ -207,3 +207,4 @@ docs/PYTORCH_PARITY_STATUS.md
 docs/PYTORCH_PARITY_TASKLIST.md
 /build_verify_pybind
 /build_verify_pybind2
+docs/MIGRATION_PYTORCH.md

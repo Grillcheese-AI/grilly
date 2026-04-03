@@ -6,6 +6,19 @@ This changelog follows the spirit of **Keep a Changelog** and uses the terms **A
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`tests/parity/`** — Numerical parity tests for `grilly.functional` (numpy reference; optional PyTorch `F.linear` / `F.relu` when `torch` is installed). See `tests/parity/README.md`.
+- **`docs/MIGRATION_PYTORCH.md`** — PyTorch → Grilly migration cookbook (device model, functional layout, module backend lifecycle, debugging).
+
+### Changed
+
+- **`docs/api/functional.md`** — PyTorch parity notes and links to migration docs and parity tests.
+
+---
+
 ## [0.5.0] — 2026-03-18 — "GPU-First"
 
 ### Added

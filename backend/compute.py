@@ -75,6 +75,13 @@ class VulkanCompute:
         self.queue = self.core.queue
         self.shaders = self.core.shaders
 
+        # Public Vulkan dispatch / batching (see docs/PERF_DISPATCH.md)
+        self.record_commands = self.core.record_commands
+        self.dispatch_compute = self.core._dispatch_compute
+        self.dispatch_compute_async = self.core._dispatch_compute_async
+        self.wait_async = self.core._wait_async
+        self.wait_fence = self.core._wait_fence
+
     def cleanup(self):
         """Clean up Vulkan resources"""
         # Clear weight caches for all backend modules (before device is destroyed)

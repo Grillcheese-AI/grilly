@@ -17,6 +17,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "cpp: marks tests that require C++ backend (deselect with '-m \"not cpp\"')"
     )
+    config.addinivalue_line(
+        "markers", "parity: marks numerical parity tests (numpy / optional PyTorch reference)"
+    )
 
 
 try:

@@ -16,6 +16,8 @@ void register_linear_ops(py::module_& m) {
            std::optional<py::array_t<float>> bias) -> Tensor {
             auto xBuf = x.request();
             auto wBuf = weights.request();
+            require_c_contiguous_float(xBuf);
+            require_c_contiguous_float(wBuf);
 
             if (xBuf.ndim < 1 || xBuf.ndim > 3)
                 throw std::runtime_error(
@@ -37,6 +39,7 @@ void register_linear_ops(py::module_& m) {
             uint32_t hasBias = 0;
             if (bias.has_value()) {
                 auto bBuf = bias->request();
+                require_c_contiguous_float(bBuf);
                 if (bBuf.ndim != 1 ||
                     static_cast<uint32_t>(bBuf.shape[0]) != outputDim)
                     throw std::runtime_error(
