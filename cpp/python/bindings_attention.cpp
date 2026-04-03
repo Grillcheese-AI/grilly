@@ -128,16 +128,21 @@ void register_attention_ops(py::module_& m) {
             py::array_t<float> wArr({
                 static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(H),
                 static_cast<py::ssize_t>(S), static_cast<py::ssize_t>(S)});
+            auto outRB = outArr.request();
+            auto wRB = wArr.request();
 
             grilly::ops::AttentionScoresParams sp{B, S, H, D, scale, 0};
             grilly::ops::AttentionOutputParams outp{B, S, H, D};
-            grilly::ops::attentionScoresSoftmaxOutput(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(qBuf.ptr),
-                static_cast<const float*>(kBuf.ptr),
-                static_cast<const float*>(vBuf.ptr),
-                static_cast<float*>(outArr.request().ptr),
-                static_cast<float*>(wArr.request().ptr), sp, outp);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::attentionScoresSoftmaxOutput(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(qBuf.ptr),
+                    static_cast<const float*>(kBuf.ptr),
+                    static_cast<const float*>(vBuf.ptr),
+                    static_cast<float*>(outRB.ptr),
+                    static_cast<float*>(wRB.ptr), sp, outp);
+            }
             return py::make_tuple(Tensor::from_numpy(outArr), Tensor::from_numpy(wArr));
         },
         py::arg("device"), py::arg("Q"), py::arg("K"), py::arg("V"),
@@ -169,9 +174,12 @@ void register_attention_ops(py::module_& m) {
 
             grilly::ops::AttentionMaskParams p{
                 B, H, S, causal ? 1u : 0u, mask_value};
-            grilly::ops::attentionMask(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<float*>(result.mutable_data()), maskPtr, p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::attentionMask(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<float*>(result.mutable_data()), maskPtr, p);
+            }
             return Tensor::from_numpy(result);
         },
         py::arg("device"), py::arg("scores"),
@@ -198,13 +206,17 @@ void register_attention_ops(py::module_& m) {
             py::array_t<float> result({
                 static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(H),
                 static_cast<py::ssize_t>(S), static_cast<py::ssize_t>(D)});
+            auto resBuf = result.request();
 
             grilly::ops::AttentionOutputParams p{B, S, H, D};
-            grilly::ops::attentionOutput(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(wBuf.ptr),
-                static_cast<const float*>(vBuf.ptr),
-                static_cast<float*>(result.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::attentionOutput(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(wBuf.ptr),
+                    static_cast<const float*>(vBuf.ptr),
+                    static_cast<float*>(resBuf.ptr), p);
+            }
             return Tensor::from_numpy(result);
         },
         py::arg("device"), py::arg("weights"), py::arg("V"),
@@ -228,12 +240,16 @@ void register_attention_ops(py::module_& m) {
                 static_cast<py::ssize_t>(B),
                 static_cast<py::ssize_t>(S),
                 static_cast<py::ssize_t>(H * D)});
+            auto resBuf = result.request();
 
             grilly::ops::ConcatHeadsParams p{B, S, H, D};
-            grilly::ops::attentionConcatHeads(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(result.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::attentionConcatHeads(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(resBuf.ptr), p);
+            }
             return Tensor::from_numpy(result);
         },
         py::arg("device"), py::arg("mh_output"),
@@ -266,13 +282,17 @@ void register_attention_ops(py::module_& m) {
                 : nullptr;
 
             py::array_t<float> result(inBuf.shape);
+            auto resBuf = result.request();
             grilly::ops::RoPEParams p{
                 B, S, H, D, base, precomputed ? 1u : 0u, scaling};
-            grilly::ops::applyRoPE(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(result.request().ptr),
-                cosPtr, sinPtr, p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::applyRoPE(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(resBuf.ptr),
+                    cosPtr, sinPtr, p);
+            }
             return Tensor::from_numpy(result);
         },
         py::arg("device"), py::arg("input"),
