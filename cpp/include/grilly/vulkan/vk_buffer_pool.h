@@ -67,6 +67,15 @@ private:
     std::mutex mutex_;
     std::unordered_map<size_t, std::vector<GrillyBuffer>> buckets_;
     Stats stats_{};
+
+    // Persistent transfer context (avoids cmd pool/fence recreation per transfer)
+    VkCommandPool transferPool_ = VK_NULL_HANDLE;
+    VkCommandBuffer transferCmd_ = VK_NULL_HANDLE;
+    VkFence transferFence_ = VK_NULL_HANDLE;
+    bool transferInitialized_ = false;
+
+    void ensureTransferContext();
+    void transferSubmitAndWait();
 };
 
 }  // namespace grilly

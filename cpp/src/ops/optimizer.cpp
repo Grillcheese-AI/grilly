@@ -48,7 +48,8 @@ void adamUpdate(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufW, weights, bytes);
     pool.download(bufGrad, grad, bytes);
@@ -95,7 +96,8 @@ void adamwUpdate(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufW, weights, bytes);
     pool.download(bufGrad, grad, bytes);

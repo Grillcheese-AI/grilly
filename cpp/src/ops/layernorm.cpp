@@ -88,7 +88,8 @@ void layernorm(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx2, 1, 1,
                    &push2, sizeof(push2));
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     // Download result
     pool.download(bufOutput, output, outputBytes);
@@ -179,7 +180,8 @@ void layernormBackward(CommandBatch& batch, BufferPool& pool,
                    (features + 255) / 256, 1, 1,
                    &push2, sizeof(push2));
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufGradIn, gradInput, elemBytes);
     pool.download(bufGradGamma, gradGamma, gammaBytes);

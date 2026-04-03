@@ -59,7 +59,8 @@ void fusedMlpGelu(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, seqLen, 1, 1,
                    nullptr, 0);
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOutput, output, outputBytes);
 
@@ -119,7 +120,8 @@ void fusedLayernormLinear(CommandBatch& batch, BufferPool& pool, PipelineCache& 
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, seqLen, 1, 1,
                    nullptr, 0);
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOutput, output, outputBytes);
 

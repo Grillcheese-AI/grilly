@@ -175,7 +175,8 @@ void conv2d(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
                            &biasPush, sizeof(biasPush));
         }
 
-        batch.submit();
+        batch.submitDeferred();
+    batch.waitForCompletion();
 
         // Download from the correct buffer (biased output if shader was
         // available, raw GEMM output otherwise)
@@ -246,7 +247,8 @@ void conv2d(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
         batch.begin();
         batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, gz,
                        &push, sizeof(push));
-        batch.submit();
+        batch.submitDeferred();
+    batch.waitForCompletion();
 
         pool.download(bufOutput, output, outputBytes);
 
@@ -324,7 +326,8 @@ void conv2dBackwardInput(CommandBatch& batch, BufferPool& pool,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, gz,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufGradIn, gradInput, gradInBytes);
 
@@ -387,7 +390,8 @@ void conv2dBackwardWeight(CommandBatch& batch, BufferPool& pool,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufGradW, gradWeight, gradWBytes);
     if (p.hasBias && gradBias) {
@@ -439,7 +443,8 @@ void conv2d3x3Gelu(CommandBatch& batch, BufferPool& pool,
     batch.dispatch(pipe.pipeline, pipe.layout, desc,
                    (width + 15) / 16, (height + 15) / 16, outChannels,
                    &pc, sizeof(pc));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, output, outBytes);
 
@@ -480,7 +485,8 @@ void maxpool2x2(CommandBatch& batch, BufferPool& pool,
     batch.dispatch(pipe.pipeline, pipe.layout, desc,
                    (outW + 15) / 16, (outH + 15) / 16, channels,
                    &pc, sizeof(pc));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, output, outBytes);
 
@@ -516,7 +522,8 @@ void adaptiveAvgPool3x3(CommandBatch& batch, BufferPool& pool,
     batch.dispatch(pipe.pipeline, pipe.layout, desc,
                    1, 1, (channels + 15) / 16,
                    &pc, sizeof(pc));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, output, outBytes);
 

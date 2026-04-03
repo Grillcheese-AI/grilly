@@ -6,11 +6,15 @@ Uses: fnn-dropout.glsl
 import numpy as np
 
 
-def _get_backend():
-    """Get compute backend"""
-    from grilly import Compute
-
-    return Compute()
+def _to_numpy(result):
+    """Convert bridge result to numpy if it's a C++ Tensor."""
+    if result is None:
+        return None
+    if isinstance(result, np.ndarray):
+        return result
+    if hasattr(result, "numpy"):
+        return result.numpy()
+    return np.asarray(result)
 
 
 def dropout(input: np.ndarray, p: float = 0.5, training: bool = True) -> np.ndarray:
@@ -26,8 +30,21 @@ def dropout(input: np.ndarray, p: float = 0.5, training: bool = True) -> np.ndar
     Returns:
         Output tensor with dropout applied (if training)
     """
+    input_arr = np.asarray(input, dtype=np.float32)
     if not training or p == 0:
-        return input
+        return input_arr
+    if p >= 1.0:
+        return np.zeros_like(input_arr, dtype=np.float32)
 
-    backend = _get_backend()
-    return backend.fnn.dropout(input, dropout_prob=p, is_training=training)
+    random_mask = (np.random.rand(*input_arr.shape) >= p).astype(np.float32)
+    try:
+        from grilly.backend import _bridge
+
+        result = _bridge.dropout(input_arr, random_mask, p=p, training=training)
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+
+    scale = 1.0 / (1.0 - p)
+    return (input_arr * random_mask * scale).astype(np.float32)

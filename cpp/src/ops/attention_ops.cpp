@@ -59,7 +59,8 @@ void attentionScores(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, gz,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufScores, scores, scoreBytes);
 
@@ -105,7 +106,8 @@ void attentionMask(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufScores, scores, scoreBytes);
 
@@ -148,7 +150,8 @@ void attentionOutput(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOutput, output, outBytes);
 
@@ -188,7 +191,8 @@ void attentionConcatHeads(CommandBatch& batch, BufferPool& pool,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, concatOutput, outBytes);
 
@@ -235,7 +239,8 @@ void applyRoPE(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, output, dataBytes);
 

@@ -1790,6 +1790,217 @@ def moqe_route_and_gemv(activations, choice, expert_weights, expert_scales, bloc
     )
 
 
+# ── Bridge support for functional modules without native kernels ──────────
+
+
+def faiss_distance(query, vectors, distance_type="l2"):
+    """Compute FAISS-style distances with numpy fallback."""
+    q = np.asarray(query, dtype=np.float32)
+    v = np.asarray(vectors, dtype=np.float32)
+    if q.ndim == 1:
+        q = q.reshape(1, -1)
+    if distance_type == "l2":
+        diff = q[:, None, :] - v[None, :, :]
+        return np.sqrt(np.sum(diff * diff, axis=2, dtype=np.float32), dtype=np.float32)
+    if distance_type == "cosine":
+        q_norm = q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-8)
+        v_norm = v / (np.linalg.norm(v, axis=1, keepdims=True) + 1e-8)
+        return (1.0 - (q_norm @ v_norm.T)).astype(np.float32)
+    return (-(q @ v.T)).astype(np.float32)
+
+
+def faiss_topk(distances, k):
+    """Select top-k nearest neighbors from a distance matrix."""
+    d = np.asarray(distances, dtype=np.float32)
+    if d.ndim == 1:
+        d = d.reshape(1, -1)
+    k = max(1, min(int(k), d.shape[1]))
+    idx = np.argpartition(d, kth=k - 1, axis=1)[:, :k]
+    vals = np.take_along_axis(d, idx, axis=1)
+    order = np.argsort(vals, axis=1)
+    idx = np.take_along_axis(idx, order, axis=1).astype(np.int32)
+    vals = np.take_along_axis(vals, order, axis=1).astype(np.float32)
+    return idx, vals
+
+
+def memory_read(queries, memory_keys, memory_values, temperature=None):
+    """Memory read via attention-style lookup."""
+    q = np.asarray(queries, dtype=np.float32)
+    k = np.asarray(memory_keys, dtype=np.float32)
+    v = np.asarray(memory_values, dtype=np.float32)
+    temp = float(temperature) if temperature is not None else float(np.sqrt(k.shape[-1]))
+    scores = (q @ k.T) / max(temp, 1e-8)
+    scores = scores - np.max(scores, axis=-1, keepdims=True)
+    weights = np.exp(scores)
+    weights = weights / np.sum(weights, axis=-1, keepdims=True)
+    return (weights @ v).astype(np.float32)
+
+
+def memory_write(new_key, new_value, memory_keys, memory_values, write_index, write_mode=0, blend_factor=0.5):
+    """Memory write for key/value banks."""
+    keys = np.array(memory_keys, dtype=np.float32, copy=True)
+    vals = np.array(memory_values, dtype=np.float32, copy=True)
+    idx = int(write_index)
+    if write_mode == 1:
+        a = float(blend_factor)
+        keys[idx] = (1.0 - a) * keys[idx] + a * np.asarray(new_key, dtype=np.float32)
+        vals[idx] = (1.0 - a) * vals[idx] + a * np.asarray(new_value, dtype=np.float32)
+    else:
+        keys[idx] = np.asarray(new_key, dtype=np.float32)
+        vals[idx] = np.asarray(new_value, dtype=np.float32)
+    return keys, vals
+
+
+def memory_query_pooling(x, w_query, b_query):
+    """Pool sequence to query vectors by mean-pool + projection."""
+    x_arr = np.asarray(x, dtype=np.float32)
+    pooled = np.mean(x_arr, axis=1)
+    return (pooled @ np.asarray(w_query, dtype=np.float32).T + np.asarray(b_query, dtype=np.float32)).astype(np.float32)
+
+
+def memory_inject_gate(x, memory_context, w_gate, b_gate, w_mem_proj):
+    """Gate between token state and projected memory context."""
+    x_arr = np.asarray(x, dtype=np.float32)
+    mem = np.asarray(memory_context, dtype=np.float32)
+    batch, seq_len, dim = x_arr.shape
+    mem_expand = np.broadcast_to(mem[:, None, :], (batch, seq_len, dim))
+    concat = np.concatenate([x_arr, mem_expand], axis=-1)
+    gate = 1.0 / (1.0 + np.exp(-(concat @ np.asarray(w_gate, dtype=np.float32).T + np.asarray(b_gate, dtype=np.float32))))
+    mem_proj = mem @ np.asarray(w_mem_proj, dtype=np.float32).T
+    mem_proj = np.broadcast_to(mem_proj[:, None, :], (batch, seq_len, dim))
+    return ((1.0 - gate) * x_arr + gate * mem_proj).astype(np.float32)
+
+
+def fisher_info_update(gradients, fisher, momentum=0.9, use_ema=True, reset=False):
+    """Update Fisher information estimate."""
+    g = np.asarray(gradients, dtype=np.float32)
+    f = np.zeros_like(g, dtype=np.float32) if reset else np.asarray(fisher, dtype=np.float32)
+    g2 = g * g
+    if use_ema:
+        return (float(momentum) * f + (1.0 - float(momentum)) * g2).astype(np.float32)
+    return (f + g2).astype(np.float32)
+
+
+def ewc_penalty(current_params, important_params, fisher, lambda_ewc=1.0):
+    """Compute scalar EWC penalty."""
+    cur = np.asarray(current_params, dtype=np.float32)
+    imp = np.asarray(important_params, dtype=np.float32)
+    f = np.asarray(fisher, dtype=np.float32)
+    diff = cur - imp
+    return float(0.5 * float(lambda_ewc) * np.sum(f * diff * diff, dtype=np.float32))
+
+
+def natural_gradient(gradients, fisher, eps=1e-8):
+    """Approximate natural gradient using diagonal Fisher."""
+    g = np.asarray(gradients, dtype=np.float32)
+    f = np.asarray(fisher, dtype=np.float32)
+    return (g / (f + float(eps))).astype(np.float32)
+
+
+def nlms_predict(x, w, bias=0.0):
+    """NLMS prediction."""
+    return float(np.dot(np.asarray(x, dtype=np.float32), np.asarray(w, dtype=np.float32)) + float(bias))
+
+
+def nlms_update(x, y_true, w, bias, mu=0.5, eps=1e-6):
+    """NLMS weight update."""
+    x_arr = np.asarray(x, dtype=np.float32)
+    w_arr = np.asarray(w, dtype=np.float32)
+    pred = float(np.dot(x_arr, w_arr) + float(bias))
+    err = float(y_true) - pred
+    denom = float(np.dot(x_arr, x_arr) + float(eps))
+    step = float(mu) * err / denom
+    w_new = (w_arr + step * x_arr).astype(np.float32)
+    b_new = float(bias + step)
+    return w_new, b_new
+
+
+def whitening_transform(data, mean=None, std=None):
+    """Compute/apply whitening transform."""
+    x = np.asarray(data, dtype=np.float32)
+    m = np.asarray(mean, dtype=np.float32) if mean is not None else np.mean(x, axis=0)
+    s = np.asarray(std, dtype=np.float32) if std is not None else np.std(x, axis=0)
+    out = (x - m) / (s + 1e-8)
+    return out.astype(np.float32), m.astype(np.float32), s.astype(np.float32)
+
+
+def place_cell(agent_position, field_centers, field_width=1.0, max_rate=20.0, baseline_rate=0.1):
+    """Gaussian place-cell tuning curves."""
+    pos = np.asarray(agent_position, dtype=np.float32)
+    centers = np.asarray(field_centers, dtype=np.float32)
+    if pos.ndim == 1:
+        pos = pos[None, :]
+    diff = pos[:, None, :] - centers[None, :, :]
+    d2 = np.sum(diff * diff, axis=-1)
+    rates = float(baseline_rate) + (float(max_rate) - float(baseline_rate)) * np.exp(
+        -d2 / (2.0 * float(field_width) * float(field_width) + 1e-8)
+    )
+    return rates.astype(np.float32).squeeze(0) if np.asarray(agent_position).ndim == 1 else rates.astype(np.float32)
+
+
+def time_cell(current_time, preferred_times, time_constant=1.0, max_rate=15.0, baseline_rate=0.1, membrane_state=None):
+    """Temporal Gaussian tuning with optional EMA membrane state."""
+    t = float(current_time)
+    pref = np.asarray(preferred_times, dtype=np.float32)
+    rates = float(baseline_rate) + (float(max_rate) - float(baseline_rate)) * np.exp(
+        -((t - pref) ** 2) / (2.0 * float(time_constant) * float(time_constant) + 1e-8)
+    )
+    if membrane_state is None:
+        mem = rates.astype(np.float32)
+    else:
+        mem = (0.9 * np.asarray(membrane_state, dtype=np.float32) + 0.1 * rates).astype(np.float32)
+    return rates.astype(np.float32), mem
+
+
+def continuous_to_spikes(continuous, num_timesteps=10, encoding_type=0, projection_weights=None, projection_bias=None):
+    """Convert continuous vectors to spike trains."""
+    x = np.asarray(continuous, dtype=np.float32)
+    if x.ndim == 1:
+        x = x[None, :]
+    if projection_weights is not None:
+        x = x @ np.asarray(projection_weights, dtype=np.float32).T
+        if projection_bias is not None:
+            x = x + np.asarray(projection_bias, dtype=np.float32)
+    x = np.clip(x, 0.0, 1.0)
+    t = int(num_timesteps)
+    if encoding_type == 1:
+        spikes = np.zeros((x.shape[0], t, x.shape[1]), dtype=np.float32)
+        idx = np.minimum((1.0 - x) * (t - 1), t - 1).astype(np.int32)
+        b_idx = np.arange(x.shape[0])[:, None]
+        f_idx = np.arange(x.shape[1])[None, :]
+        spikes[b_idx, idx, f_idx] = 1.0
+        return spikes
+    if encoding_type == 2:
+        phase = np.linspace(0.0, 2.0 * np.pi, t, endpoint=False, dtype=np.float32)
+        return ((np.sin(phase[None, :, None] + x[:, None, :] * 2.0 * np.pi) > 0).astype(np.float32))
+    return (np.random.rand(x.shape[0], t, x.shape[1]).astype(np.float32) < x[:, None, :]).astype(np.float32)
+
+
+def spikes_to_continuous(spikes, encoding_type=0, time_window=5, temporal_weights=None, projection_weights=None, projection_bias=None):
+    """Convert spike trains to continuous representations."""
+    s = np.asarray(spikes, dtype=np.float32)
+    if s.ndim != 3:
+        raise ValueError(f"spikes must be 3D (batch, time, features), got shape={s.shape}")
+    if encoding_type == 1:
+        if temporal_weights is None:
+            tw = np.linspace(1.0, 0.0, s.shape[1], dtype=np.float32)
+        else:
+            tw = np.asarray(temporal_weights, dtype=np.float32)
+        tw = tw / (np.sum(tw) + 1e-8)
+        cont = np.sum(s * tw[None, :, None], axis=1)
+    elif encoding_type == 2:
+        phase = np.linspace(0.0, 2.0 * np.pi, s.shape[1], endpoint=False, dtype=np.float32)
+        cont = np.sum(s * np.sin(phase)[None, :, None], axis=1) / max(s.shape[1], 1)
+    else:
+        window = max(1, min(int(time_window), s.shape[1]))
+        cont = np.mean(s[:, -window:, :], axis=1)
+    if projection_weights is not None:
+        cont = cont @ np.asarray(projection_weights, dtype=np.float32).T
+        if projection_bias is not None:
+            cont = cont + np.asarray(projection_bias, dtype=np.float32)
+    return cont.astype(np.float32)
+
+
 def q_similarity(queries):
     """Compute q-similarity (TAPPA metric) for attention queries.
 

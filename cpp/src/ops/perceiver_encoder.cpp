@@ -138,7 +138,8 @@ std::vector<float> perceiver_encode_native(
                            nPatches, D, D);
     }
     // ONE barrier after ALL K/V projections complete
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     // ══════════════════════════════════════════════════════════════════
     // PHASE 2: Main layer loop — only Q_cross + cached K/V + self-attn
@@ -198,7 +199,8 @@ std::vector<float> perceiver_encode_native(
         std::swap(current, scratch);
     }
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     // Download and mean-pool
     std::vector<float> finalLatents(N * D);

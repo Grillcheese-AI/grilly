@@ -38,7 +38,9 @@ def linear(input: np.ndarray, weight: np.ndarray, bias: np.ndarray | None = None
             return _to_numpy(result)
     except (ImportError, Exception):
         pass
-    # Fallback to legacy Compute() path
-    from grilly import Compute
-
-    return Compute().fnn.linear(input, weight, bias)
+    input_arr = np.asarray(input, dtype=np.float32)
+    weight_arr = np.asarray(weight, dtype=np.float32)
+    output = input_arr @ weight_arr.T
+    if bias is not None:
+        output = output + np.asarray(bias, dtype=np.float32)
+    return np.asarray(output, dtype=np.float32)

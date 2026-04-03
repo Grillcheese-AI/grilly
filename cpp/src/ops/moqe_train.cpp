@@ -137,7 +137,8 @@ void moqe_layer_forward_gpu(CommandBatch& batch, BufferPool& pool,
         batchedTiledLinear(batch, cache, tc.bufA1, lw.w1, nullptr, tc.bufC1,
                            n1, d, d);
     // No barrier between experts — independent reads/writes
-    batch.submit();  // Fence wait — safe to reuse buffers after this returns
+    batch.submitDeferred();
+    batch.waitForCompletion();  // Fence wait — safe to reuse buffers after this returns
 
     if (n0 > 0) pool.download(tc.bufC0, out0, size_t(n0) * d * sizeof(float));
     if (n1 > 0) pool.download(tc.bufC1, out1, size_t(n1) * d * sizeof(float));
@@ -166,7 +167,8 @@ void moqe_layer_backward_dx_gpu(CommandBatch& batch, BufferPool& pool,
     if (n1 > 0)
         batchedTiledLinear(batch, cache, tc.bufA1, lw.w1_t, nullptr, tc.bufC1,
                            n1, d, d);
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     if (n0 > 0) pool.download(tc.bufC0, dx0, size_t(n0) * d * sizeof(float));
     if (n1 > 0) pool.download(tc.bufC1, dx1, size_t(n1) * d * sizeof(float));

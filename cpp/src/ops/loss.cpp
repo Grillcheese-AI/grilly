@@ -70,7 +70,8 @@ void crossEntropyLoss(CommandBatch& batch, BufferPool& pool,
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push2, sizeof(push2));
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufLoss, losses, lossBytes);
 
@@ -114,7 +115,8 @@ void crossEntropyBackward(CommandBatch& batch, BufferPool& pool,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufGrad, gradLogits, logitBytes);
 

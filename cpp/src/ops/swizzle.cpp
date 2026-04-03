@@ -209,7 +209,8 @@ void swizzle(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
         batch.begin();
         batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                        &push, sizeof(push));
-        batch.submit();
+        batch.submitDeferred();
+    batch.waitForCompletion();
 
         pool.download(bufOut, output, outputBytes);
 

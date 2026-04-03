@@ -41,7 +41,8 @@ static void activationForward(
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push, sizeof(push));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, output, bytes);
 
@@ -83,7 +84,8 @@ static void activationBackward(
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push, sizeof(push));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufGradIn, gradInput, bytes);
 
@@ -207,7 +209,8 @@ void softmax(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx2, 1, 1,
                    &push2, sizeof(push2));
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOutput, output, dataBytes);
 
@@ -250,7 +253,8 @@ void softmaxBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push, sizeof(push));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufGradIn, gradInput, bytes);
 

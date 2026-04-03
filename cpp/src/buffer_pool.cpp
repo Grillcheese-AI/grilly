@@ -42,7 +42,21 @@ BufferPool::BufferPool(GrillyDevice& device) : device_(device) {
 }
 
 BufferPool::~BufferPool() {
-    // Destroy all pooled buffers first
+    VkDevice dev = device_.device();
+
+    // Clean up persistent transfer context
+    if (transferInitialized_) {
+        if (transferFence_ != VK_NULL_HANDLE) {
+            vkWaitForFences(dev, 1, &transferFence_, VK_TRUE, UINT64_MAX);
+            vkDestroyFence(dev, transferFence_, nullptr);
+        }
+        if (transferCmd_ != VK_NULL_HANDLE)
+            vkFreeCommandBuffers(dev, transferPool_, 1, &transferCmd_);
+        if (transferPool_ != VK_NULL_HANDLE)
+            vkDestroyCommandPool(dev, transferPool_, nullptr);
+    }
+
+    // Destroy all pooled buffers
     for (auto& [bucketSize, vec] : buckets_) {
         for (auto& buf : vec) {
             if (buf.handle != VK_NULL_HANDLE)
@@ -86,14 +100,15 @@ GrillyBuffer BufferPool::allocateBuffer(size_t bucketSize) {
     bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    // VMA_MEMORY_USAGE_AUTO lets VMA pick the best heap.
-    // MAPPED_BIT gives us a persistent CPU pointer — the key win over Python
-    // which does vkMapMemory/vkUnmapMemory on every upload/download cycle.
-    // HOST_ACCESS_SEQUENTIAL_WRITE_BIT hints that we write linearly (memcpy).
+    // Use device-local memory with host-visible fallback.
+    // On discrete GPUs with Resizable BAR, VMA places this in VRAM with
+    // CPU-visible mapping — best of both worlds (fast GPU access + memcpy upload).
+    // Without ReBAR, falls back to host-visible (system RAM).
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
                       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+    allocInfo.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
     GrillyBuffer buf{};
     buf.bucketSize = bucketSize;
@@ -247,9 +262,57 @@ GrillyBuffer BufferPool::acquireReadback(size_t size) {
     return buf;
 }
 
+// ── Persistent transfer context ────────────────────────────────────────────
+
+void BufferPool::ensureTransferContext() {
+    if (transferInitialized_) return;
+
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    poolInfo.queueFamilyIndex = device_.queueFamily();
+    vkCheck(vkCreateCommandPool(device_.device(), &poolInfo, nullptr, &transferPool_),
+            "transfer pool creation failed");
+
+    VkCommandBufferAllocateInfo cmdAllocInfo{};
+    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAllocInfo.commandPool = transferPool_;
+    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAllocInfo.commandBufferCount = 1;
+    vkCheck(vkAllocateCommandBuffers(device_.device(), &cmdAllocInfo, &transferCmd_),
+            "transfer cmd alloc failed");
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    vkCheck(vkCreateFence(device_.device(), &fenceInfo, nullptr, &transferFence_),
+            "transfer fence creation failed");
+
+    transferInitialized_ = true;
+}
+
+void BufferPool::transferSubmitAndWait() {
+    vkEndCommandBuffer(transferCmd_);
+
+    vkWaitForFences(device_.device(), 1, &transferFence_, VK_TRUE, UINT64_MAX);
+    vkResetFences(device_.device(), 1, &transferFence_);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &transferCmd_;
+
+    vkCheck(vkQueueSubmit(device_.computeQueue(), 1, &submitInfo, transferFence_),
+            "transfer submit failed");
+    vkCheck(vkWaitForFences(device_.device(), 1, &transferFence_, VK_TRUE, UINT64_MAX),
+            "transfer wait failed");
+}
+
 void BufferPool::uploadStaged(GrillyBuffer& deviceBuf, const void* data,
                                size_t bytes) {
-    // 1. Create a temporary host-visible staging buffer
+    ensureTransferContext();
+
+    // 1. Create staging buffer (TODO: pool these too)
     VkBufferCreateInfo stagingInfo{};
     stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     stagingInfo.size = bytes;
@@ -268,67 +331,33 @@ void BufferPool::uploadStaged(GrillyBuffer& deviceBuf, const void* data,
                             &stagingBuf, &stagingMem, &stagingMemInfo),
             "staging buffer alloc failed");
 
-    // 2. Copy data into staging buffer
+    // 2. Copy data into staging
     std::memcpy(stagingMemInfo.pMappedData, data, bytes);
     vmaFlushAllocation(allocator_, stagingMem, 0, bytes);
 
-    // 3. Create a one-shot command buffer for the transfer
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    poolInfo.queueFamilyIndex = device_.queueFamily();
-
-    VkCommandPool cmdPool;
-    vkCheck(vkCreateCommandPool(device_.device(), &poolInfo, nullptr, &cmdPool),
-            "vkCreateCommandPool for staging failed");
-
-    VkCommandBufferAllocateInfo cmdAllocInfo{};
-    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAllocInfo.commandPool = cmdPool;
-    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAllocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd;
-    vkCheck(vkAllocateCommandBuffers(device_.device(), &cmdAllocInfo, &cmd),
-            "vkAllocateCommandBuffers for staging failed");
-
+    // 3. Record transfer using persistent context
+    vkResetCommandBuffer(transferCmd_, 0);
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
+    vkBeginCommandBuffer(transferCmd_, &beginInfo);
 
     VkBufferCopy copyRegion{};
     copyRegion.size = bytes;
-    vkCmdCopyBuffer(cmd, stagingBuf, deviceBuf.handle, 1, &copyRegion);
+    vkCmdCopyBuffer(transferCmd_, stagingBuf, deviceBuf.handle, 1, &copyRegion);
 
-    vkEndCommandBuffer(cmd);
+    // 4. Submit + wait (reuses persistent fence)
+    transferSubmitAndWait();
 
-    // 4. Submit and wait
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence fence;
-    vkCheck(vkCreateFence(device_.device(), &fenceInfo, nullptr, &fence),
-            "staging fence creation failed");
-
-    vkCheck(vkQueueSubmit(device_.computeQueue(), 1, &submitInfo, fence),
-            "staging vkQueueSubmit failed");
-    vkCheck(vkWaitForFences(device_.device(), 1, &fence, VK_TRUE, UINT64_MAX),
-            "staging vkWaitForFences failed");
-
-    // 5. Cleanup
-    vkDestroyFence(device_.device(), fence, nullptr);
-    vkDestroyCommandPool(device_.device(), cmdPool, nullptr);
+    // 5. Cleanup staging only
     vmaDestroyBuffer(allocator_, stagingBuf, stagingMem);
 }
 
 void BufferPool::downloadStaged(const GrillyBuffer& deviceBuf, void* out,
                                   size_t bytes) {
-    // 1. Create a temporary host-visible staging buffer for readback
+    ensureTransferContext();
+
+    // 1. Create staging readback buffer (TODO: pool these)
     VkBufferCreateInfo stagingInfo{};
     stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     stagingInfo.size = bytes;
@@ -347,61 +376,25 @@ void BufferPool::downloadStaged(const GrillyBuffer& deviceBuf, void* out,
                             &stagingBuf, &stagingMem, &stagingMemInfo),
             "staging readback buffer alloc failed");
 
-    // 2. Copy from device-local to staging via DMA
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    poolInfo.queueFamilyIndex = device_.queueFamily();
-
-    VkCommandPool cmdPool;
-    vkCheck(vkCreateCommandPool(device_.device(), &poolInfo, nullptr, &cmdPool),
-            "vkCreateCommandPool for readback failed");
-
-    VkCommandBufferAllocateInfo cmdAllocInfo{};
-    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAllocInfo.commandPool = cmdPool;
-    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAllocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd;
-    vkCheck(vkAllocateCommandBuffers(device_.device(), &cmdAllocInfo, &cmd),
-            "vkAllocateCommandBuffers for readback failed");
-
+    // 2. Record copy using persistent transfer context
+    vkResetCommandBuffer(transferCmd_, 0);
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
+    vkBeginCommandBuffer(transferCmd_, &beginInfo);
 
     VkBufferCopy copyRegion{};
     copyRegion.size = bytes;
-    vkCmdCopyBuffer(cmd, deviceBuf.handle, stagingBuf, 1, &copyRegion);
+    vkCmdCopyBuffer(transferCmd_, deviceBuf.handle, stagingBuf, 1, &copyRegion);
 
-    vkEndCommandBuffer(cmd);
-
-    // 3. Submit and wait
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence fence;
-    vkCheck(vkCreateFence(device_.device(), &fenceInfo, nullptr, &fence),
-            "readback fence creation failed");
-
-    vkCheck(vkQueueSubmit(device_.computeQueue(), 1, &submitInfo, fence),
-            "readback vkQueueSubmit failed");
-    vkCheck(vkWaitForFences(device_.device(), 1, &fence, VK_TRUE, UINT64_MAX),
-            "readback vkWaitForFences failed");
+    // 3. Submit + wait (reuses persistent fence)
+    transferSubmitAndWait();
 
     // 4. Invalidate + copy to output
     vmaInvalidateAllocation(allocator_, stagingMem, 0, bytes);
     std::memcpy(out, stagingMemInfo.pMappedData, bytes);
 
-    // 5. Cleanup
-    vkDestroyFence(device_.device(), fence, nullptr);
-    vkDestroyCommandPool(device_.device(), cmdPool, nullptr);
+    // 5. Cleanup staging only
     vmaDestroyBuffer(allocator_, stagingBuf, stagingMem);
 }
 

@@ -32,7 +32,8 @@ void perceiverEncode(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     batch.begin();
     batchedPerceiverEncode(batch, cache, bufQ, bufK, bufV, bufOut,
                            seqN, seqM, headDim);
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, output, qBytes);
 

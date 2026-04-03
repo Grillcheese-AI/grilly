@@ -58,16 +58,17 @@ void linear(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     LinearParams pushData = p;
 
     // ── Dispatch ──
-    // 2D workgroups at 16×16 (must match fnn-linear.glsl local_size)
+    // 2D workgroups at 16×16 (matches fnn-linear.glsl tiled GEMM)
     uint32_t gx = (p.outputDim + 15) / 16;
     uint32_t gy = (p.batchSeq + 15) / 16;
 
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
                    &pushData, sizeof(pushData));
-    batch.submit();
+    batch.submitDeferred();  // Submit without waiting — GPU runs async
 
-    // ── Download result (persistent mapping — single memcpy, no vkMap) ──
+    // ── Sync + download (only waits here, not at submit) ──
+    batch.waitForCompletion();
     pool.download(bufOutput, output, outputBytes);
 
     // ── Release buffers back to pool ──
@@ -192,7 +193,8 @@ void linearBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx2, 1, 1,
                    &bwdParams, sizeof(bwdParams));
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufGradIn, gradInput, gradInBytes);
     pool.download(bufGradW, gradWeight, gradWBytes);
@@ -236,7 +238,8 @@ void dropout(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push, sizeof(push));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOutput, output, bytes);
 

@@ -3,13 +3,6 @@
 import numpy as np
 
 
-def _get_backend():
-    """Get compute backend"""
-    from grilly import Compute
-
-    return Compute()
-
-
 def fft(input: np.ndarray) -> np.ndarray:
     """
     Fast Fourier Transform
@@ -21,9 +14,7 @@ def fft(input: np.ndarray) -> np.ndarray:
     Returns:
         FFT output (complex)
     """
-    _get_backend()
-    # Note: May need to implement FFT in backend if not already exposed
-    # CPU fallback for now
+    # CPU fallback
     return np.fft.fft(input)
 
 
@@ -38,9 +29,7 @@ def ifft(input: np.ndarray) -> np.ndarray:
     Returns:
         Reconstructed signal
     """
-    _get_backend()
-    # Note: May need to implement IFFT in backend if not already exposed
-    # CPU fallback for now
+    # CPU fallback
     return np.fft.ifft(input)
 
 
@@ -55,9 +44,7 @@ def fft_magnitude(input: np.ndarray) -> np.ndarray:
     Returns:
         Magnitude spectrum
     """
-    _get_backend()
-    # Note: May need to implement in backend if not already exposed
-    # CPU fallback for now
+    # CPU fallback
     return np.abs(input)
 
 
@@ -72,7 +59,5 @@ def fft_power_spectrum(input: np.ndarray) -> np.ndarray:
     Returns:
         Power spectrum
     """
-    _get_backend()
-    # Note: May need to implement in backend if not already exposed
-    # CPU fallback for now
+    # CPU fallback
     return np.abs(input) ** 2
