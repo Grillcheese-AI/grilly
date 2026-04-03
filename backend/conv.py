@@ -609,9 +609,117 @@ class VulkanConv(BufferMixin):
         K_dim = in_channels * kernel_h * kernel_w
         N_cols = batch_size * out_h * out_w
 
+        # grad_output: (N, C_out, H_out, W_out) -> (C_out, N*H_out*W_out)
+        grad_out_reshaped = grad_output.transpose(1, 0, 2, 3).reshape(
+            out_channels, N_cols
+        )  # (C_out, N_cols)
+
+        grad_bias = None
+        if has_bias:
+            grad_bias = np.sum(grad_output, axis=(0, 2, 3))  # (C_out,)
+
+        use_gpu_gemm = (
+            "gemm_mnk" in self.shaders and "tensor-transpose" in self.shaders
+        )
+
         # --- Step 1: im2col(input) ---
         buf_input = self._acquire_buffer(input_data.nbytes)
         buf_cols = self._acquire_buffer(K_dim * N_cols * 4)
+
+        if use_gpu_gemm:
+            buf_cols_t = self._acquire_buffer(N_cols * K_dim * 4)
+            buf_grad_out = self._acquire_buffer(grad_out_reshaped.nbytes)
+            buf_grad_w = self._acquire_buffer(out_channels * K_dim * 4)
+            try:
+                self._upload_buffer(buf_input, input_data.flatten())
+
+                pipeline_im2col, layout_im2col, _ = self.pipelines.get_or_create_pipeline(
+                    "convd_im2col", 2, push_constant_size=56
+                )
+
+                in_handle = self._get_buffer_handle(buf_input)
+                cols_handle = self._get_buffer_handle(buf_cols)
+
+                desc_im2col = self.pipelines.get_cached_descriptor_set(
+                    "convd_im2col",
+                    [(in_handle, input_data.nbytes), (cols_handle, K_dim * N_cols * 4)],
+                )
+
+                push_im2col = struct.pack(
+                    "14I",
+                    batch_size,
+                    in_channels,
+                    in_h,
+                    in_w,
+                    out_h,
+                    out_w,
+                    kernel_h,
+                    kernel_w,
+                    stride_h,
+                    stride_w,
+                    padding_h,
+                    padding_w,
+                    dilation_h,
+                    dilation_w,
+                )
+
+                group_x = (K_dim + 15) // 16
+                group_y = (N_cols + 15) // 16
+                self.core._dispatch_compute(
+                    pipeline_im2col, layout_im2col, desc_im2col, group_x, push_im2col, group_y, 1
+                )
+
+                # cols (K_dim, N_cols) row-major -> cols^T (N_cols, K_dim) for GEMM B
+                pipeline_tr, layout_tr, _ = self.pipelines.get_or_create_pipeline(
+                    "tensor-transpose", 2, push_constant_size=8
+                )
+                cols_t_handle = self._get_buffer_handle(buf_cols_t)
+                desc_tr = self.pipelines.get_cached_descriptor_set(
+                    "tensor-transpose",
+                    [
+                        (cols_handle, K_dim * N_cols * 4),
+                        (cols_t_handle, N_cols * K_dim * 4),
+                    ],
+                )
+                push_tr = struct.pack("2I", K_dim, N_cols)
+                wg_tr = (K_dim * N_cols + 255) // 256
+                self.core._dispatch_compute(pipeline_tr, layout_tr, desc_tr, wg_tr, push_tr)
+
+                self._upload_buffer(buf_grad_out, grad_out_reshaped.ravel())
+
+                # C = A @ B: A (C_out, N_cols), B (N_cols, K_dim) -> (C_out, K_dim)
+                pipeline_gemm, layout_gemm, _ = self.pipelines.get_or_create_pipeline(
+                    "gemm_mnk", 3, push_constant_size=12
+                )
+                g_handle = self._get_buffer_handle(buf_grad_out)
+                b_handle = cols_t_handle
+                c_handle = self._get_buffer_handle(buf_grad_w)
+                desc_gemm = self.pipelines.get_cached_descriptor_set(
+                    "gemm_mnk",
+                    [
+                        (g_handle, grad_out_reshaped.nbytes),
+                        (b_handle, N_cols * K_dim * 4),
+                        (c_handle, out_channels * K_dim * 4),
+                    ],
+                )
+                push_gemm = struct.pack("3I", out_channels, N_cols, K_dim)
+                group_gx = (K_dim + 15) // 16
+                group_gy = (out_channels + 15) // 16
+                self.core._dispatch_compute(
+                    pipeline_gemm, layout_gemm, desc_gemm, group_gx, push_gemm, group_gy, 1
+                )
+
+                grad_weight_flat = self._download_buffer(
+                    buf_grad_w, out_channels * K_dim * 4, np.float32
+                )
+                grad_weight = grad_weight_flat.reshape(
+                    out_channels, in_channels, kernel_h, kernel_w
+                )
+                return grad_weight.astype(np.float32), grad_bias
+            finally:
+                self._release_buffers(
+                    [buf_input, buf_cols, buf_cols_t, buf_grad_out, buf_grad_w]
+                )
 
         try:
             self._upload_buffer(buf_input, input_data.flatten())
@@ -651,28 +759,11 @@ class VulkanConv(BufferMixin):
                 pipeline_im2col, layout_im2col, desc_im2col, group_x, push_im2col, group_y, 1
             )
 
-            # Download cols for GEMM (could be done on GPU, but for now download)
             cols_flat = self._download_buffer(buf_cols, K_dim * N_cols * 4, np.float32)
-            cols = cols_flat.reshape(K_dim, N_cols)  # (K_dim, N_cols)
+            cols = cols_flat.reshape(K_dim, N_cols)
 
-            # --- Step 2: Prepare grad_output for GEMM ---
-            # grad_output: (N, C_out, H_out, W_out) -> (C_out, N*H_out*W_out)
-            grad_out_reshaped = grad_output.transpose(1, 0, 2, 3).reshape(
-                out_channels, N_cols
-            )  # (C_out, N_cols)
-
-            # --- Step 3: GEMM: grad_weight = grad_out @ cols.T ---
-            # (C_out, N_cols) @ (N_cols, K_dim) = (C_out, K_dim)
-            grad_weight_flat = grad_out_reshaped @ cols.T  # (C_out, K_dim)
-
-            # Reshape to (C_out, C_in, kH, kW)
+            grad_weight_flat = grad_out_reshaped @ cols.T
             grad_weight = grad_weight_flat.reshape(out_channels, in_channels, kernel_h, kernel_w)
-
-            # --- Step 4: Compute grad_bias ---
-            grad_bias = None
-            if has_bias:
-                # Sum over all spatial positions and batch
-                grad_bias = np.sum(grad_output, axis=(0, 2, 3))  # (C_out,)
 
             return grad_weight.astype(np.float32), grad_bias
 

@@ -11,11 +11,16 @@ This changelog follows the spirit of **Keep a Changelog** and uses the terms **A
 ### Added
 
 - **`tests/parity/`** — Numerical parity tests for `grilly.functional` (numpy reference; optional PyTorch `F.linear` / `F.relu` when `torch` is installed). See `tests/parity/README.md`.
+- **`tests/parity/test_optimizers_parity.py`** — SGD and Adam (CPU) stepping vs `torch.optim`.
 - **`docs/MIGRATION_PYTORCH.md`** — PyTorch → Grilly migration cookbook (device model, functional layout, module backend lifecycle, debugging).
+- **`docs/PERF_DISPATCH.md`** — Vulkan dispatch/batching (`record_commands`, async dispatch), Sequential fusion notes, pybind GIL checklist.
 
 ### Changed
 
 - **`docs/api/functional.md`** — PyTorch parity notes and links to migration docs and parity tests.
+- **`backend/compute.py`** — `VulkanCompute` exposes `record_commands`, `dispatch_compute`, `dispatch_compute_async`, `wait_async`, `wait_fence`.
+- **`backend/fnn.py`** — `_linear_relu_recorded_chain`: Linear→ReLU in one submit when `fused-linear-relu` shader is absent.
+- **`cpp/python/bindings_{activations,attention,linear}.cpp`** — GIL release around heavy ops; `require_c_contiguous_float` on `linear` inputs.
 
 ---
 

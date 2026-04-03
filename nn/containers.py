@@ -21,6 +21,8 @@ class Sequential(Module):
 
     Caches intermediate activations during forward pass for efficient backward pass.
     Automatically fuses Linear+Activation pairs when fused GPU shaders are available.
+    When a fused shader is missing, `fused_linear_relu` may use a two-kernel **single-submit**
+    path (`VulkanFNN._linear_relu_recorded_chain`) before falling back to separate calls.
     """
 
     def __init__(self, *modules):

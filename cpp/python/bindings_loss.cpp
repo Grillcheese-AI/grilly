@@ -15,6 +15,7 @@ void register_loss_ops(py::module_& m) {
            py::array_t<float> logits, py::array_t<uint32_t> targets,
            float label_smoothing) -> Tensor {
             auto lBuf = logits.request();
+            require_c_contiguous_float(lBuf);
 
             uint32_t batchSize, seqLen, vocabSize;
             if (lBuf.ndim == 2) {
@@ -31,14 +32,20 @@ void register_loss_ops(py::module_& m) {
 
             uint32_t totalPos = batchSize * seqLen;
             py::array_t<float> losses(totalPos);
+            auto tBuf = targets.request();
+            require_c_contiguous_uint32(tBuf);
+            auto lossBuf = losses.request();
 
             grilly::ops::CrossEntropyParams p{
                 batchSize, seqLen, vocabSize, 0, label_smoothing};
-            grilly::ops::crossEntropyLoss(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(lBuf.ptr),
-                static_cast<const uint32_t*>(targets.request().ptr),
-                static_cast<float*>(losses.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::crossEntropyLoss(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(lBuf.ptr),
+                    static_cast<const uint32_t*>(tBuf.ptr),
+                    static_cast<float*>(lossBuf.ptr), p);
+            }
             return Tensor::from_numpy(losses);
         },
         py::arg("device"), py::arg("logits"), py::arg("targets"),
@@ -52,18 +59,25 @@ void register_loss_ops(py::module_& m) {
            py::array_t<float> logits,
            py::array_t<uint32_t> targets) -> Tensor {
             auto lBuf = logits.request();
+            require_c_contiguous_float(lBuf);
             uint32_t batchSize = static_cast<uint32_t>(lBuf.shape[0]);
             uint32_t numClasses = static_cast<uint32_t>(lBuf.shape[1]);
 
             py::array_t<float> gradLogits(lBuf.shape);
+            auto tBuf = targets.request();
+            require_c_contiguous_uint32(tBuf);
+            auto gBuf = gradLogits.request();
 
             grilly::ops::CrossEntropyBackwardParams p{
                 batchSize, numClasses};
-            grilly::ops::crossEntropyBackward(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(lBuf.ptr),
-                static_cast<const uint32_t*>(targets.request().ptr),
-                static_cast<float*>(gradLogits.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::crossEntropyBackward(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(lBuf.ptr),
+                    static_cast<const uint32_t*>(tBuf.ptr),
+                    static_cast<float*>(gBuf.ptr), p);
+            }
             return Tensor::from_numpy(gradLogits);
         },
         py::arg("device"), py::arg("logits"), py::arg("targets"),

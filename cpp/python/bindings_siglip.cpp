@@ -45,6 +45,7 @@ static int g_nextHandle = 1;
 
 static GrillyBuffer uploadPersistent(BufferPool& pool, py::array_t<float> arr) {
     auto buf = arr.request();
+    require_c_contiguous_float(buf);
     size_t bytes = buf.size * sizeof(float);
     GrillyBuffer gpuBuf = pool.acquire(bytes);
     pool.upload(gpuBuf, static_cast<const float*>(buf.ptr), bytes);
@@ -141,6 +142,7 @@ void register_siglip_ops(py::module_& m) {
 
             auto& wc = it->second;
             auto pBuf = patches.request();
+            require_c_contiguous_float(pBuf);
             const uint32_t S = wc.seqLen;
             const uint32_t H = wc.hidden;
             const uint32_t H3 = H * 3;

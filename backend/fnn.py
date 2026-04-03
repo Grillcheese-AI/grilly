@@ -2698,6 +2698,117 @@ class VulkanFNN(BufferMixin):
             self._release_buffer(buf_output)
             return result.reshape(output_shape)
 
+    def _linear_relu_recorded_chain(
+        self,
+        x,
+        weights: np.ndarray,
+        bias: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Linear then ReLU in one queue submit (fused shader absent)."""
+        if "fnn-linear" not in self.shaders or "activation-relu" not in self.shaders:
+            raise RuntimeError("linear/relu shaders unavailable")
+
+        original_shape = x.shape
+        input_dim = x.shape[-1]
+        output_dim = weights.shape[0]
+
+        if len(original_shape) > 2:
+            batch_seq = int(np.prod(original_shape[:-1]))
+        else:
+            batch_seq = original_shape[0] if len(original_shape) == 2 else 1
+
+        input_nbytes = batch_seq * input_dim * 4
+        output_size = batch_seq * output_dim * 4
+
+        buf_input, release_input = self._prepare_input(x, size=input_nbytes)
+
+        w_np = np.ascontiguousarray(weights, dtype=np.float32)
+        w_nbytes = int(np.prod(weights.shape)) * 4
+        buf_weights, release_weights = self._get_or_upload_weight(w_np)
+
+        if bias is not None:
+            bias_np = np.ascontiguousarray(bias, dtype=np.float32)
+            buf_bias, release_bias = self._get_or_upload_weight(bias_np)
+            b_nbytes = bias_np.size * 4
+            has_bias = 1
+        else:
+            b_flat = np.zeros(output_dim, dtype=np.float32)
+            buf_bias = self._acquire_buffer(b_flat.nbytes)
+            self._upload_buffer(buf_bias, b_flat)
+            b_nbytes = b_flat.nbytes
+            release_bias = True
+            has_bias = 0
+
+        buf_linear_out = self._acquire_buffer(output_size)
+        buf_relu_out = self._acquire_buffer(output_size)
+
+        pipeline_l, pipeline_layout_l, _ = self.pipelines.get_or_create_pipeline(
+            "fnn-linear", 4, push_constant_size=16
+        )
+        descriptor_set_l = self.pipelines.get_cached_descriptor_set(
+            "fnn-linear",
+            [
+                (self._get_buffer_handle(buf_input), input_nbytes),
+                (self._get_buffer_handle(buf_weights), w_nbytes),
+                (self._get_buffer_handle(buf_bias), b_nbytes),
+                (self._get_buffer_handle(buf_linear_out), output_size),
+            ],
+        )
+
+        push_l = struct.pack("IIII", batch_seq, input_dim, output_dim, has_bias)
+        workgroups_x = (output_dim + 15) // 16
+        workgroups_y = (batch_seq + 15) // 16
+
+        total_elements = batch_seq * output_dim
+        push_r = struct.pack("I", total_elements)
+        workgroups_r = (total_elements + 255) // 256
+
+        pipeline_r, pipeline_layout_r, _ = self.pipelines.get_or_create_pipeline(
+            "activation-relu", 2, push_constant_size=4
+        )
+        descriptor_set_r = self.pipelines.get_cached_descriptor_set(
+            "activation-relu",
+            [
+                (self._get_buffer_handle(buf_linear_out), output_size),
+                (self._get_buffer_handle(buf_relu_out), output_size),
+            ],
+        )
+
+        with self.core.record_commands() as rec:
+            rec.dispatch(
+                pipeline_l,
+                pipeline_layout_l,
+                descriptor_set_l,
+                (workgroups_x, workgroups_y),
+                push_l,
+            )
+            rec.barrier()
+            rec.dispatch(
+                pipeline_r,
+                pipeline_layout_r,
+                descriptor_set_r,
+                (workgroups_r,),
+                push_r,
+            )
+
+        if len(original_shape) > 2:
+            output_shape = original_shape[:-1] + (output_dim,)
+        else:
+            output_shape = (batch_seq, output_dim)
+
+        result = self._download_buffer(buf_relu_out, output_size, np.float32)
+
+        if release_input:
+            self._release_buffer(buf_input)
+        if release_weights:
+            self._release_buffer(buf_weights)
+        if release_bias:
+            self._release_buffer(buf_bias)
+        self._release_buffer(buf_linear_out)
+        self._release_buffer(buf_relu_out)
+
+        return result.reshape(output_shape)
+
     def fused_linear_relu(
         self,
         x,
@@ -2720,6 +2831,16 @@ class VulkanFNN(BufferMixin):
             ReLU(Linear(x))
         """
         if "fused-linear-relu" not in self.shaders:
+            if (
+                not return_gpu_tensor
+                and hasattr(self.core, "record_commands")
+                and "fnn-linear" in self.shaders
+                and "activation-relu" in self.shaders
+            ):
+                try:
+                    return self._linear_relu_recorded_chain(x, weights, bias)
+                except Exception:
+                    pass
             linear_out = self.linear(x, weights, bias, return_gpu_tensor=return_gpu_tensor)
             return self.activation_relu(linear_out, return_gpu_tensor=return_gpu_tensor)
 

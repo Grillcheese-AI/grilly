@@ -28,6 +28,9 @@ void register_perceiver_ops(py::module_& m) {
             auto qBuf = Q_arr.request();
             auto kBuf = K_arr.request();
             auto vBuf = V_arr.request();
+            require_c_contiguous_float(qBuf);
+            require_c_contiguous_float(kBuf);
+            require_c_contiguous_float(vBuf);
 
             uint32_t seqN = static_cast<uint32_t>(qBuf.shape[0]);
             uint32_t headDim = static_cast<uint32_t>(qBuf.shape[qBuf.ndim - 1]);
@@ -68,6 +71,7 @@ void register_perceiver_ops(py::module_& m) {
             for (auto& w : weights) {
                 auto arr = w.cast<py::array_t<float>>();
                 auto buf = arr.request();
+                require_c_contiguous_float(buf);
                 const float* ptr = static_cast<const float*>(buf.ptr);
                 cpp_weights.emplace_back(ptr, ptr + buf.size);
             }
@@ -92,6 +96,7 @@ void register_perceiver_ops(py::module_& m) {
 
             auto& pc = ops::perceiver_get_cache(handle);
             auto pBuf = patches.request();
+            require_c_contiguous_float(pBuf);
 
             uint32_t nPatches = static_cast<uint32_t>(pBuf.shape[0]);
             const float* patchPtr = static_cast<const float*>(pBuf.ptr);

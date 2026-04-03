@@ -20,6 +20,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "parity: marks numerical parity tests (numpy / optional PyTorch reference)"
     )
+    config.addinivalue_line(
+        "markers", "slow: marks tests that are slow or heavy (deselect with '-m \"not slow\"')"
+    )
 
 
 try:

@@ -20,9 +20,18 @@ void register_optim_ops(py::module_& m) {
            float lr, float beta1, float beta2, float eps,
            float beta1_t, float beta2_t, bool clear_grad) -> py::dict {
             auto wBuf = weights.request();
-            uint32_t total = 1;
-            for (int i = 0; i < wBuf.ndim; ++i)
-                total *= static_cast<uint32_t>(wBuf.shape[i]);
+            auto gBuf = grad.request();
+            auto mBuf = m_state.request();
+            auto vBuf = v_state.request();
+            require_c_contiguous_float(wBuf);
+            require_c_contiguous_float(gBuf);
+            require_c_contiguous_float(mBuf);
+            require_c_contiguous_float(vBuf);
+            if (wBuf.size != gBuf.size || wBuf.size != mBuf.size ||
+                wBuf.size != vBuf.size)
+                throw std::runtime_error(
+                    "adam_update: weights, grad, m, v must match shape");
+            uint32_t total = static_cast<uint32_t>(wBuf.size);
 
             py::array_t<float> wOut(wBuf.shape);
             py::array_t<float> gOut(wBuf.shape);
@@ -31,22 +40,25 @@ void register_optim_ops(py::module_& m) {
 
             std::memcpy(wOut.mutable_data(), wBuf.ptr,
                         total * sizeof(float));
-            std::memcpy(gOut.mutable_data(), grad.data(),
+            std::memcpy(gOut.mutable_data(), gBuf.ptr,
                         total * sizeof(float));
-            std::memcpy(mOut.mutable_data(), m_state.data(),
+            std::memcpy(mOut.mutable_data(), mBuf.ptr,
                         total * sizeof(float));
-            std::memcpy(vOut.mutable_data(), v_state.data(),
+            std::memcpy(vOut.mutable_data(), vBuf.ptr,
                         total * sizeof(float));
 
             grilly::ops::AdamParams p{total, lr, beta1, beta2, eps,
                                       beta1_t, beta2_t,
                                       clear_grad ? 1u : 0u};
-            grilly::ops::adamUpdate(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<float*>(wOut.mutable_data()),
-                static_cast<float*>(gOut.mutable_data()),
-                static_cast<float*>(mOut.mutable_data()),
-                static_cast<float*>(vOut.mutable_data()), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::adamUpdate(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<float*>(wOut.mutable_data()),
+                    static_cast<float*>(gOut.mutable_data()),
+                    static_cast<float*>(mOut.mutable_data()),
+                    static_cast<float*>(vOut.mutable_data()), p);
+            }
 
             py::dict result;
             result["weights"] = Tensor::from_numpy(wOut);
@@ -73,9 +85,18 @@ void register_optim_ops(py::module_& m) {
            float weight_decay,
            float beta1_t, float beta2_t, bool clear_grad) -> py::dict {
             auto wBuf = weights.request();
-            uint32_t total = 1;
-            for (int i = 0; i < wBuf.ndim; ++i)
-                total *= static_cast<uint32_t>(wBuf.shape[i]);
+            auto gBuf = grad.request();
+            auto mBuf = m_state.request();
+            auto vBuf = v_state.request();
+            require_c_contiguous_float(wBuf);
+            require_c_contiguous_float(gBuf);
+            require_c_contiguous_float(mBuf);
+            require_c_contiguous_float(vBuf);
+            if (wBuf.size != gBuf.size || wBuf.size != mBuf.size ||
+                wBuf.size != vBuf.size)
+                throw std::runtime_error(
+                    "adamw_update: weights, grad, m, v must match shape");
+            uint32_t total = static_cast<uint32_t>(wBuf.size);
 
             py::array_t<float> wOut(wBuf.shape);
             py::array_t<float> gOut(wBuf.shape);
@@ -84,22 +105,25 @@ void register_optim_ops(py::module_& m) {
 
             std::memcpy(wOut.mutable_data(), wBuf.ptr,
                         total * sizeof(float));
-            std::memcpy(gOut.mutable_data(), grad.data(),
+            std::memcpy(gOut.mutable_data(), gBuf.ptr,
                         total * sizeof(float));
-            std::memcpy(mOut.mutable_data(), m_state.data(),
+            std::memcpy(mOut.mutable_data(), mBuf.ptr,
                         total * sizeof(float));
-            std::memcpy(vOut.mutable_data(), v_state.data(),
+            std::memcpy(vOut.mutable_data(), vBuf.ptr,
                         total * sizeof(float));
 
             grilly::ops::AdamWParams p{total, lr, beta1, beta2, eps,
                                        weight_decay, beta1_t, beta2_t,
                                        clear_grad ? 1u : 0u};
-            grilly::ops::adamwUpdate(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<float*>(wOut.mutable_data()),
-                static_cast<float*>(gOut.mutable_data()),
-                static_cast<float*>(mOut.mutable_data()),
-                static_cast<float*>(vOut.mutable_data()), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::adamwUpdate(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<float*>(wOut.mutable_data()),
+                    static_cast<float*>(gOut.mutable_data()),
+                    static_cast<float*>(mOut.mutable_data()),
+                    static_cast<float*>(vOut.mutable_data()), p);
+            }
 
             py::dict result;
             result["weights"] = Tensor::from_numpy(wOut);

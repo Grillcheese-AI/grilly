@@ -75,7 +75,11 @@ PYBIND11_MODULE(grilly_core, m) {
              "Clear all recorded ops for reuse")
         .def("optimize",
              [](grilly::OpGraph& graph, GrillyCoreContext& ctx) -> py::dict {
-                 auto stats = graph.optimize(ctx.cache);
+                 grilly::FusionStats stats;
+                 {
+                     py::gil_scoped_release release;
+                     stats = graph.optimize(ctx.cache);
+                 }
                  py::dict d;
                  d["ops_fused"] = stats.opsFused;
                  d["barriers_eliminated"] = stats.barriersEliminated;
@@ -87,7 +91,10 @@ PYBIND11_MODULE(grilly_core, m) {
              "Run fusion optimization pass. Returns fusion statistics.")
         .def("execute",
              [](grilly::OpGraph& graph, GrillyCoreContext& ctx) {
-                 graph.execute(ctx.batch, ctx.cache);
+                 {
+                     py::gil_scoped_release release;
+                     graph.execute(ctx.batch, ctx.cache);
+                 }
              },
              py::arg("device"),
              "Execute all recorded ops in a single GPU submission");

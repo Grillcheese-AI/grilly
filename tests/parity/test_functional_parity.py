@@ -66,7 +66,6 @@ def test_linear_relu_chain_matches_numpy_reference():
 def test_linear_matches_torch_functional():
     torch = pytest.importorskip("torch")
     import torch.nn.functional as F
-
     from grilly.functional import linear
 
     rng = np.random.default_rng(4)
@@ -86,7 +85,6 @@ def test_linear_matches_torch_functional():
 def test_relu_matches_torch():
     torch = pytest.importorskip("torch")
     import torch.nn.functional as F
-
     from grilly.functional import relu
 
     rng = np.random.default_rng(5)

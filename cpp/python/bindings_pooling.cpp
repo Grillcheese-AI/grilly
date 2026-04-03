@@ -19,6 +19,7 @@ void register_pooling_ops(py::module_& m) {
            std::vector<uint32_t> padding,
            std::vector<uint32_t> dilation) -> py::dict {
             auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
             if (inBuf.ndim != 4)
                 throw std::runtime_error(
                     "input must be 4D (B, C, H, W)");
@@ -53,14 +54,22 @@ void register_pooling_ops(py::module_& m) {
                 static_cast<py::ssize_t>(oH),
                 static_cast<py::ssize_t>(oW)});
 
+            auto resBuf = result.request();
+            auto idxBuf = indices.request();
+            require_c_contiguous_float(resBuf);
+            require_c_contiguous_uint32(idxBuf);
+
             grilly::ops::MaxPool2dParams p{B, C, iH, iW, oH, oW,
                                            kH, kW, sH, sW,
                                            pH, pW, dH, dW};
-            grilly::ops::maxpool2dForward(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(result.request().ptr),
-                static_cast<uint32_t*>(indices.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::maxpool2dForward(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(resBuf.ptr),
+                    static_cast<uint32_t*>(idxBuf.ptr), p);
+            }
 
             py::dict out;
             out["output"] = Tensor::from_numpy(result);
@@ -85,6 +94,7 @@ void register_pooling_ops(py::module_& m) {
            std::vector<uint32_t> padding,
            bool count_include_pad) -> Tensor {
             auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
             if (inBuf.ndim != 4)
                 throw std::runtime_error("input must be 4D");
 
@@ -111,13 +121,19 @@ void register_pooling_ops(py::module_& m) {
                 static_cast<py::ssize_t>(oH),
                 static_cast<py::ssize_t>(oW)});
 
+            auto resBuf = result.request();
+            require_c_contiguous_float(resBuf);
+
             grilly::ops::AvgPool2dParams p{
                 B, C, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW,
                 count_include_pad ? 1u : 0u};
-            grilly::ops::avgpool2dForward(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(result.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::avgpool2dForward(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(resBuf.ptr), p);
+            }
             return Tensor::from_numpy(result);
         },
         py::arg("device"), py::arg("input"),
@@ -133,6 +149,7 @@ void register_pooling_ops(py::module_& m) {
         [](GrillyCoreContext& ctx,
            py::array_t<float> input) -> Tensor {
             auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
             if (inBuf.ndim != 3)
                 throw std::runtime_error(
                     "input must be 3D (B, S, D)");
@@ -145,11 +162,17 @@ void register_pooling_ops(py::module_& m) {
                 static_cast<py::ssize_t>(B),
                 static_cast<py::ssize_t>(D)});
 
+            auto resBuf = result.request();
+            require_c_contiguous_float(resBuf);
+
             grilly::ops::MeanPoolParams p{B, S, D};
-            grilly::ops::meanPool(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(result.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::meanPool(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(resBuf.ptr), p);
+            }
             return Tensor::from_numpy(result);
         },
         py::arg("device"), py::arg("input"),
