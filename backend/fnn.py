@@ -73,6 +73,12 @@ class VulkanFNN(BufferMixin):
         self.shaders = shaders
         self._pool = None  # Lazy initialization
 
+    def chain_record(self):
+        """Return a :class:`~grilly.backend.fnn_chain.FnnChainRecorder` for batched linear/relu/softmax + single submit."""
+        from .fnn_chain import FnnChainRecorder
+
+        return FnnChainRecorder(self)
+
     def gemm(self, A, B, return_gpu_tensor=False, cache_B=False, force_fp32=False):
         """
         GEMM: C = A @ B

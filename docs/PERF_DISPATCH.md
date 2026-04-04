@@ -8,13 +8,19 @@ This document summarizes **non-blocking** and **batched** Vulkan dispatch APIs a
 - **`VulkanCore._dispatch_compute_async(...)`** — Submits work **without** waiting; pair with **`_wait_async()`** before reading GPU results.
 - **`VulkanCore.record_commands()`** — Returns a **`CommandRecorder`** context manager: multiple `dispatch` + `barrier` calls, then **one** submit + wait on `__exit__`. Used by FlashAttention2 tiling, RMSNorm two-pass, and **`VulkanFNN._linear_relu_recorded_chain`** (Linear→ReLU fallback when `fused-linear-relu.spv` is missing).
 
+### FNN chain recorder (`record_commands(fnn_chain=True)`)
+
+`VulkanCompute.record_commands(fnn_chain=True)` returns **`FnnChainRecorder`** (`backend/fnn_chain.py`): high-level **`linear`**, **`relu`**, **`softmax`** methods that record dispatches only and return **`ChainBufferHandle`**. **`read(handle)`** performs **one** `submit_and_wait` + one download. **`read_multiple([h0, h1, ...])`** does **one** `submit_and_wait` then downloads each handle (MoE fan-out: many expert linears, one fence wait, many CPU reads). Use for deep MLP-style forwards to avoid one fence wait per layer.
+
+Equivalent: **`VulkanFNN.chain_record()`**.
+
 ## Public aliases on `VulkanCompute` (`backend/compute.py`)
 
 After `Compute()` / `VulkanCompute()` construction:
 
 | Attribute | Underlying API |
 |-----------|----------------|
-| `record_commands` | `core.record_commands()` |
+| `record_commands(fnn_chain=False)` | `core.record_commands()` or `fnn.chain_record()` when `fnn_chain=True` |
 | `dispatch_compute` | `core._dispatch_compute` |
 | `dispatch_compute_async` | `core._dispatch_compute_async` |
 | `wait_async` | `core._wait_async` |
