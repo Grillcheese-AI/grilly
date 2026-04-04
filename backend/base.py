@@ -374,18 +374,20 @@ class BufferMixin:
 
         When *data* is a VulkanTensor already on GPU, returns its existing
         buffer without copying. Otherwise allocates a pooled buffer and uploads.
+
+        VulkanTensor residency: ``prepare_for_dispatch()`` binds C++ GPU handles or
+        pooled buffers so GPU-resident tensors skip redundant CPU→GPU uploads.
         """
         # Avoid hard import at module level - VulkanTensor lives in utils
         from ..utils.tensor_conversion import VulkanTensor
 
         if isinstance(data, VulkanTensor):
-            if data.on_gpu:
-                buf = data._pooled_buffer if data._pooled_buffer is not None else None
-                if buf is not None:
-                    return buf, False
-                # Has raw GPU buffer but not pooled - wrap for API compat
-                return _DirectBuffer(data._gpu_buffer, data._gpu_memory, data.nbytes), False
-            # CPU-backed lazy VulkanTensor
+            data.prepare_for_dispatch()
+            if data._pooled_buffer is not None:
+                return data._pooled_buffer, False
+            if data._gpu_buffer is not None:
+                nbytes = int(data.nbytes if size is None else size)
+                return _DirectBuffer(data._gpu_buffer, data._gpu_memory, nbytes), False
             arr = np.asarray(data.numpy(), dtype=np.float32).reshape(-1)
         else:
             arr = np.asarray(data)

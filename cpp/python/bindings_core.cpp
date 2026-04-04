@@ -154,6 +154,8 @@ PYBIND11_MODULE(grilly_core, m) {
              "Download to CPU and return as numpy array")
         .def("gpu_handle", &Tensor::gpu_handle,
              "Upload to GPU and return buffer handle")
+        .def("gpu_handle_if_valid", &Tensor::gpu_handle_if_valid,
+             "GPU buffer handle if already resident (0 otherwise); does not upload")
         .def("mark_gpu_modified", &Tensor::mark_gpu_modified)
         .def("mark_cpu_modified", &Tensor::mark_cpu_modified)
         .def("reshape", &Tensor::reshape, py::arg("shape"))

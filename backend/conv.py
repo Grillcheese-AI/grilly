@@ -812,6 +812,34 @@ class VulkanConv(BufferMixin):
                 grad_output, input_data, kernel_size, stride, padding, dilation, groups, has_bias
             )
 
+        # 1×1, stride 1, pad 0, dilation 1, groups 1: optional atomic float shader (no batch dim in shader — loop batches)
+        kernel_h, kernel_w = kernel_size
+        stride_h, stride_w = stride
+        padding_h, padding_w = padding
+        dilation_h, dilation_w = dilation
+        batch_size, out_channels, out_height, out_width = grad_output.shape
+        _, in_channels, in_height, in_width = input_data.shape
+        atomic_ext = getattr(self.core, "enabled_extensions", None) or set()
+        can_1x1_atomic = (
+            "conv1x1-backward-weight" in self.shaders
+            and "VK_EXT_shader_atomic_float" in atomic_ext
+            and kernel_h == 1
+            and kernel_w == 1
+            and stride_h == 1
+            and stride_w == 1
+            and padding_h == 0
+            and padding_w == 0
+            and dilation_h == 1
+            and dilation_w == 1
+            and groups == 1
+            and out_height == in_height
+            and out_width == in_width
+        )
+        if can_1x1_atomic:
+            return self._conv1x1_backward_weight_atomic(
+                grad_output, input_data, out_channels, in_channels, has_bias
+            )
+
         # Check if shader is available
         if "conv2d-backward-weight" not in self.shaders:
             return self._conv2d_backward_weight_cpu(
@@ -923,6 +951,64 @@ class VulkanConv(BufferMixin):
 
         finally:
             self._release_buffers([buf_grad_output, buf_input, buf_grad_weight, buf_grad_bias])
+
+    def _conv1x1_backward_weight_atomic(
+        self,
+        grad_output: np.ndarray,
+        input_data: np.ndarray,
+        out_channels: int,
+        in_channels: int,
+        has_bias: bool,
+    ) -> tuple[np.ndarray, np.ndarray | None]:
+        """1×1 conv backward weight: ``conv1x1-backward-weight.glsl`` (buffer float atomics). Shader is batch=1; we dispatch per batch and accumulate."""
+        batch_size, _, out_height, out_width = grad_output.shape
+        flat_in = in_channels * out_height * out_width * 4
+        flat_dy = out_channels * out_height * out_width * 4
+        num_w = out_channels * in_channels * 4
+
+        buf_in = self._acquire_buffer(flat_in)
+        buf_dy = self._acquire_buffer(flat_dy)
+        buf_gw = self._acquire_buffer(num_w)
+
+        try:
+            self._upload_buffer(buf_gw, np.zeros(out_channels * in_channels, dtype=np.float32))
+            pipeline, pipeline_layout, _ = self.pipelines.get_or_create_pipeline(
+                "conv1x1-backward-weight", 3, push_constant_size=16
+            )
+            gx = (out_width + 15) // 16
+            gy = (out_height + 15) // 16
+            push = struct.pack("4I", out_width, out_height, in_channels, out_channels)
+
+            for b in range(batch_size):
+                self._upload_buffer(buf_in, input_data[b].ravel())
+                self._upload_buffer(buf_dy, grad_output[b].ravel())
+                descriptor_set = self.pipelines.get_cached_descriptor_set(
+                    "conv1x1-backward-weight",
+                    [
+                        (self._get_buffer_handle(buf_in), flat_in),
+                        (self._get_buffer_handle(buf_dy), flat_dy),
+                        (self._get_buffer_handle(buf_gw), num_w),
+                    ],
+                )
+                self.core._dispatch_compute(
+                    pipeline,
+                    pipeline_layout,
+                    descriptor_set,
+                    gx,
+                    push,
+                    gy,
+                    1,
+                    wait_previous=(b != 0),
+                )
+
+            grad_weight_flat = self._download_buffer(buf_gw, num_w, np.float32)
+            grad_weight = grad_weight_flat.reshape(out_channels, in_channels, 1, 1)
+            grad_bias = None
+            if has_bias:
+                grad_bias = np.sum(grad_output, axis=(0, 2, 3), dtype=np.float32)
+            return grad_weight, grad_bias
+        finally:
+            self._release_buffers([buf_in, buf_dy, buf_gw])
 
     # CPU fallbacks (using numpy)
     def _conv2d_cpu(self, input_data, weight, bias, stride, padding, dilation, groups):

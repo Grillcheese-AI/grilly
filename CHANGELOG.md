@@ -17,6 +17,8 @@ This changelog follows the spirit of **Keep a Changelog** and uses the terms **A
 
 ### Changed
 
+- **`utils/tensor_conversion.py`**, **`backend/base.py`** — `VulkanTensor.prepare_for_dispatch()` and C++ `Tensor.gpu_handle_if_valid()` binding so GPU-resident tensors reuse buffers in `BufferMixin._prepare_input` without redundant uploads when possible.
+- **`docs/PYTORCH_PARITY_TASKLIST.md`**, **`docs/PYTORCH_PARITY_STATUS.md`**, **`docs/GPU_OPTIMIZATION_REVIEW.md`** — Workstream C (kernel/throughput milestone) marked complete with scoped deliverables; follow-ups consolidated under **Workstream C — future**.
 - **`docs/api/functional.md`** — PyTorch parity notes and links to migration docs and parity tests.
 - **`backend/compute.py`** — `VulkanCompute` exposes `record_commands`, `dispatch_compute`, `dispatch_compute_async`, `wait_async`, `wait_fence`.
 - **`backend/fnn.py`** — `_linear_relu_recorded_chain`: Linear→ReLU in one submit when `fused-linear-relu` shader is absent.

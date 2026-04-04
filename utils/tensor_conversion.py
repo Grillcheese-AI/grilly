@@ -360,17 +360,69 @@ if _CPP_AVAILABLE:
             except Exception:
                 pass
 
+        def _try_bind_cpp_gpu_buffer(self) -> bool:
+            """If C++ Tensor already holds a GPU buffer, mirror its VkBuffer handle for Python dispatch.
+
+            Avoids allocating a second pooled buffer and re-uploading when the tensor is
+            GPU-resident only (e.g. output of a prior op) but Python slots were not set.
+            """
+            if self._pooled_buffer is not None or self._gpu_buffer is not None:
+                return True
+            try:
+                h = int(self._t.gpu_handle_if_valid())
+            except Exception:
+                return False
+            if h == 0:
+                return False
+            try:
+                import vulkan as vk
+
+                self._gpu_buffer = vk.ffi.cast("VkBuffer", h)
+                self._gpu_memory = None
+                if self._core is None:
+                    backend = _get_vulkan_backend()
+                    if backend is not None:
+                        self._core = backend.core
+                self._gpu_valid = True
+                self._uploaded = True
+                self._cpu_valid = bool(self._t.on_cpu)
+                return True
+            except Exception:
+                return False
+
+        def prepare_for_dispatch(self) -> None:
+            """Ensure this tensor can supply a Vulkan buffer for kernels (minimal CPU↔GPU traffic)."""
+            if self._try_bind_cpp_gpu_buffer():
+                return
+            if self._t.on_gpu:
+                try:
+                    self._t.ensure_gpu()
+                except Exception:
+                    pass
+                if self._try_bind_cpp_gpu_buffer():
+                    return
+            self._ensure_uploaded()
+
         def _ensure_uploaded(self):
-            if self._gpu_valid:
+            if self._try_bind_cpp_gpu_buffer():
                 return
 
             if not self._cpu_valid and not self._t.on_cpu:
+                if self._t.on_gpu:
+                    try:
+                        self._t.ensure_gpu()
+                    except Exception:
+                        pass
+                    if self._try_bind_cpp_gpu_buffer():
+                        return
                 raise RuntimeError("Cannot upload: no valid CPU data")
 
             try:
                 self._t.ensure_gpu()
                 self._gpu_valid = True
                 self._uploaded = True
+                if self._try_bind_cpp_gpu_buffer():
+                    return
             except Exception:
                 # C++ Tensor may not have Vulkan backend — fall back to Python path
                 try:
@@ -725,6 +777,9 @@ else:
         def mark_cpu_modified(self):
             self._cpu_valid = True
             self._gpu_valid = False
+
+        def prepare_for_dispatch(self) -> None:
+            self._ensure_uploaded()
 
         @property
         def is_leaf(self) -> bool:
