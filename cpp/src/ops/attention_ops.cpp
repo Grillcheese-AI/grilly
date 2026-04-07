@@ -1,6 +1,9 @@
 #include "grilly/ops/attention_ops.h"
 
+#include "grilly/ops/activations.h"
+
 #include <cstring>
+#include <stdexcept>
 
 namespace grilly {
 namespace ops {
@@ -59,7 +62,8 @@ void attentionScores(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, gz,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufScores, scores, scoreBytes);
 
@@ -67,6 +71,124 @@ void attentionScores(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     pool.release(bufK);
     pool.release(bufV);
     pool.release(bufScores);
+}
+
+void attentionScoresSoftmaxOutput(CommandBatch& batch, BufferPool& pool,
+                                  PipelineCache& cache, const float* Q,
+                                  const float* K, const float* V, float* output,
+                                  float* softmaxWeights, const AttentionScoresParams& sp,
+                                  const AttentionOutputParams& op) {
+    const uint32_t B = sp.batchSize;
+    const uint32_t S = sp.seqLen;
+    const uint32_t H = sp.numHeads;
+    const uint32_t D = sp.headDim;
+
+    if (op.batchSize != B || op.seqLen != S || op.numHeads != H || op.headDim != D) {
+        throw std::runtime_error(
+            "attentionScoresSoftmaxOutput: score and output params must match");
+    }
+
+    const size_t qkvBytes = size_t(B) * H * S * D * sizeof(float);
+    const size_t scoreBytes = size_t(B) * H * S * S * sizeof(float);
+    const size_t outBytes = qkvBytes;
+
+    GrillyBuffer bufQ = pool.acquire(qkvBytes);
+    GrillyBuffer bufK = pool.acquire(qkvBytes);
+    GrillyBuffer bufVDummy = pool.acquire(sizeof(float));
+    GrillyBuffer bufScores = pool.acquire(scoreBytes);
+    GrillyBuffer bufWeights = pool.acquire(scoreBytes);
+    GrillyBuffer bufV = pool.acquire(qkvBytes);
+    GrillyBuffer bufOut = pool.acquire(outBytes);
+
+    const uint32_t totalSoftmaxRows = B * H * S;
+    const size_t auxBytes = size_t(totalSoftmaxRows) * sizeof(float);
+
+    GrillyBuffer bufMax = pool.acquire(auxBytes);
+    GrillyBuffer bufSumExp = pool.acquire(auxBytes);
+
+    pool.upload(bufQ, Q, qkvBytes);
+    pool.upload(bufK, K, qkvBytes);
+    pool.upload(bufV, V, qkvBytes);
+
+    PipelineEntry pipeScores = cache.getOrCreate("attention-scores", 4,
+                                                 sizeof(AttentionScoresParams));
+    std::vector<VkDescriptorBufferInfo> scoresInfos = {
+        {bufQ.handle, 0, qkvBytes},
+        {bufK.handle, 0, qkvBytes},
+        {bufVDummy.handle, 0, sizeof(float)},
+        {bufScores.handle, 0, scoreBytes},
+    };
+    VkDescriptorSet descScores = cache.allocDescriptorSet("attention-scores", scoresInfos);
+
+    PipelineEntry pipeSoftmax = cache.getOrCreate("activation-softmax", 4,
+                                                  sizeof(SoftmaxParams));
+    std::vector<VkDescriptorBufferInfo> softmaxInfos = {
+        {bufScores.handle, 0, scoreBytes},
+        {bufWeights.handle, 0, scoreBytes},
+        {bufMax.handle, 0, auxBytes},
+        {bufSumExp.handle, 0, auxBytes},
+    };
+    VkDescriptorSet descSoftmax = cache.allocDescriptorSet("activation-softmax", softmaxInfos);
+
+    PipelineEntry pipeOut = cache.getOrCreate("attention-output", 3,
+                                              sizeof(AttentionOutputParams));
+    std::vector<VkDescriptorBufferInfo> outInfos = {
+        {bufWeights.handle, 0, scoreBytes},
+        {bufV.handle, 0, qkvBytes},
+        {bufOut.handle, 0, outBytes},
+    };
+    VkDescriptorSet descOut = cache.allocDescriptorSet("attention-output", outInfos);
+
+    const uint32_t gxS = (S + 15) / 16;
+    const uint32_t gyS = (S + 15) / 16;
+    const uint32_t gzS = B * H;
+
+    const uint32_t softmaxGx = (totalSoftmaxRows + 255) / 256;
+    const uint32_t totalElements = totalSoftmaxRows * S;
+    const uint32_t softmaxGx2 = (totalElements + 255) / 256;
+
+    const uint32_t outTotal = B * H * S * D;
+    const uint32_t gxOut = (outTotal + 255) / 256;
+
+    batch.begin();
+
+    batch.dispatch(pipeScores.pipeline, pipeScores.layout, descScores, gxS, gyS, gzS,
+                   &sp, sizeof(sp));
+    batch.barrier();
+
+    SoftmaxParams push0{1, totalSoftmaxRows, S, 0, S};
+    batch.dispatch(pipeSoftmax.pipeline, pipeSoftmax.layout, descSoftmax, softmaxGx, 1, 1,
+                   &push0, sizeof(push0));
+    batch.barrier();
+
+    SoftmaxParams push1{1, totalSoftmaxRows, S, 1, S};
+    batch.dispatch(pipeSoftmax.pipeline, pipeSoftmax.layout, descSoftmax, softmaxGx, 1, 1,
+                   &push1, sizeof(push1));
+    batch.barrier();
+
+    SoftmaxParams push2{1, totalSoftmaxRows, S, 2, S};
+    batch.dispatch(pipeSoftmax.pipeline, pipeSoftmax.layout, descSoftmax, softmaxGx2, 1, 1,
+                   &push2, sizeof(push2));
+    batch.barrier();
+
+    batch.dispatch(pipeOut.pipeline, pipeOut.layout, descOut, gxOut, 1, 1, &op,
+                   sizeof(op));
+
+    batch.submitDeferred();
+    batch.waitForCompletion();
+
+    pool.download(bufOut, output, outBytes);
+    pool.download(bufWeights, softmaxWeights, scoreBytes);
+
+    pool.release(bufQ);
+    pool.release(bufK);
+    pool.release(bufVDummy);
+    pool.release(bufScores);
+    pool.release(bufWeights);
+    pool.release(bufV);
+    pool.release(bufOut);
+    pool.release(bufMax);
+    pool.release(bufSumExp);
 }
 
 // ── Attention mask ───────────────────────────────────────────────────────
@@ -105,7 +227,8 @@ void attentionMask(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufScores, scores, scoreBytes);
 
@@ -148,7 +271,8 @@ void attentionOutput(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOutput, output, outBytes);
 
@@ -188,7 +312,8 @@ void attentionConcatHeads(CommandBatch& batch, BufferPool& pool,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, concatOutput, outBytes);
 
@@ -235,7 +360,8 @@ void applyRoPE(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, output, dataBytes);
 

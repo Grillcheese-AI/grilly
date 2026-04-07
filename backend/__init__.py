@@ -12,7 +12,11 @@ This module provides GPU acceleration for:
 - Bridge operations (continuous ↔ spike)
 """
 
-from .base import VULKAN_AVAILABLE
+from .base import (
+    VULKAN_AVAILABLE,
+    VULKAN_PYTHON_BINDINGS_AVAILABLE,
+    VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE,
+)
 from .capsule_transformer import (
     CapsuleMemory,
     CapsuleTransformerConfig,
@@ -26,6 +30,8 @@ from .snn_compute import SNNCompute
 
 __all__ = [
     "VULKAN_AVAILABLE",
+    "VULKAN_PYTHON_BINDINGS_AVAILABLE",
+    "VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE",
     "VulkanCompute",
     "SNNCompute",
     "VulkanLearning",

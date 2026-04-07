@@ -35,7 +35,8 @@ layout(push_constant) uniform PushConstants {
 } params;
 
 layout(set = 0, binding = 0) readonly buffer InputBuffer {
-    float input[];
+    // Renamed from ``input`` — reserved word in recent glslang.
+    float input_data[];
 };
 
 layout(set = 0, binding = 1) readonly buffer HiddenBuffer {
@@ -70,7 +71,12 @@ layout(set = 0, binding = 8) writeonly buffer NewCellBuffer {
     float new_cell[];
 };
 
-layout(set = 0, binding = 9) writeonly buffer GatesBuffer {
+// Not ``writeonly``: the shader writes all four gates into this buffer
+// (binding 9) in the first half of main(), then reads them back a few
+// lines later to compute the cell/hidden updates. Pre-existing bug —
+// glslang's writeonly check was only triggered after fixing the
+// reserved-word rename on binding 0 forced a recompile.
+layout(set = 0, binding = 9) buffer GatesBuffer {
     float gates[];
 };
 
@@ -94,7 +100,7 @@ void main() {
         for (uint i = 0; i < params.input_size; i++) {
             uint weight_idx = (gate * params.hidden_size + hidden_idx) * params.input_size + i;
             uint input_idx = batch_idx * params.input_size + i;
-            value += weight_ih[weight_idx] * input[input_idx];
+            value += weight_ih[weight_idx] * input_data[input_idx];
         }
 
         // Add bias_i

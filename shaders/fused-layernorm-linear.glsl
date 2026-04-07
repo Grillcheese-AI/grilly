@@ -1,5 +1,6 @@
 #version 450
 #extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_EXT_shader_atomic_float : require
 
 // Fused LayerNorm + Linear projection.
 //

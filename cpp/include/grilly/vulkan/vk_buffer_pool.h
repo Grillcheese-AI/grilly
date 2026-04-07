@@ -21,6 +21,18 @@ struct GrillyBuffer {
     size_t size = 0;
     size_t bucketSize = 0;
     void* mappedPtr = nullptr;
+    /// True if this buffer was acquired via ``acquireDeviceLocal`` (no host
+    /// visibility, mapped to GPU-only VRAM). ``release`` uses this to route
+    /// the buffer back to the device-local bucket pool, so a regular
+    /// ``acquire`` won't accidentally pick up a DL buffer and crash trying
+    /// to memcpy into a null mappedPtr.
+    bool deviceLocal = false;
+    /// True if this buffer was acquired via ``acquireReadback`` — backed
+    /// by HOST_CACHED memory for fast CPU read-after-GPU-write. Released
+    /// buffers go to a separate readback pool so a future ``acquire``
+    /// (which expects WC sequential-write memory) doesn't waste a cached
+    /// readback slot on a write-only workload.
+    bool readback = false;
 };
 
 /// VMA-backed buffer pool with power-of-2 bucket reuse.
@@ -65,8 +77,26 @@ private:
     GrillyDevice& device_;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
     std::mutex mutex_;
+    /// Pool for host-visible WC buffers (acquire / release default path).
+    /// Optimized for CPU sequential writes (memcpy CPU → buffer).
     std::unordered_map<size_t, std::vector<GrillyBuffer>> buckets_;
+    /// Pool for DEVICE_LOCAL-only buffers (acquireDeviceLocal / release).
+    /// Kept separate so a host-visible acquire never picks up a DL buffer.
+    std::unordered_map<size_t, std::vector<GrillyBuffer>> dlBuckets_;
+    /// Pool for HOST_CACHED readback buffers (acquireReadback / release).
+    /// Optimized for CPU random reads (memcpy buffer → CPU output) at
+    /// cached system RAM speed (~10 GB/s vs ~25 MB/s for WC reads).
+    std::unordered_map<size_t, std::vector<GrillyBuffer>> readbackBuckets_;
     Stats stats_{};
+
+    // Persistent transfer context (avoids cmd pool/fence recreation per transfer)
+    VkCommandPool transferPool_ = VK_NULL_HANDLE;
+    VkCommandBuffer transferCmd_ = VK_NULL_HANDLE;
+    VkFence transferFence_ = VK_NULL_HANDLE;
+    bool transferInitialized_ = false;
+
+    void ensureTransferContext();
+    void transferSubmitAndWait();
 };
 
 }  // namespace grilly

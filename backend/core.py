@@ -10,9 +10,13 @@ from pathlib import Path
 
 import numpy as np
 
-from .base import VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VULKAN_AVAILABLE
+from .base import (
+    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    VULKAN_AVAILABLE,
+    VULKAN_PYTHON_BINDINGS_AVAILABLE,
+)
 
-if VULKAN_AVAILABLE:
+if VULKAN_PYTHON_BINDINGS_AVAILABLE:
     from vulkan import *
 
 logger = logging.getLogger(__name__)
@@ -32,7 +36,12 @@ class VulkanCore:
         """Initialize the instance."""
 
         if not VULKAN_AVAILABLE:
-            raise RuntimeError("Vulkan not available")
+            raise RuntimeError("Vulkan not available (C++ grilly_core could not initialize GPU)")
+        if not VULKAN_PYTHON_BINDINGS_AVAILABLE:
+            raise RuntimeError(
+                "VulkanCore requires the Python `vulkan` package (ctypes bindings). "
+                "Install with: pip install vulkan"
+            )
         import os
 
         # Disable Mesa device_select layer which can force CPU llvmpipe
@@ -681,8 +690,15 @@ class VulkanCore:
         push_constants: bytes = None,
         workgroup_y: int = 1,
         workgroup_z: int = 1,
+        *,
+        wait_previous: bool = True,
     ):
-        """Dispatch compute shader using pre-allocated command buffer."""
+        """Dispatch compute shader using pre-allocated command buffer.
+
+        Args:
+            wait_previous: If False, skip waiting for previous dispatch.
+                          Use only when you know the queue is idle (e.g., first dispatch).
+        """
         command_buffer = self._cmd_buffer
 
         # Reset and re-record the reusable command buffer
@@ -726,7 +742,8 @@ class VulkanCore:
         vkEndCommandBuffer(command_buffer)
 
         # Wait for previous dispatch to finish, then reset the fence.
-        vkWaitForFences(self.device, 1, [self._fence], VK_TRUE, 2_000_000_000)
+        if wait_previous:
+            vkWaitForFences(self.device, 1, [self._fence], VK_TRUE, 2_000_000_000)
         vkResetFences(self.device, 1, [self._fence])
 
         # Submit with fence — avoids the heavier vkQueueWaitIdle drain.
@@ -744,6 +761,75 @@ class VulkanCore:
 
     def _wait_fence(self, timeout_ns: int = 2_000_000_000):
         """Wait for the most recent dispatch to complete."""
+        vkWaitForFences(self.device, 1, [self._fence], VK_TRUE, timeout_ns)
+
+    def _dispatch_compute_async(
+        self,
+        pipeline,
+        pipeline_layout,
+        descriptor_set,
+        workgroup_x: int,
+        push_constants: bytes = None,
+        workgroup_y: int = 1,
+        workgroup_z: int = 1,
+    ):
+        """Async dispatch: record command and return without waiting.
+
+        Returns a handle that can be waited on later via _wait_async().
+        Used for batching multiple dispatches before a single fence wait.
+        """
+        command_buffer = self._cmd_buffer
+
+        # Reset and record the reusable command buffer
+        vkResetCommandBuffer(command_buffer, 0)
+
+        begin_info = VkCommandBufferBeginInfo(
+            sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        )
+        vkBeginCommandBuffer(command_buffer, begin_info)
+
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline)
+        vkCmdBindDescriptorSets(
+            command_buffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            pipeline_layout,
+            0,
+            1,
+            [descriptor_set],
+            0,
+            None,
+        )
+
+        if push_constants:
+            push_buf = ctypes.create_string_buffer(push_constants)
+            vkCmdPushConstants(
+                command_buffer,
+                pipeline_layout,
+                VK_SHADER_STAGE_COMPUTE_BIT,
+                0,
+                len(push_constants),
+                ctypes.addressof(push_buf),
+            )
+
+        vkCmdDispatch(command_buffer, workgroup_x, workgroup_y, workgroup_z)
+        vkEndCommandBuffer(command_buffer)
+
+        # Reset fence and submit (do not wait)
+        vkResetFences(self.device, 1, [self._fence])
+
+        submit_info = VkSubmitInfo(
+            sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            commandBufferCount=1,
+            pCommandBuffers=[command_buffer],
+        )
+        vkQueueSubmit(self.queue, 1, [submit_info], self._fence)
+
+        # Return handle for optional wait
+        return self._fence
+
+    def _wait_async(self, timeout_ns: int = 2_000_000_000):
+        """Wait for async dispatch to complete."""
         vkWaitForFences(self.device, 1, [self._fence], VK_TRUE, timeout_ns)
 
     def cleanup(self):

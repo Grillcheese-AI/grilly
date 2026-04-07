@@ -49,9 +49,13 @@ layout(std430, binding = 2) buffer Workspace {
     int workspace[];  // [n_states * n_states], init to 0
 };
 
-// Output: best transition matrix (float, normalized)
-layout(std430, binding = 3) writeonly buffer Output {
-    float output[];  // [n_states * n_states]
+// Output: best transition matrix (float, normalized).
+// NOTE: not ``writeonly`` — the shader also reads this buffer as a scratch
+// space during exploration (see similarity() below, and the block_bind
+// "reusing output buffer temporarily" path).
+// ``output`` is a reserved word in recent glslang — renamed to output_data.
+layout(std430, binding = 3) buffer Output {
+    float output_data[];  // [n_states * n_states]
 };
 
 // ── Per-block circular convolution (bind) ────────────────────
@@ -66,7 +70,7 @@ void block_bind(uint block_offset_a, uint block_offset_b,
             sum += obs[block_offset_a + m] * obs[block_offset_b + idx_b];
         }
         // Store in shared memory (reusing output buffer temporarily)
-        output[block_offset_out + i] = sum;
+        output_data[block_offset_out + i] = sum;
     }
 }
 
@@ -74,7 +78,7 @@ void block_bind(uint block_offset_a, uint block_offset_b,
 float similarity(uint vec_offset, uint cb_entry, uint dim) {
     float dot = 0.0;
     for (uint i = 0; i < dim; i++) {
-        dot += output[vec_offset + i] * codebook[cb_entry * dim + i];
+        dot += output_data[vec_offset + i] * codebook[cb_entry * dim + i];
     }
     return dot / float(k);  // Normalize by number of blocks
 }

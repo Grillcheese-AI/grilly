@@ -9,14 +9,14 @@ Uses: memory-read.glsl, memory-write.glsl, memory-context-aggregate.glsl,
 import numpy as np
 
 
-def _get_backend():
-    """Get backend instance"""
-    try:
-        from ..backend.compute import Compute
-
-        return Compute()
-    except Exception:
+def _to_numpy(result):
+    if result is None:
         return None
+    if isinstance(result, np.ndarray):
+        return result
+    if hasattr(result, "numpy"):
+        return result.numpy()
+    return np.asarray(result)
 
 
 def memory_read(
@@ -39,12 +39,21 @@ def memory_read(
     Returns:
         Retrieved values (batch, value_dim)
     """
-    from grilly import Compute
-
-    backend = Compute()
     if temperature is None:
         temperature = np.sqrt(memory_keys.shape[1])
-    return backend.memory_read(queries, memory_keys, memory_values, temperature)
+    try:
+        from grilly.backend import _bridge
+
+        result = _bridge.memory_read(queries, memory_keys, memory_values, temperature)
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+    scores = (queries @ memory_keys.T) / max(float(temperature), 1e-8)
+    scores = scores - np.max(scores, axis=-1, keepdims=True)
+    weights = np.exp(scores)
+    weights = weights / np.sum(weights, axis=-1, keepdims=True)
+    return (weights @ memory_values).astype(np.float32)
 
 
 def memory_write(
@@ -73,12 +82,27 @@ def memory_write(
     Returns:
         (updated_memory_keys, updated_memory_values)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.memory_write(
-        new_key, new_value, memory_keys, memory_values, write_index, write_mode, blend_factor
-    )
+        result = _bridge.memory_write(
+            new_key, new_value, memory_keys, memory_values, write_index, write_mode, blend_factor
+        )
+        if result is not None:
+            return result
+    except (ImportError, Exception):
+        pass
+    mk = np.array(memory_keys, dtype=np.float32, copy=True)
+    mv = np.array(memory_values, dtype=np.float32, copy=True)
+    idx = int(write_index)
+    if int(write_mode) == 1:
+        alpha = float(blend_factor)
+        mk[idx] = (1.0 - alpha) * mk[idx] + alpha * np.asarray(new_key, dtype=np.float32)
+        mv[idx] = (1.0 - alpha) * mv[idx] + alpha * np.asarray(new_value, dtype=np.float32)
+    else:
+        mk[idx] = np.asarray(new_key, dtype=np.float32)
+        mv[idx] = np.asarray(new_value, dtype=np.float32)
+    return mk, mv
 
 
 def memory_context_aggregate(memory_contexts: np.ndarray) -> np.ndarray:
@@ -93,17 +117,6 @@ def memory_context_aggregate(memory_contexts: np.ndarray) -> np.ndarray:
     Returns:
         Aggregated context (batch, dim)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if hasattr(backend, "shaders") and "memory-context-aggregate" in backend.shaders:
-        try:
-            # GPU memory context aggregation would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback (mean pooling)
     return memory_contexts.mean(axis=1)
 
@@ -122,10 +135,16 @@ def memory_query_pooling(x: np.ndarray, W_query: np.ndarray, b_query: np.ndarray
     Returns:
         Query vectors (batch, out_dim)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.memory_query_pooling(x, W_query, b_query)
+        result = _bridge.memory_query_pooling(x, W_query, b_query)
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+    pooled = np.mean(np.asarray(x, dtype=np.float32), axis=1)
+    return (pooled @ np.asarray(W_query, dtype=np.float32).T + np.asarray(b_query, dtype=np.float32)).astype(np.float32)
 
 
 def memory_inject_concat(
@@ -148,17 +167,6 @@ def memory_inject_concat(
     Returns:
         Output (batch, seq_len, dim)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "memory-inject-concat" in backend.shaders:
-        try:
-            # GPU memory injection with concat would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback
     batch_size, seq_len, dim = x.shape
     mem_expanded = memory_context[:, None, :]  # (batch, 1, dim)
@@ -192,10 +200,23 @@ def memory_inject_gate(
     Returns:
         Output (batch, seq_len, dim)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.memory_inject_gate(x, memory_context, W_gate, b_gate, W_mem_proj)
+        result = _bridge.memory_inject_gate(x, memory_context, W_gate, b_gate, W_mem_proj)
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+    x_arr = np.asarray(x, dtype=np.float32)
+    mem = np.asarray(memory_context, dtype=np.float32)
+    batch, seq_len, dim = x_arr.shape
+    mem_expanded = np.broadcast_to(mem[:, None, :], (batch, seq_len, dim))
+    concat = np.concatenate([x_arr, mem_expanded], axis=-1)
+    gate = 1.0 / (1.0 + np.exp(-(concat @ np.asarray(W_gate, dtype=np.float32).T + np.asarray(b_gate, dtype=np.float32))))
+    mem_proj = mem @ np.asarray(W_mem_proj, dtype=np.float32).T
+    mem_proj = np.broadcast_to(mem_proj[:, None, :], (batch, seq_len, dim))
+    return ((1.0 - gate) * x_arr + gate * mem_proj).astype(np.float32)
 
 
 def memory_inject_residual(
@@ -218,17 +239,6 @@ def memory_inject_residual(
     Returns:
         Output (batch, seq_len, dim)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "memory-inject-residual" in backend.shaders:
-        try:
-            # GPU memory injection with residual would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback
     batch_size, seq_len, dim = x.shape
     mem_proj = memory_context @ mem_proj_weight.T

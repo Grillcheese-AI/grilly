@@ -24,7 +24,9 @@ void register_moqe_train_ops(py::module_& m) {
             for (auto& w : weight_arrays) {
                 auto arr = w.cast<py::array_t<float>>();
                 arrays.push_back(arr);
-                ptrs.push_back(static_cast<const float*>(arr.request().ptr));
+                auto wb = arr.request();
+                require_c_contiguous_float(wb);
+                ptrs.push_back(static_cast<const float*>(wb.ptr));
             }
 
             int handle = ops::moqe_train_upload(
@@ -52,6 +54,7 @@ void register_moqe_train_ops(py::module_& m) {
            uint32_t layerIdx, int expertIdx, py::array_t<float> w) {
             auto& cache = ops::moqe_train_get_cache(handle);
             auto buf = w.request();
+            require_c_contiguous_float(buf);
             {
                 py::gil_scoped_release release;
                 ops::moqe_train_update_expert(ctx.pool, cache, layerIdx, expertIdx,
@@ -71,6 +74,10 @@ void register_moqe_train_ops(py::module_& m) {
             auto& tc = ops::moqe_train_get_cache(handle);
             auto b0 = x0.request();
             auto b1 = x1.request();
+            if (b0.size > 0)
+                require_c_contiguous_float(b0);
+            if (b1.size > 0)
+                require_c_contiguous_float(b1);
             uint32_t n0 = static_cast<uint32_t>(b0.shape[0]);
             uint32_t n1 = static_cast<uint32_t>(b1.shape[0]);
             uint32_t d = tc.dModel;
@@ -100,6 +107,10 @@ void register_moqe_train_ops(py::module_& m) {
             auto& tc = ops::moqe_train_get_cache(handle);
             auto b0 = d0.request();
             auto b1 = d1.request();
+            if (b0.size > 0)
+                require_c_contiguous_float(b0);
+            if (b1.size > 0)
+                require_c_contiguous_float(b1);
             uint32_t n0 = static_cast<uint32_t>(b0.shape[0]);
             uint32_t n1 = static_cast<uint32_t>(b1.shape[0]);
             uint32_t d = tc.dModel;

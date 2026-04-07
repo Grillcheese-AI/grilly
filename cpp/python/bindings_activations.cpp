@@ -19,14 +19,18 @@ void register_activations_ops(py::module_& m) {
             [fn](GrillyCoreContext& ctx,
                  py::array_t<float> input) -> Tensor {
                 auto inBuf = input.request();
+                require_c_contiguous_float(inBuf);
                 uint32_t total = static_cast<uint32_t>(inBuf.size);
 
                 py::array_t<float> result(input.request().shape);
                 auto rBuf = result.request();
 
-                fn(ctx.batch, ctx.pool, ctx.cache,
-                   static_cast<const float*>(inBuf.ptr),
-                   static_cast<float*>(rBuf.ptr), total);
+                {
+                    py::gil_scoped_release release;
+                    fn(ctx.batch, ctx.pool, ctx.cache,
+                       static_cast<const float*>(inBuf.ptr),
+                       static_cast<float*>(rBuf.ptr), total);
+                }
 
                 return Tensor::from_numpy(result);
             },
@@ -37,6 +41,55 @@ void register_activations_ops(py::module_& m) {
     defActivation("gelu", grilly::ops::gelu);
     defActivation("silu", grilly::ops::silu);
     defActivation("tanh_act", grilly::ops::tanh_act);
+
+    m.def(
+        "mf_sigmoid",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input) -> Tensor {
+            auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
+            uint32_t total = static_cast<uint32_t>(inBuf.size);
+
+            py::array_t<float> result(input.request().shape);
+            auto rBuf = result.request();
+
+            {
+                py::gil_scoped_release release;
+                grilly::ops::mfSigmoid(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(rBuf.ptr), total);
+            }
+
+            return Tensor::from_numpy(result);
+        },
+        py::arg("device"), py::arg("input"),
+        "GPU rational sigmoid x/(1+|x|) (shader mf-sigmoid)");
+
+    m.def(
+        "mf_softplus",
+        [](GrillyCoreContext& ctx, py::array_t<float> input,
+           float beta) -> Tensor {
+            auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
+            uint32_t total = static_cast<uint32_t>(inBuf.size);
+
+            py::array_t<float> result(input.request().shape);
+            auto rBuf = result.request();
+
+            {
+                py::gil_scoped_release release;
+                grilly::ops::mfSoftplus(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(rBuf.ptr), total, beta);
+            }
+
+            return Tensor::from_numpy(result);
+        },
+        py::arg("device"), py::arg("input"), py::arg("beta") = 1.0f,
+        "GPU algebraic softplus 0.5*(x+sqrt(x*x+c)), c=4/beta^2 (shader "
+        "mf-softplus)");
 
     // ── Activation backward ops ──────────────────────────────────────────
     // 3 buffers: grad_output, input (original forward input), grad_input.
@@ -50,6 +103,8 @@ void register_activations_ops(py::module_& m) {
                  py::array_t<float> input) -> Tensor {
                 auto gBuf = grad_output.request();
                 auto iBuf = input.request();
+                require_c_contiguous_float(gBuf);
+                require_c_contiguous_float(iBuf);
                 uint32_t total = 1;
                 for (int i = 0; i < gBuf.ndim; ++i)
                     total *= static_cast<uint32_t>(gBuf.shape[i]);
@@ -57,10 +112,13 @@ void register_activations_ops(py::module_& m) {
                 py::array_t<float> result(gBuf.shape);
                 auto rBuf = result.request();
 
-                fn(ctx.batch, ctx.pool, ctx.cache,
-                   static_cast<const float*>(gBuf.ptr),
-                   static_cast<const float*>(iBuf.ptr),
-                   static_cast<float*>(rBuf.ptr), total);
+                {
+                    py::gil_scoped_release release;
+                    fn(ctx.batch, ctx.pool, ctx.cache,
+                       static_cast<const float*>(gBuf.ptr),
+                       static_cast<const float*>(iBuf.ptr),
+                       static_cast<float*>(rBuf.ptr), total);
+                }
 
                 return Tensor::from_numpy(result);
             },
@@ -95,15 +153,18 @@ void register_activations_ops(py::module_& m) {
             py::array_t<float> result(outShape);
             auto rBuf = result.request();
 
-            grilly::ops::fusedMlpGelu(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<const float*>(w1Buf.ptr),
-                static_cast<const float*>(b1Buf.ptr),
-                static_cast<const float*>(w2Buf.ptr),
-                static_cast<const float*>(b2Buf.ptr),
-                static_cast<float*>(rBuf.ptr),
-                seqLen, dIn, dHidden, dOut);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::fusedMlpGelu(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<const float*>(w1Buf.ptr),
+                    static_cast<const float*>(b1Buf.ptr),
+                    static_cast<const float*>(w2Buf.ptr),
+                    static_cast<const float*>(b2Buf.ptr),
+                    static_cast<float*>(rBuf.ptr),
+                    seqLen, dIn, dHidden, dOut);
+            }
 
             return Tensor::from_numpy(result);
         },
@@ -131,15 +192,18 @@ void register_activations_ops(py::module_& m) {
             py::array_t<float> result(outShape);
             auto rBuf = result.request();
 
-            grilly::ops::fusedLayernormLinear(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<const float*>(lnWBuf.ptr),
-                static_cast<const float*>(lnBBuf.ptr),
-                static_cast<const float*>(pWBuf.ptr),
-                static_cast<const float*>(pBBuf.ptr),
-                static_cast<float*>(rBuf.ptr),
-                seqLen, dIn, dOut);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::fusedLayernormLinear(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<const float*>(lnWBuf.ptr),
+                    static_cast<const float*>(lnBBuf.ptr),
+                    static_cast<const float*>(pWBuf.ptr),
+                    static_cast<const float*>(pBBuf.ptr),
+                    static_cast<float*>(rBuf.ptr),
+                    seqLen, dIn, dOut);
+            }
 
             return Tensor::from_numpy(result);
         },

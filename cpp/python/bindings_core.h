@@ -98,6 +98,61 @@ struct GrillyCoreContext {
 // Helper utilities shared across binding files
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// Require NumPy C-contiguous float32 (kernels assume dense row-major layout).
+inline void require_c_contiguous_float(const py::buffer_info& buf) {
+    if (buf.itemsize != sizeof(float))
+        throw std::runtime_error("expected float32 array");
+    if (buf.ndim == 0)
+        return;
+    py::ssize_t expected_stride = static_cast<py::ssize_t>(sizeof(float));
+    for (int i = static_cast<int>(buf.ndim) - 1; i >= 0; --i) {
+        if (buf.strides[i] != expected_stride)
+            throw std::runtime_error("array must be C-contiguous float32");
+        expected_stride *= buf.shape[i];
+    }
+}
+
+/// Require NumPy C-contiguous int8 (e.g. VSA / Hamming vectors).
+inline void require_c_contiguous_int8(const py::buffer_info& buf) {
+    if (buf.itemsize != sizeof(int8_t))
+        throw std::runtime_error("expected int8 array");
+    if (buf.ndim == 0)
+        return;
+    py::ssize_t expected_stride = static_cast<py::ssize_t>(sizeof(int8_t));
+    for (int i = static_cast<int>(buf.ndim) - 1; i >= 0; --i) {
+        if (buf.strides[i] != expected_stride)
+            throw std::runtime_error("array must be C-contiguous int8");
+        expected_stride *= buf.shape[i];
+    }
+}
+
+/// Require NumPy C-contiguous uint32 (e.g. CE targets).
+inline void require_c_contiguous_int32(const py::buffer_info& buf) {
+    if (buf.itemsize != sizeof(int32_t))
+        throw std::runtime_error("expected int32 array");
+    if (buf.ndim == 0)
+        return;
+    py::ssize_t expected_stride = static_cast<py::ssize_t>(sizeof(int32_t));
+    for (int i = static_cast<int>(buf.ndim) - 1; i >= 0; --i) {
+        if (buf.strides[i] != expected_stride)
+            throw std::runtime_error("array must be C-contiguous int32");
+        expected_stride *= buf.shape[i];
+    }
+}
+
+inline void require_c_contiguous_uint32(const py::buffer_info& buf) {
+    if (buf.itemsize != sizeof(uint32_t))
+        throw std::runtime_error("expected uint32 array");
+    if (buf.ndim == 0)
+        return;
+    py::ssize_t expected_stride = static_cast<py::ssize_t>(sizeof(uint32_t));
+    for (int i = static_cast<int>(buf.ndim) - 1; i >= 0; --i) {
+        if (buf.strides[i] != expected_stride)
+            throw std::runtime_error("array must be C-contiguous uint32");
+        expected_stride *= buf.shape[i];
+    }
+}
+
 /// Extract flat batch*seq and last-dim from a numpy buffer_info.
 inline std::pair<uint32_t, uint32_t> extractBatchAndLastDim(
     const py::buffer_info& buf) {
@@ -132,4 +187,8 @@ void register_pooling_ops(py::module_& m);
 void register_misc_ops(py::module_& m);
 void register_perceiver_ops(py::module_& m);
 void register_moqe_train_ops(py::module_& m);
+void register_moe_ops(py::module_& m);
 void register_fusion_ops(py::module_& m);
+void register_vsa_lm_ops(py::module_& m);
+void register_grl_ops(py::module_& m);
+void register_prefix_scan_ops(py::module_& m);

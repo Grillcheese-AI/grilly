@@ -7,9 +7,9 @@ import struct
 
 import numpy as np
 
-from .base import VULKAN_AVAILABLE, BufferMixin
+from .base import BufferMixin, VULKAN_PYTHON_BINDINGS_AVAILABLE
 
-if VULKAN_AVAILABLE:
+if VULKAN_PYTHON_BINDINGS_AVAILABLE:
     from vulkan import *
 
 

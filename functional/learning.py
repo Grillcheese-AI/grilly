@@ -10,14 +10,14 @@ Uses: fisher-info.glsl, fisher-ewc-penalty.glsl, fisher-natural-gradient.glsl,
 import numpy as np
 
 
-def _get_backend():
-    """Get backend instance"""
-    try:
-        from ..backend.compute import Compute
-
-        return Compute()
-    except Exception:
+def _to_numpy(result):
+    if result is None:
         return None
+    if isinstance(result, np.ndarray):
+        return result
+    if hasattr(result, "numpy"):
+        return result.numpy()
+    return np.asarray(result)
 
 
 def fisher_info(
@@ -42,12 +42,22 @@ def fisher_info(
     Returns:
         Updated Fisher information
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.fisher_info_update(
-        gradients, fisher, momentum=momentum, use_ema=use_ema, reset=reset
-    )
+        result = _bridge.fisher_info_update(
+            gradients, fisher, momentum=momentum, use_ema=use_ema, reset=reset
+        )
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+    gradients = np.asarray(gradients, dtype=np.float32)
+    fisher = np.zeros_like(gradients) if reset else np.asarray(fisher, dtype=np.float32)
+    g2 = gradients * gradients
+    if use_ema:
+        return (momentum * fisher + (1.0 - momentum) * g2).astype(np.float32)
+    return (fisher + g2).astype(np.float32)
 
 
 def ewc_penalty(
@@ -70,10 +80,17 @@ def ewc_penalty(
     Returns:
         EWC penalty value
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.ewc_penalty(current_params, important_params, fisher, lambda_ewc=lambda_ewc)
+        result = _bridge.ewc_penalty(current_params, important_params, fisher, lambda_ewc=lambda_ewc)
+        if result is not None:
+            return float(result)
+    except (ImportError, Exception):
+        pass
+    diff = np.asarray(current_params, dtype=np.float32) - np.asarray(important_params, dtype=np.float32)
+    f = np.asarray(fisher, dtype=np.float32)
+    return float(0.5 * lambda_ewc * np.sum(f * diff * diff, dtype=np.float32))
 
 
 def natural_gradient(gradients: np.ndarray, fisher: np.ndarray, eps: float = 1e-8) -> np.ndarray:
@@ -90,10 +107,17 @@ def natural_gradient(gradients: np.ndarray, fisher: np.ndarray, eps: float = 1e-
     Returns:
         Natural gradient: F^(-1) * grad
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.natural_gradient(gradients, fisher, eps=eps)
+        result = _bridge.natural_gradient(gradients, fisher, eps=eps)
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+    gradients = np.asarray(gradients, dtype=np.float32)
+    fisher = np.asarray(fisher, dtype=np.float32)
+    return (gradients / (fisher + eps)).astype(np.float32)
 
 
 def fisher_normalize(fisher: np.ndarray) -> np.ndarray:
@@ -108,17 +132,6 @@ def fisher_normalize(fisher: np.ndarray) -> np.ndarray:
     Returns:
         Normalized Fisher information
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "fisher-normalize" in backend.shaders:
-        try:
-            # GPU Fisher normalization would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback
     fisher_sum = np.sum(fisher)
     if fisher_sum > 0:
@@ -140,10 +153,15 @@ def nlms_predict(x: np.ndarray, w: np.ndarray, bias: float = 0.0) -> float:
     Returns:
         Predicted value
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.nlms_predict(x, w, bias)
+        result = _bridge.nlms_predict(x, w, bias)
+        if result is not None:
+            return float(result)
+    except (ImportError, Exception):
+        pass
+    return float(np.dot(np.asarray(x, dtype=np.float32), np.asarray(w, dtype=np.float32)) + bias)
 
 
 def nlms_update(
@@ -165,10 +183,20 @@ def nlms_update(
     Returns:
         (updated_weights, updated_bias)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.nlms_update(x, y_true, w, bias, mu=mu, eps=eps)
+        result = _bridge.nlms_update(x, y_true, w, bias, mu=mu, eps=eps)
+        if result is not None:
+            return result
+    except (ImportError, Exception):
+        pass
+    x_arr = np.asarray(x, dtype=np.float32)
+    w_arr = np.asarray(w, dtype=np.float32)
+    pred = float(np.dot(x_arr, w_arr) + bias)
+    err = float(y_true) - pred
+    step = float(mu) * err / float(np.dot(x_arr, x_arr) + eps)
+    return (w_arr + step * x_arr).astype(np.float32), float(bias + step)
 
 
 def nlms_ensemble(x: np.ndarray, weights_list: list, biases_list: list) -> np.ndarray:
@@ -185,17 +213,6 @@ def nlms_ensemble(x: np.ndarray, weights_list: list, biases_list: list) -> np.nd
     Returns:
         Ensemble predictions (num_experts,)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "nlms-ensemble" in backend.shaders:
-        try:
-            # GPU NLMS ensemble would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback
     predictions = []
     for w, b in zip(weights_list, biases_list):
@@ -217,17 +234,6 @@ def nlms_metrics(errors: np.ndarray, update_count: int) -> dict:
     Returns:
         Dictionary with metrics (rmse, mae, etc.)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "nlms-metrics" in backend.shaders:
-        try:
-            # GPU NLMS metrics would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback
     rmse = np.sqrt(np.mean(errors**2))
     mae = np.mean(np.abs(errors))
@@ -250,10 +256,20 @@ def whitening_transform(
     Returns:
         (whitened_data, mean, std)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.whitening_transform(data, mean=mean, std=std)
+        result = _bridge.whitening_transform(data, mean=mean, std=std)
+        if result is not None:
+            return result
+    except (ImportError, Exception):
+        pass
+    data = np.asarray(data, dtype=np.float32)
+    if mean is None:
+        mean = np.mean(data, axis=0)
+    if std is None:
+        std = np.std(data, axis=0)
+    return ((data - mean) / (std + 1e-8)).astype(np.float32), mean.astype(np.float32), std.astype(np.float32)
 
 
 def whitening_apply(data: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
@@ -270,17 +286,6 @@ def whitening_apply(data: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.n
     Returns:
         Whitened data
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "whitening-apply" in backend.shaders:
-        try:
-            # GPU whitening apply would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback
     return (data - mean) / (std + 1e-8)
 
@@ -297,17 +302,6 @@ def whitening_batch_stats(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     Returns:
         (mean, std)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "whitening-batch-stats" in backend.shaders:
-        try:
-            # GPU whitening batch stats would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback
     mean = np.mean(data, axis=0)
     std = np.std(data, axis=0)

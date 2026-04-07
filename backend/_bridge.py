@@ -11,6 +11,10 @@ bridge functions with a try/fallback pattern:
     result = _bridge.linear(x, weight, bias)
     if result is not None: return result
     # else fall through to legacy backend
+
+Fused MoE (:func:`moe_upload`, :func:`moe_forward`, :func:`moe_backward`, etc.)
+uses the same lazy :func:`_get_device` and ``shaders/spv`` load as other bridge
+ops—prefer these over calling ``grilly_core.moe_*`` with a separate Device.
 """
 
 import logging
@@ -19,6 +23,8 @@ import os
 import numpy as np
 
 logger = logging.getLogger("grilly.bridge")
+_BRIDGE_STRICT = os.getenv("GRILLY_BRIDGE_STRICT", "0").strip().lower() in {"1", "true", "yes", "on"}
+_FALLBACK_COUNTS = {}
 
 
 def _maybe_trace(op_name, inputs, output, **kwargs):
@@ -30,6 +36,25 @@ def _maybe_trace(op_name, inputs, output, **kwargs):
             tracer.record_op(op_name, inputs, output, **kwargs)
     except ImportError:
         pass
+
+
+def _record_fallback(op_name: str, reason: Exception | str | None = None):
+    """Record fallback events and optionally raise in strict mode."""
+    _FALLBACK_COUNTS[op_name] = _FALLBACK_COUNTS.get(op_name, 0) + 1
+    if reason is not None:
+        logger.debug("%s fallback triggered: %s", op_name, reason)
+    if _BRIDGE_STRICT:
+        raise RuntimeError(f"GRILLY_BRIDGE_STRICT=1: bridge op '{op_name}' failed: {reason}")
+
+
+def get_fallback_stats() -> dict[str, int]:
+    """Get fallback counts per bridge op."""
+    return dict(_FALLBACK_COUNTS)
+
+
+def reset_fallback_stats():
+    """Reset bridge fallback counters."""
+    _FALLBACK_COUNTS.clear()
 
 try:
     import grilly_core as _core
@@ -133,6 +158,7 @@ def linear(x, weight, bias=None):
         return result
     except Exception as e:
         logger.debug("linear GPU failed (%s), caller will use CPU fallback", e)
+        _record_fallback("linear", e)
         return None
 
 
@@ -147,9 +173,7 @@ def relu(x):
     try:
         return _core.relu(dev, _ensure_f32_contiguous(x))
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("relu", e)
         return None
 
 
@@ -193,9 +217,7 @@ def gelu(x):
     try:
         return _core.gelu(dev, x)
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("gelu", e)
         return None
 
 
@@ -207,9 +229,7 @@ def silu(x):
     try:
         return _core.silu(dev, _ensure_f32_contiguous(x))
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("silu", e)
         return None
 
 
@@ -221,9 +241,7 @@ def tanh(x):
     try:
         return _core.tanh_act(dev, _ensure_f32_contiguous(x))
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("tanh", e)
         return None
 
 
@@ -240,9 +258,7 @@ def relu_backward(grad_output, input):
             dev, _ensure_f32_contiguous(grad_output), _ensure_f32_contiguous(input)
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("relu_backward", e)
         return None
 
 
@@ -256,9 +272,7 @@ def gelu_backward(grad_output, input):
             dev, _ensure_f32_contiguous(grad_output), _ensure_f32_contiguous(input)
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("gelu_backward", e)
         return None
 
 
@@ -272,9 +286,7 @@ def silu_backward(grad_output, input):
             dev, _ensure_f32_contiguous(grad_output), _ensure_f32_contiguous(input)
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("silu_backward", e)
         return None
 
 
@@ -312,9 +324,7 @@ def lif_step(
             t_refrac_period,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("lif_step", e)
         return None
 
 
@@ -347,9 +357,7 @@ def snn_node_forward(
             decay_input,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("snn_node_forward", e)
         return None
 
 
@@ -368,9 +376,7 @@ def snn_node_backward(grad_spike, h_cache, alpha=2.0, surrogate_type=0, v_thresh
             v_threshold,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("snn_node_backward", e)
         return None
 
 
@@ -393,9 +399,7 @@ def hebbian_learning(
             weight_decay,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("hebbian_learning", e)
         return None
 
 
@@ -430,9 +434,7 @@ def stdp_learning(
             trace_decay,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("stdp_learning", e)
         return None
 
 
@@ -465,9 +467,7 @@ def oja_learning(memories, inputs, num_vectors, dim, eta=0.01):
             eta,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("oja_learning", e)
         return None
 
 
@@ -481,9 +481,7 @@ def synapse_filter(x_in, y_state, decay=0.95):
             dev, _ensure_f32_contiguous(x_in), _ensure_f32_contiguous(y_state), decay
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("synapse_filter", e)
         return None
 
 
@@ -538,9 +536,7 @@ def gif_neuron_step(
             t_refrac_period,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("gif_neuron_step", e)
         return None
 
 
@@ -560,9 +556,7 @@ def conv2d(x, weight, bias=None, stride=(1, 1), padding=(0, 0), dilation=(1, 1),
             dev, x, weight, bias, list(stride), list(padding), list(dilation), groups
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("conv2d", e)
         return None
 
 
@@ -582,9 +576,7 @@ def conv2d_3x3_gelu(x, weight, bias):
             _ensure_f32_contiguous(bias),
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("conv2d_3x3_gelu", e)
         return None
 
 
@@ -596,9 +588,7 @@ def maxpool2x2(x):
     try:
         return _core.maxpool2x2(dev, _ensure_f32_contiguous(x))
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("maxpool2x2", e)
         return None
 
 
@@ -610,9 +600,7 @@ def adaptive_avgpool_3x3(x):
     try:
         return _core.adaptive_avgpool_3x3(dev, _ensure_f32_contiguous(x))
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("adaptive_avgpool_3x3", e)
         return None
 
 
@@ -630,9 +618,7 @@ def layernorm(x, gamma, beta, eps=1e-5):
         beta = _ensure_f32_contiguous(beta)
         return _core.layernorm(dev, x, gamma, beta, eps)
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("layernorm", e)
         return None
 
 
@@ -652,9 +638,7 @@ def layernorm_backward(grad_output, input, gamma, mean, var, eps=1e-5):
             eps,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("layernorm_backward", e)
         return None
 
 
@@ -671,9 +655,7 @@ def rmsnorm(x, weight, eps=1e-5):
         weight = _ensure_f32_contiguous(weight)
         return _core.rmsnorm(dev, x, weight, eps)
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("rmsnorm", e)
         return None
 
 
@@ -690,9 +672,7 @@ def tanh_backward(grad_output, tanh_output):
             dev, _ensure_f32_contiguous(grad_output), _ensure_f32_contiguous(tanh_output)
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("tanh_backward", e)
         return None
 
 
@@ -704,9 +684,7 @@ def softmax(x, dim=-1):
     try:
         return _core.softmax(dev, _ensure_f32_contiguous(x), dim)
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("softmax", e)
         return None
 
 
@@ -720,9 +698,43 @@ def softmax_backward(grad_output, softmax_output):
             dev, _ensure_f32_contiguous(grad_output), _ensure_f32_contiguous(softmax_output)
         )
     except Exception as e:
+        _record_fallback("softmax_backward", e)
+        return None
 
-        logger.debug("GPU op failed: %s", e)
 
+def mf_softmax(x, dim=-1):
+    """GPU multiplication-free softmax (ReLU-normalized). Returns None on failure."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.mf_softmax(dev, _ensure_f32_contiguous(x), dim)
+    except Exception as e:
+        _record_fallback("mf_softmax", e)
+        return None
+
+
+def mf_softplus(x, beta=1.0):
+    """GPU algebraic softplus (sqrt form). Returns None on failure."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.mf_softplus(dev, _ensure_f32_contiguous(x), float(beta))
+    except Exception as e:
+        _record_fallback("mf_softplus", e)
+        return None
+
+
+def mf_sigmoid(x):
+    """GPU rational sigmoid x/(1+|x|). Returns None on failure."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.mf_sigmoid(dev, _ensure_f32_contiguous(x))
+    except Exception as e:
+        _record_fallback("mf_sigmoid", e)
         return None
 
 
@@ -742,9 +754,7 @@ def linear_backward(grad_output, input, weights):
             _ensure_f32_contiguous(weights),
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("linear_backward", e)
         return None
 
 
@@ -758,9 +768,7 @@ def dropout(x, random_mask, p=0.5, training=True):
             dev, _ensure_f32_contiguous(x), _ensure_f32_contiguous(random_mask), p, training
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("dropout", e)
         return None
 
 
@@ -786,9 +794,7 @@ def conv2d_backward_input(
             groups,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("conv2d_backward_input", e)
         return None
 
 
@@ -819,9 +825,7 @@ def conv2d_backward_weight(
             has_bias,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("conv2d_backward_weight", e)
         return None
 
 
@@ -838,9 +842,7 @@ def attention_scores(Q, K, scale=0.0):
             dev, _ensure_f32_contiguous(Q), _ensure_f32_contiguous(K), scale
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("attention_scores", e)
         return None
 
 
@@ -853,9 +855,7 @@ def attention_mask(scores, mask=None, causal=True, mask_value=-1e9):
         m = _ensure_f32_contiguous(mask) if mask is not None else None
         return _core.attention_mask(dev, _ensure_f32_contiguous(scores), m, causal, mask_value)
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("attention_mask", e)
         return None
 
 
@@ -869,9 +869,32 @@ def attention_output(weights, V):
             dev, _ensure_f32_contiguous(weights), _ensure_f32_contiguous(V)
         )
     except Exception as e:
+        _record_fallback("attention_output", e)
+        return None
 
-        logger.debug("GPU op failed: %s", e)
 
+def attention_scores_softmax_output(Q, K, V, scale=0.0):
+    """Fused attention: scores + softmax + weighted V in one GPU submit.
+
+    Requires Q, K, V shaped (B, H, S, D) with identical S (self-attention / equal length).
+    Returns ``(output, softmax_weights)`` as core tensors, or None on failure.
+    """
+    dev = _get_device()
+    if dev is None:
+        return None
+    fused = getattr(_core, "attention_scores_softmax_output", None)
+    if fused is None:
+        return None
+    try:
+        return fused(
+            dev,
+            _ensure_f32_contiguous(Q),
+            _ensure_f32_contiguous(K),
+            _ensure_f32_contiguous(V),
+            scale,
+        )
+    except Exception as e:
+        _record_fallback("attention_scores_softmax_output", e)
         return None
 
 
@@ -883,9 +906,7 @@ def attention_concat_heads(mh_output):
     try:
         return _core.attention_concat_heads(dev, _ensure_f32_contiguous(mh_output))
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("attention_concat_heads", e)
         return None
 
 
@@ -899,9 +920,7 @@ def rope(x, cos_table=None, sin_table=None, base=10000.0, scaling=1.0):
         st = _ensure_f32_contiguous(sin_table) if sin_table is not None else None
         return _core.rope(dev, _ensure_f32_contiguous(x), ct, st, base, scaling)
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("rope", e)
         return None
 
 
@@ -918,9 +937,7 @@ def flash_attention2(Q, K, V, mask=None, scale=0.0, tile_size_q=64, tile_size_k=
         m = _ensure_f32_contiguous(mask) if mask is not None else None
         return _core.flash_attention2(dev, Q, K, V, m, scale, tile_size_q, tile_size_k)
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("flash_attention2", e)
         return None
 
 
@@ -1036,9 +1053,7 @@ def maxpool2d(x, kernel_size, stride=(2, 2), padding=(0, 0), dilation=(1, 1)):
             list(dilation),
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("maxpool2d", e)
         return None
 
 
@@ -1057,9 +1072,7 @@ def avgpool2d(x, kernel_size, stride=(2, 2), padding=(0, 0), count_include_pad=T
             count_include_pad,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("avgpool2d", e)
         return None
 
 
@@ -1071,9 +1084,7 @@ def mean_pool(x):
     try:
         return _core.mean_pool(dev, _ensure_f32_contiguous(x))
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("mean_pool", e)
         return None
 
 
@@ -1100,9 +1111,7 @@ def batchnorm2d_forward(
             training,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("batchnorm2d_forward", e)
         return None
 
 
@@ -1122,9 +1131,7 @@ def cross_entropy_loss(logits, targets, label_smoothing=0.0):
             dev, _ensure_f32_contiguous(logits), targets, label_smoothing
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("cross_entropy_loss", e)
         return None
 
 
@@ -1139,9 +1146,7 @@ def cross_entropy_backward(logits, targets):
             targets = targets.astype(np.uint32)
         return _core.cross_entropy_backward(dev, _ensure_f32_contiguous(logits), targets)
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("cross_entropy_backward", e)
         return None
 
 
@@ -1181,9 +1186,7 @@ def adam_update(
             clear_grad,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("adam_update", e)
         return None
 
 
@@ -1222,9 +1225,7 @@ def adamw_update(
             clear_grad,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("adamw_update", e)
         return None
 
 
@@ -1242,9 +1243,7 @@ def embedding_lookup(token_ids, embeddings):
             token_ids = token_ids.astype(np.uint32)
         return _core.embedding_lookup(dev, token_ids, _ensure_f32_contiguous(embeddings))
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("embedding_lookup", e)
         return None
 
 
@@ -1288,9 +1287,7 @@ def create_kv_cache(
             eviction_threshold,
         )
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("create_kv_cache", e)
         return None
 
 
@@ -1305,9 +1302,7 @@ def kv_cache_append(kv_cache, new_keys, new_values):
         _core.kv_cache_append(dev, kv_cache, new_keys, new_values)
         return True
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("kv_cache_append", e)
         return None
 
 
@@ -1319,9 +1314,7 @@ def kv_cache_decode(kv_cache):
     try:
         return _core.kv_cache_decode(dev, kv_cache)
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("kv_cache_decode", e)
         return None
 
 
@@ -1335,9 +1328,7 @@ def kv_cache_evict_h2o(kv_cache, attention_scores=None, num_evict=0):
         _core.kv_cache_evict_h2o(dev, kv_cache, scores, num_evict)
         return True
     except Exception as e:
-
-        logger.debug("GPU op failed: %s", e)
-
+        _record_fallback("kv_cache_evict_h2o", e)
         return None
 
 
@@ -1788,6 +1779,513 @@ def moqe_route_and_gemv(activations, choice, expert_weights, expert_scales, bloc
         expert_scales[choice],
         block_size,
     )
+
+
+# ── Fused MoE (grilly_core moe_* — same lazy device + shaders as other bridge ops) ──
+
+
+def moe_upload(embed_w, pos_w, expert_ws, router_ws, router_bs, out_w, n_layers, n_experts):
+    """Upload MoE weights to GPU; returns an opaque integer handle.
+
+    Uses the shared bridge :func:`_get_device` (lazy init + ``shaders/spv`` load).
+
+    Args:
+        embed_w: float32 (vocab, d_model), C-contiguous.
+        pos_w: float32 (max_seq, d_model).
+        expert_ws: list of length ``n_layers * n_experts``, each (d_model, d_model).
+        router_ws: list of length ``n_layers``, each (n_experts, d_model).
+        router_bs: list of length ``n_layers``, each (n_experts,).
+        out_w: float32 (vocab, d_model) — output projection.
+        n_layers, n_experts: int.
+
+    Returns:
+        int handle, or ``None`` if the C++ extension / device is unavailable.
+    """
+    if not _NATIVE or not hasattr(_core, "moe_upload"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.moe_upload(
+            dev,
+            _ensure_f32_contiguous(embed_w),
+            _ensure_f32_contiguous(pos_w),
+            expert_ws,
+            router_ws,
+            router_bs,
+            _ensure_f32_contiguous(out_w),
+            int(n_layers),
+            int(n_experts),
+        )
+    except Exception as e:
+        _record_fallback("moe_upload", e)
+        return None
+
+
+def moe_release(handle):
+    """Free GPU resources for a handle from :func:`moe_upload`.
+
+    Returns:
+        ``True`` if released, ``False`` if bridge/device unavailable.
+    """
+    if not _NATIVE or not hasattr(_core, "moe_release"):
+        return False
+    dev = _get_device()
+    if dev is None:
+        return False
+    try:
+        _core.moe_release(dev, int(handle))
+        return True
+    except Exception as e:
+        _record_fallback("moe_release", e)
+        return False
+
+
+def moe_forward(handle, input_ids):
+    """Run fused MoE forward; returns logits (seq_len, vocab).
+
+    Args:
+        handle: int from :func:`moe_upload`.
+        input_ids: int32 1-D (seq_len,), C-contiguous.
+
+    Returns:
+        float32 ndarray or ``None`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "moe_forward"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    ids = np.asarray(input_ids, dtype=np.int32)
+    if not ids.flags.c_contiguous:
+        ids = np.ascontiguousarray(ids, dtype=np.int32)
+    try:
+        return _core.moe_forward(dev, int(handle), ids)
+    except Exception as e:
+        _record_fallback("moe_forward", e)
+        return None
+
+
+def moe_update_weights(handle, embed_w, pos_w, expert_ws, router_ws, router_bs, out_w):
+    """Re-upload weights in place (same shapes as :func:`moe_upload`).
+
+    Returns:
+        ``True`` on success, ``False`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "moe_update_weights"):
+        return False
+    dev = _get_device()
+    if dev is None:
+        return False
+    try:
+        _core.moe_update_weights(
+            dev,
+            int(handle),
+            _ensure_f32_contiguous(embed_w),
+            _ensure_f32_contiguous(pos_w),
+            expert_ws,
+            router_ws,
+            router_bs,
+            _ensure_f32_contiguous(out_w),
+        )
+        return True
+    except Exception as e:
+        _record_fallback("moe_update_weights", e)
+        return False
+
+
+def moe_backward(handle, input_ids, grad_logits):
+    """CPU backward for MoE (gradients dict); uses CPU mirrors from upload.
+
+    Args:
+        handle: int from :func:`moe_upload`.
+        input_ids: int32 (seq_len,) — same sequence as forward.
+        grad_logits: float32 (seq_len, vocab).
+
+    Returns:
+        dict with keys ``grad_embed``, ``grad_pos``, ``grad_experts``, ``grad_routers_W``,
+        ``grad_routers_b``, ``grad_out_w``, or ``None`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "moe_backward"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    ids = np.asarray(input_ids, dtype=np.int32)
+    if not ids.flags.c_contiguous:
+        ids = np.ascontiguousarray(ids, dtype=np.int32)
+    g = _ensure_f32_contiguous(grad_logits)
+    try:
+        return _core.moe_backward(dev, int(handle), ids, g)
+    except Exception as e:
+        _record_fallback("moe_backward", e)
+        return None
+
+
+# ── Fused VSA-LM (grilly_core vsa_lm_* — AdditionLinear FFN + sign activation) ──
+
+
+def vsa_lm_upload(
+    embed_w, pos_w,
+    ffn_up_patterns, ffn_up_biases, ffn_down_patterns, ffn_down_biases,
+    ln_gammas, ln_betas, out_w,
+    n_layers, d_model, d_ffn,
+):
+    """Upload VSA-LM weights to GPU; returns an opaque integer handle.
+
+    Uses the shared bridge :func:`_get_device` (lazy init + ``shaders/spv`` load).
+
+    Args:
+        embed_w: float32 (vocab, d_model).
+        pos_w: float32 (max_seq, d_model).
+        ffn_up_patterns: list of (d_ffn, d_model) float32, length n_layers.
+        ffn_up_biases: list of (d_ffn,) float32, length n_layers.
+        ffn_down_patterns: list of (d_model, d_ffn) float32, length n_layers.
+        ffn_down_biases: list of (d_model,) float32, length n_layers.
+        ln_gammas: list of (d_model,) float32, length n_layers.
+        ln_betas: list of (d_model,) float32, length n_layers.
+        out_w: float32 (vocab, d_model).
+        n_layers, d_model, d_ffn: int.
+
+    Returns:
+        int handle, or ``None`` if the C++ extension / device is unavailable.
+    """
+    if not _NATIVE or not hasattr(_core, "vsa_lm_upload"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.vsa_lm_upload(
+            dev,
+            _ensure_f32_contiguous(embed_w),
+            _ensure_f32_contiguous(pos_w),
+            ffn_up_patterns, ffn_up_biases,
+            ffn_down_patterns, ffn_down_biases,
+            ln_gammas, ln_betas,
+            _ensure_f32_contiguous(out_w),
+            int(n_layers), int(d_model), int(d_ffn),
+        )
+    except Exception as e:
+        _record_fallback("vsa_lm_upload", e)
+        return None
+
+
+def vsa_lm_release(handle):
+    """Free GPU resources for a handle from :func:`vsa_lm_upload`.
+
+    Returns:
+        ``True`` if released, ``False`` if bridge/device unavailable.
+    """
+    if not _NATIVE or not hasattr(_core, "vsa_lm_release"):
+        return False
+    dev = _get_device()
+    if dev is None:
+        return False
+    try:
+        _core.vsa_lm_release(dev, int(handle))
+        return True
+    except Exception as e:
+        _record_fallback("vsa_lm_release", e)
+        return False
+
+
+def vsa_lm_forward(handle, input_ids):
+    """Run fused VSA-LM forward; returns logits (seq_len, vocab).
+
+    Args:
+        handle: int from :func:`vsa_lm_upload`.
+        input_ids: int32 1-D (seq_len,), C-contiguous.
+
+    Returns:
+        float32 ndarray or ``None`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "vsa_lm_forward"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    ids = np.asarray(input_ids, dtype=np.int32)
+    if not ids.flags.c_contiguous:
+        ids = np.ascontiguousarray(ids, dtype=np.int32)
+    try:
+        return _core.vsa_lm_forward(dev, int(handle), ids)
+    except Exception as e:
+        _record_fallback("vsa_lm_forward", e)
+        return None
+
+
+def vsa_lm_backward(handle, input_ids, grad_logits):
+    """CPU backward for VSA-LM (gradients dict); uses CPU mirrors from upload.
+
+    Args:
+        handle: int from :func:`vsa_lm_upload`.
+        input_ids: int32 (seq_len,) — same sequence as forward.
+        grad_logits: float32 (seq_len, vocab).
+
+    Returns:
+        dict with keys ``grad_embed``, ``grad_pos``, ``grad_out_w``,
+        ``grad_ffn_up_w``, ``grad_ffn_up_b``, ``grad_ffn_down_w``,
+        ``grad_ffn_down_b``, ``grad_ln_gamma``, ``grad_ln_beta``,
+        or ``None`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "vsa_lm_backward"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    ids = np.asarray(input_ids, dtype=np.int32)
+    if not ids.flags.c_contiguous:
+        ids = np.ascontiguousarray(ids, dtype=np.int32)
+    g = _ensure_f32_contiguous(grad_logits)
+    try:
+        return _core.vsa_lm_backward(dev, int(handle), ids, g)
+    except Exception as e:
+        _record_fallback("vsa_lm_backward", e)
+        return None
+
+
+def vsa_lm_update_weights(
+    handle, embed_w, pos_w,
+    ffn_up_patterns, ffn_up_biases, ffn_down_patterns, ffn_down_biases,
+    ln_gammas, ln_betas, out_w,
+):
+    """Re-upload VSA-LM weights in place (same shapes as :func:`vsa_lm_upload`).
+
+    Returns:
+        ``True`` on success, ``False`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "vsa_lm_update_weights"):
+        return False
+    dev = _get_device()
+    if dev is None:
+        return False
+    try:
+        _core.vsa_lm_update_weights(
+            dev, int(handle),
+            _ensure_f32_contiguous(embed_w),
+            _ensure_f32_contiguous(pos_w),
+            ffn_up_patterns, ffn_up_biases,
+            ffn_down_patterns, ffn_down_biases,
+            ln_gammas, ln_betas,
+            _ensure_f32_contiguous(out_w),
+        )
+        return True
+    except Exception as e:
+        _record_fallback("vsa_lm_update_weights", e)
+        return False
+
+
+# ── Bridge support for functional modules without native kernels ──────────
+
+
+def faiss_distance(query, vectors, distance_type="l2"):
+    """Compute FAISS-style distances with numpy fallback."""
+    q = np.asarray(query, dtype=np.float32)
+    v = np.asarray(vectors, dtype=np.float32)
+    if q.ndim == 1:
+        q = q.reshape(1, -1)
+    if distance_type == "l2":
+        diff = q[:, None, :] - v[None, :, :]
+        return np.sqrt(np.sum(diff * diff, axis=2, dtype=np.float32), dtype=np.float32)
+    if distance_type == "cosine":
+        q_norm = q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-8)
+        v_norm = v / (np.linalg.norm(v, axis=1, keepdims=True) + 1e-8)
+        return (1.0 - (q_norm @ v_norm.T)).astype(np.float32)
+    return (-(q @ v.T)).astype(np.float32)
+
+
+def faiss_topk(distances, k):
+    """Select top-k nearest neighbors from a distance matrix."""
+    d = np.asarray(distances, dtype=np.float32)
+    if d.ndim == 1:
+        d = d.reshape(1, -1)
+    k = max(1, min(int(k), d.shape[1]))
+    idx = np.argpartition(d, kth=k - 1, axis=1)[:, :k]
+    vals = np.take_along_axis(d, idx, axis=1)
+    order = np.argsort(vals, axis=1)
+    idx = np.take_along_axis(idx, order, axis=1).astype(np.int32)
+    vals = np.take_along_axis(vals, order, axis=1).astype(np.float32)
+    return idx, vals
+
+
+def memory_read(queries, memory_keys, memory_values, temperature=None):
+    """Memory read via attention-style lookup."""
+    q = np.asarray(queries, dtype=np.float32)
+    k = np.asarray(memory_keys, dtype=np.float32)
+    v = np.asarray(memory_values, dtype=np.float32)
+    temp = float(temperature) if temperature is not None else float(np.sqrt(k.shape[-1]))
+    scores = (q @ k.T) / max(temp, 1e-8)
+    scores = scores - np.max(scores, axis=-1, keepdims=True)
+    weights = np.exp(scores)
+    weights = weights / np.sum(weights, axis=-1, keepdims=True)
+    return (weights @ v).astype(np.float32)
+
+
+def memory_write(new_key, new_value, memory_keys, memory_values, write_index, write_mode=0, blend_factor=0.5):
+    """Memory write for key/value banks."""
+    keys = np.array(memory_keys, dtype=np.float32, copy=True)
+    vals = np.array(memory_values, dtype=np.float32, copy=True)
+    idx = int(write_index)
+    if write_mode == 1:
+        a = float(blend_factor)
+        keys[idx] = (1.0 - a) * keys[idx] + a * np.asarray(new_key, dtype=np.float32)
+        vals[idx] = (1.0 - a) * vals[idx] + a * np.asarray(new_value, dtype=np.float32)
+    else:
+        keys[idx] = np.asarray(new_key, dtype=np.float32)
+        vals[idx] = np.asarray(new_value, dtype=np.float32)
+    return keys, vals
+
+
+def memory_query_pooling(x, w_query, b_query):
+    """Pool sequence to query vectors by mean-pool + projection."""
+    x_arr = np.asarray(x, dtype=np.float32)
+    pooled = np.mean(x_arr, axis=1)
+    return (pooled @ np.asarray(w_query, dtype=np.float32).T + np.asarray(b_query, dtype=np.float32)).astype(np.float32)
+
+
+def memory_inject_gate(x, memory_context, w_gate, b_gate, w_mem_proj):
+    """Gate between token state and projected memory context."""
+    x_arr = np.asarray(x, dtype=np.float32)
+    mem = np.asarray(memory_context, dtype=np.float32)
+    batch, seq_len, dim = x_arr.shape
+    mem_expand = np.broadcast_to(mem[:, None, :], (batch, seq_len, dim))
+    concat = np.concatenate([x_arr, mem_expand], axis=-1)
+    gate = 1.0 / (1.0 + np.exp(-(concat @ np.asarray(w_gate, dtype=np.float32).T + np.asarray(b_gate, dtype=np.float32))))
+    mem_proj = mem @ np.asarray(w_mem_proj, dtype=np.float32).T
+    mem_proj = np.broadcast_to(mem_proj[:, None, :], (batch, seq_len, dim))
+    return ((1.0 - gate) * x_arr + gate * mem_proj).astype(np.float32)
+
+
+def fisher_info_update(gradients, fisher, momentum=0.9, use_ema=True, reset=False):
+    """Update Fisher information estimate."""
+    g = np.asarray(gradients, dtype=np.float32)
+    f = np.zeros_like(g, dtype=np.float32) if reset else np.asarray(fisher, dtype=np.float32)
+    g2 = g * g
+    if use_ema:
+        return (float(momentum) * f + (1.0 - float(momentum)) * g2).astype(np.float32)
+    return (f + g2).astype(np.float32)
+
+
+def ewc_penalty(current_params, important_params, fisher, lambda_ewc=1.0):
+    """Compute scalar EWC penalty."""
+    cur = np.asarray(current_params, dtype=np.float32)
+    imp = np.asarray(important_params, dtype=np.float32)
+    f = np.asarray(fisher, dtype=np.float32)
+    diff = cur - imp
+    return float(0.5 * float(lambda_ewc) * np.sum(f * diff * diff, dtype=np.float32))
+
+
+def natural_gradient(gradients, fisher, eps=1e-8):
+    """Approximate natural gradient using diagonal Fisher."""
+    g = np.asarray(gradients, dtype=np.float32)
+    f = np.asarray(fisher, dtype=np.float32)
+    return (g / (f + float(eps))).astype(np.float32)
+
+
+def nlms_predict(x, w, bias=0.0):
+    """NLMS prediction."""
+    return float(np.dot(np.asarray(x, dtype=np.float32), np.asarray(w, dtype=np.float32)) + float(bias))
+
+
+def nlms_update(x, y_true, w, bias, mu=0.5, eps=1e-6):
+    """NLMS weight update."""
+    x_arr = np.asarray(x, dtype=np.float32)
+    w_arr = np.asarray(w, dtype=np.float32)
+    pred = float(np.dot(x_arr, w_arr) + float(bias))
+    err = float(y_true) - pred
+    denom = float(np.dot(x_arr, x_arr) + float(eps))
+    step = float(mu) * err / denom
+    w_new = (w_arr + step * x_arr).astype(np.float32)
+    b_new = float(bias + step)
+    return w_new, b_new
+
+
+def whitening_transform(data, mean=None, std=None):
+    """Compute/apply whitening transform."""
+    x = np.asarray(data, dtype=np.float32)
+    m = np.asarray(mean, dtype=np.float32) if mean is not None else np.mean(x, axis=0)
+    s = np.asarray(std, dtype=np.float32) if std is not None else np.std(x, axis=0)
+    out = (x - m) / (s + 1e-8)
+    return out.astype(np.float32), m.astype(np.float32), s.astype(np.float32)
+
+
+def place_cell(agent_position, field_centers, field_width=1.0, max_rate=20.0, baseline_rate=0.1):
+    """Gaussian place-cell tuning curves."""
+    pos = np.asarray(agent_position, dtype=np.float32)
+    centers = np.asarray(field_centers, dtype=np.float32)
+    if pos.ndim == 1:
+        pos = pos[None, :]
+    diff = pos[:, None, :] - centers[None, :, :]
+    d2 = np.sum(diff * diff, axis=-1)
+    rates = float(baseline_rate) + (float(max_rate) - float(baseline_rate)) * np.exp(
+        -d2 / (2.0 * float(field_width) * float(field_width) + 1e-8)
+    )
+    return rates.astype(np.float32).squeeze(0) if np.asarray(agent_position).ndim == 1 else rates.astype(np.float32)
+
+
+def time_cell(current_time, preferred_times, time_constant=1.0, max_rate=15.0, baseline_rate=0.1, membrane_state=None):
+    """Temporal Gaussian tuning with optional EMA membrane state."""
+    t = float(current_time)
+    pref = np.asarray(preferred_times, dtype=np.float32)
+    rates = float(baseline_rate) + (float(max_rate) - float(baseline_rate)) * np.exp(
+        -((t - pref) ** 2) / (2.0 * float(time_constant) * float(time_constant) + 1e-8)
+    )
+    if membrane_state is None:
+        mem = rates.astype(np.float32)
+    else:
+        mem = (0.9 * np.asarray(membrane_state, dtype=np.float32) + 0.1 * rates).astype(np.float32)
+    return rates.astype(np.float32), mem
+
+
+def continuous_to_spikes(continuous, num_timesteps=10, encoding_type=0, projection_weights=None, projection_bias=None):
+    """Convert continuous vectors to spike trains."""
+    x = np.asarray(continuous, dtype=np.float32)
+    if x.ndim == 1:
+        x = x[None, :]
+    if projection_weights is not None:
+        x = x @ np.asarray(projection_weights, dtype=np.float32).T
+        if projection_bias is not None:
+            x = x + np.asarray(projection_bias, dtype=np.float32)
+    x = np.clip(x, 0.0, 1.0)
+    t = int(num_timesteps)
+    if encoding_type == 1:
+        spikes = np.zeros((x.shape[0], t, x.shape[1]), dtype=np.float32)
+        idx = np.minimum((1.0 - x) * (t - 1), t - 1).astype(np.int32)
+        b_idx = np.arange(x.shape[0])[:, None]
+        f_idx = np.arange(x.shape[1])[None, :]
+        spikes[b_idx, idx, f_idx] = 1.0
+        return spikes
+    if encoding_type == 2:
+        phase = np.linspace(0.0, 2.0 * np.pi, t, endpoint=False, dtype=np.float32)
+        return ((np.sin(phase[None, :, None] + x[:, None, :] * 2.0 * np.pi) > 0).astype(np.float32))
+    return (np.random.rand(x.shape[0], t, x.shape[1]).astype(np.float32) < x[:, None, :]).astype(np.float32)
+
+
+def spikes_to_continuous(spikes, encoding_type=0, time_window=5, temporal_weights=None, projection_weights=None, projection_bias=None):
+    """Convert spike trains to continuous representations."""
+    s = np.asarray(spikes, dtype=np.float32)
+    if s.ndim != 3:
+        raise ValueError(f"spikes must be 3D (batch, time, features), got shape={s.shape}")
+    if encoding_type == 1:
+        if temporal_weights is None:
+            tw = np.linspace(1.0, 0.0, s.shape[1], dtype=np.float32)
+        else:
+            tw = np.asarray(temporal_weights, dtype=np.float32)
+        tw = tw / (np.sum(tw) + 1e-8)
+        cont = np.sum(s * tw[None, :, None], axis=1)
+    elif encoding_type == 2:
+        phase = np.linspace(0.0, 2.0 * np.pi, s.shape[1], endpoint=False, dtype=np.float32)
+        cont = np.sum(s * np.sin(phase)[None, :, None], axis=1) / max(s.shape[1], 1)
+    else:
+        window = max(1, min(int(time_window), s.shape[1]))
+        cont = np.mean(s[:, -window:, :], axis=1)
+    if projection_weights is not None:
+        cont = cont @ np.asarray(projection_weights, dtype=np.float32).T
+        if projection_bias is not None:
+            cont = cont + np.asarray(projection_bias, dtype=np.float32)
+    return cont.astype(np.float32)
 
 
 def q_similarity(queries):

@@ -5,7 +5,12 @@ Uses: attention-scores.glsl, attention-output.glsl, flash-attention2.glsl, etc.
 
 import numpy as np
 
-from ._helpers import _get_param_array
+from ._helpers import (
+    _USE_CPP_BRIDGE,
+    _bridge,
+    _bridge_to_numpy,
+    _get_param_array,
+)
 from .module import Module
 
 
@@ -103,51 +108,102 @@ class MultiheadAttention(Module):
         k_reshaped = k_4d.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len_k, head_dim)
         v_reshaped = v_4d.transpose(0, 2, 1, 3)  # (batch, num_heads, seq_len_k, head_dim)
 
-        # Compute attention scores
+        # Fused C++ path: one submit for scores + softmax + output (no mask; Sq == Sk only).
+        if _USE_CPP_BRIDGE and seq_len_q == seq_len_k and mask is None:
+            fused = _bridge.attention_scores_softmax_output(
+                q_reshaped, k_reshaped, v_reshaped
+            )
+            if fused is not None:
+                br_out, br_w = fused
+                attn_output = _bridge_to_numpy(br_out)
+                scores_softmax = _bridge_to_numpy(br_w)
+                if attn_output is not None and scores_softmax is not None:
+                    attn_output = attn_output.astype(np.float32)
+                    scores_softmax = scores_softmax.astype(np.float32)
+                    self._cached_scores_pre_softmax = None
+                    self._cached_scores = scores_softmax.copy()
+                    self._cached_attn_output = attn_output.copy()
+                    attn_output_reshaped = attn_output.transpose(0, 2, 1, 3).reshape(
+                        batch_size, seq_len_q, self.embed_dim
+                    )
+                    attn_weights = scores_softmax
+                    output = self.out_proj(attn_output_reshaped)
+                    return output, attn_weights
+
+        # C++ bridge: scores → optional padding mask (CPU) → softmax → attention output (GPU).
+        # Kernel uses one sequence length for Q and K; skip when cross-attention has Sq != Sk.
+        if _USE_CPP_BRIDGE and seq_len_q == seq_len_k:
+            br_scores = _bridge.attention_scores(q_reshaped, k_reshaped)
+            if br_scores is not None:
+                scores = _bridge_to_numpy(br_scores)
+                if scores.shape != (batch_size, self.num_heads, seq_len_q, seq_len_k):
+                    if scores.size == batch_size * self.num_heads * seq_len_q * seq_len_k:
+                        scores = scores.reshape(
+                            batch_size, self.num_heads, seq_len_q, seq_len_k
+                        )
+                    else:
+                        scores = None
+                if scores is not None:
+                    self._cached_scores_pre_softmax = scores.copy()
+                    if mask is not None:
+                        if mask.ndim == 2:
+                            mask_expanded = mask[:, None, :, None]
+                            mask_expanded = np.broadcast_to(mask_expanded, scores.shape)
+                            scores = np.where(mask_expanded > 0, scores, -1e9)
+                        else:
+                            scores = scores + mask.astype(np.float32)
+                    br_soft = _bridge.softmax(scores, dim=-1)
+                    if br_soft is not None:
+                        scores_softmax = _bridge_to_numpy(br_soft).astype(np.float32)
+                        self._cached_scores = scores_softmax.copy()
+                        br_out = _bridge.attention_output(scores_softmax, v_reshaped)
+                        if br_out is not None:
+                            attn_output = _bridge_to_numpy(br_out).astype(np.float32)
+                            self._cached_attn_output = attn_output.copy()
+                            attn_output_reshaped = attn_output.transpose(0, 2, 1, 3).reshape(
+                                batch_size, seq_len_q, self.embed_dim
+                            )
+                            attn_weights = scores_softmax
+                            output = self.out_proj(attn_output_reshaped)
+                            return output, attn_weights
+
+        # Fallback: legacy Python Vulkan backend + CPU softmax / einsum
         scores = backend.attention.attention_scores(
             q_reshaped, k_reshaped, num_heads=self.num_heads, head_dim=self.head_dim
         )
 
         # Backend may return scores in different shape - normalize to (batch, num_heads, seq_len_q, seq_len_k)
         if scores.shape == (batch_size, seq_len_q, self.num_heads, seq_len_k):
-            # Backend returned (batch, seq_len_q, num_heads, seq_len_k) - transpose to (batch, num_heads, seq_len_q, seq_len_k)
             scores = scores.transpose(0, 2, 1, 3)
         elif scores.shape != (batch_size, self.num_heads, seq_len_q, seq_len_k):
-            # Unexpected shape - try to infer
             if (
                 scores.ndim == 4
                 and scores.size == batch_size * self.num_heads * seq_len_q * seq_len_k
             ):
                 scores = scores.reshape(batch_size, self.num_heads, seq_len_q, seq_len_k)
             else:
-                # Fallback: compute manually
                 scores = np.einsum("bhqd,bhkd->bhqk", q_reshaped, k_reshaped) / np.sqrt(
-                    self.head_dim
+                    float(self.head_dim)
                 )
 
-        # Cache pre-softmax scores for backward
         self._cached_scores_pre_softmax = scores.copy()
 
-        # Apply mask if provided
         if mask is not None:
-            scores = backend.attention.attention_mask(scores, mask)
+            if mask.ndim == 2:
+                mask_expanded = mask[:, None, :, None]
+                mask_expanded = np.broadcast_to(mask_expanded, scores.shape)
+                scores = np.where(mask_expanded > 0, scores, -1e9)
+            else:
+                scores = scores + mask.astype(np.float32)
 
-        # Apply softmax (CPU for now - backend softmax expects 3D)
-        # scores is (batch, num_heads, seq_len_q, seq_len_k)
         scores_max = scores.max(axis=-1, keepdims=True)
         scores_exp = np.exp(scores - scores_max)
         scores_softmax = scores_exp / scores_exp.sum(axis=-1, keepdims=True)
 
-        # Cache softmax scores for backward
         self._cached_scores = scores_softmax.copy()
 
-        # Compute attention output
-        # scores_softmax: (batch, num_heads, seq_len_q, seq_len_k)
-        # v_reshaped: (batch, num_heads, seq_len_k, head_dim)
-        # Output: (batch, num_heads, seq_len_q, head_dim)
         attn_output = np.einsum("bhqk,bhkd->bhqd", scores_softmax, v_reshaped)
 
-        # Cache attention output for backward (in shape: batch, num_heads, seq_len_q, head_dim)
         self._cached_attn_output = attn_output.copy()
 
         # Reshape back: (batch, num_heads, seq_len_q, head_dim) -> (batch, seq_len_q, embed_dim)

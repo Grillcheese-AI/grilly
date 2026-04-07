@@ -44,21 +44,21 @@ void main() {
     uint head_idx = remainder / head_dim;
     uint dim_idx = remainder % head_dim;
     
-    // Compute weighted sum: output[batch, seq_q, head, dim] = sum_k(weights[batch, head, seq_q, k] * V[batch, k, head, dim])
+    // Compute weighted sum: output[batch, seq_q, head, dim]
+    //   = sum_k(weights[batch, head, seq_q, k] * V[batch, k, head, dim])
+    // Hoist loop-invariant index math and use FMA in the inner loop.
     float sum = 0.0;
-    
+
+    uint weight_base = batch_idx * num_heads * seq_len * seq_len +
+                       head_idx * seq_len * seq_len +
+                       seq_q * seq_len;
+
+    uint v_base = batch_idx * seq_len * num_heads * head_dim +
+                  head_idx * head_dim + dim_idx;
+    uint v_stride = num_heads * head_dim;
+
     for (uint k = 0; k < seq_len; k++) {
-        // Weight index: weights[batch, head, seq_q, k]
-        uint weight_idx = batch_idx * num_heads * seq_len * seq_len +
-                         head_idx * seq_len * seq_len +
-                         seq_q * seq_len + k;
-        
-        // Value index: V[batch, k, head, dim]
-        uint v_idx = batch_idx * seq_len * num_heads * head_dim +
-                    k * num_heads * head_dim +
-                    head_idx * head_dim + dim_idx;
-        
-        sum += weights[weight_idx] * V[v_idx];
+        sum = fma(weights[weight_base + k], V[v_base + k * v_stride], sum);
     }
     
     // Output index: output[batch, seq_q, head, dim]

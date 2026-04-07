@@ -5,14 +5,14 @@ import pytest
 
 try:
     from grilly import Compute
-    from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.backend.base import VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
     from grilly.functional import dropout, linear
 except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestFunctionalLinear:
     """Tests for functional.linear."""
 
@@ -40,7 +40,7 @@ class TestFunctionalLinear:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestFunctionalDropout:
     """Tests for functional.dropout."""
 

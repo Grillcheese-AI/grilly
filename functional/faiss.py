@@ -8,14 +8,14 @@ Uses: faiss-distance.glsl, faiss-topk.glsl, faiss-ivf-filter.glsl,
 import numpy as np
 
 
-def _get_backend():
-    """Get backend instance"""
-    try:
-        from ..backend.compute import Compute
-
-        return Compute()
-    except Exception:
+def _to_numpy(result):
+    if result is None:
         return None
+    if isinstance(result, np.ndarray):
+        return result
+    if hasattr(result, "numpy"):
+        return result.numpy()
+    return np.asarray(result)
 
 
 def faiss_distance(query: np.ndarray, vectors: np.ndarray, distance_type: str = "l2") -> np.ndarray:
@@ -32,25 +32,25 @@ def faiss_distance(query: np.ndarray, vectors: np.ndarray, distance_type: str = 
     Returns:
         Distances (batch, num_vectors) or (num_vectors,)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    if hasattr(backend, "faiss") and hasattr(backend.faiss, "compute_distances"):
-        return backend.faiss.compute_distances(query, vectors, distance_type=distance_type)
-    else:
-        # CPU fallback
-        if query.ndim == 1:
-            query = query.reshape(1, -1)
+        result = _bridge.faiss_distance(query, vectors, distance_type=distance_type)
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
 
-        if distance_type == "l2":
-            diff = query[:, None, :] - vectors[None, :, :]
-            return np.sqrt(np.sum(diff**2, axis=2))
-        elif distance_type == "cosine":
-            q_norm = query / (np.linalg.norm(query, axis=1, keepdims=True) + 1e-8)
-            v_norm = vectors / (np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-8)
-            return 1 - np.dot(q_norm, v_norm.T)
-        else:  # dot
-            return -np.dot(query, vectors.T)
+    if query.ndim == 1:
+        query = query.reshape(1, -1)
+    if distance_type == "l2":
+        diff = query[:, None, :] - vectors[None, :, :]
+        return np.sqrt(np.sum(diff**2, axis=2))
+    if distance_type == "cosine":
+        q_norm = query / (np.linalg.norm(query, axis=1, keepdims=True) + 1e-8)
+        v_norm = vectors / (np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-8)
+        return 1 - np.dot(q_norm, v_norm.T)
+    return -np.dot(query, vectors.T)
 
 
 def faiss_topk(distances: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
@@ -66,16 +66,17 @@ def faiss_topk(distances: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
     Returns:
         (indices, topk_distances) - both (batch, k)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    if hasattr(backend, "faiss") and hasattr(backend.faiss, "topk"):
-        return backend.faiss.topk(distances, k)
-    else:
-        # CPU fallback
-        indices = np.argsort(distances, axis=1)[:, :k]
-        topk_distances = np.take_along_axis(distances, indices, axis=1)
-        return indices, topk_distances
+        result = _bridge.faiss_topk(distances, k)
+        if result is not None:
+            return result
+    except (ImportError, Exception):
+        pass
+    indices = np.argsort(distances, axis=1)[:, :k]
+    topk_distances = np.take_along_axis(distances, indices, axis=1)
+    return indices, topk_distances
 
 
 def faiss_ivf_filter(vectors: np.ndarray, centroids: np.ndarray, nlist: int = 100) -> np.ndarray:
@@ -92,17 +93,6 @@ def faiss_ivf_filter(vectors: np.ndarray, centroids: np.ndarray, nlist: int = 10
     Returns:
         Cluster assignments (num_vectors,)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "faiss-kmeans-update" in backend.shaders:
-        try:
-            # GPU FAISS kmeans update would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback - Assign each vector to nearest centroid
     distances = np.linalg.norm(vectors[:, None, :] - centroids[None, :, :], axis=2)
     assignments = np.argmin(distances, axis=1)
@@ -126,33 +116,17 @@ def faiss_kmeans_update(
     Returns:
         Updated centroids (nlist, dim)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "faiss-kmeans-update" in backend.shaders:
-        try:
-            # GPU FAISS kmeans update would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
-    # CPU fallback
-    new_centroids = np.zeros_like(centroids)
-    counts = np.zeros(nlist, dtype=np.int32)
-
-    for i, vec in enumerate(vectors):
-        cluster = assignments[i]
-        new_centroids[cluster] += vec
-        counts[cluster] += 1
-
-    # Normalize by counts
-    for c in range(nlist):
-        if counts[c] > 0:
-            new_centroids[c] /= counts[c]
-        else:
-            new_centroids[c] = centroids[c]  # Keep old centroid if no vectors assigned
-
+    # CPU fallback (vectorized)
+    vectors = np.asarray(vectors, dtype=np.float32)
+    centroids = np.asarray(centroids, dtype=np.float32)
+    assignments = np.asarray(assignments, dtype=np.int32)
+    dim = vectors.shape[1]
+    new_centroids = np.zeros((nlist, dim), dtype=np.float32)
+    np.add.at(new_centroids, assignments, vectors)
+    counts = np.bincount(assignments, minlength=nlist).astype(np.float32)
+    nonzero = counts > 0
+    new_centroids[nonzero] /= counts[nonzero, None]
+    new_centroids[~nonzero] = centroids[~nonzero]
     return new_centroids
 
 
@@ -172,17 +146,6 @@ def faiss_quantize(
     Returns:
         (quantized_vectors, codes) - codes (num_vectors,)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "faiss-quantize" in backend.shaders:
-        try:
-            # GPU FAISS quantization would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback - Find nearest codebook entry for each vector
     distances = np.linalg.norm(vectors[:, None, :] - codebook[None, :, :], axis=2)
     codes = np.argmin(distances, axis=1)

@@ -37,25 +37,75 @@ class LayerNorm(Module):
         self.register_parameter("weight", self.weight)
         self.register_parameter("bias", self.bias)
 
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        """Forward pass using fnn-layernorm.glsl (GPU-first)"""
+    def forward(self, x):
+        """Forward pass using fnn-layernorm.glsl (GPU-first).
+
+        Autograd: when ``x`` is a ``Variable``, the output is wrapped in a
+        ``Variable`` whose ``GradFn`` calls ``self.backward(grad_output, x)``
+        on loss.backward(). ``self.backward`` already populates
+        ``self.weight.grad`` and ``self.bias.grad`` in-place, so AdamW picks
+        them up through ``param.grad``. Mirrors ``nn.Linear.forward``'s
+        autograd wiring — see that file for the long-form rationale.
+        """
+        try:
+            from grilly.nn.autograd import GradFn as _GradFn
+            from grilly.nn.autograd import Variable as _Variable
+            from grilly.nn.autograd import _grad_enabled
+        except ImportError:
+            _Variable = None  # type: ignore[assignment]
+            _GradFn = None  # type: ignore[assignment]
+            _grad_enabled = False
+
+        x_var = None
+        if _Variable is not None and isinstance(x, _Variable):
+            x_var = x
+            x_data = x.data
+        else:
+            x_data = x
+
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias)
 
-        # C++ bridge fast path (handles both numpy and VulkanTensor via __array__)
+        # ---- Existing forward path ----
+        result = None
         if _USE_CPP_BRIDGE:
-            result = _bridge_to_numpy(_bridge.layernorm(x, weight, bias, self.eps))
-            if result is not None:
-                return result
+            result = _bridge_to_numpy(_bridge.layernorm(x_data, weight, bias, self.eps))
 
-        backend = self._get_backend()
-        return backend.fnn.layernorm(
-            x,
-            weight,
-            bias,
-            eps=self.eps,
-            return_gpu_tensor=self._return_gpu_tensor,
-        )
+        if result is None:
+            backend = self._get_backend()
+            if backend is not None and hasattr(backend, "fnn"):
+                result = backend.fnn.layernorm(
+                    x_data,
+                    weight,
+                    bias,
+                    eps=self.eps,
+                    return_gpu_tensor=self._return_gpu_tensor,
+                )
+            else:
+                # CPU fallback — matches self.backward() math
+                mean = np.mean(x_data, axis=-1, keepdims=True)
+                var = np.var(x_data, axis=-1, keepdims=True)
+                normalized = (x_data - mean) / np.sqrt(var + self.eps)
+                result = normalized * weight + bias
+
+        # ---- Autograd wiring ----
+        if (
+            x_var is not None
+            and _GradFn is not None
+            and _grad_enabled
+            and isinstance(result, np.ndarray)
+            and not isinstance(result, _Variable)
+        ):
+            x_data_for_backward = x_data
+
+            def backward_fn(grad_output):
+                grad_input = self.backward(np.asarray(grad_output), x_data_for_backward)
+                return (grad_input,)
+
+            grad_fn = _GradFn("LayerNorm", backward_fn, [x_var])
+            return _Variable(np.asarray(result), requires_grad=True, grad_fn=grad_fn)
+
+        return result
 
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """

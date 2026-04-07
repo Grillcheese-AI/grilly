@@ -23,6 +23,15 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      - name: Guard deprecated Compute usage in runtime paths
+        run: |
+          hits="$(rg -n "from grilly import Compute|from \.\.backend\.compute import Compute|from \.compute import Compute|Compute\(" functional nn/module.py utils/tensor_conversion.py --glob "*.py" || true)"
+          if [ -n "$hits" ]; then
+            echo "Deprecated Compute usage detected in runtime paths:"
+            echo "$hits"
+            exit 1
+          fi
+
   test:
     runs-on: ubuntu-latest
     steps:

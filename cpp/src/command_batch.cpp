@@ -70,6 +70,9 @@ void CommandBatch::begin() {
     if (recording_)
         throw std::runtime_error("CommandBatch::begin() called while already recording");
 
+    // Wait for any prior pending work before reusing the command buffer
+    waitForCompletion();
+
     vkResetCommandBuffer(cmd_, 0);
 
     VkCommandBufferBeginInfo beginInfo{};
@@ -80,6 +83,12 @@ void CommandBatch::begin() {
             "vkBeginCommandBuffer failed");
 
     recording_ = true;
+    dispatchCount_ = 0;
+}
+
+void CommandBatch::ensureRecording() {
+    if (!recording_)
+        begin();
 }
 
 void CommandBatch::dispatch(VkPipeline pipeline, VkPipelineLayout layout,
@@ -99,6 +108,7 @@ void CommandBatch::dispatch(VkPipeline pipeline, VkPipelineLayout layout,
     }
 
     vkCmdDispatch(cmd_, gx, gy, gz);
+    dispatchCount_++;
 }
 
 void CommandBatch::barrier() {
@@ -121,6 +131,32 @@ void CommandBatch::barrier() {
                          0, nullptr);      // image memory barriers
 }
 
+void CommandBatch::transferComputeBarrier() {
+    if (!recording_)
+        return;
+
+    // Bidirectional TRANSFER ↔ COMPUTE barrier. The src/dst access masks
+    // cover both edges (stage-in → compute and compute → stage-out) so the
+    // staging-buffer pattern in linear() can use a single method for both
+    // transitions without tracking direction.
+    VkMemoryBarrier memBarrier{};
+    memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    memBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT |
+                               VK_ACCESS_SHADER_WRITE_BIT;
+    memBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT |
+                               VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd_,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT |
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT |
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0,
+                         1, &memBarrier,
+                         0, nullptr,
+                         0, nullptr);
+}
+
 void CommandBatch::copyBuffer(const GrillyBuffer& src, GrillyBuffer& dst, size_t bytes) {
     if (!recording_)
         throw std::runtime_error("CommandBatch::copyBuffer() called without begin()");
@@ -135,6 +171,12 @@ void CommandBatch::copyBuffer(const GrillyBuffer& src, GrillyBuffer& dst, size_t
 // ── Submission ──────────────────────────────────────────────────────────────
 
 void CommandBatch::submit() {
+    // Synchronous: submit + wait. Safe default for backward compat.
+    submitDeferred();
+    waitForCompletion();
+}
+
+void CommandBatch::submitDeferred() {
     if (!recording_)
         return;
 
@@ -142,7 +184,10 @@ void CommandBatch::submit() {
     recording_ = false;
 
     // Wait for any prior submission to complete, then reset fence
-    vkWaitForFences(device_.device(), 1, &fence_, VK_TRUE, kFenceTimeoutNs);
+    if (pending_) {
+        vkWaitForFences(device_.device(), 1, &fence_, VK_TRUE, kFenceTimeoutNs);
+        pending_ = false;
+    }
     vkResetFences(device_.device(), 1, &fence_);
 
     VkSubmitInfo submitInfo{};
@@ -153,10 +198,17 @@ void CommandBatch::submit() {
     vkCheck(vkQueueSubmit(device_.computeQueue(), 1, &submitInfo, fence_),
             "vkQueueSubmit failed");
 
-    // Wait for completion so callers can read back results
+    pending_ = true;
+    // Returns immediately — GPU runs in background
+}
+
+void CommandBatch::waitForCompletion() {
+    if (!pending_)
+        return;
     vkCheck(
         vkWaitForFences(device_.device(), 1, &fence_, VK_TRUE, kFenceTimeoutNs),
         "vkWaitForFences timed out");
+    pending_ = false;
 }
 
 void CommandBatch::submitAsync(VkSemaphore timeline, uint64_t signalValue) {

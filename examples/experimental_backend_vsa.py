@@ -7,11 +7,11 @@ Demonstrates Vulkan-accelerated VSA operations with CPU fallback.
 import numpy as np
 
 try:
-    from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.backend.base import VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
     from grilly.backend.core import VulkanCore
     from grilly.backend.experimental.vsa import VulkanVSA
 
-    if not VULKAN_AVAILABLE:
+    if not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE:
         raise ImportError("Vulkan not available")
 except ImportError:
     print("Vulkan backend not available. Skipping GPU examples.")

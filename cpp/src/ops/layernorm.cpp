@@ -36,37 +36,48 @@ void layernorm(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     const size_t meanBytes   = size_t(totalPositions) * sizeof(float);
     const size_t varBytes    = meanBytes;
 
-    // Acquire 6 buffers
-    GrillyBuffer bufInput  = pool.acquire(inputBytes);
-    GrillyBuffer bufOutput = pool.acquire(outputBytes);
-    GrillyBuffer bufGamma  = pool.acquire(gammaBytes);
-    GrillyBuffer bufBeta   = pool.acquire(betaBytes);
-    GrillyBuffer bufMean   = pool.acquire(meanBytes);
-    GrillyBuffer bufVar    = pool.acquire(varBytes);
+    // Staging pattern: 3 stage-in (input, gamma, beta), 1 stage-out (output).
+    // mean and var are intermediate buffers — pure DEVICE_LOCAL, never touched
+    // by the CPU, so no staging buffers needed for them.
+    GrillyBuffer bufInputDL  = pool.acquireDeviceLocal(inputBytes);
+    GrillyBuffer bufOutputDL = pool.acquireDeviceLocal(outputBytes);
+    GrillyBuffer bufGammaDL  = pool.acquireDeviceLocal(gammaBytes);
+    GrillyBuffer bufBetaDL   = pool.acquireDeviceLocal(betaBytes);
+    GrillyBuffer bufMeanDL   = pool.acquireDeviceLocal(meanBytes);
+    GrillyBuffer bufVarDL    = pool.acquireDeviceLocal(varBytes);
 
-    // Upload input data
-    pool.upload(bufInput, input, inputBytes);
-    pool.upload(bufGamma, gamma, gammaBytes);
-    pool.upload(bufBeta, beta, betaBytes);
+    GrillyBuffer bufInputStage  = pool.acquire(inputBytes);
+    GrillyBuffer bufGammaStage  = pool.acquire(gammaBytes);
+    GrillyBuffer bufBetaStage   = pool.acquire(betaBytes);
+    GrillyBuffer bufOutputStage = pool.acquireReadback(outputBytes);
+
+    pool.upload(bufInputStage, input, inputBytes);
+    pool.upload(bufGammaStage, gamma, gammaBytes);
+    pool.upload(bufBetaStage,  beta,  betaBytes);
 
     // Get pipeline: 6 buffers, 20 bytes push constants
     PipelineEntry pipe = cache.getOrCreate("fnn-layernorm", 6,
                                            sizeof(LayerNormParams));
 
-    // Descriptor set (same for all 3 passes — same buffers)
+    // Descriptor set bound to DEVICE_LOCAL buffers
     std::vector<VkDescriptorBufferInfo> bufInfos = {
-        {bufInput.handle,  0, inputBytes},
-        {bufOutput.handle, 0, outputBytes},
-        {bufGamma.handle,  0, gammaBytes},
-        {bufBeta.handle,   0, betaBytes},
-        {bufMean.handle,   0, meanBytes},
-        {bufVar.handle,    0, varBytes},
+        {bufInputDL.handle,  0, inputBytes},
+        {bufOutputDL.handle, 0, outputBytes},
+        {bufGammaDL.handle,  0, gammaBytes},
+        {bufBetaDL.handle,   0, betaBytes},
+        {bufMeanDL.handle,   0, meanBytes},
+        {bufVarDL.handle,    0, varBytes},
     };
     VkDescriptorSet descSet = cache.allocDescriptorSet("fnn-layernorm",
                                                         bufInfos);
 
-    // 3-pass dispatch
     batch.begin();
+
+    // Stage-in: copy 3 host-visible staging buffers to DL VRAM
+    batch.copyBuffer(bufInputStage, bufInputDL, inputBytes);
+    batch.copyBuffer(bufGammaStage, bufGammaDL, gammaBytes);
+    batch.copyBuffer(bufBetaStage,  bufBetaDL,  betaBytes);
+    batch.transferComputeBarrier();
 
     // Pass 0: compute mean
     LayerNormParams push0{batchSize, seqLen, features, eps, 0};
@@ -88,18 +99,25 @@ void layernorm(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx2, 1, 1,
                    &push2, sizeof(push2));
 
-    batch.submit();
+    // Stage-out: DL output → HOST_CACHED readback staging
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufOutputDL, bufOutputStage, outputBytes);
 
-    // Download result
-    pool.download(bufOutput, output, outputBytes);
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
-    // Release all buffers
-    pool.release(bufInput);
-    pool.release(bufOutput);
-    pool.release(bufGamma);
-    pool.release(bufBeta);
-    pool.release(bufMean);
-    pool.release(bufVar);
+    pool.download(bufOutputStage, output, outputBytes);
+
+    pool.release(bufInputDL);
+    pool.release(bufOutputDL);
+    pool.release(bufGammaDL);
+    pool.release(bufBetaDL);
+    pool.release(bufMeanDL);
+    pool.release(bufVarDL);
+    pool.release(bufInputStage);
+    pool.release(bufGammaStage);
+    pool.release(bufBetaStage);
+    pool.release(bufOutputStage);
 }
 
 // ── LayerNorm backward ───────────────────────────────────────────────────
@@ -118,46 +136,68 @@ void layernormBackward(CommandBatch& batch, BufferPool& pool,
     const size_t gammaBytes   = size_t(features) * sizeof(float);
     const size_t posBytes     = size_t(totalPositions) * sizeof(float);
 
-    // 8 buffers for backward
-    GrillyBuffer bufGradOut   = pool.acquire(elemBytes);
-    GrillyBuffer bufInput     = pool.acquire(elemBytes);
-    GrillyBuffer bufGamma     = pool.acquire(gammaBytes);
-    GrillyBuffer bufMean      = pool.acquire(posBytes);
-    GrillyBuffer bufVar       = pool.acquire(posBytes);
-    GrillyBuffer bufGradIn    = pool.acquire(elemBytes);
-    GrillyBuffer bufGradGamma = pool.acquire(gammaBytes);
-    GrillyBuffer bufGradBeta  = pool.acquire(gammaBytes);
+    // Staging pattern: 5 stage-in (gradOut, input, gamma, mean, var),
+    // 3 stage-out (gradIn, gradGamma, gradBeta)
+    GrillyBuffer bufGradOutDL   = pool.acquireDeviceLocal(elemBytes);
+    GrillyBuffer bufInputDL     = pool.acquireDeviceLocal(elemBytes);
+    GrillyBuffer bufGammaDL     = pool.acquireDeviceLocal(gammaBytes);
+    GrillyBuffer bufMeanDL      = pool.acquireDeviceLocal(posBytes);
+    GrillyBuffer bufVarDL       = pool.acquireDeviceLocal(posBytes);
+    GrillyBuffer bufGradInDL    = pool.acquireDeviceLocal(elemBytes);
+    GrillyBuffer bufGradGammaDL = pool.acquireDeviceLocal(gammaBytes);
+    GrillyBuffer bufGradBetaDL  = pool.acquireDeviceLocal(gammaBytes);
 
-    pool.upload(bufGradOut, gradOutput, elemBytes);
-    pool.upload(bufInput, input, elemBytes);
-    pool.upload(bufGamma, gamma, gammaBytes);
-    pool.upload(bufMean, mean, posBytes);
-    pool.upload(bufVar, var, posBytes);
+    GrillyBuffer bufGradOutStage   = pool.acquire(elemBytes);
+    GrillyBuffer bufInputStage     = pool.acquire(elemBytes);
+    GrillyBuffer bufGammaStage     = pool.acquire(gammaBytes);
+    GrillyBuffer bufMeanStage      = pool.acquire(posBytes);
+    GrillyBuffer bufVarStage       = pool.acquire(posBytes);
+    GrillyBuffer bufGradInStage    = pool.acquireReadback(elemBytes);
+    GrillyBuffer bufGradGammaStage = pool.acquireReadback(gammaBytes);
+    GrillyBuffer bufGradBetaStage  = pool.acquireReadback(gammaBytes);
 
-    // Zero grad outputs
+    pool.upload(bufGradOutStage, gradOutput, elemBytes);
+    pool.upload(bufInputStage,   input,      elemBytes);
+    pool.upload(bufGammaStage,   gamma,      gammaBytes);
+    pool.upload(bufMeanStage,    mean,       posBytes);
+    pool.upload(bufVarStage,     var,        posBytes);
+
+    // Zero the grad output staging buffers (atomic accumulation in shader).
+    // Reuse the readback stage buffers as upload-zeros source.
     std::vector<float> zeros_elem(totalElements, 0.0f);
     std::vector<float> zeros_feat(features, 0.0f);
-    pool.upload(bufGradIn, zeros_elem.data(), elemBytes);
-    pool.upload(bufGradGamma, zeros_feat.data(), gammaBytes);
-    pool.upload(bufGradBeta, zeros_feat.data(), gammaBytes);
+    pool.upload(bufGradInStage,    zeros_elem.data(), elemBytes);
+    pool.upload(bufGradGammaStage, zeros_feat.data(), gammaBytes);
+    pool.upload(bufGradBetaStage,  zeros_feat.data(), gammaBytes);
 
     PipelineEntry pipe = cache.getOrCreate("fnn-layernorm-backward", 8,
                                            sizeof(LayerNormParams));
 
     std::vector<VkDescriptorBufferInfo> bufInfos = {
-        {bufGradOut.handle,   0, elemBytes},
-        {bufInput.handle,     0, elemBytes},
-        {bufGamma.handle,     0, gammaBytes},
-        {bufMean.handle,      0, posBytes},
-        {bufVar.handle,       0, posBytes},
-        {bufGradIn.handle,    0, elemBytes},
-        {bufGradGamma.handle, 0, gammaBytes},
-        {bufGradBeta.handle,  0, gammaBytes},
+        {bufGradOutDL.handle,   0, elemBytes},
+        {bufInputDL.handle,     0, elemBytes},
+        {bufGammaDL.handle,     0, gammaBytes},
+        {bufMeanDL.handle,      0, posBytes},
+        {bufVarDL.handle,       0, posBytes},
+        {bufGradInDL.handle,    0, elemBytes},
+        {bufGradGammaDL.handle, 0, gammaBytes},
+        {bufGradBetaDL.handle,  0, gammaBytes},
     };
     VkDescriptorSet descSet = cache.allocDescriptorSet(
         "fnn-layernorm-backward", bufInfos);
 
     batch.begin();
+
+    // Stage-in: copy all 8 stage buffers (5 inputs + 3 zeroed grads) to DL
+    batch.copyBuffer(bufGradOutStage,   bufGradOutDL,   elemBytes);
+    batch.copyBuffer(bufInputStage,     bufInputDL,     elemBytes);
+    batch.copyBuffer(bufGammaStage,     bufGammaDL,     gammaBytes);
+    batch.copyBuffer(bufMeanStage,      bufMeanDL,      posBytes);
+    batch.copyBuffer(bufVarStage,       bufVarDL,       posBytes);
+    batch.copyBuffer(bufGradInStage,    bufGradInDL,    elemBytes);
+    batch.copyBuffer(bufGradGammaStage, bufGradGammaDL, gammaBytes);
+    batch.copyBuffer(bufGradBetaStage,  bufGradBetaDL,  gammaBytes);
+    batch.transferComputeBarrier();
 
     // Pass 0: intermediate sums
     LayerNormParams push0{batchSize, seqLen, features, eps, 0};
@@ -179,20 +219,35 @@ void layernormBackward(CommandBatch& batch, BufferPool& pool,
                    (features + 255) / 256, 1, 1,
                    &push2, sizeof(push2));
 
-    batch.submit();
+    // Stage-out: copy 3 grad buffers from DL → HOST_CACHED readback staging
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufGradInDL,    bufGradInStage,    elemBytes);
+    batch.copyBuffer(bufGradGammaDL, bufGradGammaStage, gammaBytes);
+    batch.copyBuffer(bufGradBetaDL,  bufGradBetaStage,  gammaBytes);
 
-    pool.download(bufGradIn, gradInput, elemBytes);
-    pool.download(bufGradGamma, gradGamma, gammaBytes);
-    pool.download(bufGradBeta, gradBeta, gammaBytes);
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
-    pool.release(bufGradOut);
-    pool.release(bufInput);
-    pool.release(bufGamma);
-    pool.release(bufMean);
-    pool.release(bufVar);
-    pool.release(bufGradIn);
-    pool.release(bufGradGamma);
-    pool.release(bufGradBeta);
+    pool.download(bufGradInStage,    gradInput,  elemBytes);
+    pool.download(bufGradGammaStage, gradGamma,  gammaBytes);
+    pool.download(bufGradBetaStage,  gradBeta,   gammaBytes);
+
+    pool.release(bufGradOutDL);
+    pool.release(bufInputDL);
+    pool.release(bufGammaDL);
+    pool.release(bufMeanDL);
+    pool.release(bufVarDL);
+    pool.release(bufGradInDL);
+    pool.release(bufGradGammaDL);
+    pool.release(bufGradBetaDL);
+    pool.release(bufGradOutStage);
+    pool.release(bufInputStage);
+    pool.release(bufGammaStage);
+    pool.release(bufMeanStage);
+    pool.release(bufVarStage);
+    pool.release(bufGradInStage);
+    pool.release(bufGradGammaStage);
+    pool.release(bufGradBetaStage);
 }
 
 }  // namespace ops

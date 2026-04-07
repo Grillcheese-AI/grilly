@@ -44,7 +44,8 @@ void ssmFusedMath(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, scanOut, dataBytes);
 
@@ -82,7 +83,8 @@ void fisherInfoUpdate(CommandBatch& batch, BufferPool& pool,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufFisher, fisher, bytes);
 
@@ -124,7 +126,8 @@ void ewcPenalty(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufPenalty, penalty, bytes);
 
@@ -170,7 +173,8 @@ void nlmsPredict(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufY, yPred, yBytes);
 
@@ -224,7 +228,8 @@ void nlmsUpdate(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufW, w, featureBytes);
     pool.download(bufBias, bias, scalarBytes);
@@ -302,7 +307,8 @@ void continuousToSpikes(CommandBatch& batch, BufferPool& pool,
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push1, sizeof(push1));
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufSpikes, spikes, spikeBytes);
 
@@ -376,7 +382,8 @@ void spikesToContinuous(CommandBatch& batch, BufferPool& pool,
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push1, sizeof(push1));
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufFeat, features, featBytes);
 

@@ -7,13 +7,13 @@ import pytest
 
 try:
     from grilly import Compute
-    from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.backend.base import VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
 except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestLIFOperations:
     """Test LIF neuron operations on GPU"""
 
@@ -82,7 +82,7 @@ class TestLIFOperations:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestFNNOperations:
     """Test FNN operations on GPU"""
 
@@ -202,7 +202,7 @@ class TestFNNOperations:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestFAISSOperations:
     """Test FAISS operations on GPU"""
 

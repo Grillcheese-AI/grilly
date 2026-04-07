@@ -8,7 +8,7 @@ import struct
 
 import numpy as np
 
-from .base import VULKAN_AVAILABLE, BufferMixin
+from .base import BufferMixin, VULKAN_PYTHON_BINDINGS_AVAILABLE
 from .shader_registry import get_shader
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ except ImportError:
     numba_prosody_modulation = None
     numba_attention_output = None
 
-if VULKAN_AVAILABLE:
+if VULKAN_PYTHON_BINDINGS_AVAILABLE:
     from vulkan import *
 
 
@@ -499,7 +499,7 @@ class VulkanAttention(BufferMixin):
             )
 
             push_constants_init = struct.pack(
-                "IIIIfIIIII",
+                "IIIIfIIIIII",
                 batch_size,
                 seq_len,
                 num_heads,
@@ -513,63 +513,12 @@ class VulkanAttention(BufferMixin):
                 0,  # q_tile_idx, k_tile_idx (not used in init)
             )
 
-            # Dispatch initialization
+            # Single submit for init + all tile passes + finalize (one fence wait).
             workgroups_init_x = 16
             workgroups_init_y = (num_q_positions + 15) // 16
-            self.core._dispatch_compute(
-                pipeline,
-                pipeline_layout,
-                descriptor_set_init,
-                workgroups_init_x,
-                push_constants_init,
-                workgroups_init_y,
-            )
+            workgroups_final_x = (head_dim + 15) // 16
+            workgroups_final_y = (num_q_positions + 15) // 16
 
-            # Pass 1: Process all tiles
-            for q_tile in range(num_tiles_q):
-                for k_tile in range(num_tiles_k):
-                    descriptor_set_tile = self.pipelines.get_cached_descriptor_set(
-                        "flash-attention2",
-                        [
-                            (self._get_buffer_handle(buf_q), q_flat.nbytes),
-                            (self._get_buffer_handle(buf_k), k_flat.nbytes),
-                            (self._get_buffer_handle(buf_v), v_flat.nbytes),
-                            (mask_handle, mask_size),
-                            (self._get_buffer_handle(buf_output), output_accum_size),
-                            (self._get_buffer_handle(buf_running_max), running_max_size),
-                            (self._get_buffer_handle(buf_running_sum), running_sum_size),
-                            (self._get_buffer_handle(buf_output_accum), output_accum_size),
-                        ],
-                    )
-
-                    push_constants_tile = struct.pack(
-                        "IIIIfIIIII",
-                        batch_size,
-                        seq_len,
-                        num_heads,
-                        head_dim,
-                        scale,
-                        tile_size_q,
-                        tile_size_k,
-                        1,  # pass_type = 1 (process tile)
-                        1 if mask is not None else 0,  # has_mask
-                        q_tile,
-                        k_tile,
-                    )
-
-                    # Dispatch tile processing
-                    workgroups_tile_x = (tile_size_k + 15) // 16
-                    workgroups_tile_y = (batch_size * num_heads * tile_size_q + 15) // 16
-                    self.core._dispatch_compute(
-                        pipeline,
-                        pipeline_layout,
-                        descriptor_set_tile,
-                        workgroups_tile_x,
-                        push_constants_tile,
-                        workgroups_tile_y,
-                    )
-
-            # Pass 2: Finalize output
             descriptor_set_final = self.pipelines.get_cached_descriptor_set(
                 "flash-attention2",
                 [
@@ -585,7 +534,7 @@ class VulkanAttention(BufferMixin):
             )
 
             push_constants_final = struct.pack(
-                "IIIIfIIIII",
+                "IIIIfIIIIII",
                 batch_size,
                 seq_len,
                 num_heads,
@@ -599,17 +548,65 @@ class VulkanAttention(BufferMixin):
                 0,  # q_tile_idx, k_tile_idx (not used in finalize)
             )
 
-            # Dispatch finalization
-            workgroups_final_x = (head_dim + 15) // 16
-            workgroups_final_y = (num_q_positions + 15) // 16
-            self.core._dispatch_compute(
-                pipeline,
-                pipeline_layout,
-                descriptor_set_final,
-                workgroups_final_x,
-                push_constants_final,
-                workgroups_final_y,
-            )
+            with self.core.record_commands() as rec:
+                rec.dispatch(
+                    pipeline,
+                    pipeline_layout,
+                    descriptor_set_init,
+                    (workgroups_init_x, workgroups_init_y, 1),
+                    push_constants_init,
+                )
+                rec.barrier()
+
+                for q_tile in range(num_tiles_q):
+                    for k_tile in range(num_tiles_k):
+                        descriptor_set_tile = self.pipelines.get_cached_descriptor_set(
+                            "flash-attention2",
+                            [
+                                (self._get_buffer_handle(buf_q), q_flat.nbytes),
+                                (self._get_buffer_handle(buf_k), k_flat.nbytes),
+                                (self._get_buffer_handle(buf_v), v_flat.nbytes),
+                                (mask_handle, mask_size),
+                                (self._get_buffer_handle(buf_output), output_accum_size),
+                                (self._get_buffer_handle(buf_running_max), running_max_size),
+                                (self._get_buffer_handle(buf_running_sum), running_sum_size),
+                                (self._get_buffer_handle(buf_output_accum), output_accum_size),
+                            ],
+                        )
+
+                        push_constants_tile = struct.pack(
+                            "IIIIfIIIIII",
+                            batch_size,
+                            seq_len,
+                            num_heads,
+                            head_dim,
+                            scale,
+                            tile_size_q,
+                            tile_size_k,
+                            1,  # pass_type = 1 (process tile)
+                            1 if mask is not None else 0,  # has_mask
+                            q_tile,
+                            k_tile,
+                        )
+
+                        workgroups_tile_x = (tile_size_k + 15) // 16
+                        workgroups_tile_y = (batch_size * num_heads * tile_size_q + 15) // 16
+                        rec.dispatch(
+                            pipeline,
+                            pipeline_layout,
+                            descriptor_set_tile,
+                            (workgroups_tile_x, workgroups_tile_y, 1),
+                            push_constants_tile,
+                        )
+                        rec.barrier()
+
+                rec.dispatch(
+                    pipeline,
+                    pipeline_layout,
+                    descriptor_set_final,
+                    (workgroups_final_x, workgroups_final_y, 1),
+                    push_constants_final,
+                )
 
             # Download results
             result = self._download_buffer(buf_output, output_accum_size, np.float32)

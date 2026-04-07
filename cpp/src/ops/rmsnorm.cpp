@@ -71,7 +71,8 @@ void rmsnorm(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx1, 1, 1,
                    &push1, sizeof(push1));
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     // Download result
     pool.download(bufOutput, output, outputBytes);

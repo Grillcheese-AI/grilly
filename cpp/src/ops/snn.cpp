@@ -53,7 +53,8 @@ void lifStep(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufVMem, vMem, bytes);
     pool.download(bufRefrac, tRefrac, bytes);
@@ -100,7 +101,8 @@ void snnNodeForward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufVMem, vMem, bytes);
     pool.download(bufSpikes, spikes, bytes);
@@ -143,7 +145,8 @@ void snnNodeBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufGradX, gradX, bytes);
 
@@ -187,7 +190,8 @@ void hebbianLearning(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufWeights, weights, weightBytes);
 
@@ -252,7 +256,8 @@ void stdpLearning(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
                    &push1, sizeof(push1));
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufWeights, weights, weightBytes);
     pool.download(bufPreTrace, preTrace, preTraceBytes);
@@ -295,7 +300,8 @@ void synapseFilter(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufYState, yState, bytes);
 
@@ -349,7 +355,8 @@ void gifNeuronStep(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufVMem, vMem, bytes);
     pool.download(bufIAdapt, iAdapt, bytes);

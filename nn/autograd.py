@@ -181,6 +181,16 @@ class Variable:
         """Get numpy array (detached from graph)."""
         return self.data.copy()
 
+    def __array__(self, dtype=None) -> np.ndarray:
+        """NumPy array protocol — allows ``np.asarray(var)``, ``np.matmul(var, w)``,
+        ``np.dot(var, w)``, etc. to operate on the underlying ``self.data`` ndarray
+        without an explicit ``.data`` access. Required for grilly's existing
+        numpy-native layer ``forward`` code to accept ``Tensor`` inputs from the
+        ``torch_api`` facade transparently."""
+        if dtype is not None:
+            return self.data.astype(dtype, copy=False)
+        return self.data
+
     def detach(self) -> "Variable":
         """Return a new Variable detached from the computation graph."""
         return Variable(self.data.copy(), requires_grad=False)
@@ -198,6 +208,10 @@ class Variable:
     def zero_grad(self):
         """Clear the gradient."""
         self.grad = None
+
+    def numel(self) -> int:
+        """Number of elements (PyTorch ``Tensor.numel``)."""
+        return int(self.data.size)
 
     def backward(
         self,
@@ -955,11 +969,23 @@ def pow(a, exponent) -> Variable:
 
 
 def matmul(a, b) -> Variable:
-    """Matrix multiplication: a @ b (with GPU backward support)"""
+    """Matrix multiplication: a @ b (with GPU forward + backward)"""
     a = _ensure_variable(a)
     b = _ensure_variable(b)
 
-    result_data = np.matmul(a.data, b.data)
+    # GPU forward: use _bridge.linear for 2D matrix multiply
+    result_data = None
+    if a.data.ndim == 2 and b.data.ndim == 2 and _grad_enabled:
+        try:
+            from grilly.backend import _bridge as _ag_bridge
+            # _bridge.linear(x, w) = x @ w.T, so pass b.T to get a @ b
+            gpu_result = _ag_bridge.linear(a.data, b.data.T)
+            if gpu_result is not None:
+                result_data = np.asarray(gpu_result) if not isinstance(gpu_result, np.ndarray) else gpu_result
+        except Exception:
+            pass
+    if result_data is None:
+        result_data = np.matmul(a.data, b.data)
 
     a_data, b_data = a.data, b.data
 
@@ -1273,6 +1299,20 @@ def abs(a) -> Variable:
 
     grad_fn = _make_backward("Abs", [a], backward)
 
+    return Variable(result_data, requires_grad=a.requires_grad, grad_fn=grad_fn)
+
+
+def sign(a) -> Variable:
+    """Elementwise sign; gradient is zero (subgradient)."""
+    a = _ensure_variable(a)
+    result_data = np.sign(a.data)
+
+    def backward(grad):
+        """Run backward."""
+
+        return (np.zeros_like(a.data),)
+
+    grad_fn = _make_backward("Sign", [a], backward)
     return Variable(result_data, requires_grad=a.requires_grad, grad_fn=grad_fn)
 
 
@@ -1745,6 +1785,76 @@ def softplus(a, beta=1.0, threshold=20.0) -> Variable:
         return (grad_x,)
 
     grad_fn = _make_backward("Softplus", [a], backward)
+    return Variable(result_data, requires_grad=a.requires_grad, grad_fn=grad_fn)
+
+
+def mf_softmax(a, dim: int = -1, eps: float = 1e-12) -> Variable:
+    """ReLU-normalized softmax (no exp). See :mod:`grilly.functional.mf_activations`."""
+    a = _ensure_variable(a)
+    axis = dim if dim >= 0 else a.data.ndim + dim
+    m = np.max(a.data, axis=axis, keepdims=True)
+    z = np.maximum(a.data - m, 0.0).astype(np.float32)
+    s = np.sum(z, axis=axis, keepdims=True, dtype=np.float64)
+    denom = np.maximum(s, eps)
+    y = (z / denom).astype(np.float32)
+    tot = np.sum(y, axis=axis, keepdims=True)
+    nfeat = float(a.data.shape[axis])
+    unif = np.ones_like(a.data, dtype=np.float32) / nfeat
+    result_data = np.where(tot > 1e-8, y, unif).astype(np.float32)
+
+    def backward(grad):
+        """Subgradient with STE on the max (mask active where z > 0)."""
+        m2 = np.max(a.data, axis=axis, keepdims=True)
+        z2 = np.maximum(a.data - m2, 0.0).astype(np.float32)
+        s2 = np.sum(z2, axis=axis, keepdims=True, dtype=np.float64)
+        s2 = np.maximum(s2, eps)
+        y2 = (z2 / s2).astype(np.float32)
+        tot2 = np.sum(y2, axis=axis, keepdims=True)
+        y2 = np.where(tot2 > 1e-8, y2, np.ones_like(a.data, dtype=np.float32) / nfeat)
+        gz = (grad - np.sum(grad * y2, axis=axis, keepdims=True)) / s2.astype(np.float32)
+        mask = (z2 > 0).astype(np.float32)
+        return (gz * mask,)
+
+    grad_fn = _make_backward("MfSoftmax", [a], backward)
+    return Variable(result_data, requires_grad=a.requires_grad, grad_fn=grad_fn)
+
+
+def mf_softplus(a, beta: float = 1.0) -> Variable:
+    """Algebraic softplus (sqrt form, no exp). See :mod:`grilly.functional.mf_activations`."""
+    a = _ensure_variable(a)
+    b = float(beta)
+    if b <= 0:
+        raise ValueError("beta must be positive")
+    x = a.data
+    c = 4.0 / (b * b)
+    s = np.sqrt(x * x + c)
+    result_data = (0.5 * (x + s)).astype(np.float32)
+
+    def backward(grad):
+        """Run backward."""
+
+        ds_dx = x / (s + 1e-12)
+        d = 0.5 * (1.0 + ds_dx)
+        return (grad * d,)
+
+    grad_fn = _make_backward("MfSoftplus", [a], backward)
+    return Variable(result_data, requires_grad=a.requires_grad, grad_fn=grad_fn)
+
+
+def mf_sigmoid(a) -> Variable:
+    """Rational sigmoid x / (1 + |x|)."""
+    a = _ensure_variable(a)
+    x = a.data
+    ax = np.abs(x) + 1.0
+    result_data = (x / ax).astype(np.float32)
+
+    def backward(grad):
+        """d/dx x/(1+|x|) = 1/(1+|x|)^2 on x!=0."""
+
+        denom = (1.0 + np.abs(x)) ** 2
+        return (grad / denom,)
+
+    grad_fn = _make_backward("MfSigmoid", [a], backward)
     return Variable(result_data, requires_grad=a.requires_grad, grad_fn=grad_fn)
 
 

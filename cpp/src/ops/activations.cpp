@@ -1,6 +1,8 @@
 #include "grilly/ops/activations.h"
 
+#include <cmath>
 #include <cstring>
+#include <stdexcept>
 
 namespace grilly {
 namespace ops {
@@ -22,16 +24,23 @@ static void activationForward(
     const float* input, float* output, uint32_t totalElements) {
     const size_t bytes = size_t(totalElements) * sizeof(float);
 
-    GrillyBuffer bufIn  = pool.acquire(bytes);
-    GrillyBuffer bufOut = pool.acquire(bytes);
+    // Staging pattern (see linear.cpp for the long-form rationale):
+    // compute on DEVICE_LOCAL VRAM, stage-in via WC sequential-write
+    // memory, stage-out via HOST_CACHED random-read memory. Without this
+    // a 19 MB ReLU readback ran at 25 MB/s (~750 ms); with it the same
+    // op runs in single-digit ms.
+    GrillyBuffer bufInDL    = pool.acquireDeviceLocal(bytes);
+    GrillyBuffer bufOutDL   = pool.acquireDeviceLocal(bytes);
+    GrillyBuffer bufInStage = pool.acquire(bytes);
+    GrillyBuffer bufOutStage = pool.acquireReadback(bytes);
 
-    pool.upload(bufIn, input, bytes);
+    pool.upload(bufInStage, input, bytes);
 
     PipelineEntry pipe = cache.getOrCreate(shaderName, 2, sizeof(uint32_t));
 
     std::vector<VkDescriptorBufferInfo> bufInfos = {
-        {bufIn.handle,  0, bytes},
-        {bufOut.handle, 0, bytes},
+        {bufInDL.handle,  0, bytes},
+        {bufOutDL.handle, 0, bytes},
     };
     VkDescriptorSet descSet = cache.allocDescriptorSet(shaderName, bufInfos);
 
@@ -39,14 +48,21 @@ static void activationForward(
     uint32_t gx = (totalElements + 255) / 256;
 
     batch.begin();
+    batch.copyBuffer(bufInStage, bufInDL, bytes);
+    batch.transferComputeBarrier();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push, sizeof(push));
-    batch.submit();
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufOutDL, bufOutStage, bytes);
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
-    pool.download(bufOut, output, bytes);
+    pool.download(bufOutStage, output, bytes);
 
-    pool.release(bufIn);
-    pool.release(bufOut);
+    pool.release(bufInDL);
+    pool.release(bufOutDL);
+    pool.release(bufInStage);
+    pool.release(bufOutStage);
 }
 
 // ── Activation backward helper ────────────────────────────────────────────
@@ -61,19 +77,24 @@ static void activationBackward(
     float* gradInput, uint32_t totalElements) {
     const size_t bytes = size_t(totalElements) * sizeof(float);
 
-    GrillyBuffer bufGradOut = pool.acquire(bytes);
-    GrillyBuffer bufInput   = pool.acquire(bytes);
-    GrillyBuffer bufGradIn  = pool.acquire(bytes);
+    // Staging pattern: 2 stage-in (gradOutput, input), 1 stage-out (gradInput)
+    GrillyBuffer bufGradOutDL = pool.acquireDeviceLocal(bytes);
+    GrillyBuffer bufInputDL   = pool.acquireDeviceLocal(bytes);
+    GrillyBuffer bufGradInDL  = pool.acquireDeviceLocal(bytes);
 
-    pool.upload(bufGradOut, gradOutput, bytes);
-    pool.upload(bufInput, input, bytes);
+    GrillyBuffer bufGradOutStage = pool.acquire(bytes);
+    GrillyBuffer bufInputStage   = pool.acquire(bytes);
+    GrillyBuffer bufGradInStage  = pool.acquireReadback(bytes);
+
+    pool.upload(bufGradOutStage, gradOutput, bytes);
+    pool.upload(bufInputStage, input, bytes);
 
     PipelineEntry pipe = cache.getOrCreate(shaderName, 3, sizeof(uint32_t));
 
     std::vector<VkDescriptorBufferInfo> bufInfos = {
-        {bufGradOut.handle, 0, bytes},
-        {bufInput.handle,   0, bytes},
-        {bufGradIn.handle,  0, bytes},
+        {bufGradOutDL.handle, 0, bytes},
+        {bufInputDL.handle,   0, bytes},
+        {bufGradInDL.handle,  0, bytes},
     };
     VkDescriptorSet descSet = cache.allocDescriptorSet(shaderName, bufInfos);
 
@@ -81,15 +102,24 @@ static void activationBackward(
     uint32_t gx = (totalElements + 255) / 256;
 
     batch.begin();
+    batch.copyBuffer(bufGradOutStage, bufGradOutDL, bytes);
+    batch.copyBuffer(bufInputStage,   bufInputDL,   bytes);
+    batch.transferComputeBarrier();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push, sizeof(push));
-    batch.submit();
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufGradInDL, bufGradInStage, bytes);
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
-    pool.download(bufGradIn, gradInput, bytes);
+    pool.download(bufGradInStage, gradInput, bytes);
 
-    pool.release(bufGradOut);
-    pool.release(bufInput);
-    pool.release(bufGradIn);
+    pool.release(bufGradOutDL);
+    pool.release(bufInputDL);
+    pool.release(bufGradInDL);
+    pool.release(bufGradOutStage);
+    pool.release(bufInputStage);
+    pool.release(bufGradInStage);
 }
 
 // ── Forward passes ────────────────────────────────────────────────────────
@@ -207,7 +237,8 @@ void softmax(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx2, 1, 1,
                    &push2, sizeof(push2));
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOutput, output, dataBytes);
 
@@ -250,13 +281,123 @@ void softmaxBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push, sizeof(push));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufGradIn, gradInput, bytes);
 
     pool.release(bufGradOut);
     pool.release(bufSoftmax);
     pool.release(bufGradIn);
+}
+
+// ── Multiplication-free softmax (mf-softmax.glsl) ─────────────────────────
+// Same 3-pass buffer layout as softmax; pass_type 0/1/2 with relu sums.
+
+void mfSoftmax(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+               const float* input, float* output, uint32_t batchSize, uint32_t seqLen,
+               uint32_t features) {
+    const uint32_t totalPositions = batchSize * seqLen;
+    const uint32_t totalElements = totalPositions * features;
+    const size_t dataBytes = size_t(totalElements) * sizeof(float);
+    const size_t auxBytes = size_t(totalPositions) * sizeof(float);
+
+    GrillyBuffer bufInput = pool.acquire(dataBytes);
+    GrillyBuffer bufOutput = pool.acquire(dataBytes);
+    GrillyBuffer bufMax = pool.acquire(auxBytes);
+    GrillyBuffer bufSumPos = pool.acquire(auxBytes);
+
+    pool.upload(bufInput, input, dataBytes);
+
+    PipelineEntry pipe =
+        cache.getOrCreate("mf-softmax", 4, sizeof(SoftmaxParams));
+
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {bufInput.handle, 0, dataBytes},
+        {bufOutput.handle, 0, dataBytes},
+        {bufMax.handle, 0, auxBytes},
+        {bufSumPos.handle, 0, auxBytes},
+    };
+    VkDescriptorSet descSet = cache.allocDescriptorSet("mf-softmax", bufInfos);
+
+    uint32_t gx = (totalPositions + 255) / 256;
+
+    batch.begin();
+
+    SoftmaxParams push0{batchSize, seqLen, features, 0, features};
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1, &push0,
+                   sizeof(push0));
+    batch.barrier();
+
+    SoftmaxParams push1{batchSize, seqLen, features, 1, features};
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1, &push1,
+                   sizeof(push1));
+    batch.barrier();
+
+    SoftmaxParams push2{batchSize, seqLen, features, 2, features};
+    uint32_t gx2 = (totalElements + 255) / 256;
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx2, 1, 1, &push2,
+                   sizeof(push2));
+
+    batch.submitDeferred();
+    batch.waitForCompletion();
+
+    pool.download(bufOutput, output, dataBytes);
+
+    pool.release(bufInput);
+    pool.release(bufOutput);
+    pool.release(bufMax);
+    pool.release(bufSumPos);
+}
+
+// Push layout must match mf-softplus.glsl: uint total_elements; float c;
+struct MfSoftplusParams {
+    uint32_t totalElements;
+    float c;
+};
+
+void mfSoftplus(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+                const float* input, float* output, uint32_t totalElements,
+                float beta) {
+    if (beta <= 0.f) {
+        throw std::invalid_argument("mfSoftplus: beta must be positive");
+    }
+    const float c = 4.f / (beta * beta);
+    const size_t bytes = size_t(totalElements) * sizeof(float);
+
+    GrillyBuffer bufIn = pool.acquire(bytes);
+    GrillyBuffer bufOut = pool.acquire(bytes);
+
+    pool.upload(bufIn, input, bytes);
+
+    PipelineEntry pipe =
+        cache.getOrCreate("mf-softplus", 2, sizeof(MfSoftplusParams));
+
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {bufIn.handle, 0, bytes},
+        {bufOut.handle, 0, bytes},
+    };
+    VkDescriptorSet descSet = cache.allocDescriptorSet("mf-softplus", bufInfos);
+
+    MfSoftplusParams push{totalElements, c};
+    uint32_t gx = (totalElements + 255) / 256;
+
+    batch.begin();
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1, &push,
+                   sizeof(push));
+    batch.submitDeferred();
+    batch.waitForCompletion();
+
+    pool.download(bufOut, output, bytes);
+
+    pool.release(bufIn);
+    pool.release(bufOut);
+}
+
+void mfSigmoid(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+               const float* input, float* output, uint32_t totalElements) {
+    activationForward("mf-sigmoid", batch, pool, cache, input, output,
+                      totalElements);
 }
 
 }  // namespace ops

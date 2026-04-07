@@ -5,6 +5,7 @@ Helper functions for data loading, visualization, checkpointing, device manageme
 """
 
 from .checkpoint import load_checkpoint, save_checkpoint
+from .grl_checkpoint import load_grl, save_grl
 from .data import (
     ArrayDataset,
     BatchSampler,
@@ -137,6 +138,8 @@ __all__ = [
     # Checkpoint
     "save_checkpoint",
     "load_checkpoint",
+    "save_grl",
+    "load_grl",
     # Device
     "get_device",
     "set_device",

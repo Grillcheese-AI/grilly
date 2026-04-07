@@ -46,6 +46,11 @@ public:
         return spirvCode_.count(name) > 0;
     }
 
+    /// Access the underlying device for capability queries
+    /// (e.g. ``hasCooperativeMatrix()``).
+    GrillyDevice& getDevice() { return device_; }
+    const GrillyDevice& getDevice() const { return device_; }
+
     struct CacheStats {
         uint64_t hits = 0;
         uint64_t misses = 0;

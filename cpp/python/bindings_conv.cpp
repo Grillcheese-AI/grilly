@@ -19,6 +19,8 @@ void register_conv_ops(py::module_& m) {
            uint32_t groups) -> Tensor {
             auto inBuf = input.request();
             auto wBuf = weight.request();
+            require_c_contiguous_float(inBuf);
+            require_c_contiguous_float(wBuf);
 
             if (inBuf.ndim != 4)
                 throw std::runtime_error(
@@ -46,8 +48,11 @@ void register_conv_ops(py::module_& m) {
             uint32_t outW = grilly::ops::convOutputSize(inW, kW, sW, pW, dW);
 
             const float* biasPtr = nullptr;
-            if (bias.has_value())
-                biasPtr = static_cast<const float*>(bias->request().ptr);
+            if (bias.has_value()) {
+                auto bBuf = bias->request();
+                require_c_contiguous_float(bBuf);
+                biasPtr = static_cast<const float*>(bBuf.ptr);
+            }
 
             py::array_t<float> result({
                 static_cast<py::ssize_t>(batchSize),
@@ -57,15 +62,18 @@ void register_conv_ops(py::module_& m) {
             });
             auto rBuf = result.request();
 
-            grilly::ops::conv2d(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<const float*>(wBuf.ptr),
-                biasPtr,
-                static_cast<float*>(rBuf.ptr),
-                batchSize, inChannels, inH, inW,
-                outChannels, kH, kW,
-                sH, sW, pH, pW, dH, dW, groups);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::conv2d(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<const float*>(wBuf.ptr),
+                    biasPtr,
+                    static_cast<float*>(rBuf.ptr),
+                    batchSize, inChannels, inH, inW,
+                    outChannels, kH, kW,
+                    sH, sW, pH, pW, dH, dW, groups);
+            }
 
             return Tensor::from_numpy(result);
         },
@@ -87,6 +95,8 @@ void register_conv_ops(py::module_& m) {
            uint32_t dilation, uint32_t groups) -> Tensor {
             auto inBuf = input.request();
             auto wBuf = weight.request();
+            require_c_contiguous_float(inBuf);
+            require_c_contiguous_float(wBuf);
 
             if (inBuf.ndim != 3)
                 throw std::runtime_error(
@@ -102,8 +112,11 @@ void register_conv_ops(py::module_& m) {
                 length, kSize, stride, padding, dilation);
 
             const float* biasPtr = nullptr;
-            if (bias.has_value())
-                biasPtr = static_cast<const float*>(bias->request().ptr);
+            if (bias.has_value()) {
+                auto bBuf = bias->request();
+                require_c_contiguous_float(bBuf);
+                biasPtr = static_cast<const float*>(bBuf.ptr);
+            }
 
             py::array_t<float> result({
                 static_cast<py::ssize_t>(batchSize),
@@ -112,15 +125,18 @@ void register_conv_ops(py::module_& m) {
             });
             auto rBuf = result.request();
 
-            grilly::ops::conv1d(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<const float*>(wBuf.ptr),
-                biasPtr,
-                static_cast<float*>(rBuf.ptr),
-                batchSize, inChannels, length,
-                outChannels, kSize,
-                stride, padding, dilation, groups);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::conv1d(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<const float*>(wBuf.ptr),
+                    biasPtr,
+                    static_cast<float*>(rBuf.ptr),
+                    batchSize, inChannels, length,
+                    outChannels, kSize,
+                    stride, padding, dilation, groups);
+            }
 
             return Tensor::from_numpy(result);
         },
@@ -141,6 +157,8 @@ void register_conv_ops(py::module_& m) {
            uint32_t groups) -> Tensor {
             auto gBuf = grad_output.request();
             auto wBuf = weight.request();
+            require_c_contiguous_float(gBuf);
+            require_c_contiguous_float(wBuf);
 
             uint32_t batchSize  = input_shape[0];
             uint32_t inChannels = input_shape[1];
@@ -168,12 +186,16 @@ void register_conv_ops(py::module_& m) {
                 static_cast<py::ssize_t>(inChannels),
                 static_cast<py::ssize_t>(inH),
                 static_cast<py::ssize_t>(inW)});
+            auto resBuf = result.request();
 
-            grilly::ops::conv2dBackwardInput(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(gBuf.ptr),
-                static_cast<const float*>(wBuf.ptr),
-                static_cast<float*>(result.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::conv2dBackwardInput(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(gBuf.ptr),
+                    static_cast<const float*>(wBuf.ptr),
+                    static_cast<float*>(resBuf.ptr), p);
+            }
 
             return Tensor::from_numpy(result);
         },
@@ -196,6 +218,8 @@ void register_conv_ops(py::module_& m) {
            uint32_t groups, bool has_bias) -> py::dict {
             auto gBuf = grad_output.request();
             auto iBuf = input.request();
+            require_c_contiguous_float(gBuf);
+            require_c_contiguous_float(iBuf);
 
             uint32_t batchSize  = static_cast<uint32_t>(iBuf.shape[0]);
             uint32_t inChannels = static_cast<uint32_t>(iBuf.shape[1]);
@@ -229,15 +253,19 @@ void register_conv_ops(py::module_& m) {
                 has_bias ? std::vector<py::ssize_t>{
                     static_cast<py::ssize_t>(outChannels)}
                 : std::vector<py::ssize_t>{1});
+            auto gwBuf = gradWeight.request();
+            auto gbBuf = gradBias.request();
 
-            grilly::ops::conv2dBackwardWeight(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(gBuf.ptr),
-                static_cast<const float*>(iBuf.ptr),
-                static_cast<float*>(gradWeight.request().ptr),
-                has_bias ? static_cast<float*>(gradBias.request().ptr)
-                         : nullptr,
-                p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::conv2dBackwardWeight(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(gBuf.ptr),
+                    static_cast<const float*>(iBuf.ptr),
+                    static_cast<float*>(gwBuf.ptr),
+                    has_bias ? static_cast<float*>(gbBuf.ptr) : nullptr,
+                    p);
+            }
 
             py::dict result;
             result["grad_weight"] = Tensor::from_numpy(gradWeight);

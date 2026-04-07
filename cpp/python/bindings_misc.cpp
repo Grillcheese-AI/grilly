@@ -90,17 +90,25 @@ void register_misc_ops(py::module_& m) {
            py::array_t<float> input, py::array_t<float> random_mask,
            float p, bool training) -> Tensor {
             auto inBuf = input.request();
-            uint32_t total = 1;
-            for (int i = 0; i < inBuf.ndim; ++i)
-                total *= static_cast<uint32_t>(inBuf.shape[i]);
+            auto maskBuf = random_mask.request();
+            require_c_contiguous_float(inBuf);
+            require_c_contiguous_float(maskBuf);
+            uint32_t total = static_cast<uint32_t>(inBuf.size);
+            if (static_cast<uint32_t>(maskBuf.size) != total)
+                throw std::runtime_error("dropout: input and mask size mismatch");
 
             py::array_t<float> result(inBuf.shape);
-            grilly::ops::dropout(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<const float*>(random_mask.request().ptr),
-                static_cast<float*>(result.request().ptr),
-                total, p, training);
+            auto rBuf = result.request();
+            require_c_contiguous_float(rBuf);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::dropout(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<const float*>(maskBuf.ptr),
+                    static_cast<float*>(rBuf.ptr),
+                    total, p, training);
+            }
             return Tensor::from_numpy(result);
         },
         py::arg("device"), py::arg("input"), py::arg("random_mask"),
@@ -115,6 +123,8 @@ void register_misc_ops(py::module_& m) {
            py::array_t<float> embeddings) -> Tensor {
             auto idBuf = token_ids.request();
             auto eBuf = embeddings.request();
+            require_c_contiguous_uint32(idBuf);
+            require_c_contiguous_float(eBuf);
 
             uint32_t batchSize = 1, seqLen;
             if (idBuf.ndim == 1) {
@@ -131,13 +141,19 @@ void register_misc_ops(py::module_& m) {
                 static_cast<py::ssize_t>(seqLen),
                 static_cast<py::ssize_t>(embDim)});
 
+            auto rBuf = result.request();
+            require_c_contiguous_float(rBuf);
+
             grilly::ops::EmbeddingParams p{
                 batchSize, seqLen, vocabSize, embDim};
-            grilly::ops::embeddingLookup(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const uint32_t*>(idBuf.ptr),
-                static_cast<const float*>(eBuf.ptr),
-                static_cast<float*>(result.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::embeddingLookup(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const uint32_t*>(idBuf.ptr),
+                    static_cast<const float*>(eBuf.ptr),
+                    static_cast<float*>(rBuf.ptr), p);
+            }
 
             if (idBuf.ndim == 1)
                 result = result.reshape({
@@ -208,13 +224,18 @@ void register_misc_ops(py::module_& m) {
         [](GrillyCoreContext& ctx, grilly::ops::KVCache& kvCache,
            py::array_t<float> newKeys, py::array_t<float> newValues) {
             auto kBuf = newKeys.request();
+            auto vBuf = newValues.request();
+            require_c_contiguous_float(kBuf);
+            require_c_contiguous_float(vBuf);
             uint32_t numNew = static_cast<uint32_t>(kBuf.shape[0]);
-            grilly::ops::kvCacheAppend(
-                ctx.batch, ctx.pool, ctx.cache, kvCache,
-                static_cast<const float*>(kBuf.ptr),
-                static_cast<const float*>(
-                    newValues.request().ptr),
-                numNew);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::kvCacheAppend(
+                    ctx.batch, ctx.pool, ctx.cache, kvCache,
+                    static_cast<const float*>(kBuf.ptr),
+                    static_cast<const float*>(vBuf.ptr),
+                    numNew);
+            }
         },
         py::arg("device"), py::arg("kv_cache"),
         py::arg("new_keys"), py::arg("new_values"),
@@ -234,10 +255,17 @@ void register_misc_ops(py::module_& m) {
                 static_cast<py::ssize_t>(tokens),
                 static_cast<py::ssize_t>(cfg.numHeads),
                 static_cast<py::ssize_t>(cfg.headDim)});
-            grilly::ops::kvCacheDecode(
-                ctx.batch, ctx.pool, ctx.cache, kvCache,
-                static_cast<float*>(keys.request().ptr),
-                static_cast<float*>(values.request().ptr));
+            auto keysBuf = keys.request();
+            auto valsBuf = values.request();
+            require_c_contiguous_float(keysBuf);
+            require_c_contiguous_float(valsBuf);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::kvCacheDecode(
+                    ctx.batch, ctx.pool, ctx.cache, kvCache,
+                    static_cast<float*>(keysBuf.ptr),
+                    static_cast<float*>(valsBuf.ptr));
+            }
             py::dict result;
             result["keys"] = Tensor::from_numpy(keys);
             result["values"] = Tensor::from_numpy(values);
@@ -252,12 +280,18 @@ void register_misc_ops(py::module_& m) {
            std::optional<py::array_t<float>> attentionScores,
            uint32_t numEvict) {
             const float* scoresPtr = nullptr;
-            if (attentionScores.has_value())
-                scoresPtr = static_cast<const float*>(
-                    attentionScores->request().ptr);
-            grilly::ops::kvCacheEvictH2O(
-                ctx.batch, ctx.pool, ctx.cache, kvCache,
-                scoresPtr, numEvict);
+            py::buffer_info scoresBuf;
+            if (attentionScores.has_value()) {
+                scoresBuf = attentionScores->request();
+                require_c_contiguous_float(scoresBuf);
+                scoresPtr = static_cast<const float*>(scoresBuf.ptr);
+            }
+            {
+                py::gil_scoped_release release;
+                grilly::ops::kvCacheEvictH2O(
+                    ctx.batch, ctx.pool, ctx.cache, kvCache,
+                    scoresPtr, numEvict);
+            }
         },
         py::arg("device"), py::arg("kv_cache"),
         py::arg("attention_scores") = py::none(),
@@ -267,8 +301,11 @@ void register_misc_ops(py::module_& m) {
     m.def(
         "kv_cache_compact",
         [](GrillyCoreContext& ctx, grilly::ops::KVCache& kvCache) {
-            grilly::ops::kvCacheCompact(
-                ctx.batch, ctx.pool, ctx.cache, kvCache);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::kvCacheCompact(
+                    ctx.batch, ctx.pool, ctx.cache, kvCache);
+            }
         },
         py::arg("device"), py::arg("kv_cache"),
         "Compact KV cache after eviction");
@@ -298,13 +335,18 @@ void register_misc_ops(py::module_& m) {
         [](GrillyCoreContext& ctx, grilly::ops::KVCache& kvCache,
            py::array_t<float> tokenFeatures,
            py::array_t<float> attentionScores, uint32_t seqLen) {
-            grilly::ops::kvCacheTrainEvictionHead(
-                ctx.batch, ctx.pool, ctx.cache, kvCache,
-                static_cast<const float*>(
-                    tokenFeatures.request().ptr),
-                static_cast<const float*>(
-                    attentionScores.request().ptr),
-                seqLen);
+            auto tfBuf = tokenFeatures.request();
+            auto asBuf = attentionScores.request();
+            require_c_contiguous_float(tfBuf);
+            require_c_contiguous_float(asBuf);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::kvCacheTrainEvictionHead(
+                    ctx.batch, ctx.pool, ctx.cache, kvCache,
+                    static_cast<const float*>(tfBuf.ptr),
+                    static_cast<const float*>(asBuf.ptr),
+                    seqLen);
+            }
         },
         py::arg("device"), py::arg("kv_cache"),
         py::arg("token_features"), py::arg("attention_scores"),
@@ -317,12 +359,18 @@ void register_misc_ops(py::module_& m) {
            std::optional<py::array_t<float>> hiddenStates,
            uint32_t hiddenDim) {
             const float* hsPtr = nullptr;
-            if (hiddenStates.has_value())
-                hsPtr = static_cast<const float*>(
-                    hiddenStates->request().ptr);
-            grilly::ops::kvCacheEvictSpeculative(
-                ctx.batch, ctx.pool, ctx.cache, kvCache,
-                hsPtr, hiddenDim);
+            py::buffer_info hsBuf;
+            if (hiddenStates.has_value()) {
+                hsBuf = hiddenStates->request();
+                require_c_contiguous_float(hsBuf);
+                hsPtr = static_cast<const float*>(hsBuf.ptr);
+            }
+            {
+                py::gil_scoped_release release;
+                grilly::ops::kvCacheEvictSpeculative(
+                    ctx.batch, ctx.pool, ctx.cache, kvCache,
+                    hsPtr, hiddenDim);
+            }
         },
         py::arg("device"), py::arg("kv_cache"),
         py::arg("hidden_states") = py::none(),
@@ -335,6 +383,7 @@ void register_misc_ops(py::module_& m) {
         [](GrillyCoreContext& ctx, py::array_t<float> input,
            uint32_t waveSize, bool reverse) -> py::array_t<float> {
             auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
             if (inBuf.ndim != 4)
                 throw std::runtime_error("input must be 4D");
             uint32_t batchSize = static_cast<uint32_t>(inBuf.shape[0]);
@@ -355,12 +404,16 @@ void register_misc_ops(py::module_& m) {
                 result = py::array_t<float>(outSize / sizeof(float));
             }
             auto rBuf = result.request();
-            grilly::ops::swizzle(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(rBuf.ptr),
-                batchSize, numHeads, seqLen, headDim,
-                waveSize, reverse);
+            require_c_contiguous_float(rBuf);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::swizzle(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(rBuf.ptr),
+                    batchSize, numHeads, seqLen, headDim,
+                    waveSize, reverse);
+            }
             return result;
         },
         py::arg("device"), py::arg("input"),
@@ -517,6 +570,8 @@ void register_misc_ops(py::module_& m) {
            py::array_t<int8_t> cache_data) -> py::array_t<uint32_t> {
             auto qBuf = query.request();
             auto cBuf = cache_data.request();
+            require_c_contiguous_int8(qBuf);
+            require_c_contiguous_int8(cBuf);
             uint32_t dim = static_cast<uint32_t>(qBuf.shape[0]);
             uint32_t numEntries;
             if (cBuf.ndim == 2) {
@@ -571,6 +626,8 @@ void register_misc_ops(py::module_& m) {
            py::array_t<int8_t> cache_data) -> py::array_t<uint32_t> {
             auto qBuf = query.request();
             auto cBuf = cache_data.request();
+            require_c_contiguous_int8(qBuf);
+            require_c_contiguous_int8(cBuf);
             uint32_t dim = static_cast<uint32_t>(qBuf.shape[0]);
             uint32_t numEntries = (cBuf.ndim == 2)
                 ? static_cast<uint32_t>(cBuf.shape[0])

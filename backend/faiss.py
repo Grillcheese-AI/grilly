@@ -8,9 +8,9 @@ import struct
 
 import numpy as np
 
-from .base import VULKAN_AVAILABLE, BufferMixin
+from .base import BufferMixin, VULKAN_PYTHON_BINDINGS_AVAILABLE
 
-if VULKAN_AVAILABLE:
+if VULKAN_PYTHON_BINDINGS_AVAILABLE:
     from vulkan import *
 
 logger = logging.getLogger(__name__)
@@ -132,7 +132,7 @@ class VulkanFAISS(BufferMixin):
         k = min(int(k), num_database)
 
         # Fallback to CPU when Vulkan is unavailable
-        if not VULKAN_AVAILABLE or self.core is None:
+        if not VULKAN_PYTHON_BINDINGS_AVAILABLE or self.core is None:
             return self._cpu_topk(distances, k)
 
         # GPU attempt with validation fallback

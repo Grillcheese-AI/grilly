@@ -149,7 +149,8 @@ void flashAttention2(CommandBatch& batch, BufferPool& pool,
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, finalGroups, 1, 1,
                    &push2, sizeof(push2));
 
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     // Download result
     pool.download(bufOutput, output, outBytes);

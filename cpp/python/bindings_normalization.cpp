@@ -19,6 +19,8 @@ void register_normalization_ops(py::module_& m) {
            float eps) -> Tensor {
             auto inBuf = input.request();
             auto gBuf = gamma.request();
+            require_c_contiguous_float(inBuf);
+            require_c_contiguous_float(gBuf);
 
             if (inBuf.ndim < 2)
                 throw std::runtime_error("input must be at least 2D");
@@ -31,14 +33,19 @@ void register_normalization_ops(py::module_& m) {
 
             py::array_t<float> result(inBuf.shape);
             auto rBuf = result.request();
+            auto bBuf = beta.request();
+            require_c_contiguous_float(bBuf);
 
-            grilly::ops::layernorm(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(rBuf.ptr),
-                static_cast<const float*>(gBuf.ptr),
-                static_cast<const float*>(beta.request().ptr),
-                1, totalBatch, features, eps);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::layernorm(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(rBuf.ptr),
+                    static_cast<const float*>(gBuf.ptr),
+                    static_cast<const float*>(bBuf.ptr),
+                    1, totalBatch, features, eps);
+            }
 
             return Tensor::from_numpy(result);
         },
@@ -56,6 +63,9 @@ void register_normalization_ops(py::module_& m) {
             auto goBuf = grad_output.request();
             auto inBuf = input.request();
             auto gBuf  = gamma.request();
+            require_c_contiguous_float(goBuf);
+            require_c_contiguous_float(inBuf);
+            require_c_contiguous_float(gBuf);
 
             if (inBuf.ndim < 2)
                 throw std::runtime_error("input must be at least 2D");
@@ -71,18 +81,28 @@ void register_normalization_ops(py::module_& m) {
                 {static_cast<py::ssize_t>(features)});
             py::array_t<float> gradBeta(
                 {static_cast<py::ssize_t>(features)});
+            auto meanBuf = mean.request();
+            auto varBuf = var.request();
+            auto giBuf = gradInput.request();
+            auto ggBuf = gradGamma.request();
+            auto gbBuf = gradBeta.request();
+            require_c_contiguous_float(meanBuf);
+            require_c_contiguous_float(varBuf);
 
-            grilly::ops::layernormBackward(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(goBuf.ptr),
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<const float*>(gBuf.ptr),
-                static_cast<const float*>(mean.request().ptr),
-                static_cast<const float*>(var.request().ptr),
-                static_cast<float*>(gradInput.request().ptr),
-                static_cast<float*>(gradGamma.request().ptr),
-                static_cast<float*>(gradBeta.request().ptr),
-                1, totalBatch, features, eps);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::layernormBackward(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(goBuf.ptr),
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<const float*>(gBuf.ptr),
+                    static_cast<const float*>(meanBuf.ptr),
+                    static_cast<const float*>(varBuf.ptr),
+                    static_cast<float*>(giBuf.ptr),
+                    static_cast<float*>(ggBuf.ptr),
+                    static_cast<float*>(gbBuf.ptr),
+                    1, totalBatch, features, eps);
+            }
 
             py::dict result;
             result["grad_input"] = Tensor::from_numpy(gradInput);
@@ -104,6 +124,7 @@ void register_normalization_ops(py::module_& m) {
            py::array_t<float> weight,
            float eps) -> Tensor {
             auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
 
             uint32_t features, batchSize, seqLen;
             if (inBuf.ndim == 1) {
@@ -124,13 +145,18 @@ void register_normalization_ops(py::module_& m) {
 
             py::array_t<float> result(inBuf.shape);
             auto rBuf = result.request();
+            auto wBuf = weight.request();
+            require_c_contiguous_float(wBuf);
 
-            grilly::ops::rmsnorm(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(rBuf.ptr),
-                static_cast<const float*>(weight.request().ptr),
-                batchSize, seqLen, features, eps);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::rmsnorm(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(rBuf.ptr),
+                    static_cast<const float*>(wBuf.ptr),
+                    batchSize, seqLen, features, eps);
+            }
 
             return Tensor::from_numpy(result);
         },
@@ -147,6 +173,7 @@ void register_normalization_ops(py::module_& m) {
            py::array_t<float> running_mean, py::array_t<float> running_var,
            float eps, float momentum, bool training) -> py::dict {
             auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
             if (inBuf.ndim != 4)
                 throw std::runtime_error("input must be 4D (B, C, H, W)");
 
@@ -168,16 +195,25 @@ void register_normalization_ops(py::module_& m) {
 
             grilly::ops::BatchNorm2dForwardParams p{
                 B, C, H, W, eps, momentum, training ? 1u : 0u, 1u};
-            grilly::ops::batchnorm2dForward(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(output.request().ptr),
-                static_cast<const float*>(gamma.request().ptr),
-                static_cast<const float*>(beta.request().ptr),
-                static_cast<float*>(rmOut.mutable_data()),
-                static_cast<float*>(rvOut.mutable_data()),
-                static_cast<float*>(bMean.mutable_data()),
-                static_cast<float*>(bVar.mutable_data()), p);
+            auto outBuf = output.request();
+            auto gaBuf = gamma.request();
+            auto beBuf = beta.request();
+            require_c_contiguous_float(gaBuf);
+            require_c_contiguous_float(beBuf);
+
+            {
+                py::gil_scoped_release release;
+                grilly::ops::batchnorm2dForward(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(outBuf.ptr),
+                    static_cast<const float*>(gaBuf.ptr),
+                    static_cast<const float*>(beBuf.ptr),
+                    static_cast<float*>(rmOut.mutable_data()),
+                    static_cast<float*>(rvOut.mutable_data()),
+                    static_cast<float*>(bMean.mutable_data()),
+                    static_cast<float*>(bVar.mutable_data()), p);
+            }
 
             py::dict result;
             result["output"] = Tensor::from_numpy(output);
@@ -200,6 +236,7 @@ void register_normalization_ops(py::module_& m) {
         [](GrillyCoreContext& ctx, py::array_t<float> input,
            int dim) -> Tensor {
             auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
             if (inBuf.ndim < 1)
                 throw std::runtime_error("input must be at least 1D");
 
@@ -211,15 +248,51 @@ void register_normalization_ops(py::module_& m) {
             if (inBuf.ndim == 1) totalBatch = 1;
 
             py::array_t<float> result(inBuf.shape);
-            grilly::ops::softmax(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(result.request().ptr),
-                1, totalBatch, features);
+            auto rBuf = result.request();
+            {
+                py::gil_scoped_release release;
+                grilly::ops::softmax(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(rBuf.ptr),
+                    1, totalBatch, features);
+            }
             return Tensor::from_numpy(result);
         },
         py::arg("device"), py::arg("input"), py::arg("dim") = -1,
         "GPU Softmax (3-pass: max, sum_exp, normalize)");
+
+    m.def(
+        "mf_softmax",
+        [](GrillyCoreContext& ctx, py::array_t<float> input,
+           int dim) -> Tensor {
+            auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
+            if (inBuf.ndim < 1)
+                throw std::runtime_error("input must be at least 1D");
+
+            uint32_t features = static_cast<uint32_t>(
+                inBuf.shape[inBuf.ndim - 1]);
+            uint32_t totalBatch = 1;
+            for (int i = 0; i < inBuf.ndim - 1; ++i)
+                totalBatch *= static_cast<uint32_t>(inBuf.shape[i]);
+            if (inBuf.ndim == 1) totalBatch = 1;
+
+            py::array_t<float> result(inBuf.shape);
+            auto rBuf = result.request();
+            {
+                py::gil_scoped_release release;
+                grilly::ops::mfSoftmax(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(rBuf.ptr),
+                    1, totalBatch, features);
+            }
+            return Tensor::from_numpy(result);
+        },
+        py::arg("device"), py::arg("input"), py::arg("dim") = -1,
+        "GPU multiplication-free softmax (ReLU-normalized; 3-pass, shader "
+        "mf-softmax)");
 
     // ── Softmax backward ─────────────────────────────────────────────────
     m.def(
@@ -228,6 +301,7 @@ void register_normalization_ops(py::module_& m) {
            py::array_t<float> grad_output,
            py::array_t<float> softmax_output) -> Tensor {
             auto gBuf = grad_output.request();
+            require_c_contiguous_float(gBuf);
             uint32_t numClasses = static_cast<uint32_t>(
                 gBuf.shape[gBuf.ndim - 1]);
             uint32_t batchSeq = 1;
@@ -236,13 +310,19 @@ void register_normalization_ops(py::module_& m) {
             if (gBuf.ndim == 1) batchSeq = 1;
 
             py::array_t<float> result(gBuf.shape);
-            grilly::ops::softmaxBackward(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(gBuf.ptr),
-                static_cast<const float*>(
-                    softmax_output.request().ptr),
-                static_cast<float*>(result.request().ptr),
-                1, batchSeq, numClasses);
+            auto sBuf = softmax_output.request();
+            auto rBuf = result.request();
+            require_c_contiguous_float(sBuf);
+
+            {
+                py::gil_scoped_release release;
+                grilly::ops::softmaxBackward(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(gBuf.ptr),
+                    static_cast<const float*>(sBuf.ptr),
+                    static_cast<float*>(rBuf.ptr),
+                    1, batchSeq, numClasses);
+            }
             return Tensor::from_numpy(result);
         },
         py::arg("device"), py::arg("grad_output"),

@@ -44,10 +44,13 @@ class GPUBackwardOps:
 
         if use_gpu:
             try:
-                from grilly import Compute
-
-                self.backend = Compute()
-                logger.info("GPU backward operations initialized successfully")
+                from grilly.backend import _bridge
+                if _bridge.is_available():
+                    self.backend = _bridge
+                    logger.info("GPU backward operations initialized via _bridge")
+                else:
+                    logger.warning("_bridge not available. Falling back to CPU.")
+                    self.use_gpu = False
             except Exception as e:
                 logger.warning(f"Failed to initialize GPU backend: {e}. Falling back to CPU.")
                 self.use_gpu = False
@@ -77,15 +80,22 @@ class GPUBackwardOps:
         return self.backend is not None and self.use_gpu
 
     def _has_shader(self, shader_name: str) -> bool:
-        """Check if a shader is available."""
+        """Check if a backward op is available on _bridge."""
         if not self.is_available():
             return False
-        try:
-            return (
-                hasattr(self.backend.core, "shaders") and shader_name in self.backend.core.shaders
-            )
-        except Exception:
-            return False
+        # Map shader names to _bridge function names
+        bridge_map = {
+            "fnn-linear-backward": "linear_backward",
+            "activation-relu-backward": "relu_backward",
+            "activation-gelu-backward": "gelu_backward",
+            "activation-silu-backward": "silu_backward",
+            "activation-softmax-backward": "softmax_backward",
+            "activation-tanh-backward": "tanh_backward",
+            "cross-entropy-backward": "cross_entropy_backward",
+            "fnn-layernorm-backward": "layernorm_backward",
+        }
+        fn_name = bridge_map.get(shader_name, shader_name.replace("-", "_"))
+        return hasattr(self.backend, fn_name)
 
     # ========================================================================
     # Linear / Fully Connected Layer
@@ -131,10 +141,11 @@ class GPUBackwardOps:
             )
 
         try:
-            # Use Grilly's existing linear_backward method!
-            grad_input, grad_weight, grad_bias = self.backend.fnn.linear_backward(
-                grad_output, input_data, weights, bias=None
-            )
+            # Use _bridge.linear_backward directly
+            result = self.backend.linear_backward(grad_output, input_data, weights)
+            grad_input = np.asarray(result['grad_input']) if 'grad_input' in result else None
+            grad_weight = np.asarray(result['grad_weight']) if 'grad_weight' in result else None
+            grad_bias = np.asarray(result['grad_bias']) if 'grad_bias' in result else None
 
             # Filter outputs based on what was requested
             if not compute_input_grad:
@@ -207,11 +218,8 @@ class GPUBackwardOps:
             return grad_output * (input_data > 0).astype(np.float32)
 
         try:
-            return self.backend.core.dispatch_shader(
-                "activation-relu-backward",
-                inputs={"grad_output": grad_output, "input_data": input_data},
-                output_shape=grad_output.shape,
-            )
+            result = self.backend.relu_backward(grad_output, input_data)
+            return np.asarray(result) if result is not None else grad_output * (input_data > 0).astype(np.float32)
         except Exception as e:
             logger.warning(f"GPU ReLU backward failed: {e}. Falling back to CPU.")
             return grad_output * (input_data > 0).astype(np.float32)
@@ -241,22 +249,19 @@ class GPUBackwardOps:
             return grad_output * (cdf_approx + x * dcdf)
 
         try:
-            return self.backend.core.dispatch_shader(
-                "activation-gelu-backward",
-                inputs={"grad_output": grad_output, "input_data": input_data},
-                output_shape=grad_output.shape,
-            )
+            result = self.backend.gelu_backward(grad_output, input_data)
+            if result is not None:
+                return np.asarray(result)
         except Exception as e:
             logger.warning(f"GPU GELU backward failed: {e}. Falling back to CPU.")
-            # CPU fallback
-            x = input_data
-            sqrt_2_pi = np.sqrt(2.0 / np.pi)
-            cdf_approx = 0.5 * (1.0 + np.tanh(sqrt_2_pi * (x + 0.044715 * x**3)))
-            inner = sqrt_2_pi * (x + 0.044715 * x**3)
-            tanh_inner = np.tanh(inner)
-            sech2 = 1 - tanh_inner**2
-            dcdf = 0.5 * sech2 * sqrt_2_pi * (1 + 3 * 0.044715 * x**2)
-            return grad_output * (cdf_approx + x * dcdf)
+        x = input_data
+        sqrt_2_pi = np.sqrt(2.0 / np.pi)
+        cdf_approx = 0.5 * (1.0 + np.tanh(sqrt_2_pi * (x + 0.044715 * x**3)))
+        inner = sqrt_2_pi * (x + 0.044715 * x**3)
+        tanh_inner = np.tanh(inner)
+        sech2 = 1 - tanh_inner**2
+        dcdf = 0.5 * sech2 * sqrt_2_pi * (1 + 3 * 0.044715 * x**2)
+        return grad_output * (cdf_approx + x * dcdf)
 
     def silu_backward(self, grad_output: np.ndarray, input_data: np.ndarray) -> np.ndarray:
         """
@@ -275,15 +280,13 @@ class GPUBackwardOps:
             return grad_output * sigmoid_x * (1 + input_data * (1 - sigmoid_x))
 
         try:
-            return self.backend.core.dispatch_shader(
-                "activation-silu-backward",
-                inputs={"grad_output": grad_output, "input_data": input_data},
-                output_shape=grad_output.shape,
-            )
+            result = self.backend.silu_backward(grad_output, input_data)
+            if result is not None:
+                return np.asarray(result)
         except Exception as e:
             logger.warning(f"GPU SiLU backward failed: {e}. Falling back to CPU.")
-            sigmoid_x = 1.0 / (1.0 + np.exp(-input_data))
-            return grad_output * sigmoid_x * (1 + input_data * (1 - sigmoid_x))
+        sigmoid_x = 1.0 / (1.0 + np.exp(-input_data))
+        return grad_output * sigmoid_x * (1 + input_data * (1 - sigmoid_x))
 
     def swiglu_backward(
         self, grad_output: np.ndarray, input_data: np.ndarray, gate_data: np.ndarray

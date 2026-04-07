@@ -75,6 +75,18 @@ class VulkanCompute:
         self.queue = self.core.queue
         self.shaders = self.core.shaders
 
+        # Public Vulkan dispatch / batching (see docs/PERF_DISPATCH.md)
+        self.dispatch_compute = self.core._dispatch_compute
+        self.dispatch_compute_async = self.core._dispatch_compute_async
+        self.wait_async = self.core._wait_async
+        self.wait_fence = self.core._wait_fence
+
+    def record_commands(self, fnn_chain: bool = False):
+        """Batch command recording. Use ``fnn_chain=True`` for :class:`FnnChainRecorder` (linear/relu/softmax + ``read``)."""
+        if fnn_chain:
+            return self.fnn.chain_record()
+        return self.core.record_commands()
+
     def cleanup(self):
         """Clean up Vulkan resources"""
         # Clear weight caches for all backend modules (before device is destroyed)

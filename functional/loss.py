@@ -6,11 +6,14 @@ Uses: loss-cross-entropy.glsl, loss-fn-bce.glsl
 import numpy as np
 
 
-def _get_backend():
-    """Get compute backend"""
-    from grilly import Compute
-
-    return Compute()
+def _to_numpy(result):
+    if result is None:
+        return None
+    if isinstance(result, np.ndarray):
+        return result
+    if hasattr(result, "numpy"):
+        return result.numpy()
+    return np.asarray(result)
 
 
 def cross_entropy(
@@ -29,9 +32,21 @@ def cross_entropy(
     Returns:
         Loss value(s)
     """
-    _get_backend()
-    # Note: May need to implement in backend if not already exposed
-    # CPU fallback for now
+    try:
+        from grilly.backend import _bridge
+
+        if target.ndim < input.ndim and target.dtype.kind in {"i", "u"}:
+            gpu_loss = _bridge.cross_entropy_loss(input, target)
+            if gpu_loss is not None:
+                loss = _to_numpy(gpu_loss)
+                if reduction == "mean":
+                    return np.mean(loss)
+                if reduction == "sum":
+                    return np.sum(loss)
+                return loss
+    except (ImportError, Exception):
+        pass
+    # CPU fallback
     input_softmax = np.exp(input - np.max(input, axis=-1, keepdims=True))
     input_softmax = input_softmax / np.sum(input_softmax, axis=-1, keepdims=True)
 
@@ -71,9 +86,7 @@ def binary_cross_entropy(
     Returns:
         Loss value(s)
     """
-    _get_backend()
-    # Note: May need to implement in backend if not already exposed
-    # CPU fallback for now
+    # CPU fallback
     input_clamped = np.clip(input, 1e-8, 1 - 1e-8)
     loss = -(target * np.log(input_clamped) + (1 - target) * np.log(1 - input_clamped))
 

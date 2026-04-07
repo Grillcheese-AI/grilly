@@ -54,23 +54,29 @@ void main() {
     uint packed_K = (K + 3) / 4;  // number of uint32s per row
 
     float sum = 0.0;
+    uint base = row * K;
 
-    for (uint k = 0; k < K; k++) {
-        // Get activation value
-        float act = activations[row * K + k];
-
-        // Get packed weight and unpack
-        uint pack_idx = k / 4;
-        uint pack_offset = k % 4;
+    // Inner K: process 4 elements per iteration — one packed uint32 load per 4 weights.
+    uint k = 0;
+    for (; k + 4u <= K; k += 4u) {
+        uint pk = weights_packed[col * packed_K + k / 4u];
+        uint g0 = k / group_size;
+        uint g1 = (k + 1u) / group_size;
+        uint g2 = (k + 2u) / group_size;
+        uint g3 = (k + 3u) / group_size;
+        sum += activations[base + k] * unpack_int8(pk, 0) * scales[col * num_groups + g0];
+        sum += activations[base + k + 1u] * unpack_int8(pk, 1) * scales[col * num_groups + g1];
+        sum += activations[base + k + 2u] * unpack_int8(pk, 2) * scales[col * num_groups + g2];
+        sum += activations[base + k + 3u] * unpack_int8(pk, 3) * scales[col * num_groups + g3];
+    }
+    for (; k < K; k++) {
+        uint pack_idx = k / 4u;
+        uint pack_offset = k % 4u;
         uint packed = weights_packed[col * packed_K + pack_idx];
         float w = unpack_int8(packed, pack_offset);
-
-        // Get per-group scale
         uint group_idx = k / group_size;
         float s = scales[col * num_groups + group_idx];
-
-        // FP32 accumulate: act * (w_int8 * scale)
-        sum += act * w * s;
+        sum += activations[base + k] * w * s;
     }
 
     output_data[row * N + col] = sum;

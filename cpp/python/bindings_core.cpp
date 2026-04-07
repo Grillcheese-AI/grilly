@@ -75,7 +75,11 @@ PYBIND11_MODULE(grilly_core, m) {
              "Clear all recorded ops for reuse")
         .def("optimize",
              [](grilly::OpGraph& graph, GrillyCoreContext& ctx) -> py::dict {
-                 auto stats = graph.optimize(ctx.cache);
+                 grilly::FusionStats stats;
+                 {
+                     py::gil_scoped_release release;
+                     stats = graph.optimize(ctx.cache);
+                 }
                  py::dict d;
                  d["ops_fused"] = stats.opsFused;
                  d["barriers_eliminated"] = stats.barriersEliminated;
@@ -87,7 +91,10 @@ PYBIND11_MODULE(grilly_core, m) {
              "Run fusion optimization pass. Returns fusion statistics.")
         .def("execute",
              [](grilly::OpGraph& graph, GrillyCoreContext& ctx) {
-                 graph.execute(ctx.batch, ctx.cache);
+                 {
+                     py::gil_scoped_release release;
+                     graph.execute(ctx.batch, ctx.cache);
+                 }
              },
              py::arg("device"),
              "Execute all recorded ops in a single GPU submission");
@@ -147,6 +154,8 @@ PYBIND11_MODULE(grilly_core, m) {
              "Download to CPU and return as numpy array")
         .def("gpu_handle", &Tensor::gpu_handle,
              "Upload to GPU and return buffer handle")
+        .def("gpu_handle_if_valid", &Tensor::gpu_handle_if_valid,
+             "GPU buffer handle if already resident (0 otherwise); does not upload")
         .def("mark_gpu_modified", &Tensor::mark_gpu_modified)
         .def("mark_cpu_modified", &Tensor::mark_cpu_modified)
         .def("reshape", &Tensor::reshape, py::arg("shape"))
@@ -426,6 +435,10 @@ PYBIND11_MODULE(grilly_core, m) {
     register_siglip_ops(m);
     register_perceiver_ops(m);
     register_moqe_train_ops(m);
+    register_moe_ops(m);
     register_fusion_ops(m);
+    register_vsa_lm_ops(m);
+    register_grl_ops(m);
     register_misc_ops(m);
+    register_prefix_scan_ops(m);
 }

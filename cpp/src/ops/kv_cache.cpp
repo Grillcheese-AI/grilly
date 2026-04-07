@@ -231,7 +231,8 @@ void kvCacheAppend(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
         batch.begin();
         batch.dispatch(pipeGemm.pipeline, pipeGemm.layout, descGemm,
                        gemmGX, gemmGY, 1, gemmPush, sizeof(gemmPush));
-        batch.submit();
+        batch.submitDeferred();
+    batch.waitForCompletion();
 
         // Copy compressed latents into cache at currentLen offset
         std::vector<float> latentData(numNewTokens * cfg.numHeads * latentDim);
@@ -475,7 +476,8 @@ void kvCacheDecode(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
         batch.dispatch(pipeGemm.pipeline, pipeGemm.layout, descGemm,
                        (N_proj + 15) / 16, (M_proj + 15) / 16, 1,
                        gemmPush, sizeof(gemmPush));
-        batch.submit();
+        batch.submitDeferred();
+    batch.waitForCompletion();
 
         // Download and split into K and V
         std::vector<float> decoded(M_proj * N_proj);

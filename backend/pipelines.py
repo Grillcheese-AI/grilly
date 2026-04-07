@@ -4,9 +4,9 @@ Pipeline creation and management for Vulkan compute shaders.
 
 from collections import OrderedDict
 
-from .base import VULKAN_AVAILABLE
+from .base import VULKAN_PYTHON_BINDINGS_AVAILABLE
 
-if VULKAN_AVAILABLE:
+if VULKAN_PYTHON_BINDINGS_AVAILABLE:
     from vulkan import *
 
 

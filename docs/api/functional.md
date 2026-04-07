@@ -154,3 +154,13 @@ Source: [`functional/`](https://github.com/grillcheese-ai/grilly/tree/main/funct
 | `seq_to_ann_forward` | `seq_to_ann_forward(module, x)` | Apply ANN module to temporal data. |
 | `reset_net` | `reset_net(module)` | Reset all neuron membrane potentials. |
 | `set_step_mode` | `set_step_mode(module, mode)` | Set single-step or multi-step mode. |
+
+---
+
+## PyTorch parity notes
+
+- **Layout**: `linear(x, weight, bias)` uses `weight` of shape `(out_features, in_features)`, matching `torch.nn.functional.linear` and `nn.Linear.weight`.
+- **Dtypes**: GPU paths expect float32 inputs unless documented otherwise.
+- **Differences**: Not every `torch.nn.functional` symbol exists; Grilly adds domain-specific ops (SNN, memory, FAISS-like). See `docs/PYTORCH_PARITY_STATUS.md`.
+- **Migration**: Step-by-step porting guidance lives in `docs/MIGRATION_PYTORCH.md`.
+- **Tests**: Numerical checks vs numpy (and optional PyTorch) live under `tests/parity/`.

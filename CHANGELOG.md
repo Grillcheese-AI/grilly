@@ -6,6 +6,32 @@ This changelog follows the spirit of **Keep a Changelog** and uses the terms **A
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`tests/sentencepiece/test_sentencepiece_parity.py`** — Adaptive SentencePiece parity tests vs Hugging Face references (T5/MT5-style tokenizers; auto-skip until `grilly.tokenizers` SentencePiece support is available).
+- **`tests/tokenizers/test_gpu_tokenizer_parity.py`** — Adaptive real tokenizer parity tests vs Hugging Face references (auto-skip until `grilly.tokenizers` lands and assets are available).
+- **`tests/sentence_transformers/`**, **`tests/transformers_compat/`**, **`tests/converter/`**, **`tests/autograd_chain/`**, **`tests/moe_quant/`** — CI-safe skip-marked scaffold suites to make pre-v1.0 roadmap targets executable and incrementally fillable.
+- **`docs/pre-v1.0/OPTIMIZATION_PARITY_TASKLIST.md`** — Post-upgrade pre-v1.0 optimization + feature parity execution plan (P0/P1/P2 workstreams, acceptance criteria, and verification commands).
+- **`backend/fnn_chain.py`** — `FnnChainRecorder` / `ChainBufferHandle`: batched `linear` / `relu` / `softmax` recording with `read()` / `read_multiple()` for one submit+wait (then one or many downloads); `VulkanCompute.record_commands(fnn_chain=True)` or `VulkanFNN.chain_record()`. See `docs/PERF_DISPATCH.md`.
+- **`tests/parity/`** — Numerical parity tests for `grilly.functional` (numpy reference; optional PyTorch `F.linear` / `F.relu` when `torch` is installed). See `tests/parity/README.md`.
+- **`tests/parity/test_optimizers_parity.py`** — SGD and Adam (CPU) stepping vs `torch.optim`.
+- **`docs/MIGRATION_PYTORCH.md`** — PyTorch → Grilly migration cookbook (device model, functional layout, module backend lifecycle, debugging).
+- **`docs/PERF_DISPATCH.md`** — Vulkan dispatch/batching (`record_commands`, async dispatch), Sequential fusion notes, pybind GIL checklist.
+
+### Changed
+
+- **`docs/pre-v1.0/OPTIMIZATION_PARITY_TASKLIST.md`** — Re-prioritized roadmap to feature-delivery order: GPU tokenizer -> sentence-transformers -> transformers compatibility -> PyTorch→Grilly converter, with supporting throughput track; expanded tokenizer interoperability to include SentencePiece compatibility targets.
+- **`utils/tensor_conversion.py`**, **`backend/base.py`** — `VulkanTensor.prepare_for_dispatch()` and C++ `Tensor.gpu_handle_if_valid()` binding so GPU-resident tensors reuse buffers in `BufferMixin._prepare_input` without redundant uploads when possible.
+- **`docs/PYTORCH_PARITY_TASKLIST.md`**, **`docs/PYTORCH_PARITY_STATUS.md`**, **`docs/GPU_OPTIMIZATION_REVIEW.md`** — Workstream C (kernel/throughput milestone) marked complete with scoped deliverables; follow-ups consolidated under **Workstream C — future**.
+- **`docs/api/functional.md`** — PyTorch parity notes and links to migration docs and parity tests.
+- **`backend/compute.py`** — `VulkanCompute` exposes `record_commands`, `dispatch_compute`, `dispatch_compute_async`, `wait_async`, `wait_fence`.
+- **`backend/fnn.py`** — `_linear_relu_recorded_chain`: Linear→ReLU in one submit when `fused-linear-relu` shader is absent.
+- **`cpp/python/bindings_{activations,attention,linear}.cpp`** — GIL release around heavy ops; `require_c_contiguous_float` on `linear` inputs.
+
+---
+
 ## [0.5.0] — 2026-03-18 — "GPU-First"
 
 ### Added

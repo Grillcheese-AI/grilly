@@ -17,16 +17,26 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "cpp: marks tests that require C++ backend (deselect with '-m \"not cpp\"')"
     )
+    config.addinivalue_line(
+        "markers", "parity: marks numerical parity tests (numpy / optional PyTorch reference)"
+    )
+    config.addinivalue_line(
+        "markers", "slow: marks tests that are slow or heavy (deselect with '-m \"not slow\"')"
+    )
 
 
 try:
     import grilly
-    from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.backend.base import (
+        VULKAN_AVAILABLE,
+        VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE,
+    )
 
     GRILLY_AVAILABLE = True
 except (ImportError, AttributeError, Exception):
     GRILLY_AVAILABLE = False
     VULKAN_AVAILABLE = False
+    VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE = False
 
 # C++ backend (grilly_core with NN framework classes)
 try:
@@ -40,8 +50,10 @@ except (ImportError, AttributeError):
 @pytest.fixture
 def gpu_backend():
     """Fixture for GPU backend (skips if not available)"""
-    if not VULKAN_AVAILABLE:
-        pytest.skip("Vulkan not available")
+    if not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE:
+        pytest.skip(
+            "Vulkan Compute() not available (needs C++ grilly_core GPU + pip install vulkan)"
+        )
     try:
         from grilly import Compute
 

@@ -1,5 +1,10 @@
 """
 Base constants and utilities for Vulkan backend.
+
+``VULKAN_AVAILABLE`` is True when ``grilly_core.Device()`` can initialize (C++ Vulkan;
+does not use the PyPI ``vulkan`` package). Optional ctypes bindings set
+``VULKAN_PYTHON_BINDINGS_AVAILABLE``; the legacy Python ``VulkanCore`` / ``Compute()`` stack
+requires both (see ``VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE``).
 """
 
 import numpy as np
@@ -40,15 +45,30 @@ _VULKAN_FALLBACKS = {
     "VK_PIPELINE_BIND_POINT_COMPUTE": 0,
 }
 
+def _probe_cpp_vulkan() -> bool:
+    """True when ``grilly_core`` can initialize a Vulkan device (C++ path; no PyPI ``vulkan``)."""
+    try:
+        import grilly_core as gc
+
+        gc.Device()
+        return True
+    except Exception:
+        return False
+
+
+VULKAN_AVAILABLE = _probe_cpp_vulkan()
+
+# Optional ctypes bindings (``pip install vulkan``) — used by legacy VulkanCore / VulkanCompute.
 try:
     from vulkan import *
 
-    VULKAN_AVAILABLE = True
-    # After 'from vulkan import *', all Vulkan constants are in the namespace
-    # and can be imported by other modules using 'from base import VK_...'
+    VULKAN_PYTHON_BINDINGS_AVAILABLE = True
+    # After 'from vulkan import *', constants live in this module for 'from base import VK_...'
 except ImportError:
-    VULKAN_AVAILABLE = False
-    pass
+    VULKAN_PYTHON_BINDINGS_AVAILABLE = False
+
+# Full Python VulkanCore stack (ctypes + SPIR-V loaders) — not required for ``grilly_core``-only GPU.
+VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE = VULKAN_AVAILABLE and VULKAN_PYTHON_BINDINGS_AVAILABLE
 
 # Create dummy constants for type checking when Vulkan is not available
 # or when a mocked `vulkan` module does not define them (e.g. RTD autodoc).
@@ -374,18 +394,20 @@ class BufferMixin:
 
         When *data* is a VulkanTensor already on GPU, returns its existing
         buffer without copying. Otherwise allocates a pooled buffer and uploads.
+
+        VulkanTensor residency: ``prepare_for_dispatch()`` binds C++ GPU handles or
+        pooled buffers so GPU-resident tensors skip redundant CPU→GPU uploads.
         """
         # Avoid hard import at module level - VulkanTensor lives in utils
         from ..utils.tensor_conversion import VulkanTensor
 
         if isinstance(data, VulkanTensor):
-            if data.on_gpu:
-                buf = data._pooled_buffer if data._pooled_buffer is not None else None
-                if buf is not None:
-                    return buf, False
-                # Has raw GPU buffer but not pooled - wrap for API compat
-                return _DirectBuffer(data._gpu_buffer, data._gpu_memory, data.nbytes), False
-            # CPU-backed lazy VulkanTensor
+            data.prepare_for_dispatch()
+            if data._pooled_buffer is not None:
+                return data._pooled_buffer, False
+            if data._gpu_buffer is not None:
+                nbytes = int(data.nbytes if size is None else size)
+                return _DirectBuffer(data._gpu_buffer, data._gpu_memory, nbytes), False
             arr = np.asarray(data.numpy(), dtype=np.float32).reshape(-1)
         else:
             arr = np.asarray(data)
@@ -415,4 +437,11 @@ class BufferMixin:
         return self._acquire_buffer(size)
 
 
-__all__ = ["VULKAN_AVAILABLE", "BufferMixin", "_DirectBuffer", "BUFFER_POOL_AVAILABLE"]
+__all__ = [
+    "VULKAN_AVAILABLE",
+    "VULKAN_PYTHON_BINDINGS_AVAILABLE",
+    "VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE",
+    "BufferMixin",
+    "_DirectBuffer",
+    "BUFFER_POOL_AVAILABLE",
+]

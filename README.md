@@ -53,8 +53,8 @@ curl -sSL https://raw.githubusercontent.com/Grillcheese-AI/grilly/main/scripts/i
 On Colab:
 
 ```python
-# Recommended: fast mode for Colab (5 min instead of 30)
-!wget -qO- https://raw.githubusercontent.com/Grillcheese-AI/grilly/main/scripts/install.sh | bash -s -- --fast
+# Recommended: Colab mode (Vulkan 1.3 + fast build + NVIDIA ICD, ~5 min)
+!wget -qO- https://raw.githubusercontent.com/Grillcheese-AI/grilly/main/scripts/install.sh | bash -s -- --colab
 ```
 
 This installs system deps, downloads and builds Vulkan SDK 1.4, compiles the grilly C++ extension, and installs the Python package. The `--fast` flag builds only the components grilly needs (shaderc, loader, headers) and skips validation layers.

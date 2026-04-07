@@ -7,14 +7,14 @@ Uses: place-cell.glsl, time-cell.glsl, theta-gamma-encoding.glsl
 import numpy as np
 
 
-def _get_backend():
-    """Get backend instance"""
-    try:
-        from ..backend.compute import Compute
-
-        return Compute()
-    except Exception:
+def _to_numpy(result):
+    if result is None:
         return None
+    if isinstance(result, np.ndarray):
+        return result
+    if hasattr(result, "numpy"):
+        return result.numpy()
+    return np.asarray(result)
 
 
 def place_cell(
@@ -39,16 +39,30 @@ def place_cell(
     Returns:
         Firing rates (n_neurons,) or (batch, n_neurons)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.place_cell(
-        agent_position,
-        field_centers,
-        field_width=field_width,
-        max_rate=max_rate,
-        baseline_rate=baseline_rate,
+        result = _bridge.place_cell(
+            agent_position,
+            field_centers,
+            field_width=field_width,
+            max_rate=max_rate,
+            baseline_rate=baseline_rate,
+        )
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+    pos = np.asarray(agent_position, dtype=np.float32)
+    centers = np.asarray(field_centers, dtype=np.float32)
+    if pos.ndim == 1:
+        pos = pos[None, :]
+    diff = pos[:, None, :] - centers[None, :, :]
+    d2 = np.sum(diff * diff, axis=-1)
+    rates = baseline_rate + (max_rate - baseline_rate) * np.exp(
+        -d2 / (2.0 * field_width * field_width + 1e-8)
     )
+    return rates.astype(np.float32).squeeze(0) if np.asarray(agent_position).ndim == 1 else rates.astype(np.float32)
 
 
 def time_cell(
@@ -75,17 +89,31 @@ def time_cell(
     Returns:
         (firing_rates, updated_membrane_state)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    return backend.time_cell(
-        current_time,
-        preferred_times,
-        time_constant=temporal_width,
-        max_rate=max_rate,
-        baseline_rate=baseline_rate,
-        membrane_state=membrane_state,
+        result = _bridge.time_cell(
+            current_time,
+            preferred_times,
+            time_constant=temporal_width,
+            max_rate=max_rate,
+            baseline_rate=baseline_rate,
+            membrane_state=membrane_state,
+        )
+        if result is not None:
+            rates, mem = result
+            return _to_numpy(rates), _to_numpy(mem)
+    except (ImportError, Exception):
+        pass
+    pref = np.asarray(preferred_times, dtype=np.float32)
+    rates = baseline_rate + (max_rate - baseline_rate) * np.exp(
+        -((float(current_time) - pref) ** 2) / (2.0 * temporal_width * temporal_width + 1e-8)
     )
+    if membrane_state is None:
+        mem = rates.astype(np.float32)
+    else:
+        mem = (0.9 * np.asarray(membrane_state, dtype=np.float32) + 0.1 * rates).astype(np.float32)
+    return rates.astype(np.float32), mem
 
 
 def theta_gamma_encoding(
@@ -112,17 +140,6 @@ def theta_gamma_encoding(
     Returns:
         Theta-gamma encoding (n_theta * n_gamma,)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "theta-gamma-encoding" in backend.shaders:
-        try:
-            # GPU theta-gamma encoding would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback
     theta_phase = 2 * np.pi * theta_freq * time
     gamma_phase = 2 * np.pi * gamma_freq * time

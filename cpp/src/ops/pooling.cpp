@@ -52,7 +52,8 @@ void maxpool2dForward(CommandBatch& batch, BufferPool& pool,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, gz,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, output, outBytes);
     pool.download(bufIdx, reinterpret_cast<float*>(indices), idxBytes);
@@ -104,7 +105,8 @@ void maxpool2dBackward(CommandBatch& batch, BufferPool& pool,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, gz,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufGradIn, gradInput, gradInBytes);
 
@@ -146,7 +148,8 @@ void avgpool2dForward(CommandBatch& batch, BufferPool& pool,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, gz,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, output, outBytes);
 
@@ -187,7 +190,8 @@ void avgpool2dBackward(CommandBatch& batch, BufferPool& pool,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, gz,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufGradIn, gradInput, gradInBytes);
 
@@ -223,7 +227,8 @@ void meanPool(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &p, sizeof(p));
-    batch.submit();
+    batch.submitDeferred();
+    batch.waitForCompletion();
 
     pool.download(bufOut, output, outBytes);
 

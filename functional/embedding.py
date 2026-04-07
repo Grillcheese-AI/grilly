@@ -8,14 +8,14 @@ Uses: embedding-lookup.glsl, embedding-normalize.glsl, embedding-position.glsl,
 import numpy as np
 
 
-def _get_backend():
-    """Get backend instance"""
-    try:
-        from ..backend.compute import Compute
-
-        return Compute()
-    except Exception:
+def _to_numpy(result):
+    if result is None:
         return None
+    if isinstance(result, np.ndarray):
+        return result
+    if hasattr(result, "numpy"):
+        return result.numpy()
+    return np.asarray(result)
 
 
 def embedding_lookup(weight: np.ndarray, indices: np.ndarray) -> np.ndarray:
@@ -31,11 +31,15 @@ def embedding_lookup(weight: np.ndarray, indices: np.ndarray) -> np.ndarray:
     Returns:
         Embeddings (batch, seq_len, embedding_dim) or (batch, embedding_dim)
     """
-    from grilly import Compute
+    try:
+        from grilly.backend import _bridge
 
-    backend = Compute()
-    # Backend expects (token_ids, embedding_table) - note the order!
-    return backend.embedding_lookup(indices, weight)
+        result = _bridge.embedding_lookup(indices, weight)
+        if result is not None:
+            return _to_numpy(result)
+    except (ImportError, Exception):
+        pass
+    return weight[indices]
 
 
 def embedding_normalize(embeddings: np.ndarray, eps: float = 1e-8) -> np.ndarray:
@@ -51,17 +55,6 @@ def embedding_normalize(embeddings: np.ndarray, eps: float = 1e-8) -> np.ndarray
     Returns:
         Normalized embeddings (same shape)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "embedding-normalize" in backend.shaders:
-        try:
-            # GPU embedding normalization would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback
     norm = np.linalg.norm(embeddings, axis=-1, keepdims=True)
     return embeddings / (norm + eps)
@@ -83,27 +76,15 @@ def embedding_position(
     Returns:
         Embeddings with positional encoding (same shape)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "embedding-position" in backend.shaders:
-        try:
-            # GPU positional encoding would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
-    # CPU fallback (sinusoidal positional encoding)
+    # CPU fallback (vectorized sinusoidal positional encoding)
     batch_size, seq_len, dim = embeddings.shape
 
-    # Create positional encoding
+    positions = np.arange(seq_len, dtype=np.float32)[:, None]
+    div_term = np.exp(-(np.log(10000.0) * np.arange(0, dim, 2, dtype=np.float32) / dim))
+    angles = positions * div_term[None, :]
     pos_enc = np.zeros((seq_len, dim), dtype=np.float32)
-    for pos in range(seq_len):
-        for i in range(0, dim, 2):
-            pos_enc[pos, i] = np.sin(pos / (10000 ** (i / dim)))
-            if i + 1 < dim:
-                pos_enc[pos, i + 1] = np.cos(pos / (10000 ** (i / dim)))
+    pos_enc[:, 0::2] = np.sin(angles)
+    pos_enc[:, 1::2] = np.cos(angles[:, : pos_enc[:, 1::2].shape[1]])
 
     return embeddings + pos_enc[None, :, :]
 
@@ -121,17 +102,6 @@ def embedding_pool(embeddings: np.ndarray, pool_type: str = "mean") -> np.ndarra
     Returns:
         Pooled embeddings (batch, dim)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "embedding-pool" in backend.shaders:
-        try:
-            # GPU embedding pooling would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback
     if pool_type == "mean":
         return embeddings.mean(axis=1)
@@ -167,17 +137,6 @@ def embedding_ffn(
     Returns:
         Output embeddings (batch, seq_len, dim)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "embedding-ffn" in backend.shaders:
-        try:
-            # GPU embedding FFN would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback
     x = embeddings @ W1.T + b1
 
@@ -209,18 +168,8 @@ def embedding_attention(
     Returns:
         Attended embeddings (batch, seq_len, dim)
     """
-    backend = _get_backend()
-
-    # Try GPU shader if available
-    if backend and hasattr(backend, "shaders") and "embedding-attention" in backend.shaders:
-        try:
-            # GPU embedding attention would go here
-            # For now, use CPU fallback
-            pass
-        except Exception:
-            pass  # Fall back to CPU
-
     # CPU fallback (simplified)
     from grilly.functional.attention import attention
 
-    return attention(embeddings, embeddings, embeddings, num_heads=num_heads)
+    output, _ = attention(embeddings, embeddings, embeddings)
+    return output

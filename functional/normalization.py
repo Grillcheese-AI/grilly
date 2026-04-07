@@ -51,7 +51,10 @@ def layer_norm(
             return _to_numpy(result)
     except (ImportError, Exception):
         pass
-    # Fallback to legacy Compute() path
-    from grilly import Compute
-
-    return Compute().layernorm(input, weight, bias, eps=eps)
+    input_arr = np.asarray(input, dtype=np.float32)
+    weight_arr = np.asarray(weight, dtype=np.float32)
+    bias_arr = np.asarray(bias, dtype=np.float32)
+    mean = np.mean(input_arr, axis=-1, keepdims=True)
+    var = np.var(input_arr, axis=-1, keepdims=True)
+    normalized = (input_arr - mean) / np.sqrt(var + eps)
+    return (normalized * weight_arr + bias_arr).astype(np.float32)

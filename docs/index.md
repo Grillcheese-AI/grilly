@@ -102,6 +102,10 @@ grilly/
 | [optimum-grilly](https://github.com/grillcheese-ai/optimum-grilly) | HuggingFace Optimum backend -- `from_pretrained` to Vulkan inference |
 | [CubeMind](https://github.com/grillcheese-ai/cubemind) | Neuro-vector-symbolic reasoning powered by grilly |
 
+## Pre-v1.0 Planning
+
+- [Pre-v1.0 Optimization + Parity Tasklist](pre-v1.0/OPTIMIZATION_PARITY_TASKLIST.md)
+
 ## License
 
 MIT -- see [LICENSE](https://github.com/grillcheese-ai/grilly/blob/main/LICENSE).

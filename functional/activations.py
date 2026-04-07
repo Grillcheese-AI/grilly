@@ -27,10 +27,8 @@ def relu(x: np.ndarray) -> np.ndarray:
             return _to_numpy(result)
     except (ImportError, Exception):
         pass
-    # Fallback to legacy Compute() path
-    from grilly import Compute
-
-    return Compute().activation_relu(x)
+    x = np.asarray(x, dtype=np.float32)
+    return np.maximum(0.0, x).astype(np.float32)
 
 
 def gelu(x: np.ndarray) -> np.ndarray:
@@ -46,10 +44,10 @@ def gelu(x: np.ndarray) -> np.ndarray:
             return _to_numpy(result)
     except (ImportError, Exception):
         pass
-    # Fallback to legacy Compute() path
-    from grilly import Compute
-
-    return Compute().activation_gelu(x)
+    x = np.asarray(x, dtype=np.float32)
+    return (
+        0.5 * x * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * x**3)))
+    ).astype(np.float32)
 
 
 def silu(x: np.ndarray) -> np.ndarray:
@@ -65,10 +63,8 @@ def silu(x: np.ndarray) -> np.ndarray:
             return _to_numpy(result)
     except (ImportError, Exception):
         pass
-    # Fallback to legacy Compute() path
-    from grilly import Compute
-
-    return Compute().activation_silu(x)
+    x = np.asarray(x, dtype=np.float32)
+    return (x / (1.0 + np.exp(-x))).astype(np.float32)
 
 
 def softmax(x: np.ndarray, dim: int = -1) -> np.ndarray:
@@ -84,10 +80,10 @@ def softmax(x: np.ndarray, dim: int = -1) -> np.ndarray:
             return _to_numpy(result)
     except (ImportError, Exception):
         pass
-    # Fallback to legacy Compute() path
-    from grilly import Compute
-
-    return Compute().activation_softmax(x, dim=dim)
+    x = np.asarray(x, dtype=np.float32)
+    x_max = np.max(x, axis=dim, keepdims=True)
+    exp_x = np.exp(x - x_max)
+    return (exp_x / np.sum(exp_x, axis=dim, keepdims=True)).astype(np.float32)
 
 
 def softplus(x: np.ndarray) -> np.ndarray:

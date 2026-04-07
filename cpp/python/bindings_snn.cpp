@@ -19,6 +19,7 @@ void register_snn_ops(py::module_& m) {
            float v_thresh, float r_mem,
            float t_refrac_period) -> py::dict {
             auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
             uint32_t n = 1;
             for (int i = 0; i < inBuf.ndim; ++i)
                 n *= static_cast<uint32_t>(inBuf.shape[i]);
@@ -26,21 +27,29 @@ void register_snn_ops(py::module_& m) {
             py::array_t<float> vMemOut(v_mem.request().shape);
             py::array_t<float> refracOut(t_refrac.request().shape);
             py::array_t<float> spikes(inBuf.shape);
+            auto vmIn = v_mem.request();
+            auto trIn = t_refrac.request();
+            require_c_contiguous_float(vmIn);
+            require_c_contiguous_float(trIn);
+            auto vmOut = vMemOut.request();
+            auto rfOut = refracOut.request();
+            auto spOut = spikes.request();
 
-            std::memcpy(vMemOut.request().ptr, v_mem.request().ptr,
-                        n * sizeof(float));
-            std::memcpy(refracOut.request().ptr,
-                        t_refrac.request().ptr, n * sizeof(float));
+            std::memcpy(vmOut.ptr, vmIn.ptr, n * sizeof(float));
+            std::memcpy(rfOut.ptr, trIn.ptr, n * sizeof(float));
 
             grilly::ops::LIFParams p{n, dt, tau_mem, v_rest, v_reset,
                                      v_thresh, r_mem, t_refrac_period};
 
-            grilly::ops::lifStep(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(vMemOut.request().ptr),
-                static_cast<float*>(refracOut.request().ptr),
-                static_cast<float*>(spikes.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::lifStep(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(vmOut.ptr),
+                    static_cast<float*>(rfOut.ptr),
+                    static_cast<float*>(spOut.ptr), p);
+            }
 
             py::dict result;
             result["spikes"] = Tensor::from_numpy(spikes);
@@ -66,6 +75,7 @@ void register_snn_ops(py::module_& m) {
            float v_reset, uint32_t reset_mode,
            uint32_t decay_input) -> py::dict {
             auto xBuf = x_in.request();
+            require_c_contiguous_float(xBuf);
             uint32_t n = 1;
             for (int i = 0; i < xBuf.ndim; ++i)
                 n *= static_cast<uint32_t>(xBuf.shape[i]);
@@ -73,22 +83,30 @@ void register_snn_ops(py::module_& m) {
             py::array_t<float> vMemOut(v_mem.request().shape);
             py::array_t<float> spikes(xBuf.shape);
             py::array_t<float> hOut(xBuf.shape);
+            auto vmIn = v_mem.request();
+            require_c_contiguous_float(vmIn);
+            auto tpIn = tau_param.request();
+            require_c_contiguous_float(tpIn);
+            auto vmOut = vMemOut.request();
+            auto spOut = spikes.request();
+            auto hR = hOut.request();
 
-            std::memcpy(vMemOut.request().ptr, v_mem.request().ptr,
-                        n * sizeof(float));
+            std::memcpy(vmOut.ptr, vmIn.ptr, n * sizeof(float));
 
             grilly::ops::SNNNodeForwardParams p{
                 n, neuron_type, tau, v_threshold, v_reset,
                 reset_mode, decay_input};
 
-            grilly::ops::snnNodeForward(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(xBuf.ptr),
-                static_cast<float*>(vMemOut.request().ptr),
-                static_cast<float*>(spikes.request().ptr),
-                static_cast<float*>(hOut.request().ptr),
-                static_cast<const float*>(
-                    tau_param.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::snnNodeForward(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(xBuf.ptr),
+                    static_cast<float*>(vmOut.ptr),
+                    static_cast<float*>(spOut.ptr),
+                    static_cast<float*>(hR.ptr),
+                    static_cast<const float*>(tpIn.ptr), p);
+            }
 
             py::dict result;
             result["spikes"] = Tensor::from_numpy(spikes);
@@ -112,21 +130,27 @@ void register_snn_ops(py::module_& m) {
            float alpha, uint32_t surrogate_type,
            float v_threshold) -> Tensor {
             auto gBuf = grad_spike.request();
+            require_c_contiguous_float(gBuf);
             uint32_t n = 1;
             for (int i = 0; i < gBuf.ndim; ++i)
                 n *= static_cast<uint32_t>(gBuf.shape[i]);
 
             py::array_t<float> gradX(gBuf.shape);
+            auto hBuf = h_cache.request();
+            require_c_contiguous_float(hBuf);
+            auto gxBuf = gradX.request();
 
             grilly::ops::SNNNodeBackwardParams p{
                 n, alpha, surrogate_type, v_threshold};
 
-            grilly::ops::snnNodeBackward(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(gBuf.ptr),
-                static_cast<const float*>(
-                    h_cache.request().ptr),
-                static_cast<float*>(gradX.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::snnNodeBackward(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(gBuf.ptr),
+                    static_cast<const float*>(hBuf.ptr),
+                    static_cast<float*>(gxBuf.ptr), p);
+            }
 
             return Tensor::from_numpy(gradX);
         },
@@ -143,10 +167,13 @@ void register_snn_ops(py::module_& m) {
            py::array_t<float> weights,
            uint32_t batch_size, uint32_t time_steps,
            float learning_rate,
-           float weight_decay) -> Tensor {
+            float weight_decay) -> Tensor {
             auto preBuf = pre.request();
             auto postBuf = post.request();
             auto wBuf = weights.request();
+            require_c_contiguous_float(preBuf);
+            require_c_contiguous_float(postBuf);
+            require_c_contiguous_float(wBuf);
 
             uint32_t pre_dim = static_cast<uint32_t>(
                 preBuf.shape[preBuf.ndim - 1]);
@@ -154,18 +181,22 @@ void register_snn_ops(py::module_& m) {
                 postBuf.shape[postBuf.ndim - 1]);
 
             py::array_t<float> wOut(wBuf.shape);
-            std::memcpy(wOut.request().ptr, wBuf.ptr,
+            auto woBuf = wOut.request();
+            std::memcpy(woBuf.ptr, wBuf.ptr,
                         size_t(pre_dim) * post_dim * sizeof(float));
 
             grilly::ops::HebbianParams p{batch_size, time_steps,
                                          pre_dim, post_dim,
                                          learning_rate, weight_decay};
 
-            grilly::ops::hebbianLearning(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(preBuf.ptr),
-                static_cast<const float*>(postBuf.ptr),
-                static_cast<float*>(wOut.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::hebbianLearning(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(preBuf.ptr),
+                    static_cast<const float*>(postBuf.ptr),
+                    static_cast<float*>(woBuf.ptr), p);
+            }
 
             return Tensor::from_numpy(wOut);
         },
@@ -189,6 +220,9 @@ void register_snn_ops(py::module_& m) {
             auto preBuf = pre.request();
             auto postBuf = post.request();
             auto wBuf = weights.request();
+            require_c_contiguous_float(preBuf);
+            require_c_contiguous_float(postBuf);
+            require_c_contiguous_float(wBuf);
 
             uint32_t pre_dim = static_cast<uint32_t>(
                 preBuf.shape[preBuf.ndim - 1]);
@@ -200,27 +234,35 @@ void register_snn_ops(py::module_& m) {
                 pre_trace.request().shape);
             py::array_t<float> postTraceOut(
                 post_trace.request().shape);
+            auto ptIn = pre_trace.request();
+            auto pstIn = post_trace.request();
+            require_c_contiguous_float(ptIn);
+            require_c_contiguous_float(pstIn);
+            auto woBuf = wOut.request();
+            auto ptoBuf = preTraceOut.request();
+            auto pstoBuf = postTraceOut.request();
 
-            std::memcpy(wOut.request().ptr, wBuf.ptr,
+            std::memcpy(woBuf.ptr, wBuf.ptr,
                         size_t(pre_dim) * post_dim * sizeof(float));
-            std::memcpy(preTraceOut.request().ptr,
-                        pre_trace.request().ptr,
+            std::memcpy(ptoBuf.ptr, ptIn.ptr,
                         size_t(batch_size) * pre_dim * sizeof(float));
-            std::memcpy(postTraceOut.request().ptr,
-                        post_trace.request().ptr,
+            std::memcpy(pstoBuf.ptr, pstIn.ptr,
                         size_t(batch_size) * post_dim * sizeof(float));
 
             grilly::ops::STDPParams p{batch_size, time_steps,
                                       pre_dim, post_dim,
                                       lr_pot, lr_dep, trace_decay, 0};
 
-            grilly::ops::stdpLearning(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(preBuf.ptr),
-                static_cast<const float*>(postBuf.ptr),
-                static_cast<float*>(wOut.request().ptr),
-                static_cast<float*>(preTraceOut.request().ptr),
-                static_cast<float*>(postTraceOut.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::stdpLearning(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(preBuf.ptr),
+                    static_cast<const float*>(postBuf.ptr),
+                    static_cast<float*>(woBuf.ptr),
+                    static_cast<float*>(ptoBuf.ptr),
+                    static_cast<float*>(pstoBuf.ptr), p);
+            }
 
             py::dict result;
             result["weights"] = Tensor::from_numpy(wOut);
@@ -244,21 +286,26 @@ void register_snn_ops(py::module_& m) {
            py::array_t<float> y_state,
            float decay) -> Tensor {
             auto xBuf = x_in.request();
+            require_c_contiguous_float(xBuf);
             uint32_t n = 1;
             for (int i = 0; i < xBuf.ndim; ++i)
                 n *= static_cast<uint32_t>(xBuf.shape[i]);
 
             py::array_t<float> yOut(y_state.request().shape);
-            std::memcpy(yOut.request().ptr,
-                        y_state.request().ptr,
-                        n * sizeof(float));
+            auto ysIn = y_state.request();
+            require_c_contiguous_float(ysIn);
+            auto yoBuf = yOut.request();
+            std::memcpy(yoBuf.ptr, ysIn.ptr, n * sizeof(float));
 
             grilly::ops::SynapseFilterParams p{n, decay};
 
-            grilly::ops::synapseFilter(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(xBuf.ptr),
-                static_cast<float*>(yOut.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::synapseFilter(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(xBuf.ptr),
+                    static_cast<float*>(yoBuf.ptr), p);
+            }
 
             return Tensor::from_numpy(yOut);
         },
@@ -279,8 +326,9 @@ void register_snn_ops(py::module_& m) {
            float tau_mem, float v_rest, float v_reset, float v_thresh,
            float r_mem, float tau_adapt, float delta_adapt,
            float b_adapt, float tau_gate, float gate_strength,
-           float t_refrac_period) -> py::dict {
+            float t_refrac_period) -> py::dict {
             auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
             uint32_t n = 1;
             for (int i = 0; i < inBuf.ndim; ++i)
                 n *= static_cast<uint32_t>(inBuf.shape[i]);
@@ -294,35 +342,52 @@ void register_snn_ops(py::module_& m) {
             py::array_t<float> tLastOut(
                 t_last_spike.request().shape);
 
-            std::memcpy(vMemOut.request().ptr,
-                        v_mem.request().ptr, n * sizeof(float));
-            std::memcpy(iAdaptOut.request().ptr,
-                        i_adapt.request().ptr, n * sizeof(float));
-            std::memcpy(gInputOut.request().ptr,
-                        g_input.request().ptr, n * sizeof(float));
-            std::memcpy(gForgetOut.request().ptr,
-                        g_forget.request().ptr, n * sizeof(float));
-            std::memcpy(refracOut.request().ptr,
-                        t_refrac.request().ptr, n * sizeof(float));
-            std::memcpy(tLastOut.request().ptr,
-                        t_last_spike.request().ptr,
-                        n * sizeof(float));
+            auto vmIn = v_mem.request();
+            auto iaIn = i_adapt.request();
+            auto giIn = g_input.request();
+            auto gfIn = g_forget.request();
+            auto trIn = t_refrac.request();
+            auto tlsIn = t_last_spike.request();
+            require_c_contiguous_float(vmIn);
+            require_c_contiguous_float(iaIn);
+            require_c_contiguous_float(giIn);
+            require_c_contiguous_float(gfIn);
+            require_c_contiguous_float(trIn);
+            require_c_contiguous_float(tlsIn);
+
+            auto vmOut = vMemOut.request();
+            auto iaOut = iAdaptOut.request();
+            auto giOut = gInputOut.request();
+            auto gfOut = gForgetOut.request();
+            auto trOut = refracOut.request();
+            auto spOut = spikes.request();
+            auto tlsOut = tLastOut.request();
+
+            std::memcpy(vmOut.ptr, vmIn.ptr, n * sizeof(float));
+            std::memcpy(iaOut.ptr, iaIn.ptr, n * sizeof(float));
+            std::memcpy(giOut.ptr, giIn.ptr, n * sizeof(float));
+            std::memcpy(gfOut.ptr, gfIn.ptr, n * sizeof(float));
+            std::memcpy(trOut.ptr, trIn.ptr, n * sizeof(float));
+            std::memcpy(tlsOut.ptr, tlsIn.ptr, n * sizeof(float));
 
             grilly::ops::GIFParams p{
                 n, dt, current_time, tau_mem, v_rest, v_reset,
                 v_thresh, r_mem, tau_adapt, delta_adapt, b_adapt,
                 tau_gate, gate_strength, t_refrac_period};
 
-            grilly::ops::gifNeuronStep(
-                ctx.batch, ctx.pool, ctx.cache,
-                static_cast<const float*>(inBuf.ptr),
-                static_cast<float*>(vMemOut.request().ptr),
-                static_cast<float*>(iAdaptOut.request().ptr),
-                static_cast<float*>(gInputOut.request().ptr),
-                static_cast<float*>(gForgetOut.request().ptr),
-                static_cast<float*>(refracOut.request().ptr),
-                static_cast<float*>(spikes.request().ptr),
-                static_cast<float*>(tLastOut.request().ptr), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::gifNeuronStep(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(vmOut.ptr),
+                    static_cast<float*>(iaOut.ptr),
+                    static_cast<float*>(giOut.ptr),
+                    static_cast<float*>(gfOut.ptr),
+                    static_cast<float*>(trOut.ptr),
+                    static_cast<float*>(spOut.ptr),
+                    static_cast<float*>(tlsOut.ptr), p);
+            }
 
             py::dict result;
             result["spikes"] = Tensor::from_numpy(spikes);

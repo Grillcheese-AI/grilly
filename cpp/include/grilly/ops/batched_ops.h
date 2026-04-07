@@ -15,6 +15,8 @@
 #include "grilly/command_batch.h"
 #include "grilly/pipeline_cache.h"
 
+#include "grilly/ops/embedding.h"
+
 namespace grilly {
 namespace ops {
 
@@ -59,6 +61,13 @@ void batchedFlashAttention2(CommandBatch& batch, PipelineCache& cache,
 void batchedAdd(CommandBatch& batch, PipelineCache& cache,
                 GrillyBuffer& a, const GrillyBuffer& b,
                 uint32_t totalElements);
+
+/// Embedding lookup: output[batch*seq, d] = table[token_ids]. Caller must
+/// `batch.begin()` first; buffers must be pre-uploaded (ids, table).
+void batchedEmbeddingLookup(CommandBatch& batch, PipelineCache& cache,
+                            const GrillyBuffer& tokenIds, const GrillyBuffer& embedTable,
+                            GrillyBuffer& output, uint32_t batchSize, uint32_t seqLen,
+                            uint32_t vocabSize, uint32_t embeddingDim);
 
 /// Tiled GEMM: C[M,N] = A[M,K] @ B[N,K]^T + bias[N]
 /// Uses 32x32 shared memory tiles, 2x2 per-thread sub-tiles.

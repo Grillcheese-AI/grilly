@@ -39,7 +39,11 @@ void register_fusion_ops(py::module_& m) {
                     graph.ops.push_back(std::move(op));
                 }
 
-                FusionResult result = engine.fuse(graph, ctx.cache);
+                FusionResult result;
+                {
+                    py::gil_scoped_release release;
+                    result = engine.fuse(graph, ctx.cache);
+                }
 
                 py::dict d;
                 d["shader_name"] = result.shaderName;

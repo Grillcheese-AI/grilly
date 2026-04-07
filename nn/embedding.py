@@ -34,34 +34,65 @@ class Embedding(Module):
         # Register parameter
         self.register_parameter("weight", self.weight)
 
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        """Forward pass using embedding-lookup.glsl"""
-        backend = self._get_backend()
+    def forward(self, x):
+        """Forward pass using embedding-lookup.glsl.
+
+        Autograd: when called through ``Module.__call__`` with a LongTensor
+        input (standard pattern for token ids), the output is wrapped in a
+        ``Variable`` whose ``GradFn`` calls ``self.backward(grad_output, ids)``
+        on loss.backward(). The GradFn has an empty inputs list because token
+        ids are discrete and don't receive gradients — we only use the
+        closure to populate ``self.weight.grad`` via the existing
+        ``self.backward``.
+
+        Mirrors ``nn.Linear.forward``'s autograd wiring.
+        """
+        try:
+            from grilly.nn.autograd import GradFn as _GradFn
+            from grilly.nn.autograd import Variable as _Variable
+            from grilly.nn.autograd import _grad_enabled
+        except ImportError:
+            _Variable = None  # type: ignore[assignment]
+            _GradFn = None  # type: ignore[assignment]
+            _grad_enabled = False
+
         weight = _get_param_array(self.weight)
 
-        gpu_lookup_enabled = os.getenv("GRILLY_EMBEDDING_GPU_LOOKUP", "1").strip().lower() not in {
-            "0",
-            "false",
-            "no",
-        }
-        if (
-            gpu_lookup_enabled
-            and hasattr(backend, "learning")
-            and hasattr(backend.learning, "embedding_lookup")
-        ):
-            try:
-                return backend.learning.embedding_lookup(
-                    x,
-                    weight,
-                    return_gpu_tensor=self._return_gpu_tensor,
-                )
-            except Exception:
-                pass  # Fall back to CPU
+        # Extract the raw token-id ndarray (caller may pass a LongTensor
+        # subclass or plain ndarray). Keep the original around so the
+        # backward closure has access to the indices.
+        ids_data = np.asarray(x)
 
-        # CPU fallback
-        if isinstance(x, np.ndarray):
-            return weight[x.astype(np.int32)]
-        return weight[x]
+        # Numpy fancy-index lookup. The legacy ``backend.learning.embedding_lookup``
+        # expects a (batch, seq) shape and adds a leading batch dim for 1D
+        # inputs, which breaks downstream ops that don't expect the extra
+        # axis. Fancy indexing preserves the exact input shape with a
+        # trailing embedding dim, matches what PyTorch's Embedding does,
+        # and is plenty fast for the sizes we care about (LUT bandwidth
+        # bound — even at 8192 vocab × 384 dim it's under 1 ms).
+        result = weight[ids_data.astype(np.int32)]
+
+        # ---- Autograd wiring ----
+        # Always wrap the output in a Variable with a GradFn when autograd is
+        # enabled — Embedding's input is discrete (token ids), so there's no
+        # upstream Variable to chain to, but we still need the GradFn so that
+        # ``loss.backward()`` can flow back here and update ``weight.grad``.
+        if (
+            _GradFn is not None
+            and _grad_enabled
+            and isinstance(result, np.ndarray)
+            and not isinstance(result, _Variable)
+        ):
+            def backward_fn(grad_output):
+                # self.backward populates self.weight.grad in-place.
+                # Returns None for the input gradient (token ids are discrete).
+                self.backward(np.asarray(grad_output), ids_data)
+                return ()  # no upstream inputs
+
+            grad_fn = _GradFn("Embedding", backward_fn, [])
+            return _Variable(np.asarray(result), requires_grad=True, grad_fn=grad_fn)
+
+        return result
 
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """

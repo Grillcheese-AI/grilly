@@ -1,0 +1,176 @@
+// grilly_channels.proto — Core message types for grilly C++/Python channels.
+//
+// These messages define the wire format for zero-copy data passing between
+// Vulkan compute shaders (C++) and CubeMind's Python brain modules.
+
+syntax = "proto3";
+package grilly;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tensor data
+// ═══════════════════════════════════════════════════════════════════════════════
+
+message TensorData {
+    repeated uint32 shape = 1;       // e.g., [batch, seq, dim]
+    string dtype = 2;                // "float32", "float16", "int8", "int4"
+    bytes data = 3;                  // raw bytes (packed)
+    string device = 4;              // "cpu", "vulkan0", "cuda0"
+    uint64 buffer_id = 5;           // GPU buffer handle (zero-copy)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SNN spike trains
+// ═══════════════════════════════════════════════════════════════════════════════
+
+message SpikeTrain {
+    uint32 n_neurons = 1;
+    uint32 n_timesteps = 2;
+    repeated float spikes = 3 [packed = true]; // flattened (timesteps, neurons)
+    float dt = 4;                              // timestep duration
+}
+
+message SpikeEvent {
+    uint32 neuron_id = 1;
+    uint32 timestep = 2;
+    float value = 3;                // multi-bit spike level (0..L)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Expert / MoE messages
+// ═══════════════════════════════════════════════════════════════════════════════
+
+message ExpertWeights {
+    uint32 expert_id = 1;
+    TensorData weights = 2;         // quantized weights (INT4/INT8)
+    TensorData scales = 3;          // per-block scale factors
+    string quant_type = 4;          // "int4", "int8", "float16"
+}
+
+message ExpertUpdate {
+    uint32 expert_id = 1;
+    float q_value = 2;              // bandit Q-value
+    float charge = 3;               // HE-MoE charge (+1/-1)
+    repeated float mu = 4 [packed = true];  // expert position in RKHS
+    float a_trace = 5;              // activity trace
+    repeated float e_trace = 6 [packed = true]; // error trace
+    uint64 n_uses = 7;
+}
+
+message RouteRequest {
+    TensorData input = 1;
+    uint32 top_k = 2;
+    float temperature = 3;
+}
+
+message RouteResponse {
+    repeated uint32 expert_ids = 1 [packed = true];
+    repeated float weights = 2 [packed = true];
+    repeated float scores = 3 [packed = true];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Memory / Hippocampal capsules
+// ═══════════════════════════════════════════════════════════════════════════════
+
+message MemoryCapsule {
+    string capsule_id = 1;
+    TensorData context = 2;         // input context at storage time
+    repeated uint32 expert_ids = 3 [packed = true]; // which experts were active
+    TensorData error = 4;           // prediction error
+    uint64 timestamp_ns = 5;
+    float surprise = 6;             // error magnitude
+    repeated string tags = 7;       // "novel", "high_error", etc.
+}
+
+message MemoryQuery {
+    TensorData query = 1;
+    uint32 top_k = 2;
+    float min_similarity = 3;
+    string filter_tag = 4;          // optional tag filter
+}
+
+message MemoryResult {
+    repeated MemoryCapsule capsules = 1;
+    repeated float similarities = 2 [packed = true];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Telemetry / Observability
+// ═══════════════════════════════════════════════════════════════════════════════
+
+message TelemetryEvent {
+    string component_id = 1;
+    string event_type = 2;          // "forward", "spawn", "charge_flip", etc.
+    map<string, float> metrics = 3; // key-value metrics
+    map<string, string> labels = 4; // key-value labels
+    uint64 timestamp_ns = 5;
+    uint32 step = 6;
+}
+
+message TelemetryBatch {
+    repeated TelemetryEvent events = 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Neurochemistry
+// ═══════════════════════════════════════════════════════════════════════════════
+
+message NeurochemState {
+    float dopamine = 1;
+    float serotonin = 2;
+    float cortisol = 3;
+    float noradrenaline = 4;
+    float oxytocin = 5;
+    string emotion = 6;             // Lövheim cube classification
+    float arousal = 7;
+    float valence = 8;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Training
+// ═══════════════════════════════════════════════════════════════════════════════
+
+message TrainStepRequest {
+    TensorData input = 1;
+    TensorData target = 2;
+    float learning_rate = 3;
+    bool extract_logits = 4;
+}
+
+message TrainStepResult {
+    float loss = 1;
+    float loss_ce = 2;
+    float loss_kd = 3;
+    uint32 n_experts = 4;
+    bool spawned = 5;
+    float residual_ema = 6;
+    TelemetryEvent telemetry = 7;
+    TensorData teacher_logits = 8;  // optional, if extract_logits=true
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RPC Service definitions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+service GrillyCompute {
+    // Core tensor ops
+    rpc Linear(TensorData) returns (TensorData);
+    rpc Relu(TensorData) returns (TensorData);
+    rpc Gelu(TensorData) returns (TensorData);
+
+    // SNN ops
+    rpc GIFNeuronStep(SpikeTrain) returns (SpikeTrain);
+    rpc SynapsisFwd(TensorData) returns (TensorData);
+    rpc STDPUpdate(SpikeTrain) returns (ExpertWeights);
+
+    // MoE routing
+    rpc Route(RouteRequest) returns (RouteResponse);
+    rpc UpdateExpert(ExpertUpdate) returns (TelemetryEvent);
+
+    // Memory
+    rpc StoreMemory(MemoryCapsule) returns (TelemetryEvent);
+    rpc QueryMemory(MemoryQuery) returns (MemoryResult);
+
+    // Training
+    rpc TrainStep(TrainStepRequest) returns (TrainStepResult);
+}
