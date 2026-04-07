@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from ._helpers import _get_param_array, _create_param_wrapper
-from .module import Module
+from ._helpers import _create_param_wrapper, _get_param_array
 from .addition_linear import AdditionLinear
+from .module import Module
 
 
 def _try_bridge():

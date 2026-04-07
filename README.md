@@ -14,7 +14,60 @@
 
 GPU-accelerated neural network framework using **Vulkan compute shaders**. PyTorch-like API that runs on **any GPU** -- AMD, NVIDIA, Intel -- no CUDA dependency. 231 GLSL compute shaders compiled to SPIR-V, dispatched through a native C++ layer with automatic CPU fallback.
 
-> **Alpha software (v0.6.1).** APIs may change between minor versions.
+> ## ⚠️ Pre-v1.0 release — massive changes ahead
+>
+> The current `main` branch is **substantially rewritten** since the last
+> tagged release (`v0.6.1`). The changes touch the C++ Vulkan dispatch
+> layer, the VMA buffer allocation strategy, the autograd graph, the
+> `nn` module forward signatures, the `torch_api` facade, and several
+> shaders. Existing user code that depends on `v0.6.1` semantics may
+> need updates.
+>
+> **Highlights of what changed:**
+>
+> - **40x faster `nn.Linear`** on AMD/Windows via a new staging-buffer
+>   pattern (DEVICE_LOCAL VRAM compute + WC stage-in + HOST_CACHED
+>   readback). The same pattern was applied across `linear` /
+>   `linear_backward` / `layernorm` / `embedding` / `activations` /
+>   `optimizer` / `loss` / `dropout`.
+> - **Cooperative-matrix GEMM** (`gemm-coopmat-shared.glsl`) — fp16
+>   GEMM via `VK_KHR_cooperative_matrix`. Hits hardware tensor cores on
+>   RDNA3 / NVIDIA RTX, runs through the driver emulation path on
+>   RDNA2. New `LinearParams.elemSize` field + generic `py::array`
+>   bindings let `nn.Linear` accept fp32 OR fp16 input transparently.
+> - **Causal Linear-RNN prefix scan** — new `prefix-scan-causal` /
+>   `prefix-scan-causal-backward` shaders + C++ dispatcher + Python
+>   autograd wrapper. `grilly.nn.prefix_scan.CausalSequenceMixer` is a
+>   drop-in subgroup-parallel replacement for sequence pooling that
+>   strictly respects autoregressive causality.
+> - **Real autograd through `nn.Linear`, `nn.LayerNorm`, `nn.Embedding`** —
+>   their `forward` methods now wrap numpy outputs in `Variable` with a
+>   `GradFn` that calls the existing `backward()` so `loss.backward()`
+>   actually updates layer parameters. Before this fix, optimizer steps
+>   silently no-op'd on every Module subclass that used the standard
+>   `self.weight = nn.Parameter(...)` idiom.
+> - **`Module.__setattr__` auto-registration** — `Parameter` and child
+>   `Module` attribute assignments now populate `_parameters` /
+>   `_modules` automatically. Standard PyTorch idiom; was previously
+>   silently broken (every subclass returned 0 parameters).
+> - **`.grl` checkpoint roundtrip** — `torch.save({'model': sd, 'step':
+>   N}, path); ck = torch.load(path)` now returns exactly what was
+>   saved (matches PyTorch semantics). Previously the loader
+>   force-wrapped content under a fixed `'model'` key.
+> - **VMA fix** — `BufferPool::allocateBuffer` now uses
+>   `requiredFlags = DEVICE_LOCAL_BIT` instead of `preferredFlags`, so
+>   the allocator actually selects VRAM instead of silently falling
+>   back to slow host memory.
+> - **`Variable.__array__`** — numpy interop. `np.matmul(tensor, w)` /
+>   `np.dot(tensor, w)` / `np.asarray(tensor)` now work transparently.
+> - **PEP 660 editable install fix** — `import grilly_core` now works
+>   under modern editable installs (path hook didn't add the package
+>   dir to `sys.path`, so the Vulkan probe silently reported
+>   `VULKAN_AVAILABLE = False` even on machines with working Vulkan).
+>
+> See [the "What's new since 0.6.1" section below](#whats-new-since-061)
+> for the full list. Tag will land as a `v1.0.0-rc.1` once the
+> remaining causal-RNN training validation lands.
 
 ---
 

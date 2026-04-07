@@ -15,7 +15,7 @@ import struct
 
 import numpy as np
 
-from .base import BufferMixin, VULKAN_PYTHON_BINDINGS_AVAILABLE
+from .base import VULKAN_PYTHON_BINDINGS_AVAILABLE, BufferMixin
 
 if VULKAN_PYTHON_BINDINGS_AVAILABLE:
     from vulkan import *

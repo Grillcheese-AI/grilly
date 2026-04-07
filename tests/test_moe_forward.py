@@ -41,7 +41,6 @@ def moe_forward_numpy(
 ) -> np.ndarray:
     """Reference forward (CPU)."""
     s_len = int(input_ids.shape[0])
-    d = embed_w.shape[1]
     x = embed_w[input_ids.astype(np.int64)] + pos_w[:s_len]
     for layer in range(n_layers):
         xm = x.mean(axis=0)

@@ -3,7 +3,6 @@ Embedding module.
 Uses: embedding-lookup.glsl
 """
 
-import os
 
 import numpy as np
 

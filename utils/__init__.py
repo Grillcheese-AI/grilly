@@ -5,7 +5,6 @@ Helper functions for data loading, visualization, checkpointing, device manageme
 """
 
 from .checkpoint import load_checkpoint, save_checkpoint
-from .grl_checkpoint import load_grl, save_grl
 from .data import (
     ArrayDataset,
     BatchSampler,
@@ -32,6 +31,7 @@ from .data import (
     random_split,
 )
 from .device import device_count, get_device, set_device
+from .grl_checkpoint import load_grl, save_grl
 from .initialization import kaiming_normal_, kaiming_uniform_, xavier_normal_, xavier_uniform_
 
 # Visualization utilities (optional dependency)

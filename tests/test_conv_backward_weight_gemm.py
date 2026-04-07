@@ -14,8 +14,8 @@ torch = pytest.importorskip("torch")
 import torch.nn.functional as F
 
 try:
-    from grilly.backend.compute import VulkanCompute
     from grilly.backend.base import VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
+    from grilly.backend.compute import VulkanCompute
 except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 

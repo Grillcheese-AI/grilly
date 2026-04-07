@@ -27,6 +27,7 @@ This package provides GPU acceleration for:
 # directory once, before any submodule import triggers the probe.
 import os as _os
 import sys as _sys
+
 _pkg_dir = _os.path.dirname(_os.path.abspath(__file__))
 if _pkg_dir not in _sys.path:
     _sys.path.insert(0, _pkg_dir)
@@ -35,8 +36,6 @@ import grilly.functional as functional
 import grilly.nn as nn
 import grilly.optim as optim
 import grilly.utils as utils
-
-from . import torch_api
 from grilly.backend.base import (
     VULKAN_AVAILABLE,
     VULKAN_PYTHON_BINDINGS_AVAILABLE,
@@ -51,6 +50,8 @@ from grilly.backend.capsule_transformer import (
 from grilly.backend.compute import VulkanCompute
 from grilly.backend.learning import VulkanLearning
 from grilly.backend.snn_compute import SNNCompute
+
+from . import torch_api
 
 # Main API exports
 Compute = VulkanCompute

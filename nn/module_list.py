@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from .module import Module
 
@@ -33,13 +34,13 @@ class ModuleList(Module):
     def __iter__(self) -> Iterator[Module]:
         return iter(self._list)
 
-    def append(self, module: Module) -> "ModuleList":
+    def append(self, module: Module) -> ModuleList:
         idx = len(self._list)
         self._modules[str(idx)] = module
         self._list.append(module)
         return self
 
-    def extend(self, modules: list[Module]) -> "ModuleList":
+    def extend(self, modules: list[Module]) -> ModuleList:
         for m in modules:
             self.append(m)
         return self

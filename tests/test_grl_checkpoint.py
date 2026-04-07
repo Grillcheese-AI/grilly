@@ -6,7 +6,6 @@ import tempfile
 
 import numpy as np
 import pytest
-
 from grilly.utils.grl_checkpoint import (
     FORMAT_VERSION,
     HEADER_SIZE,
