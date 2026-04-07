@@ -1,5 +1,10 @@
 """
 Base constants and utilities for Vulkan backend.
+
+``VULKAN_AVAILABLE`` is True when ``grilly_core.Device()`` can initialize (C++ Vulkan;
+does not use the PyPI ``vulkan`` package). Optional ctypes bindings set
+``VULKAN_PYTHON_BINDINGS_AVAILABLE``; the legacy Python ``VulkanCore`` / ``Compute()`` stack
+requires both (see ``VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE``).
 """
 
 import numpy as np
@@ -40,15 +45,30 @@ _VULKAN_FALLBACKS = {
     "VK_PIPELINE_BIND_POINT_COMPUTE": 0,
 }
 
+def _probe_cpp_vulkan() -> bool:
+    """True when ``grilly_core`` can initialize a Vulkan device (C++ path; no PyPI ``vulkan``)."""
+    try:
+        import grilly_core as gc
+
+        gc.Device()
+        return True
+    except Exception:
+        return False
+
+
+VULKAN_AVAILABLE = _probe_cpp_vulkan()
+
+# Optional ctypes bindings (``pip install vulkan``) — used by legacy VulkanCore / VulkanCompute.
 try:
     from vulkan import *
 
-    VULKAN_AVAILABLE = True
-    # After 'from vulkan import *', all Vulkan constants are in the namespace
-    # and can be imported by other modules using 'from base import VK_...'
+    VULKAN_PYTHON_BINDINGS_AVAILABLE = True
+    # After 'from vulkan import *', constants live in this module for 'from base import VK_...'
 except ImportError:
-    VULKAN_AVAILABLE = False
-    pass
+    VULKAN_PYTHON_BINDINGS_AVAILABLE = False
+
+# Full Python VulkanCore stack (ctypes + SPIR-V loaders) — not required for ``grilly_core``-only GPU.
+VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE = VULKAN_AVAILABLE and VULKAN_PYTHON_BINDINGS_AVAILABLE
 
 # Create dummy constants for type checking when Vulkan is not available
 # or when a mocked `vulkan` module does not define them (e.g. RTD autodoc).
@@ -417,4 +437,11 @@ class BufferMixin:
         return self._acquire_buffer(size)
 
 
-__all__ = ["VULKAN_AVAILABLE", "BufferMixin", "_DirectBuffer", "BUFFER_POOL_AVAILABLE"]
+__all__ = [
+    "VULKAN_AVAILABLE",
+    "VULKAN_PYTHON_BINDINGS_AVAILABLE",
+    "VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE",
+    "BufferMixin",
+    "_DirectBuffer",
+    "BUFFER_POOL_AVAILABLE",
+]

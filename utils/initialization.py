@@ -116,3 +116,33 @@ def kaiming_normal_(
     std = gain / np.sqrt(fan)
     tensor[:] = np.random.randn(*tensor.shape).astype(tensor.dtype) * std
     return tensor
+
+
+def _writable_array(tensor):
+    """Return a writable ndarray view for ``tensor``.
+
+    The torch_api ``Tensor`` / autograd ``Variable`` / ``Parameter`` wrappers
+    don't all support ``__setitem__`` directly — but they expose the backing
+    ndarray via ``.data``. Detect those and return the underlying buffer so
+    in-place init works for both raw arrays and wrapped tensors.
+    """
+    if isinstance(tensor, np.ndarray):
+        return tensor
+    if hasattr(tensor, "data") and isinstance(getattr(tensor, "data", None), np.ndarray):
+        return tensor.data
+    # Last-resort: hope it's array-like and writable.
+    return np.asarray(tensor)
+
+
+def normal_(tensor, mean: float = 0.0, std: float = 1.0):
+    """In-place normal distribution (PyTorch ``nn.init.normal_``)."""
+    arr = _writable_array(tensor)
+    arr[:] = np.random.normal(mean, std, arr.shape).astype(arr.dtype, copy=False)
+    return tensor
+
+
+def uniform_(tensor, a: float = 0.0, b: float = 1.0):
+    """In-place uniform distribution (PyTorch ``nn.init.uniform_``)."""
+    arr = _writable_array(tensor)
+    arr[:] = np.random.uniform(a, b, arr.shape).astype(arr.dtype, copy=False)
+    return tensor

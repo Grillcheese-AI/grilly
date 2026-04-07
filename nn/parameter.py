@@ -23,6 +23,8 @@ class Parameter(np.ndarray):
             data: Numpy array containing parameter values
             requires_grad: Whether this parameter requires gradients (default: True)
         """
+        if hasattr(data, "data") and not isinstance(data, np.ndarray):
+            data = getattr(data, "data", data)
         obj = np.asarray(data, dtype=np.float32).view(cls)
         obj.requires_grad = requires_grad
         obj.grad = None
@@ -41,6 +43,45 @@ class Parameter(np.ndarray):
             self.grad.fill(0.0)
         else:
             self.grad = np.zeros_like(self, dtype=np.float32)
+
+    def uniform_(self, a: float = 0.0, b: float = 1.0) -> "Parameter":
+        """In-place uniform fill (PyTorch ``Tensor.uniform_``)."""
+        self[:] = np.random.uniform(a, b, self.shape).astype(np.float32)
+        return self
+
+    def zero_(self) -> "Parameter":
+        """Fill with zeros (PyTorch ``Tensor.zero_``)."""
+        self.fill(0.0)
+        return self
+
+    # ------------------------------------------------------------------
+    # PyTorch-style shape methods so user ``forward`` code can do
+    # ``self.weight.unsqueeze(0)`` / ``.view(...)`` / ``.mean(dim=...)``
+    # without having to know that Parameter is a numpy ndarray subclass.
+    # ------------------------------------------------------------------
+    def unsqueeze(self, dim: int) -> np.ndarray:
+        """Insert a length-1 axis at *dim* (PyTorch ``Tensor.unsqueeze``)."""
+        return np.expand_dims(np.asarray(self), dim)
+
+    def view(self, *shape) -> np.ndarray:
+        """Alias for ``reshape`` matching PyTorch's ``Tensor.view`` signature."""
+        if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
+            shape = tuple(shape[0])
+        return np.asarray(self).reshape(shape)
+
+    def mean(self, dim=None, keepdims: bool = False, **kwargs):  # type: ignore[override]
+        """``Tensor.mean(dim=...)`` — accepts both ``dim=`` (torch) and
+        ``axis=`` (numpy) so it composes cleanly with ``np.mean(p, axis=...)``.
+        """
+        axis = kwargs.pop("axis", dim)
+        if kwargs:
+            # Forward any remaining numpy kwargs (dtype, out, where, ...).
+            return np.asarray(self).mean(axis=axis, keepdims=keepdims, **kwargs)
+        return np.asarray(self).mean(axis=axis, keepdims=keepdims)
+
+    def detach(self) -> "Parameter":
+        """Return a Parameter detached from any (future) autograd graph."""
+        return Parameter(np.array(self, copy=True), requires_grad=False)
 
     def __repr__(self):
         """Return a debug representation."""

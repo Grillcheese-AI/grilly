@@ -56,7 +56,7 @@ BufferPool::~BufferPool() {
             vkDestroyCommandPool(dev, transferPool_, nullptr);
     }
 
-    // Destroy all pooled buffers
+    // Destroy all pooled buffers (host-visible bucket pool)
     for (auto& [bucketSize, vec] : buckets_) {
         for (auto& buf : vec) {
             if (buf.handle != VK_NULL_HANDLE)
@@ -64,6 +64,24 @@ BufferPool::~BufferPool() {
         }
     }
     buckets_.clear();
+
+    // Destroy all pooled buffers (device-local bucket pool)
+    for (auto& [bucketSize, vec] : dlBuckets_) {
+        for (auto& buf : vec) {
+            if (buf.handle != VK_NULL_HANDLE)
+                vmaDestroyBuffer(allocator_, buf.handle, buf.allocation);
+        }
+    }
+    dlBuckets_.clear();
+
+    // Destroy all pooled buffers (readback bucket pool)
+    for (auto& [bucketSize, vec] : readbackBuckets_) {
+        for (auto& buf : vec) {
+            if (buf.handle != VK_NULL_HANDLE)
+                vmaDestroyBuffer(allocator_, buf.handle, buf.allocation);
+        }
+    }
+    readbackBuckets_.clear();
 
     if (allocator_ != VK_NULL_HANDLE)
         vmaDestroyAllocator(allocator_);
@@ -100,15 +118,33 @@ GrillyBuffer BufferPool::allocateBuffer(size_t bucketSize) {
     bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    // Use device-local memory with host-visible fallback.
-    // On discrete GPUs with Resizable BAR, VMA places this in VRAM with
-    // CPU-visible mapping — best of both worlds (fast GPU access + memcpy upload).
-    // Without ReBAR, falls back to host-visible (system RAM).
+    // REQUIRE device-local memory.
+    //
+    // Background: ``preferredFlags`` is a soft hint VMA can ignore. Combined
+    // with ``HOST_ACCESS_SEQUENTIAL_WRITE_BIT``, on Windows + AMD/RDNA the
+    // auto-selector lands on memoryType[1] (HOST_VISIBLE | HOST_COHERENT
+    // *only* — no DEVICE_LOCAL, no HOST_CACHED). The buffer ends up in
+    // host-uncached BAR memory, and every GPU read becomes a single-byte
+    // PCIe transaction → measured 0.1 GB/s effective bandwidth, ~100x slower
+    // than CPU/numpy. See sandbox/vsa_lm/grilly_gpu_path_test.py for the
+    // smoking-gun profile (gc.relu on 4.7M elements: 757 ms).
+    //
+    // Using ``requiredFlags`` forces VMA to *only* consider memory types with
+    // DEVICE_LOCAL_BIT. On systems with Resizable BAR (the common case for
+    // modern AMD + Windows + AGESA 2020+), VMA picks the
+    // DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT memory type — full VRAM
+    // bandwidth (~432 GB/s on RX 6750 XT) + CPU mapping for fast uploads.
+    //
+    // On systems without ReBAR, this allocation will FAIL — which is the
+    // correct behavior, because the silent slow path was a footgun. Users
+    // without ReBAR should enable it in BIOS, or callers needing the legacy
+    // host-mapped path should use ``acquirePreferDeviceLocal`` which is
+    // explicitly soft-preferred for that case.
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
                       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-    allocInfo.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
     GrillyBuffer buf{};
     buf.bucketSize = bucketSize;
@@ -156,7 +192,17 @@ void BufferPool::release(GrillyBuffer& buf) {
     std::lock_guard<std::mutex> lock(mutex_);
     stats_.totalReleased++;
 
-    auto& vec = buckets_[buf.bucketSize];
+    // Route to the right bucket pool based on memory class. The three pools
+    // MUST stay separate:
+    //   - dlBuckets_       : DEVICE_LOCAL only (mappedPtr=null, GPU compute)
+    //   - readbackBuckets_ : HOST_CACHED random read (CPU reads from GPU)
+    //   - buckets_         : default WC sequential write (CPU writes to GPU)
+    // Picking up a DL buffer via ``acquire()`` would crash trying to memcpy
+    // into a null mappedPtr; picking up a WC buffer via ``acquireReadback``
+    // would silently destroy CPU-read perf (the original bug we're fixing).
+    auto& vec = buf.deviceLocal ? dlBuckets_[buf.bucketSize]
+              : buf.readback    ? readbackBuckets_[buf.bucketSize]
+                                 : buckets_[buf.bucketSize];
     if (vec.size() < kMaxBuffersPerBucket) {
         vec.push_back(buf);
     } else {
@@ -179,11 +225,32 @@ void BufferPool::release(GrillyBuffer& buf) {
 GrillyBuffer BufferPool::acquireDeviceLocal(size_t size) {
     size_t bucket = sizeToBucket(size);
 
+    std::lock_guard<std::mutex> lock(mutex_);
+    stats_.totalAcquired++;
+
+    // Try reuse from the DL bucket pool first (LIFO returns the same handle
+    // most often, which keeps the descriptor cache hitting on repeat calls).
+    auto it = dlBuckets_.find(bucket);
+    if (it != dlBuckets_.end() && !it->second.empty()) {
+        GrillyBuffer buf = it->second.back();
+        it->second.pop_back();
+        buf.size = size;
+        stats_.hits++;
+        return buf;
+    }
+
+    stats_.misses++;
+    stats_.allocations++;
+
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = bucket;
+    // We need both TRANSFER_DST (for stage-in copies) and TRANSFER_SRC (for
+    // stage-out copies) since the staging pattern in cpp/src/ops/linear.cpp
+    // copies output back from DL → host-visible staging.
     bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                       VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+                       VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                       VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VmaAllocationCreateInfo allocInfo{};
@@ -193,6 +260,7 @@ GrillyBuffer BufferPool::acquireDeviceLocal(size_t size) {
     GrillyBuffer buf{};
     buf.bucketSize = bucket;
     buf.size = size;
+    buf.deviceLocal = true;  // routes to dlBuckets_ on release
 
     vkCheck(vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo, &buf.handle,
                             &buf.allocation, &buf.info),
@@ -236,6 +304,22 @@ GrillyBuffer BufferPool::acquirePreferDeviceLocal(size_t size) {
 GrillyBuffer BufferPool::acquireReadback(size_t size) {
     size_t bucket = sizeToBucket(size);
 
+    std::lock_guard<std::mutex> lock(mutex_);
+    stats_.totalAcquired++;
+
+    // Try reuse from the readback bucket pool first.
+    auto it = readbackBuckets_.find(bucket);
+    if (it != readbackBuckets_.end() && !it->second.empty()) {
+        GrillyBuffer buf = it->second.back();
+        it->second.pop_back();
+        buf.size = size;
+        stats_.hits++;
+        return buf;
+    }
+
+    stats_.misses++;
+    stats_.allocations++;
+
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = bucket;
@@ -253,6 +337,7 @@ GrillyBuffer BufferPool::acquireReadback(size_t size) {
     GrillyBuffer buf{};
     buf.bucketSize = bucket;
     buf.size = size;
+    buf.readback = true;  // routes to readbackBuckets_ on release
 
     vkCheck(vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo, &buf.handle,
                             &buf.allocation, &buf.info),

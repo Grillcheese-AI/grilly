@@ -7,13 +7,13 @@ import pytest
 
 try:
     from grilly import Compute
-    from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.backend.base import VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
 except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestBackwardOperations:
     """Test backward pass operations on GPU"""
 
@@ -181,7 +181,7 @@ class TestBackwardOperations:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestAutogradIntegration:
     """Test autograd integration with nn.Module"""
 
@@ -240,7 +240,7 @@ class TestAutogradIntegration:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestEndToEndTraining:
     """Test end-to-end training loop"""
 

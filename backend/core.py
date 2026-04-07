@@ -10,9 +10,13 @@ from pathlib import Path
 
 import numpy as np
 
-from .base import VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VULKAN_AVAILABLE
+from .base import (
+    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    VULKAN_AVAILABLE,
+    VULKAN_PYTHON_BINDINGS_AVAILABLE,
+)
 
-if VULKAN_AVAILABLE:
+if VULKAN_PYTHON_BINDINGS_AVAILABLE:
     from vulkan import *
 
 logger = logging.getLogger(__name__)
@@ -32,7 +36,12 @@ class VulkanCore:
         """Initialize the instance."""
 
         if not VULKAN_AVAILABLE:
-            raise RuntimeError("Vulkan not available")
+            raise RuntimeError("Vulkan not available (C++ grilly_core could not initialize GPU)")
+        if not VULKAN_PYTHON_BINDINGS_AVAILABLE:
+            raise RuntimeError(
+                "VulkanCore requires the Python `vulkan` package (ctypes bindings). "
+                "Install with: pip install vulkan"
+            )
         import os
 
         # Disable Mesa device_select layer which can force CPU llvmpipe

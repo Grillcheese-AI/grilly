@@ -262,6 +262,38 @@ void register_normalization_ops(py::module_& m) {
         py::arg("device"), py::arg("input"), py::arg("dim") = -1,
         "GPU Softmax (3-pass: max, sum_exp, normalize)");
 
+    m.def(
+        "mf_softmax",
+        [](GrillyCoreContext& ctx, py::array_t<float> input,
+           int dim) -> Tensor {
+            auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
+            if (inBuf.ndim < 1)
+                throw std::runtime_error("input must be at least 1D");
+
+            uint32_t features = static_cast<uint32_t>(
+                inBuf.shape[inBuf.ndim - 1]);
+            uint32_t totalBatch = 1;
+            for (int i = 0; i < inBuf.ndim - 1; ++i)
+                totalBatch *= static_cast<uint32_t>(inBuf.shape[i]);
+            if (inBuf.ndim == 1) totalBatch = 1;
+
+            py::array_t<float> result(inBuf.shape);
+            auto rBuf = result.request();
+            {
+                py::gil_scoped_release release;
+                grilly::ops::mfSoftmax(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(rBuf.ptr),
+                    1, totalBatch, features);
+            }
+            return Tensor::from_numpy(result);
+        },
+        py::arg("device"), py::arg("input"), py::arg("dim") = -1,
+        "GPU multiplication-free softmax (ReLU-normalized; 3-pass, shader "
+        "mf-softmax)");
+
     // ── Softmax backward ─────────────────────────────────────────────────
     m.def(
         "softmax_backward",

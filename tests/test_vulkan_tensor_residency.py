@@ -9,14 +9,14 @@ import pytest
 
 try:
     from grilly.backend.compute import VulkanCompute
-    from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.backend.base import VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
     from grilly.utils.tensor_conversion import VulkanTensor
 except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 def test_prepare_for_dispatch_binds_without_double_upload():
     """After one GPU op, a VulkanTensor should expose a buffer for the next op without re-uploading."""
     with warnings.catch_warnings():

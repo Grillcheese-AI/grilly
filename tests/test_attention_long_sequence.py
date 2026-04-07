@@ -10,14 +10,14 @@ import pytest
 
 try:
     from grilly import Compute
-    from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.backend.base import VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
 except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("seq_len", [128, 256, 512])
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 def test_flash_attention2_long_sequence_finite(seq_len):
     backend = Compute()
     try:
@@ -47,7 +47,7 @@ def test_flash_attention2_long_sequence_finite(seq_len):
 @pytest.mark.gpu
 @pytest.mark.slow
 @pytest.mark.parametrize("seq_len", [1024])
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 def test_flash_attention2_very_long_sequence_finite(seq_len):
     backend = Compute()
     try:

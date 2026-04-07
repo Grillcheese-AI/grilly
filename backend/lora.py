@@ -14,9 +14,9 @@ import struct
 
 import numpy as np
 
-from .base import VULKAN_AVAILABLE, BufferMixin
+from .base import BufferMixin, VULKAN_PYTHON_BINDINGS_AVAILABLE
 
-if VULKAN_AVAILABLE:
+if VULKAN_PYTHON_BINDINGS_AVAILABLE:
     from vulkan import *
 
 
@@ -84,7 +84,7 @@ class VulkanLoRA(BufferMixin):
         rank = A.shape[0]
 
         # Check if GPU shader available
-        if not VULKAN_AVAILABLE or "lora-forward" not in self.shaders:
+        if not VULKAN_PYTHON_BINDINGS_AVAILABLE or "lora-forward" not in self.shaders:
             return self._forward_cpu(x, W, A, B, scale, bias)
 
         try:
@@ -270,7 +270,7 @@ class VulkanLoRA(BufferMixin):
         rank = A.shape[0]
 
         # Check if GPU shader available
-        if not VULKAN_AVAILABLE or "lora-backward" not in self.shaders:
+        if not VULKAN_PYTHON_BINDINGS_AVAILABLE or "lora-backward" not in self.shaders:
             return self._backward_cpu(grad_output, x, A, B, h, scale)
 
         try:

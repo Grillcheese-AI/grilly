@@ -42,6 +42,55 @@ void register_activations_ops(py::module_& m) {
     defActivation("silu", grilly::ops::silu);
     defActivation("tanh_act", grilly::ops::tanh_act);
 
+    m.def(
+        "mf_sigmoid",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> input) -> Tensor {
+            auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
+            uint32_t total = static_cast<uint32_t>(inBuf.size);
+
+            py::array_t<float> result(input.request().shape);
+            auto rBuf = result.request();
+
+            {
+                py::gil_scoped_release release;
+                grilly::ops::mfSigmoid(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(rBuf.ptr), total);
+            }
+
+            return Tensor::from_numpy(result);
+        },
+        py::arg("device"), py::arg("input"),
+        "GPU rational sigmoid x/(1+|x|) (shader mf-sigmoid)");
+
+    m.def(
+        "mf_softplus",
+        [](GrillyCoreContext& ctx, py::array_t<float> input,
+           float beta) -> Tensor {
+            auto inBuf = input.request();
+            require_c_contiguous_float(inBuf);
+            uint32_t total = static_cast<uint32_t>(inBuf.size);
+
+            py::array_t<float> result(input.request().shape);
+            auto rBuf = result.request();
+
+            {
+                py::gil_scoped_release release;
+                grilly::ops::mfSoftplus(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(inBuf.ptr),
+                    static_cast<float*>(rBuf.ptr), total, beta);
+            }
+
+            return Tensor::from_numpy(result);
+        },
+        py::arg("device"), py::arg("input"), py::arg("beta") = 1.0f,
+        "GPU algebraic softplus 0.5*(x+sqrt(x*x+c)), c=4/beta^2 (shader "
+        "mf-softplus)");
+
     // ── Activation backward ops ──────────────────────────────────────────
     // 3 buffers: grad_output, input (original forward input), grad_input.
     // Same push constant (uint total_elements) and dispatch pattern.

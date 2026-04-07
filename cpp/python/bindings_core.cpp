@@ -435,6 +435,9 @@ PYBIND11_MODULE(grilly_core, m) {
     register_siglip_ops(m);
     register_perceiver_ops(m);
     register_moqe_train_ops(m);
+    register_moe_ops(m);
     register_fusion_ops(m);
+    register_vsa_lm_ops(m);
+    register_grl_ops(m);
     register_misc_ops(m);
 }

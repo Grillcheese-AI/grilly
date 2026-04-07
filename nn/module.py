@@ -65,30 +65,60 @@ class Module:
         self._use_device_local = False  # DEVICE_LOCAL VRAM buffers
 
     def _get_backend(self):
-        """Execute get backend."""
+        """Get the legacy VulkanCompute backend if available, else None.
 
+        The legacy backend (``backend.compute.VulkanCompute``) requires the
+        PyPI ``vulkan`` Python package (ctypes bindings) and is only used
+        today by a few slow-path fallbacks (e.g. ``fnn.xavier_init`` at
+        layer construction time). The real forward/backward path goes
+        through the C++ ``_bridge`` which only needs ``grilly_core`` and has
+        no Python ``vulkan`` dependency.
+
+        Returning ``None`` when the legacy backend can't init lets callers
+        that already guard with ``hasattr(backend, "fnn")`` gracefully fall
+        through to their CPU reference path (e.g. numpy xavier init), which
+        is harmless at construction time since the fast path takes over at
+        forward time via the bridge.
+        """
         if self._backend is None:
-            from ..utils.device_manager import get_device_manager
+            try:
+                from ..utils.device_manager import get_device_manager
 
-            self._backend = get_device_manager().vulkan
+                self._backend = get_device_manager().vulkan
+            except Exception:
+                self._backend = None
         return self._backend
 
     def _convert_input(self, x: np.ndarray | Any):
         """
         Convert input to Vulkan-compatible format (GPU-first).
 
-        VulkanTensor inputs always pass through without downloading to CPU.
-        numpy/PyTorch inputs are converted to VulkanTensor when the C++ backend
-        is available, otherwise to float32 numpy arrays.
+        Pass-through priority:
+        1. ``torch_api.Tensor`` / ``LongTensor`` — kept as-is so user
+           ``forward()`` code keeps torch-style methods (``.unsqueeze``,
+           ``.reshape``, ``.mean(dim=...)``). Works alongside grilly's
+           existing numpy-native layers because ``Variable.__array__``
+           lets ``np.matmul``/``np.dot`` operate on Tensor inputs directly.
+        2. ``VulkanTensor`` — GPU-resident, always pass through.
+        3. Everything else (numpy, PyTorch, …) — convert to Vulkan-compatible.
+
         Preserves integer dtypes for index arrays (e.g., token IDs).
-
-        Args:
-            x: Input (PyTorch tensor, numpy array, VulkanTensor, or other)
-
-        Returns:
-            VulkanTensor or numpy array
         """
-        # GPU-first: always pass VulkanTensor through without CPU round-trip
+        # 1. torch_api Tensor wrappers + autograd Variable: pass through
+        # unchanged. Variable matters because Tensor inherits from Variable
+        # and ops like ``.reshape`` / ``.mean(dim=...)`` / arithmetic return
+        # raw Variable instances rather than the Tensor subclass.
+        try:
+            from grilly.nn.autograd import Variable as _Variable
+            from grilly.torch_api.tensor import LongTensor as _TorchLong
+            from grilly.torch_api.tensor import Tensor as _TorchTensor
+
+            if isinstance(x, (_TorchTensor, _TorchLong, _Variable)):
+                return x
+        except ImportError:
+            pass
+
+        # 2. GPU-first: always pass VulkanTensor through without CPU round-trip
         if TENSOR_CONVERSION_AVAILABLE:
             from ..utils.tensor_conversion import VulkanTensor
 
@@ -121,15 +151,56 @@ class Module:
         raise NotImplementedError
 
     def __call__(self, *args, **kwargs):
-        # Automatically convert PyTorch tensor inputs to numpy
-        """Invoke the callable instance."""
+        """Invoke the callable instance.
+
+        If any positional arg was torch-style (``torch_api.Tensor``,
+        ``LongTensor``, or autograd ``Variable``) and the forward returned a
+        raw ndarray, wrap the output in ``Tensor`` so chained calls
+        (``x = embed(ids); x = layer(x); x = next(x)``) preserve torch-style
+        type through user-defined Module subclasses.
+
+        Three classes count as a "torch input":
+        - ``LongTensor`` — model entry points use it for token ids; the next
+          layer (Embedding) returns floats and the chain has to start in
+          torch-style mode from the first step.
+        - ``Tensor`` — the public torch_api wrapper users construct directly.
+        - ``Variable`` — what ``Tensor.reshape``/``.mean(dim=...)``/arithmetic
+          ops actually return today (they delegate to module-level functions
+          that build raw Variable, not the Tensor subclass). Without this
+          branch the type is silently lost after the first reshape and the
+          chain falls back to numpy.
+
+        ``Parameter`` (ndarray subclass) is left untouched on the way out so
+        re-wrapping a stored weight doesn't break gradient bookkeeping.
+        """
+        try:
+            from grilly.nn.autograd import Variable as _Variable
+            from grilly.torch_api.tensor import LongTensor as _TorchLong
+            from grilly.torch_api.tensor import Tensor as _TorchTensor
+
+            saw_torch_input = any(
+                isinstance(a, (_TorchTensor, _TorchLong, _Variable)) for a in args
+            )
+        except ImportError:
+            _TorchTensor = None  # type: ignore[assignment]
+            _TorchLong = None  # type: ignore[assignment]
+            _Variable = None  # type: ignore[assignment]
+            saw_torch_input = False
 
         converted_args = tuple(self._convert_input(arg) for arg in args)
-        # Convert keyword arguments that might be tensors
         converted_kwargs = {
-            k: self._convert_input(v) if self._is_tensor_like(v) else v for k, v in kwargs.items()
+            k: self._convert_input(v) if self._is_tensor_like(v) else v
+            for k, v in kwargs.items()
         }
-        return self.forward(*converted_args, **converted_kwargs)
+        out = self.forward(*converted_args, **converted_kwargs)
+
+        # Wrap raw ndarray outputs back to Tensor when a torch input was seen.
+        # Skip ndarray subclasses (Parameter, LongTensor) and Variable outputs
+        # — those already carry a torch-compatible API.
+        if saw_torch_input and _TorchTensor is not None:
+            if isinstance(out, np.ndarray) and type(out) is np.ndarray:
+                return _TorchTensor(out, requires_grad=False)
+        return out
 
     def _is_tensor_like(self, obj: Any) -> bool:
         """Check if object is tensor-like and needs conversion"""
@@ -226,6 +297,39 @@ class Module:
 
         self._parameters[name] = param
 
+    def register_buffer(self, name: str, tensor: np.ndarray | Any | None, persistent: bool = True):
+        """
+        Register a non-trainable buffer (e.g. running state not in autograd).
+
+        Args:
+            name: Buffer attribute name
+            tensor: Numpy array or None to remove
+            persistent: If False, omitted from state_dict (PyTorch parity; optional)
+        """
+        if tensor is None:
+            self._buffers.pop(name, None)
+            if hasattr(self, name):
+                delattr(self, name)
+            return
+        try:
+            from grilly.torch_api.tensor import Tensor as _TorchTensor
+        except ImportError:
+            _TorchTensor = None  # type: ignore[assignment]
+        if _TorchTensor is not None and isinstance(tensor, _TorchTensor):
+            self._buffers[name] = tensor
+            setattr(self, name, tensor)
+        elif hasattr(tensor, "data") and not isinstance(tensor, np.ndarray):
+            arr = np.asarray(tensor.data)
+            self._buffers[name] = arr
+            setattr(self, name, arr)
+        else:
+            arr = np.asarray(tensor)
+            self._buffers[name] = arr
+            setattr(self, name, arr)
+        if not persistent:
+            # Mark non-persistent with a private set on the buffer entry
+            setattr(self, f"_np_buffer_{name}", True)
+
     def state_dict(self) -> dict[str, Any]:
         """Execute state dict."""
 
@@ -243,6 +347,19 @@ class Module:
                 state[name] = param.data.copy()  # ParamWrapper
             else:
                 state[name] = param
+        try:
+            from grilly.torch_api.tensor import Tensor as _TorchTensor
+        except ImportError:
+            _TorchTensor = None  # type: ignore[assignment]
+        for name, buf in self._buffers.items():
+            if getattr(self, f"_np_buffer_{name}", False):
+                continue
+            if _TorchTensor is not None and isinstance(buf, _TorchTensor):
+                state[name] = buf.data.copy()
+            elif isinstance(buf, np.ndarray):
+                state[name] = buf.copy()
+            else:
+                state[name] = np.asarray(buf)
         for name, module in self._modules.items():
             state[name] = module.state_dict()
         return state
@@ -256,9 +373,40 @@ class Module:
                     self._parameters[name] = state_dict[name].copy()
                 else:
                     self._parameters[name] = state_dict[name]
+        try:
+            from grilly.torch_api.tensor import Tensor as _TorchTensor
+        except ImportError:
+            _TorchTensor = None  # type: ignore[assignment]
+        for name in list(self._buffers.keys()):
+            if name in state_dict:
+                prev = self._buffers.get(name)
+                raw = state_dict[name]
+                if _TorchTensor is not None and isinstance(prev, _TorchTensor):
+                    self._buffers[name] = _TorchTensor(
+                        np.asarray(raw, dtype=np.float32).copy(), requires_grad=False
+                    )
+                else:
+                    val = np.asarray(raw, dtype=np.float32)
+                    if val.dtype != np.float32 and np.issubdtype(val.dtype, np.floating):
+                        val = val.astype(np.float32)
+                    self._buffers[name] = val
+                setattr(self, name, self._buffers[name])
         for name, module in self._modules.items():
             if name in state_dict:
                 module.load_state_dict(state_dict[name])
+
+    def named_buffers(self):
+        """Yield (name, buffer) for all buffers including child modules."""
+        for name, buf in self._buffers.items():
+            yield name, buf
+        for prefix, module in self._modules.items():
+            for n, b in module.named_buffers():
+                yield f"{prefix}.{n}", b
+
+    def buffers(self):
+        """Iterator over buffers."""
+        for _, b in self.named_buffers():
+            yield b
 
     def gpu_mode(self, enable=True, device_local=True):
         """Enable GPU-resident output (returns VulkanTensor instead of numpy).
@@ -314,6 +462,36 @@ class Module:
         """Execute llama cpp."""
 
         return self.to("llama-cpp")
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Auto-register ``Parameter`` / child ``Module`` attributes (PyTorch parity).
+
+        Without this hook, ``self.weight = nn.Parameter(...)`` and
+        ``self.lin = nn.Linear(...)`` only land in ``self.__dict__``, never in
+        ``self._parameters`` / ``self._modules``. ``parameters()`` then walks
+        empty dicts and the optimizer sees no params to update — silently
+        breaking every Module subclass that uses the standard PyTorch
+        attribute-assignment idiom.
+        """
+        if isinstance(value, Parameter):
+            # Ensure base __init__ has run; if not, fall back to plain assign.
+            params = self.__dict__.get("_parameters")
+            if params is not None:
+                # Drop any prior child module / buffer with the same name first.
+                self.__dict__.get("_modules", {}).pop(name, None)
+                self.__dict__.get("_buffers", {}).pop(name, None)
+                params[name] = value
+                object.__setattr__(self, name, value)
+                return
+        elif isinstance(value, Module):
+            modules = self.__dict__.get("_modules")
+            if modules is not None:
+                self.__dict__.get("_parameters", {}).pop(name, None)
+                self.__dict__.get("_buffers", {}).pop(name, None)
+                modules[name] = value
+                object.__setattr__(self, name, value)
+                return
+        object.__setattr__(self, name, value)
 
     def __repr__(self):
         """Return a debug representation."""

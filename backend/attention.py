@@ -8,7 +8,7 @@ import struct
 
 import numpy as np
 
-from .base import VULKAN_AVAILABLE, BufferMixin
+from .base import BufferMixin, VULKAN_PYTHON_BINDINGS_AVAILABLE
 from .shader_registry import get_shader
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ except ImportError:
     numba_prosody_modulation = None
     numba_attention_output = None
 
-if VULKAN_AVAILABLE:
+if VULKAN_PYTHON_BINDINGS_AVAILABLE:
     from vulkan import *
 
 

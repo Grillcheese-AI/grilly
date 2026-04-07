@@ -52,6 +52,9 @@ from .autograd import (
     lt,
     matmul,
     max,
+    mf_sigmoid,
+    mf_softmax,
+    mf_softplus,
     mean,
     min,
     mse_loss,
@@ -72,6 +75,7 @@ from .autograd import (
     # Shapes
     reshape,
     sigmoid,
+    sign,
     silu,
     # Trigonometric
     sin,
@@ -141,7 +145,13 @@ from .memory import (
     MemoryRead,
     MemoryWrite,
 )
+from .addition_linear import AdditionLinear
+from . import functional
+from . import init
 from .module import Module
+from .module_list import ModuleList
+from . import utils
+from .vsa_lm import VsaLmModel
 from .modules import (
     GCU,
     GELU,
@@ -280,6 +290,10 @@ from .multimodal import (
 __all__ = [
     # Base class
     "Module",
+    "ModuleList",
+    "functional",
+    "init",
+    "utils",
     # Standard layers
     "Linear",
     "LayerNorm",
@@ -370,6 +384,9 @@ __all__ = [
     "DomainPredictor",
     "DomainClassifier",
     "ExpertCombiner",
+    # AdditionLinear (VSA)
+    "AdditionLinear",
+    "VsaLmModel",
     # Affect layers (when implemented)
     "AffectMLP",
     # Capsule layers
@@ -414,6 +431,9 @@ __all__ = [
     "neg",
     "pow",
     "matmul",
+    "mf_sigmoid",
+    "mf_softmax",
+    "mf_softplus",
     # Reductions
     "sum",
     "mean",
@@ -425,6 +445,7 @@ __all__ = [
     # Activations
     "relu",
     "sigmoid",
+    "sign",
     "tanh",
     "exp",
     "log",

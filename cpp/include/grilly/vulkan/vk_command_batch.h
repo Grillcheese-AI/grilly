@@ -31,6 +31,12 @@ public:
 
     void barrier();
 
+    /// Bidirectional TRANSFER ↔ COMPUTE memory barrier — covers both
+    /// stage-in → compute (TRANSFER_WRITE → SHADER_READ) and
+    /// compute → stage-out (SHADER_WRITE → TRANSFER_READ). Used by the
+    /// staging-buffer pattern in cpp/src/ops/linear.cpp.
+    void transferComputeBarrier();
+
     /// GPU-to-GPU buffer copy (no CPU involvement).
     void copyBuffer(const GrillyBuffer& src, GrillyBuffer& dst, size_t bytes);
 

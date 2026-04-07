@@ -188,46 +188,105 @@ class Linear(Module):
         if self.bias is not None:
             self.register_parameter("bias", self.bias)
 
-    def forward(self, x) -> np.ndarray:
-        """Forward pass — GPU-first, always dispatches through GPU backend."""
+    def forward(self, x):
+        """Forward pass — GPU-first, always dispatches through GPU backend.
+
+        Autograd: when ``x`` is an autograd ``Variable`` (or carries
+        ``requires_grad``), the output is wrapped in a ``Variable`` with a
+        ``GradFn`` that calls ``self.backward(grad_output, x_data)`` during
+        ``loss.backward()``. ``self.backward`` already populates
+        ``self.weight.grad`` and ``self.bias.grad`` from the existing
+        ``fnn-linear-backward.glsl`` kernel, so the AdamW step picks them up
+        through ``param.grad`` like any other PyTorch-style optimizer.
+
+        Without this wiring, ``loss.backward()`` produced gradients on the
+        Variable wrapping the cross-entropy logits but the chain stopped at
+        ``Linear`` (no ``grad_fn`` -> autograd traversal terminated), so
+        weights silently never updated.
+        """
+        # Detect autograd input (Variable, or Tensor — Tensor is a Variable subclass)
+        # and remember its underlying ndarray for the backward closure.
+        try:
+            from grilly.nn.autograd import GradFn as _GradFn
+            from grilly.nn.autograd import Variable as _Variable
+            from grilly.nn.autograd import _grad_enabled
+        except ImportError:
+            _Variable = None  # type: ignore[assignment]
+            _GradFn = None  # type: ignore[assignment]
+            _grad_enabled = False
+
+        x_var: "_Variable | None" = None  # type: ignore[name-defined]
+        if _Variable is not None and isinstance(x, _Variable):
+            x_var = x
+            x_data = x.data
+        else:
+            x_data = x  # raw ndarray (or VulkanTensor)
+
         weight = _get_param_array(self.weight)
         bias = _get_param_array(self.bias) if self.bias is not None else None
 
         def cpu_linear():
-            x_arr = np.asarray(x, dtype=np.float32)
+            x_arr = np.asarray(x_data, dtype=np.float32)
             w_arr = np.asarray(weight, dtype=np.float32)
             out = x_arr @ w_arr.T
             if bias is not None:
                 out = out + np.asarray(bias, dtype=np.float32)
             return np.asarray(out, dtype=np.float32)
 
-        # C++ bridge fast path (handles both numpy and VulkanTensor via __array__)
+        # ---- Run the existing forward path (unchanged) ----
+        result: np.ndarray | None = None
         if _USE_CPP_BRIDGE:
             def gpu_linear():
-                return _bridge_to_numpy(_bridge.linear(x, weight, bias))
+                return _bridge_to_numpy(_bridge.linear(x_data, weight, bias))
 
             # Auto-fastest policy only for numpy-in/numpy-out path.
-            if isinstance(x, np.ndarray) and not self._return_gpu_tensor:
-                batch = int(np.prod(x.shape[:-1])) if x.ndim > 1 else 1
-                in_features = int(x.shape[-1]) if x.ndim > 0 else self.in_features
+            if isinstance(x_data, np.ndarray) and not self._return_gpu_tensor:
+                batch = int(np.prod(x_data.shape[:-1])) if x_data.ndim > 1 else 1
+                in_features = int(x_data.shape[-1]) if x_data.ndim > 0 else self.in_features
                 op_key = f"linear:{batch}x{in_features}x{self.out_features}"
-                return choose_fastest(op_key, gpu_linear, cpu_linear)
+                result = choose_fastest(op_key, gpu_linear, cpu_linear)
+            else:
+                result = gpu_linear()
 
-            result = gpu_linear()
-            if result is not None:
-                return result
+        if result is None:
+            # Legacy Python Vulkan backend (fallback) or final CPU path
+            backend = self._get_backend()
+            if hasattr(backend, "fnn") and hasattr(backend.fnn, "linear"):
+                result = backend.fnn.linear(
+                    x_data,
+                    weight,
+                    bias,
+                    return_gpu_tensor=self._return_gpu_tensor,
+                )
+            else:
+                result = cpu_linear()
 
-        # Legacy Python Vulkan backend (fallback)
-        backend = self._get_backend()
-        if hasattr(backend, "fnn") and hasattr(backend.fnn, "linear"):
-            return backend.fnn.linear(
-                x,
-                weight,
-                bias,
-                return_gpu_tensor=self._return_gpu_tensor,
-            )
+        # ---- Autograd wiring ----
+        # If the input came from autograd, wrap result so loss.backward()
+        # can flow back through this layer and populate weight.grad / bias.grad
+        # via the existing self.backward() implementation. We bypass
+        # ``_make_backward`` (which short-circuits when no input requires grad)
+        # because the *weight* always requires grad even if the input doesn't —
+        # otherwise a frozen-input training loop silently never updates weights.
+        if (
+            x_var is not None
+            and _GradFn is not None
+            and _grad_enabled
+            and isinstance(result, np.ndarray)
+            and not isinstance(result, _Variable)
+        ):
+            x_data_for_backward = x_data  # capture for closure
 
-        return cpu_linear()
+            def backward_fn(grad_output):
+                # self.backward populates self.weight.grad and self.bias.grad
+                # in-place and returns grad_input.
+                grad_input = self.backward(np.asarray(grad_output), x_data_for_backward)
+                return (grad_input,)
+
+            grad_fn = _GradFn("Linear", backward_fn, [x_var])
+            return _Variable(np.asarray(result), requires_grad=True, grad_fn=grad_fn)
+
+        return result
 
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """

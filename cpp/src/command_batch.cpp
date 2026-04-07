@@ -131,6 +131,32 @@ void CommandBatch::barrier() {
                          0, nullptr);      // image memory barriers
 }
 
+void CommandBatch::transferComputeBarrier() {
+    if (!recording_)
+        return;
+
+    // Bidirectional TRANSFER ↔ COMPUTE barrier. The src/dst access masks
+    // cover both edges (stage-in → compute and compute → stage-out) so the
+    // staging-buffer pattern in linear() can use a single method for both
+    // transitions without tracking direction.
+    VkMemoryBarrier memBarrier{};
+    memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    memBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT |
+                               VK_ACCESS_SHADER_WRITE_BIT;
+    memBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT |
+                               VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd_,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT |
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT |
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0,
+                         1, &memBarrier,
+                         0, nullptr,
+                         0, nullptr);
+}
+
 void CommandBatch::copyBuffer(const GrillyBuffer& src, GrillyBuffer& dst, size_t bytes) {
     if (!recording_)
         throw std::runtime_error("CommandBatch::copyBuffer() called without begin()");

@@ -8,7 +8,7 @@ import pytest
 
 try:
     from grilly import Compute
-    from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.backend.base import VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
 except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
@@ -96,7 +96,7 @@ def _ref_gqa_decode_attention(
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestRMSNormGPU:
     """Test RMSNorm on GPU"""
 
@@ -174,7 +174,7 @@ class TestRMSNormGPU:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestSwiGLUFusedGPU:
     """Test fused SwiGLU on GPU"""
 
@@ -231,7 +231,7 @@ class TestSwiGLUFusedGPU:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestGEMMInt8GPU:
     """Test INT8 weight-only GEMM on GPU"""
 
@@ -295,7 +295,7 @@ class TestGEMMInt8GPU:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestGQADecodeAttentionGPU:
     """Test GQA decode attention on GPU"""
 

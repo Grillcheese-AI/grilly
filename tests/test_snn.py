@@ -7,7 +7,7 @@ import pytest
 
 try:
     from grilly import SNNCompute
-    from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.backend.base import VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
 except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
@@ -136,7 +136,7 @@ class TestSNNProcess:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 class TestSNNGPU:
     """Test SNN with GPU (if available)"""
 

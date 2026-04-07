@@ -6,7 +6,7 @@ import logging
 
 import numpy as np
 
-from .base import VULKAN_AVAILABLE
+from .base import VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
 from .compute import VulkanCompute
 
 # Import config for SNN parameters (optional - for integration with main project)
@@ -70,7 +70,7 @@ class SNNCompute:
         self.use_vulkan = False
         self.backend = None
 
-        if use_vulkan and VULKAN_AVAILABLE:
+        if use_vulkan and VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE:
             try:
                 self.backend = VulkanCompute()
                 self.use_vulkan = True

@@ -83,5 +83,20 @@ void softmaxBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
                      float* gradInput, uint32_t batchSize, uint32_t seqLen,
                      uint32_t numClasses);
 
+/// Multiplication-free softmax (ReLU-normalized): shader ``mf-softmax`` (same 3-pass
+/// layout as ``activation-softmax``).
+void mfSoftmax(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+               const float* input, float* output, uint32_t batchSize, uint32_t seqLen,
+               uint32_t features);
+
+/// Algebraic softplus: ``0.5 * (x + sqrt(x*x + c))`` with ``c = 4/beta^2``. Shader
+/// ``mf-softplus`` (2 buffers).
+void mfSoftplus(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+                const float* input, float* output, uint32_t totalElements, float beta);
+
+/// Rational sigmoid ``x / (1 + |x|)``. Shader ``mf-sigmoid`` (2 buffers).
+void mfSigmoid(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+               const float* input, float* output, uint32_t totalElements);
+
 }  // namespace ops
 }  // namespace grilly

@@ -10,6 +10,7 @@
 #include "grilly/ops/batched_ops.h"
 #include "grilly/ops/linear.h"
 #include "grilly/ops/activations.h"
+#include "grilly/ops/embedding.h"
 
 namespace grilly {
 namespace ops {
@@ -183,6 +184,33 @@ void batchedAdd(CommandBatch& batch, PipelineCache& cache,
 
     uint32_t push = totalElements;
     uint32_t gx = (totalElements + 255) / 256;
+
+    batch.dispatch(pipe.pipeline, pipe.layout, desc, gx, 1, 1,
+                   &push, sizeof(push));
+}
+
+void batchedEmbeddingLookup(CommandBatch& batch, PipelineCache& cache,
+                            const GrillyBuffer& tokenIds, const GrillyBuffer& embedTable,
+                            GrillyBuffer& output, uint32_t batchSize, uint32_t seqLen,
+                            uint32_t vocabSize, uint32_t embeddingDim) {
+
+    PipelineEntry pipe = cache.getOrCreate("embedding-lookup", 3,
+                                           sizeof(EmbeddingParams));
+
+    const uint32_t totalTokens = batchSize * seqLen;
+    size_t idBytes = size_t(totalTokens) * sizeof(uint32_t);
+    size_t embedBytes = size_t(vocabSize) * embeddingDim * sizeof(float);
+    size_t outBytes = size_t(totalTokens) * embeddingDim * sizeof(float);
+
+    std::vector<VkDescriptorBufferInfo> bufs = {
+        {tokenIds.handle,   0, idBytes},
+        {embedTable.handle, 0, embedBytes},
+        {output.handle,     0, outBytes},
+    };
+    VkDescriptorSet desc = cache.allocDescriptorSet("embedding-lookup", bufs);
+
+    EmbeddingParams push{batchSize, seqLen, vocabSize, embeddingDim};
+    uint32_t gx = (totalTokens + 255) / 256;
 
     batch.dispatch(pipe.pipeline, pipe.layout, desc, gx, 1, 1,
                    &push, sizeof(push));

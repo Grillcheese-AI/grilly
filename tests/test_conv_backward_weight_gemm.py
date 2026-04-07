@@ -15,13 +15,13 @@ import torch.nn.functional as F
 
 try:
     from grilly.backend.compute import VulkanCompute
-    from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.backend.base import VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
 except ImportError:
     pytest.skip("grilly not available", allow_module_level=True)
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available")
 def test_conv2d_backward_weight_matches_torch_gemm_path():
     """Small conv: dW from Grilly GEMM path vs torch autograd."""
     np.random.seed(123)

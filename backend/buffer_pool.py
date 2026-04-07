@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .base import VULKAN_AVAILABLE
+from .base import VULKAN_PYTHON_BINDINGS_AVAILABLE
 
 if TYPE_CHECKING:
     from .core import VulkanCore
@@ -53,7 +53,7 @@ try:
 except ImportError:
     logger.debug("PyVMA2 not available - using direct Vulkan allocation")
 
-if VULKAN_AVAILABLE:
+if VULKAN_PYTHON_BINDINGS_AVAILABLE:
     from vulkan import (
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
         VK_SHARING_MODE_EXCLUSIVE,

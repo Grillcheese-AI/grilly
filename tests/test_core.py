@@ -7,12 +7,13 @@ import pytest
 
 try:
     import grilly
-    from grilly.backend.base import VULKAN_AVAILABLE
+    from grilly.backend.base import VULKAN_AVAILABLE, VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE
 
     GRILLY_AVAILABLE = True
 except ImportError:
     GRILLY_AVAILABLE = False
     VULKAN_AVAILABLE = False
+    VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE = False
 
 
 class TestGrillyImports:
@@ -49,7 +50,9 @@ class TestGrillyImports:
 
 
 @pytest.mark.gpu
-@pytest.mark.skipif(not VULKAN_AVAILABLE, reason="Vulkan not available")
+@pytest.mark.skipif(
+    not VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE, reason="Vulkan not available"
+)
 class TestComputeInitialization:
     """Test Compute backend initialization"""
 

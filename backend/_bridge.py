@@ -11,6 +11,10 @@ bridge functions with a try/fallback pattern:
     result = _bridge.linear(x, weight, bias)
     if result is not None: return result
     # else fall through to legacy backend
+
+Fused MoE (:func:`moe_upload`, :func:`moe_forward`, :func:`moe_backward`, etc.)
+uses the same lazy :func:`_get_device` and ``shaders/spv`` load as other bridge
+ops—prefer these over calling ``grilly_core.moe_*`` with a separate Device.
 """
 
 import logging
@@ -695,6 +699,42 @@ def softmax_backward(grad_output, softmax_output):
         )
     except Exception as e:
         _record_fallback("softmax_backward", e)
+        return None
+
+
+def mf_softmax(x, dim=-1):
+    """GPU multiplication-free softmax (ReLU-normalized). Returns None on failure."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.mf_softmax(dev, _ensure_f32_contiguous(x), dim)
+    except Exception as e:
+        _record_fallback("mf_softmax", e)
+        return None
+
+
+def mf_softplus(x, beta=1.0):
+    """GPU algebraic softplus (sqrt form). Returns None on failure."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.mf_softplus(dev, _ensure_f32_contiguous(x), float(beta))
+    except Exception as e:
+        _record_fallback("mf_softplus", e)
+        return None
+
+
+def mf_sigmoid(x):
+    """GPU rational sigmoid x/(1+|x|). Returns None on failure."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.mf_sigmoid(dev, _ensure_f32_contiguous(x))
+    except Exception as e:
+        _record_fallback("mf_sigmoid", e)
         return None
 
 
@@ -1739,6 +1779,302 @@ def moqe_route_and_gemv(activations, choice, expert_weights, expert_scales, bloc
         expert_scales[choice],
         block_size,
     )
+
+
+# ── Fused MoE (grilly_core moe_* — same lazy device + shaders as other bridge ops) ──
+
+
+def moe_upload(embed_w, pos_w, expert_ws, router_ws, router_bs, out_w, n_layers, n_experts):
+    """Upload MoE weights to GPU; returns an opaque integer handle.
+
+    Uses the shared bridge :func:`_get_device` (lazy init + ``shaders/spv`` load).
+
+    Args:
+        embed_w: float32 (vocab, d_model), C-contiguous.
+        pos_w: float32 (max_seq, d_model).
+        expert_ws: list of length ``n_layers * n_experts``, each (d_model, d_model).
+        router_ws: list of length ``n_layers``, each (n_experts, d_model).
+        router_bs: list of length ``n_layers``, each (n_experts,).
+        out_w: float32 (vocab, d_model) — output projection.
+        n_layers, n_experts: int.
+
+    Returns:
+        int handle, or ``None`` if the C++ extension / device is unavailable.
+    """
+    if not _NATIVE or not hasattr(_core, "moe_upload"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.moe_upload(
+            dev,
+            _ensure_f32_contiguous(embed_w),
+            _ensure_f32_contiguous(pos_w),
+            expert_ws,
+            router_ws,
+            router_bs,
+            _ensure_f32_contiguous(out_w),
+            int(n_layers),
+            int(n_experts),
+        )
+    except Exception as e:
+        _record_fallback("moe_upload", e)
+        return None
+
+
+def moe_release(handle):
+    """Free GPU resources for a handle from :func:`moe_upload`.
+
+    Returns:
+        ``True`` if released, ``False`` if bridge/device unavailable.
+    """
+    if not _NATIVE or not hasattr(_core, "moe_release"):
+        return False
+    dev = _get_device()
+    if dev is None:
+        return False
+    try:
+        _core.moe_release(dev, int(handle))
+        return True
+    except Exception as e:
+        _record_fallback("moe_release", e)
+        return False
+
+
+def moe_forward(handle, input_ids):
+    """Run fused MoE forward; returns logits (seq_len, vocab).
+
+    Args:
+        handle: int from :func:`moe_upload`.
+        input_ids: int32 1-D (seq_len,), C-contiguous.
+
+    Returns:
+        float32 ndarray or ``None`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "moe_forward"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    ids = np.asarray(input_ids, dtype=np.int32)
+    if not ids.flags.c_contiguous:
+        ids = np.ascontiguousarray(ids, dtype=np.int32)
+    try:
+        return _core.moe_forward(dev, int(handle), ids)
+    except Exception as e:
+        _record_fallback("moe_forward", e)
+        return None
+
+
+def moe_update_weights(handle, embed_w, pos_w, expert_ws, router_ws, router_bs, out_w):
+    """Re-upload weights in place (same shapes as :func:`moe_upload`).
+
+    Returns:
+        ``True`` on success, ``False`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "moe_update_weights"):
+        return False
+    dev = _get_device()
+    if dev is None:
+        return False
+    try:
+        _core.moe_update_weights(
+            dev,
+            int(handle),
+            _ensure_f32_contiguous(embed_w),
+            _ensure_f32_contiguous(pos_w),
+            expert_ws,
+            router_ws,
+            router_bs,
+            _ensure_f32_contiguous(out_w),
+        )
+        return True
+    except Exception as e:
+        _record_fallback("moe_update_weights", e)
+        return False
+
+
+def moe_backward(handle, input_ids, grad_logits):
+    """CPU backward for MoE (gradients dict); uses CPU mirrors from upload.
+
+    Args:
+        handle: int from :func:`moe_upload`.
+        input_ids: int32 (seq_len,) — same sequence as forward.
+        grad_logits: float32 (seq_len, vocab).
+
+    Returns:
+        dict with keys ``grad_embed``, ``grad_pos``, ``grad_experts``, ``grad_routers_W``,
+        ``grad_routers_b``, ``grad_out_w``, or ``None`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "moe_backward"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    ids = np.asarray(input_ids, dtype=np.int32)
+    if not ids.flags.c_contiguous:
+        ids = np.ascontiguousarray(ids, dtype=np.int32)
+    g = _ensure_f32_contiguous(grad_logits)
+    try:
+        return _core.moe_backward(dev, int(handle), ids, g)
+    except Exception as e:
+        _record_fallback("moe_backward", e)
+        return None
+
+
+# ── Fused VSA-LM (grilly_core vsa_lm_* — AdditionLinear FFN + sign activation) ──
+
+
+def vsa_lm_upload(
+    embed_w, pos_w,
+    ffn_up_patterns, ffn_up_biases, ffn_down_patterns, ffn_down_biases,
+    ln_gammas, ln_betas, out_w,
+    n_layers, d_model, d_ffn,
+):
+    """Upload VSA-LM weights to GPU; returns an opaque integer handle.
+
+    Uses the shared bridge :func:`_get_device` (lazy init + ``shaders/spv`` load).
+
+    Args:
+        embed_w: float32 (vocab, d_model).
+        pos_w: float32 (max_seq, d_model).
+        ffn_up_patterns: list of (d_ffn, d_model) float32, length n_layers.
+        ffn_up_biases: list of (d_ffn,) float32, length n_layers.
+        ffn_down_patterns: list of (d_model, d_ffn) float32, length n_layers.
+        ffn_down_biases: list of (d_model,) float32, length n_layers.
+        ln_gammas: list of (d_model,) float32, length n_layers.
+        ln_betas: list of (d_model,) float32, length n_layers.
+        out_w: float32 (vocab, d_model).
+        n_layers, d_model, d_ffn: int.
+
+    Returns:
+        int handle, or ``None`` if the C++ extension / device is unavailable.
+    """
+    if not _NATIVE or not hasattr(_core, "vsa_lm_upload"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.vsa_lm_upload(
+            dev,
+            _ensure_f32_contiguous(embed_w),
+            _ensure_f32_contiguous(pos_w),
+            ffn_up_patterns, ffn_up_biases,
+            ffn_down_patterns, ffn_down_biases,
+            ln_gammas, ln_betas,
+            _ensure_f32_contiguous(out_w),
+            int(n_layers), int(d_model), int(d_ffn),
+        )
+    except Exception as e:
+        _record_fallback("vsa_lm_upload", e)
+        return None
+
+
+def vsa_lm_release(handle):
+    """Free GPU resources for a handle from :func:`vsa_lm_upload`.
+
+    Returns:
+        ``True`` if released, ``False`` if bridge/device unavailable.
+    """
+    if not _NATIVE or not hasattr(_core, "vsa_lm_release"):
+        return False
+    dev = _get_device()
+    if dev is None:
+        return False
+    try:
+        _core.vsa_lm_release(dev, int(handle))
+        return True
+    except Exception as e:
+        _record_fallback("vsa_lm_release", e)
+        return False
+
+
+def vsa_lm_forward(handle, input_ids):
+    """Run fused VSA-LM forward; returns logits (seq_len, vocab).
+
+    Args:
+        handle: int from :func:`vsa_lm_upload`.
+        input_ids: int32 1-D (seq_len,), C-contiguous.
+
+    Returns:
+        float32 ndarray or ``None`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "vsa_lm_forward"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    ids = np.asarray(input_ids, dtype=np.int32)
+    if not ids.flags.c_contiguous:
+        ids = np.ascontiguousarray(ids, dtype=np.int32)
+    try:
+        return _core.vsa_lm_forward(dev, int(handle), ids)
+    except Exception as e:
+        _record_fallback("vsa_lm_forward", e)
+        return None
+
+
+def vsa_lm_backward(handle, input_ids, grad_logits):
+    """CPU backward for VSA-LM (gradients dict); uses CPU mirrors from upload.
+
+    Args:
+        handle: int from :func:`vsa_lm_upload`.
+        input_ids: int32 (seq_len,) — same sequence as forward.
+        grad_logits: float32 (seq_len, vocab).
+
+    Returns:
+        dict with keys ``grad_embed``, ``grad_pos``, ``grad_out_w``,
+        ``grad_ffn_up_w``, ``grad_ffn_up_b``, ``grad_ffn_down_w``,
+        ``grad_ffn_down_b``, ``grad_ln_gamma``, ``grad_ln_beta``,
+        or ``None`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "vsa_lm_backward"):
+        return None
+    dev = _get_device()
+    if dev is None:
+        return None
+    ids = np.asarray(input_ids, dtype=np.int32)
+    if not ids.flags.c_contiguous:
+        ids = np.ascontiguousarray(ids, dtype=np.int32)
+    g = _ensure_f32_contiguous(grad_logits)
+    try:
+        return _core.vsa_lm_backward(dev, int(handle), ids, g)
+    except Exception as e:
+        _record_fallback("vsa_lm_backward", e)
+        return None
+
+
+def vsa_lm_update_weights(
+    handle, embed_w, pos_w,
+    ffn_up_patterns, ffn_up_biases, ffn_down_patterns, ffn_down_biases,
+    ln_gammas, ln_betas, out_w,
+):
+    """Re-upload VSA-LM weights in place (same shapes as :func:`vsa_lm_upload`).
+
+    Returns:
+        ``True`` on success, ``False`` on failure.
+    """
+    if not _NATIVE or not hasattr(_core, "vsa_lm_update_weights"):
+        return False
+    dev = _get_device()
+    if dev is None:
+        return False
+    try:
+        _core.vsa_lm_update_weights(
+            dev, int(handle),
+            _ensure_f32_contiguous(embed_w),
+            _ensure_f32_contiguous(pos_w),
+            ffn_up_patterns, ffn_up_biases,
+            ffn_down_patterns, ffn_down_biases,
+            ln_gammas, ln_betas,
+            _ensure_f32_contiguous(out_w),
+        )
+        return True
+    except Exception as e:
+        _record_fallback("vsa_lm_update_weights", e)
+        return False
 
 
 # ── Bridge support for functional modules without native kernels ──────────

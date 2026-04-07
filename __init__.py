@@ -19,11 +19,29 @@ This package provides GPU acceleration for:
 - Hippocampal transformer with capsule memory
 """
 
+# grilly_core.<plat>.pyd lives in this directory as a sibling .pyd. Editable
+# (PEP 660) installs route `import grilly` through a path hook that does NOT
+# add this directory to sys.path, so `import grilly_core` would fail and the
+# Vulkan probe in backend/base.py would silently report VULKAN_AVAILABLE=False
+# even on machines with a perfectly working Vulkan device. Insert the package
+# directory once, before any submodule import triggers the probe.
+import os as _os
+import sys as _sys
+_pkg_dir = _os.path.dirname(_os.path.abspath(__file__))
+if _pkg_dir not in _sys.path:
+    _sys.path.insert(0, _pkg_dir)
+
 import grilly.functional as functional
 import grilly.nn as nn
 import grilly.optim as optim
 import grilly.utils as utils
-from grilly.backend.base import VULKAN_AVAILABLE
+
+from . import torch_api
+from grilly.backend.base import (
+    VULKAN_AVAILABLE,
+    VULKAN_PYTHON_BINDINGS_AVAILABLE,
+    VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE,
+)
 from grilly.backend.capsule_transformer import (
     CapsuleMemory,
     CapsuleTransformerConfig,
@@ -65,6 +83,8 @@ except Exception:
 
 __all__ = [
     "VULKAN_AVAILABLE",
+    "VULKAN_PYTHON_BINDINGS_AVAILABLE",
+    "VULKAN_PYTHON_LEGACY_BACKEND_AVAILABLE",
     "VulkanCompute",
     "Compute",
     "SNNCompute",
@@ -79,6 +99,7 @@ __all__ = [
     "functional",
     "optim",
     "utils",
+    "torch_api",
 ]
 
 # Conditionally add compatibility exports
