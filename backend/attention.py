@@ -8,7 +8,7 @@ import struct
 
 import numpy as np
 
-from .base import BufferMixin, VULKAN_PYTHON_BINDINGS_AVAILABLE
+from .base import VULKAN_PYTHON_BINDINGS_AVAILABLE, BufferMixin
 from .shader_registry import get_shader
 
 logger = logging.getLogger(__name__)

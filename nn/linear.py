@@ -13,8 +13,8 @@ from ._helpers import (
     _bridge_to_numpy,
     _get_param_array,
 )
-from .module import Module
 from ._perf_policy import choose_fastest
+from .module import Module
 
 
 class Linear(Module):
@@ -215,7 +215,7 @@ class Linear(Module):
             _GradFn = None  # type: ignore[assignment]
             _grad_enabled = False
 
-        x_var: "_Variable | None" = None  # type: ignore[name-defined]
+        x_var: _Variable | None = None  # type: ignore[name-defined]
         if _Variable is not None and isinstance(x, _Variable):
             x_var = x
             x_data = x.data

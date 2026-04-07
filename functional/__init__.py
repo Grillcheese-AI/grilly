@@ -10,13 +10,6 @@ from .activations import (
     softmax,
     softplus,
 )
-from .mf_activations import (
-    mf_relu,
-    mf_sigmoid,
-    mf_sigmoid_01,
-    mf_softmax,
-    mf_softplus,
-)
 from .attention import (
     attention,
     flash_attention2,
@@ -83,6 +76,13 @@ from .memory import (
     memory_query_pooling,
     memory_read,
     memory_write,
+)
+from .mf_activations import (
+    mf_relu,
+    mf_sigmoid,
+    mf_sigmoid_01,
+    mf_softmax,
+    mf_softplus,
 )
 from .normalization import (
     layer_norm,

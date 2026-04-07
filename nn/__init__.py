@@ -1,5 +1,7 @@
 """Neural network module namespace for the Grilly framework."""
 
+from . import functional, init, utils
+from .addition_linear import AdditionLinear
 from .affect import (
     AffectMLP,
 )
@@ -52,10 +54,10 @@ from .autograd import (
     lt,
     matmul,
     max,
+    mean,
     mf_sigmoid,
     mf_softmax,
     mf_softplus,
-    mean,
     min,
     mse_loss,
     mul,
@@ -145,13 +147,8 @@ from .memory import (
     MemoryRead,
     MemoryWrite,
 )
-from .addition_linear import AdditionLinear
-from . import functional
-from . import init
 from .module import Module
 from .module_list import ModuleList
-from . import utils
-from .vsa_lm import VsaLmModel
 from .modules import (
     GCU,
     GELU,
@@ -252,6 +249,7 @@ from .transformer import (
     TransformerDecoderLayer,
     TransformerEncoderLayer,
 )
+from .vsa_lm import VsaLmModel
 
 # Backend autograd integration
 try:

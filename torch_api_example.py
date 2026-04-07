@@ -9,14 +9,14 @@ overhead. Sequence-mean is O(1) per layer per sequence — GPU-friendly and
 the architecture that trained the checkpoint in the first place.
 """
 
+import math
+import os
+import time
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-import time
-import os
-
-import numpy as np
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

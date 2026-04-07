@@ -10,9 +10,7 @@ Backward uses the subgradient: d/dx |a - b| = -sign(a - b).
 import numpy as np
 
 from ._helpers import (
-    _PARAMETER_AVAILABLE,
     _USE_CPP_BRIDGE,
-    ParameterClass,
     _bridge,
     _bridge_to_numpy,
     _create_param_wrapper,

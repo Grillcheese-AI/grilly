@@ -18,13 +18,14 @@ Usage:
 
 from __future__ import annotations
 
-import time
 import struct
+import time
 from collections import defaultdict
+from collections.abc import Callable
 from enum import IntEnum
-from queue import Queue, Empty
+from queue import Empty, Queue
 from threading import Lock
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -52,7 +53,7 @@ class Message:
     __slots__ = ("type", "payload", "sender_id", "timestamp_ns", "metadata")
 
     def __init__(self, msg_type: MessageType, payload: bytes = b"",
-                 sender_id: str = "", metadata: Dict[str, Any] | None = None):
+                 sender_id: str = "", metadata: dict[str, Any] | None = None):
         self.type = msg_type
         self.payload = payload
         self.sender_id = sender_id
@@ -79,7 +80,7 @@ class Channel:
         self.name = name
         self._cpp_channel = None
         self._py_queue: Queue = Queue(maxsize=max_queue_size)
-        self._listeners: Dict[MessageType, List[Callable]] = defaultdict(list)
+        self._listeners: dict[MessageType, list[Callable]] = defaultdict(list)
         self._lock = Lock()
 
         # Try C++ channel
@@ -195,7 +196,7 @@ class Channel:
         return spikes.reshape(n_timesteps, n_neurons), n_neurons, n_timesteps
 
     def send_telemetry(self, component_id: str, event_type: str,
-                        metrics: Dict[str, float] | None = None,
+                        metrics: dict[str, float] | None = None,
                         step: int = 0) -> None:
         """Send a telemetry event."""
         import json
@@ -212,7 +213,7 @@ class Channel:
         )
         self.send(msg)
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "backend": self.backend,

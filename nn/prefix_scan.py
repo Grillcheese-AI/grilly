@@ -25,8 +25,6 @@ Example::
 
 from __future__ import annotations
 
-from typing import Tuple
-
 import numpy as np
 
 from grilly.nn.autograd import GradFn, Variable, _ensure_variable, _grad_enabled

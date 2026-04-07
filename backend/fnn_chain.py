@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -62,7 +62,7 @@ class FnnChainRecorder(CommandRecorder):
 
     def linear(
         self,
-        x: Union[np.ndarray, ChainBufferHandle, Any],
+        x: np.ndarray | ChainBufferHandle | Any,
         weights: np.ndarray,
         bias: np.ndarray | None = None,
     ) -> ChainBufferHandle:

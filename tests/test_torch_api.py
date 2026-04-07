@@ -1,9 +1,8 @@
 """Smoke tests for ``grilly.torch_api`` (torch-style facade, no PyTorch)."""
 
+import grilly.torch_api as torch
 import numpy as np
 import pytest
-
-import grilly.torch_api as torch
 from grilly.nn import autograd as ag
 
 

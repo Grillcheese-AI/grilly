@@ -397,8 +397,7 @@ class Module:
 
     def named_buffers(self):
         """Yield (name, buffer) for all buffers including child modules."""
-        for name, buf in self._buffers.items():
-            yield name, buf
+        yield from self._buffers.items()
         for prefix, module in self._modules.items():
             for n, b in module.named_buffers():
                 yield f"{prefix}.{n}", b
