@@ -191,3 +191,4 @@ void register_moe_ops(py::module_& m);
 void register_fusion_ops(py::module_& m);
 void register_vsa_lm_ops(py::module_& m);
 void register_grl_ops(py::module_& m);
+void register_prefix_scan_ops(py::module_& m);

@@ -26,14 +26,49 @@ namespace ops {
 // so the dispatch overhead is unchanged from the old fast-path.
 
 void linear(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
-            const float* x, const float* weights, const float* bias,
-            float* output, const LinearParams& p) {
-    // ── Buffer sizes ──
-    const size_t inputBytes  = size_t(p.batchSeq) * p.inputDim * sizeof(float);
-    const size_t weightBytes = size_t(p.outputDim) * p.inputDim * sizeof(float);
+            const void* x, const void* weights, const void* bias,
+            void* output, const LinearParams& p) {
+    // ── Byte sizes (dynamic — fp32 or fp16 determined by p.elemSize) ──
+    const uint32_t inElem  = p.elemSize;          // 2 for fp16, 4 for fp32
+    const size_t inputBytes  = size_t(p.batchSeq) * p.inputDim  * inElem;
+    const size_t weightBytes = size_t(p.outputDim) * p.inputDim * inElem;
+    // Bias is ALWAYS fp32 regardless of input dtype. The fp32 bias matches
+    // both fnn-linear's 3rd binding and gemm-bias-add's accumulator, and
+    // bias is small enough (outputDim floats) that the bandwidth cost of
+    // fp32 vs fp16 is negligible.
     const size_t biasBytes   = p.hasBias ? size_t(p.outputDim) * sizeof(float)
                                          : sizeof(float);  // dummy
+    // The output is ALWAYS fp32 regardless of input dtype — coopmat
+    // accumulator runs in fp32 for numerical stability, and fnn-linear
+    // also writes fp32. The Python binding converts back to fp16 if
+    // requested by the caller's dtype.
     const size_t outputBytes = size_t(p.batchSeq) * p.outputDim * sizeof(float);
+
+    // ── Shader selection ──
+    // Coopmat requirements:
+    //   - fp16 input (elemSize == 2)
+    //   - device exposes VK_KHR_cooperative_matrix
+    //   - the compiled SPIR-V is loaded in the pipeline cache
+    //   - shape aligned to the shader's tile (M%16, K%16, N%64)
+    const bool shapeAligned =
+        (p.batchSeq  % 16u == 0u) &&
+        (p.inputDim  % 16u == 0u) &&
+        (p.outputDim % 64u == 0u);
+    const bool useCoopMat =
+        inElem == 2u &&
+        cache.getDevice().hasCooperativeMatrix() &&
+        cache.hasShader("gemm-coopmat-shared") &&
+        shapeAligned;
+
+    // fp16 input without a coopmat path is not supported in this function —
+    // the fallback fnn-linear shader is fp32-only. Callers must either use
+    // fp32 input or run on a device that supports cooperative matrix.
+    if (inElem == 2u && !useCoopMat) {
+        throw std::runtime_error(
+            "linear(): fp16 input requested but cooperative matrix path is "
+            "unavailable (missing device support, shader, or shape "
+            "alignment — M%16, K%16, N%64 required).");
+    }
 
     // ── Acquire DEVICE_LOCAL compute buffers (cached VRAM, fast GPU access) ──
     GrillyBuffer bufInputDL   = pool.acquireDeviceLocal(inputBytes);
@@ -53,51 +88,119 @@ void linear(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     // HOST_CACHED via acquireReadback gives ~7 GB/s for the same memcpy.
     GrillyBuffer bufOutputStage  = pool.acquireReadback(outputBytes);
 
-    // ── memcpy CPU → staging (no GPU sync needed, persistent mapping) ──
-    pool.upload(bufInputStage, x, inputBytes);
-    pool.upload(bufWeightsStage, weights, weightBytes);
+    // ── memcpy CPU → staging (raw bytes, dtype-agnostic for x/weights) ──
+    pool.upload(bufInputStage,
+                reinterpret_cast<const float*>(x), inputBytes);
+    pool.upload(bufWeightsStage,
+                reinterpret_cast<const float*>(weights), weightBytes);
     if (p.hasBias && bias) {
-        pool.upload(bufBiasStage, bias, p.outputDim * sizeof(float));
+        // Bias is always fp32 (see biasBytes computation above).
+        pool.upload(bufBiasStage,
+                    reinterpret_cast<const float*>(bias),
+                    size_t(p.outputDim) * sizeof(float));
     }
 
-    // ── Get or create pipeline (4 buffers, 16 bytes push constants) ──
-    PipelineEntry pipe = cache.getOrCreate("fnn-linear", 4, 16);
+    // ── Get or create pipeline ──
+    const std::string shaderName = useCoopMat ? "gemm-coopmat-shared"
+                                               : "fnn-linear";
+    // gemm-coopmat-shared has 3 bindings (A, B, C); push constants = 12 bytes.
+    // fnn-linear has 4 bindings (input, weights, bias, output); push 16 bytes.
+    const uint32_t numBindings = useCoopMat ? 3u : 4u;
+    const uint32_t pushSize    = useCoopMat ? 12u : 16u;
+    PipelineEntry pipe = cache.getOrCreate(shaderName, numBindings, pushSize);
 
-    // ── Allocate descriptor set bound to DEVICE_LOCAL buffers ──
-    // The descriptor cache keys on (shader_name, [(buffer.handle, range)]),
-    // so as long as the pool returns stable handles for repeated bucket
-    // requests (LIFO), this hits across calls.
-    std::vector<VkDescriptorBufferInfo> bufferInfos(4);
-    bufferInfos[0] = {bufInputDL.handle,   0, inputBytes};
-    bufferInfos[1] = {bufWeightsDL.handle, 0, weightBytes};
-    bufferInfos[2] = {bufBiasDL.handle,    0, biasBytes};
-    bufferInfos[3] = {bufOutputDL.handle,  0, outputBytes};
+    // ── Allocate descriptor set ──
+    std::vector<VkDescriptorBufferInfo> bufferInfos;
+    if (useCoopMat) {
+        bufferInfos = {
+            {bufInputDL.handle,   0, inputBytes},
+            {bufWeightsDL.handle, 0, weightBytes},
+            {bufOutputDL.handle,  0, outputBytes},
+        };
+    } else {
+        bufferInfos = {
+            {bufInputDL.handle,   0, inputBytes},
+            {bufWeightsDL.handle, 0, weightBytes},
+            {bufBiasDL.handle,    0, biasBytes},
+            {bufOutputDL.handle,  0, outputBytes},
+        };
+    }
+    VkDescriptorSet descSet = cache.allocDescriptorSet(shaderName, bufferInfos);
 
-    VkDescriptorSet descSet = cache.allocDescriptorSet("fnn-linear", bufferInfos);
-
-    LinearParams pushData = p;
-
-    uint32_t gx = (p.outputDim + 15) / 16;
-    uint32_t gy = (p.batchSeq + 15) / 16;
+    // Dispatch grid depends on the shader's output tile.
+    uint32_t gx, gy;
+    if (useCoopMat) {
+        // gemm-coopmat-shared writes a 16×64 (M×N) tile per workgroup.
+        gx = (p.outputDim + 63u) / 64u;
+        gy = (p.batchSeq  + 15u) / 16u;
+    } else {
+        // fnn-linear writes a 16×16 tile per workgroup.
+        gx = (p.outputDim + 15u) / 16u;
+        gy = (p.batchSeq  + 15u) / 16u;
+    }
 
     // ── Single command buffer: stage-in → barrier → compute → barrier → stage-out ──
     batch.begin();
 
-    // Stage-in: DMA copy host-visible staging → DEVICE_LOCAL VRAM
+    // Stage-in: DMA copy host-visible staging → DEVICE_LOCAL VRAM.
+    // Bias goes to DL up front for both paths — fnn-linear reads it via
+    // binding 2, and the coopmat bias-add post-pass reads it via binding 1.
     batch.copyBuffer(bufInputStage,   bufInputDL,   inputBytes);
     batch.copyBuffer(bufWeightsStage, bufWeightsDL, weightBytes);
     if (p.hasBias && bias) {
-        batch.copyBuffer(bufBiasStage, bufBiasDL, p.outputDim * sizeof(float));
+        batch.copyBuffer(bufBiasStage, bufBiasDL,
+                         size_t(p.outputDim) * sizeof(float));
     }
 
-    // Barrier: TRANSFER_WRITE → SHADER_READ
     batch.transferComputeBarrier();
 
-    // Compute on DEVICE_LOCAL buffers (full ~432 GB/s VRAM bandwidth)
-    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
-                   &pushData, sizeof(pushData));
+    if (useCoopMat) {
+        // Coopmat push constants: {M, K, N} (12 bytes)
+        struct CoopPush {
+            uint32_t M;
+            uint32_t K;
+            uint32_t N;
+        } coopPush = {p.batchSeq, p.inputDim, p.outputDim};
+        batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
+                       &coopPush, sizeof(coopPush));
+    } else {
+        // fnn-linear push constants: {batch, in, out, hasBias} (16 bytes)
+        struct FnnPush {
+            uint32_t batchSeq;
+            uint32_t inputDim;
+            uint32_t outputDim;
+            uint32_t hasBias;
+        } fnnPush = {p.batchSeq, p.inputDim, p.outputDim, p.hasBias};
+        batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
+                       &fnnPush, sizeof(fnnPush));
+    }
 
-    // Barrier: SHADER_WRITE → TRANSFER_READ
+    // ── Bias post-pass (coopmat only; fnn-linear applies bias inline) ──
+    // Bias was already copied to bufBiasDL during the stage-in phase above,
+    // so the post-pass just needs a GEMM-write → bias-read barrier and a
+    // dispatch of the gemm-bias-add kernel.
+    if (useCoopMat && p.hasBias && bias &&
+        cache.hasShader("gemm-bias-add")) {
+        batch.barrier();  // SHADER_WRITE (GEMM) → SHADER_READ (bias-add)
+
+        // gemm-bias-add: 2 bindings (C, bias), 8 bytes push {totalElements, N}
+        PipelineEntry biasPipe =
+            cache.getOrCreate("gemm-bias-add", 2, 2 * sizeof(uint32_t));
+        std::vector<VkDescriptorBufferInfo> biasInfos = {
+            {bufOutputDL.handle, 0, outputBytes},
+            {bufBiasDL.handle,   0, size_t(p.outputDim) * sizeof(float)},
+        };
+        VkDescriptorSet biasSet =
+            cache.allocDescriptorSet("gemm-bias-add", biasInfos);
+        struct BiasPush {
+            uint32_t totalElements;
+            uint32_t N;
+        } biasPush = {p.batchSeq * p.outputDim, p.outputDim};
+        uint32_t biasGx = (biasPush.totalElements + 255u) / 256u;
+        batch.dispatch(biasPipe.pipeline, biasPipe.layout, biasSet,
+                       biasGx, 1, 1, &biasPush, sizeof(biasPush));
+    }
+
     batch.transferComputeBarrier();
 
     // Stage-out: DMA copy DEVICE_LOCAL → host-visible HOST_CACHED staging
@@ -107,7 +210,8 @@ void linear(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.waitForCompletion();
 
     // ── memcpy staging → CPU output (HOST_CACHED, ~7 GB/s) ──
-    pool.download(bufOutputStage, output, outputBytes);
+    // Output is always fp32, regardless of input dtype.
+    pool.download(bufOutputStage, reinterpret_cast<float*>(output), outputBytes);
 
     // ── Release buffers back to their respective pools ──
     pool.release(bufInputDL);
@@ -165,16 +269,27 @@ std::vector<float> linearCPU(const float* x, const float* weights,
 // Workgroups: 2D at (16,16) for passes 0 and 1, 1D for pass 2.
 
 void linearBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
-                    const float* gradOutput, const float* input,
-                    const float* weights,
-                    float* gradInput, float* gradWeight, float* gradBias,
+                    const void* gradOutput, const void* input,
+                    const void* weights,
+                    void* gradInput, void* gradWeight, void* gradBias,
                     const LinearParams& p) {
-    const size_t gradOutBytes  = size_t(p.batchSeq) * p.outputDim * sizeof(float);
-    const size_t inputBytes    = size_t(p.batchSeq) * p.inputDim * sizeof(float);
-    const size_t weightBytes   = size_t(p.outputDim) * p.inputDim * sizeof(float);
+    // The fnn-linear-backward shader is fp32-only; reject fp16 input until a
+    // coopmat backward shader lands. The void* interface is in place so the
+    // switchover is local.
+    if (p.elemSize != 4u) {
+        throw std::runtime_error(
+            "linearBackward(): currently requires fp32 (elemSize=4). fp16 "
+            "backward needs a cooperative matrix backward shader — TODO.");
+    }
+
+    // Dynamic byte calculation. With elemSize==4 today these match the old
+    // sizeof(float) computations, so existing callers see no behavior change.
+    const size_t gradOutBytes  = size_t(p.batchSeq) * p.outputDim * p.elemSize;
+    const size_t inputBytes    = size_t(p.batchSeq) * p.inputDim  * p.elemSize;
+    const size_t weightBytes   = size_t(p.outputDim) * p.inputDim * p.elemSize;
     const size_t gradInBytes   = inputBytes;
     const size_t gradWBytes    = weightBytes;
-    const size_t gradBiasBytes = size_t(p.outputDim) * sizeof(float);
+    const size_t gradBiasBytes = size_t(p.outputDim) * p.elemSize;
 
     // Staging pattern: 3 stage-in (gradOut, input, weights),
     // 3 stage-out (gradIn, gradW, gradBias). All compute on DEVICE_LOCAL.
@@ -192,27 +307,27 @@ void linearBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     GrillyBuffer bufGradWStage    = pool.acquireReadback(gradWBytes);
     GrillyBuffer bufGradBiasStage = pool.acquireReadback(gradBiasBytes);
 
-    pool.upload(bufGradOutStage, gradOutput, gradOutBytes);
-    pool.upload(bufInputStage,   input, inputBytes);
-    pool.upload(bufWeightsStage, weights, weightBytes);
+    pool.upload(bufGradOutStage,
+                reinterpret_cast<const float*>(gradOutput), gradOutBytes);
+    pool.upload(bufInputStage,
+                reinterpret_cast<const float*>(input), inputBytes);
+    pool.upload(bufWeightsStage,
+                reinterpret_cast<const float*>(weights), weightBytes);
 
-    // The grad output buffers must start at zero — pass 1 (grad_weight) and
-    // pass 2 (grad_bias) accumulate via atomic adds in the shader. We zero
-    // them on the GPU side via vkCmdFillBuffer rather than uploading zeros
-    // through staging (which was the old code path).
-    // (Workaround: upload zeros to a small temporary stage and copy. The
-    // simpler path: keep the upload-zeros-via-stage approach since we need
-    // to reset every call.)
-    std::vector<float> zerosIn(p.batchSeq * p.inputDim, 0.0f);
-    std::vector<float> zerosW(p.outputDim * p.inputDim, 0.0f);
-    std::vector<float> zerosB(p.outputDim, 0.0f);
-    // Reuse the readback stage buffers as upload-zeros source: they're
-    // host-visible (HOST_CACHED), CPU-write is fine even though it's not
-    // optimal for sequential write — total bytes is small relative to GPU
-    // compute. Upload then DMA copy in the command buffer.
-    pool.upload(bufGradInStage,   zerosIn.data(), gradInBytes);
-    pool.upload(bufGradWStage,    zerosW.data(),  gradWBytes);
-    pool.upload(bufGradBiasStage, zerosB.data(),  gradBiasBytes);
+    // The grad buffers must start at zero — pass 1 (grad_weight) and
+    // pass 2 (grad_bias) accumulate via atomic adds in the shader. Use
+    // raw byte vectors so zeroing works identically for fp32 and fp16
+    // (whenever the fp16 backward shader lands). Reuse the readback stage
+    // buffers as upload-zeros source — HOST_CACHED, CPU-write is fine.
+    std::vector<uint8_t> zerosIn(gradInBytes, 0);
+    std::vector<uint8_t> zerosW(gradWBytes, 0);
+    std::vector<uint8_t> zerosB(gradBiasBytes, 0);
+    pool.upload(bufGradInStage,
+                reinterpret_cast<const float*>(zerosIn.data()), gradInBytes);
+    pool.upload(bufGradWStage,
+                reinterpret_cast<const float*>(zerosW.data()), gradWBytes);
+    pool.upload(bufGradBiasStage,
+                reinterpret_cast<const float*>(zerosB.data()), gradBiasBytes);
 
     LinearBackwardParams bwdParams{p.batchSeq, p.inputDim, p.outputDim, 0};
 
@@ -274,9 +389,12 @@ void linearBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.submitDeferred();
     batch.waitForCompletion();
 
-    pool.download(bufGradInStage,   gradInput,  gradInBytes);
-    pool.download(bufGradWStage,    gradWeight, gradWBytes);
-    pool.download(bufGradBiasStage, gradBias,   gradBiasBytes);
+    pool.download(bufGradInStage,
+                  reinterpret_cast<float*>(gradInput), gradInBytes);
+    pool.download(bufGradWStage,
+                  reinterpret_cast<float*>(gradWeight), gradWBytes);
+    pool.download(bufGradBiasStage,
+                  reinterpret_cast<float*>(gradBias), gradBiasBytes);
 
     pool.release(bufGradOutDL);
     pool.release(bufInputDL);

@@ -440,4 +440,5 @@ PYBIND11_MODULE(grilly_core, m) {
     register_vsa_lm_ops(m);
     register_grl_ops(m);
     register_misc_ops(m);
+    register_prefix_scan_ops(m);
 }

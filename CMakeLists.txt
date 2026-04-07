@@ -220,6 +220,7 @@ add_library(grilly_core_lib STATIC
     cpp/src/ops/moqe_train.cpp
     cpp/src/ops/moe_forward.cpp
     cpp/src/ops/vsa_lm_forward.cpp
+    cpp/src/ops/prefix_scan.cpp
     cpp/src/shader_fusion.cpp
     # ── Experimental ──
     cpp/src/experimental/paged_latent_pool.cpp
@@ -310,6 +311,7 @@ pybind11_add_module(grilly_core
     cpp/python/bindings_fusion.cpp
     cpp/python/bindings_vsa_lm.cpp
     cpp/python/bindings_grl.cpp
+    cpp/python/bindings_prefix_scan.cpp
 )
 target_link_libraries(grilly_core PRIVATE grilly_core_lib)
 
