@@ -395,7 +395,199 @@ uv run pytest tests/test_linear.py -v
 
 ## What's New
 
-### 0.6.x (current)
+### Pre-v1.0 (current `main`, since 0.6.1) {#whats-new-since-061}
+
+A long debug session against a real workload (`vsa_lm_v3c_grilly` —
+language modeling with multiplication-free FFN + causal Linear-RNN
+mixer) surfaced and fixed a stack of bugs and perf cliffs that the
+0.6.1 test suite never tripped. Each fix is small in isolation; the
+pile is large enough to warrant a major version bump.
+
+#### Performance — bridge dispatch overhauled
+
+- **`BufferPool::allocateBuffer` VMA fix.** Changed `preferredFlags`
+  → `requiredFlags = DEVICE_LOCAL_BIT`. The old code silently fell
+  back to slow host-visible BAR memory on AMD/Windows when the
+  allocator's auto-select picked the wrong heap; the fix forces
+  `memoryType[2]` (DEVICE_LOCAL+HOST_VISIBLE+HOST_COHERENT) under
+  Resizable BAR or fails loudly when ReBAR is unavailable.
+  ([cpp/src/buffer_pool.cpp](cpp/src/buffer_pool.cpp))
+- **3-way bucket pool routing.** `acquire` / `acquireDeviceLocal` /
+  `acquireReadback` now have separate per-size pools; `release`
+  routes by the buffer's `deviceLocal` / `readback` flag. Prevents a
+  DL buffer from being picked up by a host-visible `acquire` and
+  crashing on `mappedPtr=null`.
+- **Staging pattern across all hot ops** ("Thread A"). Each op
+  acquires DEVICE_LOCAL VRAM compute buffers + WC sequential-write
+  stage-in + HOST_CACHED random-read stage-out, batches a single
+  command buffer with `copyBuffer × N → barrier → dispatch →
+  barrier → copyBuffer × M → submit/wait`. Applied to:
+  - `cpp/src/ops/linear.cpp` — `linear`, `linearBackward`, `dropout`
+  - `cpp/src/ops/activations.cpp` — `activationForward` /
+    `activationBackward` helpers (covers ReLU/GELU/SiLU/Tanh)
+  - `cpp/src/ops/layernorm.cpp` — `layernorm`, `layernormBackward`
+  - `cpp/src/ops/embedding.cpp` — `embeddingLookup`
+  - `cpp/src/ops/optimizer.cpp` — `adamUpdate`, `adamwUpdate`
+  - `cpp/src/ops/loss.cpp` — `crossEntropyLoss`, `crossEntropyBackward`
+- **Measured impact**: forward `nn.Linear` on a 4096×384×1152 GEMM
+  went from **763 ms → 19 ms** on an AMD RX 6750 XT (~40x). The
+  download phase alone collapsed from **749 ms → 2.7 ms** once the
+  output stage moved to `HOST_CACHED` memory (random-read instead of
+  uncached WC reads).
+- **`transferComputeBarrier()`** added to `CommandBatch` — bidirectional
+  TRANSFER ↔ COMPUTE memory + execution barrier needed by the
+  staging pattern (the existing `barrier()` is COMPUTE→COMPUTE only,
+  kept unchanged for `linearBackward`'s 3-pass intra-shader barriers).
+
+#### fp16 + cooperative matrix GEMM
+
+- **`shaders/gemm-coopmat-shared.glsl`** — fp16 tiled GEMM via
+  `VK_KHR_cooperative_matrix` with shared-memory staging. Subgroup
+  scope, 16×64 (M×N) tile per workgroup, 256 threads (4×Wave64
+  subgroups), fp32 accumulator. Dispatches to native WMMA on RDNA3
+  and NVIDIA RTX, falls through the driver emulation path on
+  RDNA1/RDNA2.
+- **`shaders/gemm-bias-add.glsl`** — companion row-broadcast bias
+  add (the coopmat store can't interleave bias inline).
+- **`LinearParams.elemSize`** — new field (4 = fp32, 2 = fp16).
+  `linear()` selects `gemm-coopmat-shared` when `elemSize == 2`,
+  cooperative-matrix is supported, AND shape is aligned
+  (M%16, K%16, N%64); otherwise falls back to `fnn-linear.glsl`.
+- **Pybind: generic `py::array`** — `bindings_linear.cpp` now accepts
+  fp32 OR fp16 numpy input via `xBuf.itemsize`. Output is always
+  fp32 (coopmat accumulator). Bias must be fp32 regardless of input
+  dtype.
+- **`linearBackward` interface upgrade** — same `void*` + `elemSize`
+  signature so the fp16 path slots in cleanly when an fp16 backward
+  shader lands. For now `elemSize != 4` raises with a clear message.
+
+#### Causal Linear-RNN prefix scan (new feature)
+
+- **`shaders/prefix-scan-causal.glsl`** — `h_t = a_t * h_{t-1} + x_t`
+  in O(log S) parallel depth via `subgroupInclusiveAdd` on `log(a)`
+  and the rescaled input (Blelloch's two-scan trick). Strictly
+  causal; one workgroup per `(batch, hidden_dim)` pair.
+- **`shaders/prefix-scan-causal-backward.glsl`** — anti-causal scan
+  for `grad_x` and `grad_a` via the identity
+  `R[t] = total - F[t] + w[t]` (no `subgroupShuffle`, which is
+  undefined on partial Wave64 subgroups). Hits fp32 epsilon vs the
+  closed-form gradient (verified `max abs err ≈ 3.6e-6`).
+- **`grilly/cpp/src/ops/prefix_scan.cpp`** — C++ dispatcher with the
+  same staging pattern as the rest of Thread A.
+- **`grilly/cpp/python/bindings_prefix_scan.cpp`** — pybind exposing
+  `prefix_scan_causal` and `prefix_scan_causal_backward`.
+- **`grilly/nn/prefix_scan.py`** — Python autograd wrapper
+  (`prefix_scan_causal()`) wired into grilly's `Variable` /
+  `GradFn` system, plus a `CausalSequenceMixer` module that uses it
+  as a drop-in causal sequence-pooling replacement.
+- **Constraint**: `seq_len <= 32` (one thread per time step in a
+  single subgroup). A hierarchical multi-subgroup version is on the
+  roadmap.
+
+#### Autograd — actually working now
+
+- **`Module.__setattr__` auto-registration**. `self.weight =
+  nn.Parameter(...)` and `self.lin = nn.Linear(...)` now populate
+  `_parameters` / `_modules` automatically. Standard PyTorch idiom.
+  Was previously silently broken — every Module subclass returned 0
+  parameters from `parameters()`, AdamW silently no-op'd.
+- **`nn.Linear.forward` autograd wiring.** When the input is a
+  `Variable`, the output is wrapped in a `Variable` with a `GradFn`
+  whose backward closure calls the existing `Linear.backward()`
+  (which already populates `weight.grad`/`bias.grad` via the GPU
+  shader). Same template applied to `nn.LayerNorm.forward` and
+  `nn.Embedding.forward`.
+- **`Variable.__array__`** — numpy array protocol on
+  `nn.autograd.Variable`. `np.matmul(tensor, w)` /
+  `np.dot(tensor, w)` / `np.asarray(tensor)` now operate on the
+  backing ndarray transparently. Required to let grilly's existing
+  numpy-native layer code keep working when called from torch_api
+  Tensor inputs.
+- **`Module.__call__` Variable passthrough + output wrap.** Inputs
+  of type `Tensor` / `LongTensor` / `Variable` are passed through to
+  `forward()` unchanged; raw ndarray outputs are re-wrapped in
+  `Tensor` so chained calls preserve torch-style type all the way
+  through user-defined Module subclasses.
+- **`Parameter` shape methods** — `unsqueeze`, `view`,
+  `mean(dim=...)`, `detach` added to `nn.Parameter` so user
+  `forward` code can do `self.weight.unsqueeze(0)` /
+  `self.weight.view(...)` / `self.weight.mean(dim=-1)` without
+  knowing that `Parameter` is an `np.ndarray` subclass.
+- **`nn.init.normal_/uniform_`** — added a `_writable_array(tensor)`
+  helper that unwraps Tensor/Variable wrappers to their backing
+  ndarray for in-place init. Previously raised `TypeError: 'Tensor'
+  object does not support item assignment` for the standard
+  `nn.init.normal_(self.weight, 0, 0.02)` idiom.
+- **`F.gelu` re-export** in `grilly.nn.functional` (was importable
+  via `grilly.nn.autograd.gelu` but missing from the public
+  `functional` namespace).
+
+#### Checkpoint format
+
+- **`.grl` save/load roundtrip fixed.**
+  `torch.save({'model': sd, 'step': N}, path)` followed by
+  `ck = torch.load(path)` now returns exactly what was saved
+  (matches `torch.save`/`torch.load` semantics). The previous
+  `load_grl` force-wrapped content under a fixed `'model'` key,
+  producing `ck['model']['model']['weight']` instead of
+  `ck['model']['weight']` for any payload that already contained a
+  `model` key.
+
+#### Editable install / Vulkan probe
+
+- **`grilly/__init__.py` sys.path fix.** Added an `os.path.dirname`
+  insert at the very top of the package init so `import grilly_core`
+  works under PEP 660 editable installs. The path hook used by
+  modern editable installs (`__editable__.grilly-X.Y.finder.__path_hook__`)
+  doesn't add the package directory to `sys.path`, so the sibling
+  `grilly_core.<plat>.pyd` was invisible to `import grilly_core`.
+  The downstream effect: `backend/base.py:_probe_cpp_vulkan()`
+  silently caught the `ModuleNotFoundError`, set
+  `VULKAN_AVAILABLE = False`, and the entire `nn` stack thought it
+  had no GPU (despite a perfectly working Vulkan device).
+- **`Module._get_backend()` graceful None.** Catches the legacy
+  `VulkanCompute` init exception and returns `None` so layers that
+  only used `_get_backend()` for one-time GPU Xavier init at
+  construction time don't crash when the legacy Python `vulkan`
+  ctypes package isn't installed (the new C++ `_bridge` path doesn't
+  need it).
+
+#### Pre-existing shader bugs surfaced by recompile
+
+Three shaders that had stale `.spv` files compiled against a more
+permissive glslang version. Recent glslang catches them:
+
+- **`fused-layernorm-linear.glsl`** — added missing
+  `#extension GL_EXT_shader_atomic_float : require` for the
+  `atomicAdd(shared_sum, sg_sum)` accumulator.
+- **`lstm-cell-forward.glsl`** — renamed buffer field `input` →
+  `input_data` (`input` is a reserved word in recent glslang).
+  Also removed an incorrect `writeonly` qualifier on the gates
+  buffer that the shader actually reads back.
+- **`vsa-explore.glsl`** — renamed buffer field `output` →
+  `output_data`. Same `writeonly` mismatch fix.
+
+#### Tooling
+
+- **`rebuild.ps1`** — one-command Windows rebuild. Compiles all
+  GLSL → SPIR-V (with `-S comp` to disambiguate the stage,
+  `--target-env vulkan1.3` for cooperative matrix + subgroup
+  extensions), runs `cmake --build build2 --config Release --target
+  grilly_core`, copies the freshly built `.pyd` to the package
+  root. Skips up-to-date shaders by mtime comparison.
+- **`PipelineCache::getDevice()`** accessor — needed by `linear.cpp`
+  to query `hasCooperativeMatrix()` before selecting the coopmat
+  shader path.
+
+#### Lint cleanup
+
+- 75 ruff errors fixed across the codebase. Mix of unsorted imports
+  (`I001`), unused imports (`F401`), missing f-string placeholders
+  (`F541`), deprecated typing imports (`UP035`), non-PEP 585
+  annotations (`UP006`), and a `yield from` modernization in
+  `nn.Module.named_buffers`.
+
+### 0.6.x
 
 - **MindForge** adapter hypernetwork integration (via CubeMind)
 - **Synaptic shaders**: `synapsis-stdp-update.glsl`, `bridge-spike-to-continuous.glsl`
