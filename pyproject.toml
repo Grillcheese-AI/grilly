@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grilly"
-version = "0.6.1"
+version = "1.0.0-rc1"
 description = "GPU-accelerated neural network operations using Vulkan compute shaders"
 readme = "README.md"
 license = {text = "MIT"}
