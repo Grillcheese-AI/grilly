@@ -454,4 +454,5 @@ PYBIND11_MODULE(grilly_core, m) {
     register_bandit_ops(m);
     register_eggroll_ops(m);
     register_autograd_ops(m);
+    register_distillation_ops(m);
 }
