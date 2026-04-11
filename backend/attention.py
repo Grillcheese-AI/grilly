@@ -976,12 +976,13 @@ class VulkanAttention(BufferMixin):
             "IIIIIf", batch_size, num_q_heads, num_kv_heads, head_dim, cache_len, scale
         )
 
+        # One workgroup per (batch, q_head) — all 3 phases run within
+        # the same workgroup so barrier() synchronization is correct.
         total_q = batch_size * num_q_heads
-        workgroups_x = (max(cache_len, head_dim) + 15) // 16
-        workgroups_y = (total_q + 15) // 16
+        workgroups_x = total_q
 
         self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
+            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants
         )
 
         result = self._download_buffer(buf_out, out_bytes, np.float32)
