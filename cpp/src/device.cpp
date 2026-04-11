@@ -169,13 +169,25 @@ void GrillyDevice::initVulkan() {
                                               &queueFamilyCount,
                                               queueFamilies.data());
 
+    // Prefer a dedicated compute queue (no GRAPHICS bit) — shows as
+    // "Compute" in Windows Task Manager and avoids graphics contention.
+    // Fall back to universal queue (GRAPHICS+COMPUTE) if no dedicated one.
     queueFamily_ = UINT32_MAX;
+    uint32_t fallbackFamily = UINT32_MAX;
     for (uint32_t i = 0; i < queueFamilyCount; ++i) {
         if (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
-            queueFamily_ = i;
-            break;
+            if (!(queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+                // Dedicated compute — preferred
+                queueFamily_ = i;
+                break;
+            }
+            if (fallbackFamily == UINT32_MAX) {
+                fallbackFamily = i;  // universal queue as fallback
+            }
         }
     }
+    if (queueFamily_ == UINT32_MAX)
+        queueFamily_ = fallbackFamily;
     if (queueFamily_ == UINT32_MAX)
         throw std::runtime_error("No compute queue family found");
 
