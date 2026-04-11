@@ -45,9 +45,11 @@ void register_distillation_ops(py::module_& m) {
             size_t label_bytes = size_t(seq_len) * sizeof(int32_t);
             size_t loss_bytes  = size_t(seq_len) * sizeof(float);
 
-            // Output arrays
-            py::array_t<float> grad_out({(ssize_t)seq_len, (ssize_t)vocab_size});
-            py::array_t<float> loss_out((ssize_t)seq_len);
+            // Output arrays (allocate before GIL release, grab raw ptrs)
+            py::array_t<float> grad_arr({(py::ssize_t)seq_len, (py::ssize_t)vocab_size});
+            py::array_t<float> loss_arr((py::ssize_t)seq_len);
+            float* grad_ptr = grad_arr.mutable_data();
+            float* loss_ptr = loss_arr.mutable_data();
 
             DistillationPushConstants pc{vocab_size, temperature, alpha};
 
@@ -87,9 +89,9 @@ void register_distillation_ops(py::module_& m) {
                                    seq_len, 1, 1, &pc, sizeof(pc));
                 ctx.batch.submit();
 
-                // Download results
-                ctx.pool.download(buf_g,  grad_out.mutable_data(), logit_bytes);
-                ctx.pool.download(buf_lo, loss_out.mutable_data(), loss_bytes);
+                // Download results via raw pointers (no Python objects in GIL-free zone)
+                ctx.pool.download(buf_g,  grad_ptr, logit_bytes);
+                ctx.pool.download(buf_lo, loss_ptr, loss_bytes);
 
                 // Release
                 ctx.pool.release(buf_s);
@@ -100,8 +102,8 @@ void register_distillation_ops(py::module_& m) {
             }
 
             py::dict result;
-            result["loss"] = loss_out;
-            result["grad"] = grad_out;
+            result["loss"] = loss_arr;
+            result["grad"] = grad_arr;
             return result;
         },
         py::arg("device"),
