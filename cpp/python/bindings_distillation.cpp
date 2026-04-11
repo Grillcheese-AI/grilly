@@ -5,6 +5,8 @@
 
 #include "bindings_core.h"
 
+#include <cstring>
+
 struct DistillationPushConstants {
     uint32_t vocab_size;
     float temperature;
@@ -20,7 +22,7 @@ void register_distillation_ops(py::module_& m) {
            py::array_t<float> teacher_logits,
            py::array_t<int32_t> labels,
            float temperature,
-           float alpha) -> std::pair<py::array_t<float>, py::array_t<float>> {
+           float alpha) -> py::dict {
             auto sBuf = student_logits.request();
             auto tBuf = teacher_logits.request();
             auto lBuf = labels.request();
@@ -37,20 +39,15 @@ void register_distillation_ops(py::module_& m) {
 
             if (static_cast<uint32_t>(tBuf.shape[0]) != seq_len ||
                 static_cast<uint32_t>(tBuf.shape[1]) != vocab_size)
-                throw std::runtime_error("teacher_logits shape must match student_logits");
-            if (static_cast<uint32_t>(lBuf.shape[0]) != seq_len)
-                throw std::runtime_error("labels length must match seq_len");
+                throw std::runtime_error("teacher shape must match student");
 
-            uint32_t logit_bytes = seq_len * vocab_size * sizeof(float);
-            uint32_t label_bytes = seq_len * sizeof(int32_t);
-            uint32_t grad_bytes = logit_bytes;
-            uint32_t loss_bytes = seq_len * sizeof(float);
+            size_t logit_bytes = size_t(seq_len) * vocab_size * sizeof(float);
+            size_t label_bytes = size_t(seq_len) * sizeof(int32_t);
+            size_t loss_bytes  = size_t(seq_len) * sizeof(float);
 
-            // Allocate output arrays
+            // Output arrays
             py::array_t<float> grad_out({(ssize_t)seq_len, (ssize_t)vocab_size});
             py::array_t<float> loss_out((ssize_t)seq_len);
-            auto gBuf = grad_out.request();
-            auto loBuf = loss_out.request();
 
             DistillationPushConstants pc{vocab_size, temperature, alpha};
 
@@ -58,58 +55,43 @@ void register_distillation_ops(py::module_& m) {
                 py::gil_scoped_release release;
                 std::lock_guard<std::mutex> lock(ctx.ctx_mutex);
 
-                // Get or create pipeline
-                auto [pipeline, layout, dsetLayout] =
-                    ctx.cache.getOrCreatePipeline("distillation-loss", 5, sizeof(pc));
+                // Pipeline
+                auto pe = ctx.cache.getOrCreate("distillation-loss", 5, sizeof(pc));
 
-                // Acquire GPU buffers
-                auto buf_s = ctx.pool.acquire(logit_bytes);
-                auto buf_t = ctx.pool.acquire(logit_bytes);
-                auto buf_l = ctx.pool.acquire(label_bytes);
-                auto buf_g = ctx.pool.acquire(grad_bytes);
+                // Buffers
+                auto buf_s  = ctx.pool.acquire(logit_bytes);
+                auto buf_t  = ctx.pool.acquire(logit_bytes);
+                auto buf_l  = ctx.pool.acquire(label_bytes);
+                auto buf_g  = ctx.pool.acquire(logit_bytes);
                 auto buf_lo = ctx.pool.acquire(loss_bytes);
 
-                // Upload inputs
+                // Upload student + teacher logits
                 ctx.pool.upload(buf_s, static_cast<const float*>(sBuf.ptr), logit_bytes);
                 ctx.pool.upload(buf_t, static_cast<const float*>(tBuf.ptr), logit_bytes);
-                ctx.pool.upload(buf_l, static_cast<const int32_t*>(lBuf.ptr), label_bytes);
+                // Labels: raw memcpy (int32, not float)
+                std::memcpy(buf_l.mappedPtr, lBuf.ptr, label_bytes);
 
                 // Descriptor set
-                auto dset = ctx.cache.allocateDescriptorSet(dsetLayout);
-                VkDescriptorBufferInfo infos[5] = {
-                    {ctx.pool.vkBuffer(buf_s), 0, logit_bytes},
-                    {ctx.pool.vkBuffer(buf_t), 0, logit_bytes},
-                    {ctx.pool.vkBuffer(buf_l), 0, label_bytes},
-                    {ctx.pool.vkBuffer(buf_g), 0, grad_bytes},
-                    {ctx.pool.vkBuffer(buf_lo), 0, loss_bytes},
+                std::vector<VkDescriptorBufferInfo> bufInfos = {
+                    {buf_s.handle,  0, (VkDeviceSize)logit_bytes},
+                    {buf_t.handle,  0, (VkDeviceSize)logit_bytes},
+                    {buf_l.handle,  0, (VkDeviceSize)label_bytes},
+                    {buf_g.handle,  0, (VkDeviceSize)logit_bytes},
+                    {buf_lo.handle, 0, (VkDeviceSize)loss_bytes},
                 };
-                VkWriteDescriptorSet writes[5];
-                for (int i = 0; i < 5; i++) {
-                    writes[i] = {};
-                    writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                    writes[i].dstSet = dset;
-                    writes[i].dstBinding = i;
-                    writes[i].descriptorCount = 1;
-                    writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                    writes[i].pBufferInfo = &infos[i];
-                }
-                vkUpdateDescriptorSets(ctx.device.logicalDevice(), 5, writes, 0, nullptr);
+                auto dset = ctx.cache.allocDescriptorSet("distillation-loss", bufInfos);
 
-                // Record and dispatch: 1 workgroup per token
+                // Dispatch: 1 workgroup (1024 threads) per token
                 ctx.batch.begin();
-                ctx.batch.bindPipeline(pipeline);
-                ctx.batch.bindDescriptorSet(layout, dset);
-                ctx.batch.pushConstants(layout, VK_SHADER_STAGE_COMPUTE_BIT,
-                                         0, sizeof(pc), &pc);
-                ctx.batch.dispatch(seq_len, 1, 1);
+                ctx.batch.dispatch(pe.pipeline, pe.layout, dset,
+                                   seq_len, 1, 1, &pc, sizeof(pc));
                 ctx.batch.submit();
-                ctx.batch.waitFence();
 
                 // Download results
-                ctx.pool.download(buf_g, static_cast<float*>(gBuf.ptr), grad_bytes);
-                ctx.pool.download(buf_lo, static_cast<float*>(loBuf.ptr), loss_bytes);
+                ctx.pool.download(buf_g,  grad_out.mutable_data(), logit_bytes);
+                ctx.pool.download(buf_lo, loss_out.mutable_data(), loss_bytes);
 
-                // Release buffers
+                // Release
                 ctx.pool.release(buf_s);
                 ctx.pool.release(buf_t);
                 ctx.pool.release(buf_l);
@@ -117,7 +99,10 @@ void register_distillation_ops(py::module_& m) {
                 ctx.pool.release(buf_lo);
             }
 
-            return {loss_out, grad_out};
+            py::dict result;
+            result["loss"] = loss_out;
+            result["grad"] = grad_out;
+            return result;
         },
         py::arg("device"),
         py::arg("student_logits"),
@@ -126,21 +111,9 @@ void register_distillation_ops(py::module_& m) {
         py::arg("temperature") = 2.0f,
         py::arg("alpha") = 0.6f,
         R"doc(
-Fused Knowledge Distillation + Cross-Entropy loss on GPU.
+Fused KD+CE distillation loss on GPU. Returns dict with 'loss' and 'grad'.
 
-Computes in a single dispatch per token:
-  loss = (1-alpha)*CE + alpha*T^2*KL
-  grad = (1-alpha)*grad_CE + alpha*grad_KD
-
-Args:
-    device: GrillyCoreContext (Device)
-    student_logits: (seq_len, vocab) float32
-    teacher_logits: (seq_len, vocab) float32
-    labels: (seq_len,) int32
-    temperature: softmax temperature for KD (default 2.0)
-    alpha: KD weight, loss = (1-alpha)*CE + alpha*KD (default 0.6)
-
-Returns:
-    (loss, grad) where loss is (seq_len,) and grad is (seq_len, vocab)
+loss = (1-alpha)*CE + alpha*T^2*KL per token
+grad = (1-alpha)*grad_CE + alpha*grad_KD per (token, vocab)
 )doc");
 }
