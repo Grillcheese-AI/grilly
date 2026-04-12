@@ -330,6 +330,7 @@ pybind11_add_module(grilly_core
     cpp/python/bindings_grl.cpp
     cpp/python/bindings_prefix_scan.cpp
     cpp/python/bindings_distillation.cpp
+    cpp/python/bindings_mindforge.cpp
 )
 target_link_libraries(grilly_core PRIVATE grilly_core_lib)
 

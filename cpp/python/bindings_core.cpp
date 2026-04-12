@@ -442,4 +442,5 @@ PYBIND11_MODULE(grilly_core, m) {
     register_misc_ops(m);
     register_prefix_scan_ops(m);
     register_distillation_ops(m);
+    register_mindforge_ops(m);
 }
