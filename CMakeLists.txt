@@ -262,13 +262,30 @@ target_include_directories(grilly_core_lib PUBLIC
     "${VMA_INCLUDE_DIR}"
 )
 
-# Find shaderc for JIT shader fusion (ships with Vulkan SDK)
-find_library(SHADERC_LIB shaderc_combined
-    HINTS "$ENV{VULKAN_SDK}/Lib" "$ENV{VULKAN_SDK}/lib")
-if(SHADERC_LIB)
-    message(STATUS "Found shaderc: ${SHADERC_LIB}")
+# Find shaderc for JIT shader fusion (ships with Vulkan SDK only).
+#
+# IMPORTANT: We intentionally restrict the search to $VULKAN_SDK and refuse
+# to fall through to system paths. On Linux, distro-packaged
+# /usr/lib64/libshaderc_combined.a is typically built by Google's upstream
+# against libc++ (Clang). Linking it into a libstdc++ (GCC) build produces a
+# .so that references std::__1::* symbols with no matching definition —
+# manifesting at import time as:
+#   ImportError: undefined symbol: _ZTT...basic_istringstream...
+# The LunarG SDK ships a GCC/libstdc++-compatible build, so we require it
+# explicitly. Shader JIT fusion is optional; if VULKAN_SDK is unset we just
+# disable GRILLY_HAS_SHADERC rather than risk an ABI mismatch.
+if(DEFINED ENV{VULKAN_SDK})
+    find_library(SHADERC_LIB shaderc_combined
+        HINTS "$ENV{VULKAN_SDK}/Lib" "$ENV{VULKAN_SDK}/lib"
+        NO_DEFAULT_PATH)
+    if(SHADERC_LIB)
+        message(STATUS "Found shaderc: ${SHADERC_LIB}")
+    else()
+        message(WARNING "shaderc not found in VULKAN_SDK — JIT shader fusion disabled")
+    endif()
 else()
-    message(WARNING "shaderc not found — JIT shader fusion disabled")
+    message(STATUS "VULKAN_SDK not set — JIT shader fusion disabled "
+                   "(install LunarG Vulkan SDK and export VULKAN_SDK to enable)")
 endif()
 
 target_link_libraries(grilly_core_lib PUBLIC
