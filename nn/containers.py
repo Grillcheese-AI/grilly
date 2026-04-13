@@ -85,7 +85,7 @@ class Sequential(Module):
                 weight = _get_param_array(linear_mod.weight)
                 bias = _get_param_array(linear_mod.bias) if linear_mod.bias is not None else None
                 backend = linear_mod._get_backend()
-                fused_fn = getattr(backend.fnn, method_name, None)
+                fused_fn = getattr(backend.fnn, method_name, None) if backend is not None else None
                 if fused_fn is not None:
                     try:
                         current = fused_fn(
