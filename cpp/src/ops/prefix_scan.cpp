@@ -46,9 +46,11 @@ void prefixScanCausal(CommandBatch& batch, BufferPool& pool,
         uint32_t hiddenDim;
     } push = {p.seqLen, p.hiddenDim};
 
-    // One workgroup per (hidden_dim, batch) pair. Local size = 32 threads
-    // (one per time step) — shader enforces seqLen <= 32.
-    uint32_t gx = p.hiddenDim;
+    // Per-thread sequential scan (rev 2): one thread per (batch, hidden_dim)
+    // pair, each running an inner loop over seq_len. Workgroup tiles 64
+    // hidden-dim slots. No seq_len cap.
+    constexpr uint32_t kTileX = 64u;
+    uint32_t gx = (p.hiddenDim + kTileX - 1u) / kTileX;
     uint32_t gy = p.batchSize;
 
     batch.begin();
@@ -124,7 +126,11 @@ void prefixScanCausalBackward(CommandBatch& batch, BufferPool& pool,
         uint32_t hiddenDim;
     } push = {p.seqLen, p.hiddenDim};
 
-    uint32_t gx = p.hiddenDim;
+    // Same dispatch layout as forward (rev 2): tile of 64 hidden_dim per
+    // workgroup, one thread per (batch, hidden_dim) running a reverse-time
+    // serial loop.
+    constexpr uint32_t kTileX = 64u;
+    uint32_t gx = (p.hiddenDim + kTileX - 1u) / kTileX;
     uint32_t gy = p.batchSize;
 
     batch.begin();

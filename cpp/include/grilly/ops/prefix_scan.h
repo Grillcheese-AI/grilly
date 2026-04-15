@@ -12,7 +12,7 @@ namespace ops {
 /// Causal Linear-RNN prefix scan push constants.
 /// Matches shaders/prefix-scan-causal.glsl + prefix-scan-causal-backward.glsl.
 struct PrefixScanParams {
-    uint32_t seqLen;     ///< must be <= subgroup size (32 Wave32 / 64 Wave64)
+    uint32_t seqLen;     ///< any length; shader uses per-thread sequential scan
     uint32_t hiddenDim;
     uint32_t batchSize;
 };
@@ -33,8 +33,9 @@ struct PrefixScanParams {
 ///   1: a (decay)
 ///   2: h (output)
 ///
-/// Constraint: seqLen <= subgroup size. Longer sequences need a hierarchical
-/// scan — not implemented yet.
+/// No seq_len cap — shader runs a per-thread serial time loop, parallelism
+/// is across (batch × hidden_dim). Previous revision used a subgroup scan
+/// and required seqLen <= 32.
 void prefixScanCausal(CommandBatch& batch, BufferPool& pool,
                       PipelineCache& cache,
                       const float* x, const float* a, float* h,

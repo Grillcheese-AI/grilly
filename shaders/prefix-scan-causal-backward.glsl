@@ -1,38 +1,28 @@
 #version 450
-#extension GL_KHR_shader_subgroup_arithmetic : require
-#extension GL_KHR_shader_subgroup_basic : require
 
 /*
  * Causal Linear-RNN Prefix Scan (backward)
  *
- * Given forward recurrence h_t = a_t * h_{t-1} + x_t, the adjoint rules are:
+ * Given forward recurrence h_t = a_t * h_{t-1} + x_t, adjoint rules are:
  *
- *     dx_t = dh_t + a_{t+1} * dx_{t+1}      (anti-causal sum)
- *     da_t = dx_t * h_{t-1}
+ *     dx_t = dh_t + a_{t+1} * dx_{t+1}   (anti-causal recurrence; dx_T+1 = 0)
+ *     da_t = dx_t * h_{t-1}              (h_{-1} = 0)
  *
- * Using g_t = prod_{k<=t} a_k (forward cumprod):
+ * Strategy (rev 2, 2026-04-15): one thread per (batch, hidden_dim) pair,
+ * sequential reverse-time loop. Matches the new per-thread forward shader
+ * and drops the subgroup-scan seq-length cap.
  *
- *     dx_t = (1 / g_t) * sum_{s>=t} g_s * dh_s
+ *   - h_{t-1} comes from the saved forward H buffer (no reconstruction).
+ *   - a_{t+1} is read fresh each iteration; for t = seq_len-1 the
+ *     incoming dx_next is 0 so the factor does not matter.
+ *   - The same ``max(A[idx], 1e-6)`` clamp as forward keeps gradients
+ *     bounded when a decay gate sits at the edge of its range.
  *
- * Strategy:
- *   1. Compute g_t via ``subgroupInclusiveAdd(log(a))`` + exp. Verified
- *      correct on partial Wave64 subgroups (see earlier debug dump:
- *      max abs err 2.98e-08 vs numpy cumprod).
- *   2. Compute weighted_dh = g_t * dh_t per thread.
- *   3. Store to shared memory.
- *   4. Each thread LOOPS sequentially over shared[t..seq_len-1] to compute
- *      its own right_sum. For seq_len <= 32 this is ~32 iterations which
- *      is cheap compared to the rest of the pipeline, and it sidesteps
- *      the ``total`` broadcast trap entirely (neither ``subgroupAdd`` nor
- *      a ``shared_total`` write from thread 31 produced the correct total
- *      in earlier attempts — the cause is still unclear but likely some
- *      AMD partial-Wave64 edge case).
- *
- * Dispatch: one workgroup per (batch, hidden_dim) pair, one thread per
- * time step. Constraint: seq_len <= 32 (matches local_size_x).
+ * Dispatch matches forward: local_size_x=64 tile of hidden_dim,
+ * workgroup grid (ceil(hidden_dim/64), batch).
  */
 
-layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 layout(binding = 0) readonly  buffer GradHBuffer    { float dH[]; };
 layout(binding = 1) readonly  buffer DecayBuffer    { float A[]; };
@@ -46,57 +36,41 @@ layout(push_constant) uniform PushConstants {
     uint hidden_dim;
 } params;
 
-shared float scratch[32];
-
 void main() {
-    uint t = gl_LocalInvocationID.x;
-    uint d = gl_WorkGroupID.x;
+    uint d = gl_GlobalInvocationID.x;
     uint b = gl_WorkGroupID.y;
 
-    bool in_bounds = (d < params.hidden_dim);
-    bool in_seq    = in_bounds && (t < params.seq_len);
+    if (d >= params.hidden_dim) return;
 
-    uint idx = in_seq
-        ? (b * params.seq_len * params.hidden_dim) + (t * params.hidden_dim) + d
-        : 0u;
+    uint stride_t = params.hidden_dim;
+    uint base     = b * params.seq_len * params.hidden_dim + d;
 
-    // Load forward values (neutral for padding threads).
-    float a_t  = in_seq ? max(A[idx], 1e-6) : 1.0;
-    float dh_t = in_seq ? dH[idx] : 0.0;
-    float h_t  = in_seq ? H[idx]  : 0.0;
-    float x_t  = in_seq ? X[idx]  : 0.0;
+    float dx_next = 0.0;
+    // Iterate t from seq_len-1 down to 0. Use a signed counter so the
+    // termination check (t >= 0) is safe for the unsigned loop.
+    for (int t_signed = int(params.seq_len) - 1; t_signed >= 0; --t_signed) {
+        uint t   = uint(t_signed);
+        uint idx = base + t * stride_t;
 
-    // ── Forward cumulative product of a: g_t = prod_{k<=t} a_k ──
-    float log_a = log(a_t);
-    float cumsum_log_a = subgroupInclusiveAdd(log_a);
-    float g_t = exp(cumsum_log_a);
+        float dh_t = dH[idx];
 
-    // ── Store weighted_dh to shared memory ──
-    float weighted_dh = g_t * dh_t;
-    scratch[t] = weighted_dh;
-    barrier();
-
-    // ── Sequential right-sum: right_sum[t] = sum_{s>=t} weighted_dh[s] ──
-    float right_sum = 0.0;
-    for (uint s = t; s < params.seq_len; s++) {
-        right_sum += scratch[s];
-    }
-
-    // dx_t = right_sum / g_t
-    float dx_t = right_sum / g_t;
-
-    // ── da_t = dx_t * h_{t-1}, with h_{t-1} = (h_t - x_t) / a_t ──
-    // Numerically unstable when a_t is tiny — max(A[idx], 1e-6) clamp
-    // keeps it away from zero. TODO: save h_{t-1} during forward for
-    // full stability.
-    float h_prev = 0.0;
-    if (in_seq && t > 0u) {
-        h_prev = (h_t - x_t) / a_t;
-    }
-    float da_t = dx_t * h_prev;
-
-    if (in_seq) {
+        // a_{t+1} factor between dx_{t+1} and its contribution to dx_t.
+        float a_tp1 = 1.0;  // irrelevant when dx_next == 0 (t == seq_len-1)
+        if (t + 1u < params.seq_len) {
+            uint idx_tp1 = base + (t + 1u) * stride_t;
+            a_tp1 = max(A[idx_tp1], 1e-6);
+        }
+        float dx_t = dh_t + a_tp1 * dx_next;
         dX[idx] = dx_t;
-        dA[idx] = da_t;
+
+        // h_{t-1}: zero at t == 0, otherwise read the forward hidden state.
+        float h_prev = 0.0;
+        if (t > 0u) {
+            uint idx_prev = base + (t - 1u) * stride_t;
+            h_prev = H[idx_prev];
+        }
+        dA[idx] = dx_t * h_prev;
+
+        dx_next = dx_t;
     }
 }

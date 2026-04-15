@@ -199,21 +199,78 @@ class RMSNorm(Module):
         self.weight = _create_param_wrapper(weight_data)
         self.register_parameter("weight", self.weight)
 
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        """Forward pass using rms-norm.glsl (GPU-first)"""
+    def forward(self, x):
+        """Forward pass using rms-norm.glsl (GPU-first).
+
+        Autograd: when ``x`` is an autograd ``Variable`` (or carries
+        ``requires_grad``), the output is wrapped in a ``Variable`` with a
+        ``GradFn`` that calls ``self.backward(grad_output, x_data)`` during
+        ``loss.backward()``. ``self.backward`` populates ``self.weight.grad``
+        from the saved forward activations, so the optimizer picks the
+        update up through ``param.grad`` like any other layer.
+
+        Mirrors the autograd wiring added to ``nn.Linear.forward``. Without
+        this, ``loss.backward()`` terminates at the first RMSNorm call
+        because the returned ndarray has no ``grad_fn``.
+        """
+        # Detect autograd input and keep a reference to the Variable so the
+        # backward closure can chain to it.
+        try:
+            from grilly.nn.autograd import GradFn as _GradFn
+            from grilly.nn.autograd import Variable as _Variable
+            from grilly.nn.autograd import _grad_enabled
+        except ImportError:
+            _Variable = None  # type: ignore[assignment]
+            _GradFn = None  # type: ignore[assignment]
+            _grad_enabled = False
+
+        x_var: _Variable | None = None  # type: ignore[name-defined]
+        if _Variable is not None and isinstance(x, _Variable):
+            x_var = x
+            x_data = x.data
+        else:
+            x_data = x
+
         weight = _get_param_array(self.weight)
 
         # Try C++ bridge fast path
+        result = None
         if _USE_CPP_BRIDGE:
-            result = _bridge_to_numpy(_bridge.rmsnorm(x, weight, self.eps))
-            if result is not None:
-                return result
+            result = _bridge_to_numpy(_bridge.rmsnorm(x_data, weight, self.eps))
 
-        # CPU fallback
-        x = np.asarray(x, dtype=np.float32)
-        mean_sq = np.mean(x**2, axis=-1, keepdims=True)
-        normed = x * (1.0 / np.sqrt(mean_sq + self.eps))
-        return normed * weight
+        if result is None:
+            # CPU fallback
+            x_arr = np.asarray(x_data, dtype=np.float32)
+            mean_sq = np.mean(x_arr ** 2, axis=-1, keepdims=True)
+            normed = x_arr * (1.0 / np.sqrt(mean_sq + self.eps))
+            result = normed * weight
+
+        # ---- Autograd wiring ----
+        if (
+            x_var is not None
+            and _GradFn is not None
+            and _grad_enabled
+            and isinstance(result, np.ndarray)
+            and not isinstance(result, _Variable)
+        ):
+            x_data_for_backward = np.asarray(x_data, dtype=np.float32)
+
+            def backward_fn(grad_output):
+                # self.backward populates self.weight.grad in-place and
+                # returns the grad w.r.t. the input.
+                grad_input = self.backward(
+                    np.asarray(grad_output, dtype=np.float32),
+                    x_data_for_backward,
+                )
+                return (grad_input,)
+
+            grad_fn = _GradFn("RMSNorm", backward_fn, [x_var])
+            return _Variable(
+                np.asarray(result, dtype=np.float32),
+                requires_grad=True, grad_fn=grad_fn,
+            )
+
+        return result
 
     def backward(self, grad_output: np.ndarray, x: np.ndarray = None) -> np.ndarray:
         """Backward pass for RMSNorm."""
