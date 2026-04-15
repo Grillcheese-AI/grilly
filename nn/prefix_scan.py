@@ -6,14 +6,13 @@ Wraps the C++ / Vulkan ``grilly_core.prefix_scan_causal`` and
 
 Math:
     Forward:   h_t  = a_t * h_{t-1} + x_t          (h_0 = 0)
-    Backward:  dx_t = dh_t + a_{t+1} * dx_{t+1}    (anti-causal scan)
+    Backward:  dx_t = dh_t + a_{t+1} * dx_{t+1}    (anti-causal recurrence)
                da_t = dx_t * h_{t-1}
 
-The shader runs one subgroup per (batch, hidden_dim) pair, one thread per
-time step, and uses ``subgroupInclusiveAdd`` for O(log S) parallel depth.
-
-Constraint: ``seq_len <= 32``. Longer sequences need a hierarchical scan
-(chunk the sequence, carry state between chunks) — not implemented yet.
+The shader runs one thread per (batch, hidden_dim) pair with an inner
+sequential loop over time. Parallelism is across (batch × hidden_dim),
+so there is **no seq_len cap** — any length that fits in GPU memory works.
+Previous revision used a subgroup scan and capped at 32.
 
 Example::
 
@@ -72,16 +71,6 @@ def prefix_scan_causal(x, a) -> Variable:
     if x_data.ndim != 3:
         raise ValueError(
             f"prefix_scan_causal: inputs must be 3D (B, S, D), got {x_data.ndim}D"
-        )
-
-    S = x_data.shape[1]
-    if S > 32:
-        raise ValueError(
-            f"prefix_scan_causal: seq_len {S} > 32. The current shader runs "
-            f"one subgroup per (batch, dim) pair with one thread per time "
-            f"step — hierarchical multi-subgroup scan is a TODO. Either "
-            f"chunk the sequence on the Python side or truncate to 32 for "
-            f"the correctness run."
         )
 
     dev = _get_bridge_device()

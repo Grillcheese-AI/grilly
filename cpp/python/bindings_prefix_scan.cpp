@@ -29,11 +29,6 @@ void register_prefix_scan_ops(py::module_& m) {
             const uint32_t seqLen    = static_cast<uint32_t>(xBuf.shape[1]);
             const uint32_t hiddenDim = static_cast<uint32_t>(xBuf.shape[2]);
 
-            if (seqLen > 32)
-                throw std::runtime_error(
-                    "prefix_scan_causal: seq_len must be <= 32 (subgroup size). "
-                    "Longer sequences need a hierarchical scan (TODO).");
-
             PrefixScanParams p{seqLen, hiddenDim, batchSize};
 
             py::array_t<float> result(xBuf.shape);
@@ -70,10 +65,6 @@ void register_prefix_scan_ops(py::module_& m) {
             const uint32_t batchSize = static_cast<uint32_t>(dhBuf.shape[0]);
             const uint32_t seqLen    = static_cast<uint32_t>(dhBuf.shape[1]);
             const uint32_t hiddenDim = static_cast<uint32_t>(dhBuf.shape[2]);
-
-            if (seqLen > 32)
-                throw std::runtime_error(
-                    "prefix_scan_causal_backward: seq_len must be <= 32");
 
             PrefixScanParams p{seqLen, hiddenDim, batchSize};
 
