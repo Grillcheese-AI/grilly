@@ -121,8 +121,8 @@ class MultiheadAttention(Module):
                     attn_output = attn_output.astype(np.float32)
                     scores_softmax = scores_softmax.astype(np.float32)
                     self._cached_scores_pre_softmax = None
-                    self._cached_scores = scores_softmax.copy()
-                    self._cached_attn_output = attn_output.copy()
+                    self._cached_scores = scores_softmax
+                    self._cached_attn_output = attn_output
                     attn_output_reshaped = attn_output.transpose(0, 2, 1, 3).reshape(
                         batch_size, seq_len_q, self.embed_dim
                     )
@@ -144,7 +144,7 @@ class MultiheadAttention(Module):
                     else:
                         scores = None
                 if scores is not None:
-                    self._cached_scores_pre_softmax = scores.copy()
+                    self._cached_scores_pre_softmax = scores
                     if mask is not None:
                         if mask.ndim == 2:
                             mask_expanded = mask[:, None, :, None]
@@ -155,11 +155,11 @@ class MultiheadAttention(Module):
                     br_soft = _bridge.softmax(scores, dim=-1)
                     if br_soft is not None:
                         scores_softmax = _bridge_to_numpy(br_soft).astype(np.float32)
-                        self._cached_scores = scores_softmax.copy()
+                        self._cached_scores = scores_softmax
                         br_out = _bridge.attention_output(scores_softmax, v_reshaped)
                         if br_out is not None:
                             attn_output = _bridge_to_numpy(br_out).astype(np.float32)
-                            self._cached_attn_output = attn_output.copy()
+                            self._cached_attn_output = attn_output
                             attn_output_reshaped = attn_output.transpose(0, 2, 1, 3).reshape(
                                 batch_size, seq_len_q, self.embed_dim
                             )
@@ -186,7 +186,7 @@ class MultiheadAttention(Module):
                     float(self.head_dim)
                 )
 
-        self._cached_scores_pre_softmax = scores.copy()
+        self._cached_scores_pre_softmax = scores
 
         if mask is not None:
             if mask.ndim == 2:
@@ -200,11 +200,11 @@ class MultiheadAttention(Module):
         scores_exp = np.exp(scores - scores_max)
         scores_softmax = scores_exp / scores_exp.sum(axis=-1, keepdims=True)
 
-        self._cached_scores = scores_softmax.copy()
+        self._cached_scores = scores_softmax
 
         attn_output = np.einsum("bhqk,bhkd->bhqd", scores_softmax, v_reshaped)
 
-        self._cached_attn_output = attn_output.copy()
+        self._cached_attn_output = attn_output
 
         # Reshape back: (batch, num_heads, seq_len_q, head_dim) -> (batch, seq_len_q, embed_dim)
         attn_output_reshaped = attn_output.transpose(0, 2, 1, 3).reshape(
@@ -431,9 +431,9 @@ class FlashAttention2(Module):
             Output tensor (batch, seq_len, num_heads, head_dim) or (batch, seq_len, embed_dim)
         """
         # Cache inputs for backward pass
-        self._cached_q = q.copy()
-        self._cached_k = k.copy()
-        self._cached_v = v.copy()
+        self._cached_q = q
+        self._cached_k = k
+        self._cached_v = v
         self._cached_mask = mask
 
         # Handle different input shapes
@@ -444,11 +444,19 @@ class FlashAttention2(Module):
             k = k.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
             v = v.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
 
+        # Try C++ bridge fast path
+        if _USE_CPP_BRIDGE:
+            result = _bridge.flash_attention2(q, k, v, mask=mask, use_rope=self.use_rope)
+            if result is not None:
+                output = _bridge_to_numpy(result)
+                self._cached_output = output
+                return output
+
         backend = self._get_backend()
-        if hasattr(backend, "flash_attention2"):
+        if backend is not None and hasattr(backend, "flash_attention2"):
             try:
                 output = backend.flash_attention2(q, k, v, mask=mask, use_rope=self.use_rope)
-                self._cached_output = output.copy()
+                self._cached_output = output
                 return output
             except Exception:
                 pass  # Fall back to CPU
@@ -487,7 +495,7 @@ class FlashAttention2(Module):
         # Reshape back: (batch, num_heads, seq_len, head_dim) -> (batch, seq_len, num_heads, head_dim)
         output = output.transpose(0, 2, 1, 3)
 
-        self._cached_output = output.copy()
+        self._cached_output = output
         return output
 
     def backward(

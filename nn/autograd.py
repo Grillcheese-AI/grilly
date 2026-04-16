@@ -26,6 +26,27 @@ except ImportError:
 # Global flag to disable gradient computation
 _grad_enabled = True
 
+# Cached GPU backward ops — avoids import + availability check on every backward() call.
+_gpu_backward_ops_cache = None
+_gpu_backward_ops_checked = False
+
+
+def _get_gpu_backward_ops():
+    """Return GPU backward ops if available, caching the result."""
+    global _gpu_backward_ops_cache, _gpu_backward_ops_checked
+    if _gpu_backward_ops_checked:
+        return _gpu_backward_ops_cache
+    _gpu_backward_ops_checked = True
+    try:
+        from grilly.nn.gpu_backward import get_gpu_backward_ops
+
+        ops = get_gpu_backward_ops(use_gpu=True)
+        if ops.is_available():
+            _gpu_backward_ops_cache = ops
+    except Exception:
+        pass
+    return _gpu_backward_ops_cache
+
 
 def is_grad_enabled() -> bool:
     """Check if gradient computation is enabled."""
@@ -240,35 +261,30 @@ class Variable:
         # Initialize GPU backend if requested
         gpu_ops = None
         if use_gpu:
-            try:
-                from grilly.nn.gpu_backward import get_gpu_backward_ops
-
-                gpu_ops = get_gpu_backward_ops(use_gpu=True)
-                if not gpu_ops.is_available():
-                    gpu_ops = None
-                    use_gpu = False
-            except Exception:
-                # Fall back to CPU if GPU not available
-                gpu_ops = None
+            gpu_ops = _get_gpu_backward_ops()
+            if gpu_ops is None:
                 use_gpu = False
 
-        # Build topological order of the computation graph
+        # Build topological order of the computation graph (iterative DFS
+        # to avoid stack overflow on deep graphs with >1000 ops).
         topo_order = []
         visited = set()
+        topo_set = set()
+        stack = [self]
 
-        def build_topo(var: Variable):
-            """Execute build topo."""
-
+        while stack:
+            var = stack[-1]
             if var in visited:
-                return
+                stack.pop()
+                if var not in topo_set:
+                    topo_set.add(var)
+                    topo_order.append(var)
+                continue
             visited.add(var)
             if var.grad_fn is not None:
                 for input_var in var.grad_fn.inputs:
-                    if input_var is not None and input_var.requires_grad:
-                        build_topo(input_var)
-            topo_order.append(var)
-
-        build_topo(self)
+                    if input_var is not None and input_var.requires_grad and input_var not in visited:
+                        stack.append(input_var)
 
         # Initialize gradient for the output
         grad_map = {id(self): grad_output.copy()}
@@ -1774,7 +1790,7 @@ def softplus(a, beta=1.0, threshold=20.0) -> Variable:
     x = a.data
     bx = beta * x
     # For numerical stability, use x when beta*x > threshold
-    result_data = np.where(bx > threshold, x, np.log1p(np.exp(bx)) / beta)
+    result_data = np.where(bx > threshold, x, np.log1p(np.exp(np.minimum(bx, threshold))) / beta)
 
     def backward(grad):
         # d/dx softplus = sigmoid(beta * x)

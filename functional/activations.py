@@ -2,16 +2,7 @@
 
 import numpy as np
 
-
-def _to_numpy(result):
-    """Convert bridge result to numpy if it's a C++ Tensor."""
-    if result is None:
-        return None
-    if isinstance(result, np.ndarray):
-        return result
-    if hasattr(result, "numpy"):
-        return result.numpy()
-    return np.asarray(result)
+from ._helpers import _to_numpy
 
 
 def relu(x: np.ndarray) -> np.ndarray:
@@ -86,10 +77,16 @@ def softmax(x: np.ndarray, dim: int = -1) -> np.ndarray:
     return (exp_x / np.sum(exp_x, axis=dim, keepdims=True)).astype(np.float32)
 
 
-def softplus(x: np.ndarray) -> np.ndarray:
+def softplus(x: np.ndarray, beta: float = 1.0, threshold: float = 20.0) -> np.ndarray:
     """
-    Softplus activation: log(1 + exp(x))
+    Softplus activation: (1/beta) * log(1 + exp(beta * x))
+
+    Uses a linear approximation for large values to prevent overflow.
     Uses: activation-softplus.glsl
     """
-    # No bridge equivalent; CPU fallback
-    return np.log(1 + np.exp(x))
+    x = np.asarray(x, dtype=np.float32)
+    bx = beta * x
+    # For bx > threshold, softplus ≈ x (avoids exp overflow)
+    return np.where(
+        bx > threshold, x, (1.0 / beta) * np.log(1.0 + np.exp(np.minimum(bx, threshold)))
+    ).astype(np.float32)

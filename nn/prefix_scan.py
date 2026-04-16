@@ -14,6 +14,12 @@ sequential loop over time. Parallelism is across (batch × hidden_dim),
 so there is **no seq_len cap** — any length that fits in GPU memory works.
 Previous revision used a subgroup scan and capped at 32.
 
+Fused MinGRU:
+    Forward:   x_scan = sigmoid(g) * tanh(v)
+               a      = 0.05 + 0.9 * sigmoid(d)
+               h_t    = a_t * h_{t-1} + x_scan_t
+               (Computed in a single fused GPU kernel)
+
 Example::
 
     from grilly.nn.prefix_scan import prefix_scan_causal
@@ -104,6 +110,57 @@ def prefix_scan_causal(x, a) -> Variable:
 
     # GradFn inputs list order MUST match the backward return tuple order.
     grad_fn = GradFn("PrefixScanCausal", backward_fn, [x_var, a_var])
+    return Variable(h_data, requires_grad=True, grad_fn=grad_fn)
+
+
+def min_gru(g, v, d) -> Variable:
+    """Fused MinGRU mixer: ``h_t = a_t * h_{t-1} + x_scan_t``.
+    
+    Logic:
+        x_scan_t = sigmoid(g_t) * tanh(v_t)
+        a_t      = 0.05 + 0.9 * sigmoid(d_t)
+        h_t      = a_t * h_{t-1} + x_scan_t
+        
+    Args:
+        g, v, d: Gate projections of shape ``(B, S, D)``.
+    """
+    import grilly_core as gc
+
+    g_var = _ensure_variable(g)
+    v_var = _ensure_variable(v)
+    d_var = _ensure_variable(d)
+
+    g_data = np.asarray(g_var.data, dtype=np.float32)
+    v_data = np.asarray(v_var.data, dtype=np.float32)
+    d_data = np.asarray(d_var.data, dtype=np.float32)
+
+    dev = _get_bridge_device()
+    h_data = np.asarray(gc.mingru_forward(dev, g_data, v_data, d_data), dtype=np.float32)
+
+    requires_grad = (
+        _grad_enabled
+        and (g_var.requires_grad or v_var.requires_grad or d_var.requires_grad)
+    )
+    if not requires_grad:
+        return Variable(h_data, requires_grad=False)
+
+    saved_g = g_data.copy()
+    saved_v = v_data.copy()
+    saved_d = d_data.copy()
+    saved_h = h_data.copy()
+
+    def backward_fn(grad_output):
+        grad_h = np.asarray(grad_output, dtype=np.float32)
+        result = gc.mingru_backward(
+            dev, grad_h, saved_g, saved_v, saved_d, saved_h
+        )
+        return (
+            np.asarray(result["grad_g"], dtype=np.float32),
+            np.asarray(result["grad_v"], dtype=np.float32),
+            np.asarray(result["grad_d"], dtype=np.float32)
+        )
+
+    grad_fn = GradFn("MinGRUFused", backward_fn, [g_var, v_var, d_var])
     return Variable(h_data, requires_grad=True, grad_fn=grad_fn)
 
 
@@ -208,3 +265,32 @@ class CausalSequenceMixer:
 
         h = prefix_scan_causal(x_t, a_t)
         return h
+
+
+class MinGRU:
+    """Fused MinGRU layer using the specialized GPU kernel."""
+    
+    def __init__(self, d_model: int, bias_init: float = 1.0):
+        from grilly import nn
+        self.d_model = d_model
+        self.proj_g = nn.Linear(d_model, d_model, bias=True)
+        self.proj_v = nn.Linear(d_model, d_model, bias=True)
+        self.proj_d = nn.Linear(d_model, d_model, bias=True)
+
+        try:
+            b = self.proj_d.bias
+            b_arr = b.data if hasattr(b, "data") else b
+            b_arr[:] = float(bias_init)
+        except Exception:
+            pass
+
+    def parameters(self):
+        yield from self.proj_g.parameters()
+        yield from self.proj_v.parameters()
+        yield from self.proj_d.parameters()
+
+    def __call__(self, x):
+        g = self.proj_g(x)
+        v = self.proj_v(x)
+        d = self.proj_d(x)
+        return min_gru(g, v, d)

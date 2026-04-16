@@ -115,9 +115,11 @@ class VulkanAttention(BufferMixin):
                 "IIIIfI", batch_size, seq_len, num_heads, head_dim, scale, 0
             )
 
-            # Dispatch
+            # Dispatch: x = seq_len, y = seq_len, z = batch_size * num_heads
             workgroups_x = (seq_len + 15) // 16
-            workgroups_y = ((batch_size * num_heads * seq_len) + 15) // 16
+            workgroups_y = (seq_len + 15) // 16
+            workgroups_z = batch_size * num_heads
+            
             self.core._dispatch_compute(
                 pipeline,
                 pipeline_layout,
@@ -125,6 +127,7 @@ class VulkanAttention(BufferMixin):
                 workgroups_x,
                 push_constants,
                 workgroups_y,
+                workgroups_z,
             )
 
             # Download results
@@ -958,7 +961,7 @@ class VulkanAttention(BufferMixin):
         self._upload_buffer(buf_v, v_flat)
 
         pipeline, pipeline_layout, _ = self.pipelines.get_or_create_pipeline(
-            "gqa-attention", 5, push_constant_size=24
+            "gqa-attention", 5, push_constant_size=28
         )
 
         descriptor_set = self.pipelines.get_cached_descriptor_set(
@@ -972,17 +975,30 @@ class VulkanAttention(BufferMixin):
             ],
         )
 
-        push_constants = struct.pack(
-            "IIIIIf", batch_size, num_q_heads, num_kv_heads, head_dim, cache_len, scale
-        )
+        total_q = batch_size * num_q_heads;
+        workgroups_scores_x = (cache_len + 15) // 16;
+        workgroups_scores_y = (total_q + 15) // 16;
+        
+        workgroups_softmax_x = 1; # One thread per head
+        workgroups_softmax_y = (total_q + 15) // 16;
+        
+        workgroups_out_x = (head_dim + 15) // 16;
+        workgroups_out_y = (total_q + 15) // 16;
 
-        total_q = batch_size * num_q_heads
-        workgroups_x = (max(cache_len, head_dim) + 15) // 16
-        workgroups_y = (total_q + 15) // 16
-
-        self.core._dispatch_compute(
-            pipeline, pipeline_layout, descriptor_set, workgroups_x, push_constants, workgroups_y
-        )
+        with self.core.record_commands() as rec:
+            # Phase 0: Scores
+            push_0 = struct.pack("IIIIIfI", batch_size, num_q_heads, num_kv_heads, head_dim, cache_len, scale, 0)
+            rec.dispatch(pipeline, pipeline_layout, descriptor_set, (workgroups_scores_x, workgroups_scores_y, 1), push_0)
+            rec.barrier()
+            
+            # Phase 1: Softmax
+            push_1 = struct.pack("IIIIIfI", batch_size, num_q_heads, num_kv_heads, head_dim, cache_len, scale, 1)
+            rec.dispatch(pipeline, pipeline_layout, descriptor_set, (workgroups_softmax_x, workgroups_softmax_y, 1), push_1)
+            rec.barrier()
+            
+            # Phase 2: Output
+            push_2 = struct.pack("IIIIIfI", batch_size, num_q_heads, num_kv_heads, head_dim, cache_len, scale, 2)
+            rec.dispatch(pipeline, pipeline_layout, descriptor_set, (workgroups_out_x, workgroups_out_y, 1), push_2)
 
         result = self._download_buffer(buf_out, out_bytes, np.float32)
         self._release_buffers([buf_q, buf_k, buf_v, buf_out, buf_scores])

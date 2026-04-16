@@ -5,15 +5,7 @@ Uses: loss-cross-entropy.glsl, loss-fn-bce.glsl
 
 import numpy as np
 
-
-def _to_numpy(result):
-    if result is None:
-        return None
-    if isinstance(result, np.ndarray):
-        return result
-    if hasattr(result, "numpy"):
-        return result.numpy()
-    return np.asarray(result)
+from ._helpers import _to_numpy
 
 
 def cross_entropy(

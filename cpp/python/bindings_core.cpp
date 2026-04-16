@@ -15,6 +15,9 @@
 
 // Forward declarations for split binding files
 void register_siglip_ops(py::module_& m);
+void register_mingru_ops(py::module_& m);
+void register_bandit_ops(py::module_& m);
+void register_eggroll_ops(py::module_& m);
 
 PYBIND11_MODULE(grilly_core, m) {
     m.doc() = "grilly C++ Vulkan backend — eliminates Python->C boundary "
@@ -441,4 +444,7 @@ PYBIND11_MODULE(grilly_core, m) {
     register_grl_ops(m);
     register_misc_ops(m);
     register_prefix_scan_ops(m);
+    register_mingru_ops(m);
+    register_bandit_ops(m);
+    register_eggroll_ops(m);
 }

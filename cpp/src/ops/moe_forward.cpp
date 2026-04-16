@@ -255,7 +255,7 @@ void moe_forward_gpu(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     uint32_t V = h.vocab;
 
     pool.upload(h.bufIds, reinterpret_cast<const float*>(input_ids),
-                S * sizeof(uint32_t));
+                S * sizeof(int32_t));
     pool.upload(h.bufPosSlice, h.cpu_pos.data(), S * d * sizeof(float));
 
     batch.begin();

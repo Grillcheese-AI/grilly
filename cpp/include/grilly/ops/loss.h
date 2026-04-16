@@ -44,7 +44,30 @@ void crossEntropyBackward(CommandBatch& batch, BufferPool& pool,
                           PipelineCache& cache,
                           const float* logits, const uint32_t* targets,
                           float* gradLogits,
-                          const CrossEntropyBackwardParams& p);
+    const CrossEntropyBackwardParams& p);
+
+// ── MSE Loss ────────────────────────────────────────────────────────────
+
+struct MSELossParams {
+    uint32_t n;
+};
+
+void mseLoss(CommandBatch& batch, BufferPool& pool,
+             PipelineCache& cache,
+             const float* preds, const float* targets,
+             float* losses, const MSELossParams& p);
+
+// ── Cosine Similarity Loss ──────────────────────────────────────────────
+
+struct CosineLossParams {
+    uint32_t batchSize;
+    uint32_t dim;
+};
+
+void cosineSimilarityLoss(CommandBatch& batch, BufferPool& pool,
+                          PipelineCache& cache,
+                          const float* preds, const float* targets,
+                          float* losses, const CosineLossParams& p);
 
 }  // namespace ops
 }  // namespace grilly

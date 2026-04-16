@@ -61,40 +61,34 @@ void main() {
         barrier();
 
         // Accumulate for all 4 experts
-        // Each iteration: load 4 floats from input (via tileX), multiply with expert weight vec4
-        [[unroll]]
-        for (uint k = 0; k < 16; k++) {
+        uint k_limit = min(16u, d_vec - k_base);
+        for (uint k = 0; k < k_limit; k++) {
             vec4 xv = tileX[ty][k];
-            uint k_global = k_base + k;  // vec4 index in K dimension
-
-            // For each expert: W[col_out_vec4, k_global_vec4]
-            // col_vec gives us the output vec4 column
-            // We need 4 loads per expert (one per component of xv)
-            // ew index: expert * ew_stride + (col_vec*4 + component) * d_vec + k_global
+            uint k_global = k_base + k;
 
             // Expert 0
-            acc0 += xv.x * ew[0 * ew_stride + (col_vec * 4 + 0) * d_vec + k_global];
-            acc0 += xv.y * ew[0 * ew_stride + (col_vec * 4 + 1) * d_vec + k_global];
-            acc0 += xv.z * ew[0 * ew_stride + (col_vec * 4 + 2) * d_vec + k_global];
-            acc0 += xv.w * ew[0 * ew_stride + (col_vec * 4 + 3) * d_vec + k_global];
+            acc0.x += dot(xv, ew[0 * ew_stride + (col_vec * 4 + 0) * d_vec + k_global]);
+            acc0.y += dot(xv, ew[0 * ew_stride + (col_vec * 4 + 1) * d_vec + k_global]);
+            acc0.z += dot(xv, ew[0 * ew_stride + (col_vec * 4 + 2) * d_vec + k_global]);
+            acc0.w += dot(xv, ew[0 * ew_stride + (col_vec * 4 + 3) * d_vec + k_global]);
 
             // Expert 1
-            acc1 += xv.x * ew[1 * ew_stride + (col_vec * 4 + 0) * d_vec + k_global];
-            acc1 += xv.y * ew[1 * ew_stride + (col_vec * 4 + 1) * d_vec + k_global];
-            acc1 += xv.z * ew[1 * ew_stride + (col_vec * 4 + 2) * d_vec + k_global];
-            acc1 += xv.w * ew[1 * ew_stride + (col_vec * 4 + 3) * d_vec + k_global];
+            acc1.x += dot(xv, ew[1 * ew_stride + (col_vec * 4 + 0) * d_vec + k_global]);
+            acc1.y += dot(xv, ew[1 * ew_stride + (col_vec * 4 + 1) * d_vec + k_global]);
+            acc1.z += dot(xv, ew[1 * ew_stride + (col_vec * 4 + 2) * d_vec + k_global]);
+            acc1.w += dot(xv, ew[1 * ew_stride + (col_vec * 4 + 3) * d_vec + k_global]);
 
             // Expert 2
-            acc2 += xv.x * ew[2 * ew_stride + (col_vec * 4 + 0) * d_vec + k_global];
-            acc2 += xv.y * ew[2 * ew_stride + (col_vec * 4 + 1) * d_vec + k_global];
-            acc2 += xv.z * ew[2 * ew_stride + (col_vec * 4 + 2) * d_vec + k_global];
-            acc2 += xv.w * ew[2 * ew_stride + (col_vec * 4 + 3) * d_vec + k_global];
+            acc2.x += dot(xv, ew[2 * ew_stride + (col_vec * 4 + 0) * d_vec + k_global]);
+            acc2.y += dot(xv, ew[2 * ew_stride + (col_vec * 4 + 1) * d_vec + k_global]);
+            acc2.z += dot(xv, ew[2 * ew_stride + (col_vec * 4 + 2) * d_vec + k_global]);
+            acc2.w += dot(xv, ew[2 * ew_stride + (col_vec * 4 + 3) * d_vec + k_global]);
 
             // Expert 3
-            acc3 += xv.x * ew[3 * ew_stride + (col_vec * 4 + 0) * d_vec + k_global];
-            acc3 += xv.y * ew[3 * ew_stride + (col_vec * 4 + 1) * d_vec + k_global];
-            acc3 += xv.z * ew[3 * ew_stride + (col_vec * 4 + 2) * d_vec + k_global];
-            acc3 += xv.w * ew[3 * ew_stride + (col_vec * 4 + 3) * d_vec + k_global];
+            acc3.x += dot(xv, ew[3 * ew_stride + (col_vec * 4 + 0) * d_vec + k_global]);
+            acc3.y += dot(xv, ew[3 * ew_stride + (col_vec * 4 + 1) * d_vec + k_global]);
+            acc3.z += dot(xv, ew[3 * ew_stride + (col_vec * 4 + 2) * d_vec + k_global]);
+            acc3.w += dot(xv, ew[3 * ew_stride + (col_vec * 4 + 3) * d_vec + k_global]);
         }
 
         barrier();

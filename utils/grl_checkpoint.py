@@ -171,6 +171,14 @@ def load_grl(filepath: str | Path, *, map_location: Any = None) -> dict[str, Any
     """
     _ = map_location
     path = Path(filepath)
+    # Check header before calling C++ to ensure consistent error reporting
+    with open(path, "rb") as f:
+        head = f.read(HEADER_SIZE)
+    if len(head) < HEADER_SIZE or head[0:4] != MAGIC:
+        raise ValueError(f"Not a GRL file or corrupt magic: {path}")
+    version = struct.unpack_from("<H", head, 4)[0]
+    if version != FORMAT_VERSION:
+        raise ValueError(f"Unsupported GRL format version {version}")
 
     if _HAS_CPP_GRL:
         meta_json, index_json, pay_bytes = _grl_core.grl_read_file(str(path))
@@ -188,18 +196,11 @@ def load_grl(filepath: str | Path, *, map_location: Any = None) -> dict[str, Any
             buf = payload[off : off + ln].tobytes()
             arr = np.frombuffer(buf, dtype=dt).reshape(shape)
             flat[name] = np.array(arr, copy=True)
-        # Roundtrip semantics: return what the user saved, not a forced
-        # ``{'model': ..., 'metadata': ...}`` wrapper. ``torch.save`` /
-        # ``torch.load`` users expect ``ck == original_payload``.
-        out: dict[str, Any] = _unflatten_state_dict(flat)
-        # Add metadata only if it doesn't collide with a user key.
-        if "metadata" not in out:
-            out["metadata"] = metadata
-        # Promote common training scalars from metadata to top level when
-        # the user didn't include them in the original payload (back-compat
-        # with checkpoints saved by older grilly that only put step in meta).
+        nested = _unflatten_state_dict(flat)
+        out: dict[str, Any] = {"metadata": metadata, "model": nested}
+        # Promote common training keys from metadata to top level for torch-style access
         for k in ("step", "training_step", "best_ppl", "epoch"):
-            if k in metadata and k not in out:
+            if k in metadata:
                 out[k] = metadata[k]
         return out
 

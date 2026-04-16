@@ -152,6 +152,98 @@ void crossEntropyBackward(CommandBatch& batch, BufferPool& pool,
     pool.release(bufTargetStage);
     pool.release(bufGradStage);
 }
+// ── MSE Loss ─────────────────────────────────────────────────────────────
+
+void mseLoss(CommandBatch& batch, BufferPool& pool,
+             PipelineCache& cache,
+             const float* preds, const float* targets,
+             float* losses, const MSELossParams& p) {
+    const size_t bytes = size_t(p.n) * sizeof(float);
+
+    GrillyBuffer bPDL = pool.acquireDeviceLocal(bytes);
+    GrillyBuffer bTDL = pool.acquireDeviceLocal(bytes);
+    GrillyBuffer bLDL = pool.acquireDeviceLocal(bytes);
+
+    GrillyBuffer bPStage = pool.acquire(bytes);
+    GrillyBuffer bTStage = pool.acquire(bytes);
+    GrillyBuffer bLStage = pool.acquireReadback(bytes);
+
+    pool.upload(bPStage, preds, bytes);
+    pool.upload(bTStage, targets, bytes);
+
+    PipelineEntry pipe = cache.getOrCreate("loss-mse", 3, sizeof(MSELossParams));
+
+    std::vector<VkDescriptorBufferInfo> bufs = {
+        {bPDL.handle, 0, bytes},
+        {bTDL.handle, 0, bytes},
+        {bLDL.handle, 0, bytes},
+    };
+    VkDescriptorSet descSet = cache.allocDescriptorSet("loss-mse", bufs);
+
+    uint32_t gx = (p.n + 255u) / 256u;
+
+    batch.begin();
+    batch.copyBuffer(bPStage, bPDL, bytes);
+    batch.copyBuffer(bTStage, bTDL, bytes);
+    batch.transferComputeBarrier();
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1, &p, sizeof(p));
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bLDL, bLStage, bytes);
+    batch.submitDeferred();
+    batch.waitForCompletion();
+
+    pool.download(bLStage, losses, bytes);
+
+    pool.release(bPDL); pool.release(bTDL); pool.release(bLDL);
+    pool.release(bPStage); pool.release(bTStage); pool.release(bLStage);
+}
+
+// ── Cosine Similarity Loss ───────────────────────────────────────────────
+
+void cosineSimilarityLoss(CommandBatch& batch, BufferPool& pool,
+                          PipelineCache& cache,
+                          const float* preds, const float* targets,
+                          float* losses, const CosineLossParams& p) {
+    const size_t inBytes = size_t(p.batchSize) * p.dim * sizeof(float);
+    const size_t outBytes = size_t(p.batchSize) * sizeof(float);
+
+    GrillyBuffer bPDL = pool.acquireDeviceLocal(inBytes);
+    GrillyBuffer bTDL = pool.acquireDeviceLocal(inBytes);
+    GrillyBuffer bLDL = pool.acquireDeviceLocal(outBytes);
+
+    GrillyBuffer bPStage = pool.acquire(inBytes);
+    GrillyBuffer bTStage = pool.acquire(inBytes);
+    GrillyBuffer bLStage = pool.acquireReadback(outBytes);
+
+    pool.upload(bPStage, preds, inBytes);
+    pool.upload(bTStage, targets, inBytes);
+
+    PipelineEntry pipe = cache.getOrCreate("loss-cosine", 3, sizeof(CosineLossParams));
+
+    std::vector<VkDescriptorBufferInfo> bufs = {
+        {bPDL.handle, 0, inBytes},
+        {bTDL.handle, 0, inBytes},
+        {bLDL.handle, 0, outBytes},
+    };
+    VkDescriptorSet descSet = cache.allocDescriptorSet("loss-cosine", bufs);
+
+    uint32_t gx = (p.batchSize + 63u) / 64u;
+
+    batch.begin();
+    batch.copyBuffer(bPStage, bPDL, inBytes);
+    batch.copyBuffer(bTStage, bTDL, inBytes);
+    batch.transferComputeBarrier();
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1, &p, sizeof(p));
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bLDL, bLStage, outBytes);
+    batch.submitDeferred();
+    batch.waitForCompletion();
+
+    pool.download(bLStage, losses, outBytes);
+
+    pool.release(bPDL); pool.release(bTDL); pool.release(bLDL);
+    pool.release(bPStage); pool.release(bTStage); pool.release(bLStage);
+}
 
 }  // namespace ops
 }  // namespace grilly

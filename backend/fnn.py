@@ -795,17 +795,21 @@ class VulkanFNN(BufferMixin):
         output_shape = original_shape[:-1] + (hidden_dim,)
         return result.reshape(output_shape)
 
-    def activation_softmax(self, input_data, axis=-1):
+    def activation_softmax(self, input_data, axis=-1, **kwargs):
         """
         Apply softmax activation: exp(x) / sum(exp(x))
 
         Args:
             input_data: Input array
-            axis: Axis along which to compute softmax (default: -1)
+            axis: Axis along which to compute softmax
+            kwargs: Accepts 'dim' as an alias for 'axis'
 
         Returns:
             Softmax probabilities
         """
+        if "dim" in kwargs:
+            axis = kwargs.pop("dim")
+
         # Check if shader is available
         if "activation-softmax" not in self.shaders:
             # CPU fallback (numba if available)
