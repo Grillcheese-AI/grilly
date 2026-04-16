@@ -66,11 +66,18 @@ class Optimizer:
         """
         Clear gradients for all parameters.
 
-        Note: In this implementation, gradients are expected to be
-        stored in a separate structure (e.g., in the model's backward pass).
-        This method is provided for API compatibility.
+        Zeroes the .grad attribute on every parameter managed by this optimizer,
+        matching the standard PyTorch training loop pattern:
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
         """
-        pass
+        for group in self.param_groups:
+            for p in group["params"]:
+                if hasattr(p, "zero_grad") and callable(p.zero_grad):
+                    p.zero_grad()
+                elif hasattr(p, "grad") and p.grad is not None:
+                    p.grad = None
 
     def step(self, closure=None):
         """

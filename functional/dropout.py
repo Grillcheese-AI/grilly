@@ -5,16 +5,7 @@ Uses: fnn-dropout.glsl
 
 import numpy as np
 
-
-def _to_numpy(result):
-    """Convert bridge result to numpy if it's a C++ Tensor."""
-    if result is None:
-        return None
-    if isinstance(result, np.ndarray):
-        return result
-    if hasattr(result, "numpy"):
-        return result.numpy()
-    return np.asarray(result)
+from ._helpers import _to_numpy
 
 
 def dropout(input: np.ndarray, p: float = 0.5, training: bool = True) -> np.ndarray:

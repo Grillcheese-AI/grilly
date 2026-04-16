@@ -48,6 +48,28 @@ except ImportError:
                 self.grad = np.zeros_like(self, dtype=np.float32)
 
 
+# Cached torch-API class resolution — avoids try/except on every forward pass.
+_torch_classes = None  # Will be (Tensor, LongTensor, Variable) or ()
+_torch_classes_resolved = False
+
+
+def _get_torch_classes():
+    """Return (Tensor, LongTensor, Variable) or () if unavailable. Cached."""
+    global _torch_classes, _torch_classes_resolved
+    if _torch_classes_resolved:
+        return _torch_classes
+    _torch_classes_resolved = True
+    try:
+        from grilly.nn.autograd import Variable as _Variable
+        from grilly.torch_api.tensor import LongTensor as _TorchLong
+        from grilly.torch_api.tensor import Tensor as _TorchTensor
+
+        _torch_classes = (_TorchTensor, _TorchLong, _Variable)
+    except ImportError:
+        _torch_classes = ()
+    return _torch_classes
+
+
 class Module:
     """Base class for Grilly neural network modules."""
 
@@ -108,15 +130,9 @@ class Module:
         # unchanged. Variable matters because Tensor inherits from Variable
         # and ops like ``.reshape`` / ``.mean(dim=...)`` / arithmetic return
         # raw Variable instances rather than the Tensor subclass.
-        try:
-            from grilly.nn.autograd import Variable as _Variable
-            from grilly.torch_api.tensor import LongTensor as _TorchLong
-            from grilly.torch_api.tensor import Tensor as _TorchTensor
-
-            if isinstance(x, (_TorchTensor, _TorchLong, _Variable)):
-                return x
-        except ImportError:
-            pass
+        torch_cls = _get_torch_classes()
+        if torch_cls and isinstance(x, torch_cls):
+            return x
 
         # 2. GPU-first: always pass VulkanTensor through without CPU round-trip
         if TENSOR_CONVERSION_AVAILABLE:
@@ -173,18 +189,12 @@ class Module:
         ``Parameter`` (ndarray subclass) is left untouched on the way out so
         re-wrapping a stored weight doesn't break gradient bookkeeping.
         """
-        try:
-            from grilly.nn.autograd import Variable as _Variable
-            from grilly.torch_api.tensor import LongTensor as _TorchLong
-            from grilly.torch_api.tensor import Tensor as _TorchTensor
-
-            saw_torch_input = any(
-                isinstance(a, (_TorchTensor, _TorchLong, _Variable)) for a in args
-            )
-        except ImportError:
+        torch_cls = _get_torch_classes()
+        if torch_cls:
+            saw_torch_input = any(isinstance(a, torch_cls) for a in args)
+            _TorchTensor = torch_cls[0]
+        else:
             _TorchTensor = None  # type: ignore[assignment]
-            _TorchLong = None  # type: ignore[assignment]
-            _Variable = None  # type: ignore[assignment]
             saw_torch_input = False
 
         converted_args = tuple(self._convert_input(arg) for arg in args)

@@ -82,4 +82,66 @@ void register_loss_ops(py::module_& m) {
         },
         py::arg("device"), py::arg("logits"), py::arg("targets"),
         "GPU cross-entropy backward");
+
+    // ── MSE Loss ─────────────────────────────────────────────────────────
+    m.def(
+        "mse_loss",
+        [](GrillyCoreContext& ctx, py::array_t<float> preds, py::array_t<float> targets) -> Tensor {
+            auto pBuf = preds.request();
+            auto tBuf = targets.request();
+            require_c_contiguous_float(pBuf);
+            require_c_contiguous_float(tBuf);
+            
+            if (pBuf.size != tBuf.size)
+                throw std::runtime_error("mse_loss: preds and targets must have same size");
+                
+            uint32_t n = static_cast<uint32_t>(pBuf.size);
+            py::array_t<float> losses(n);
+            auto lBuf = losses.request();
+            
+            grilly::ops::MSELossParams p{n};
+            {
+                py::gil_scoped_release release;
+                grilly::ops::mseLoss(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(pBuf.ptr),
+                    static_cast<const float*>(tBuf.ptr),
+                    static_cast<float*>(lBuf.ptr), p);
+            }
+            return Tensor::from_numpy(losses);
+        },
+        py::arg("device"), py::arg("preds"), py::arg("targets"),
+        "GPU MSE loss forward");
+
+    // ── Cosine Similarity Loss ───────────────────────────────────────────
+    m.def(
+        "cosine_similarity_loss",
+        [](GrillyCoreContext& ctx, py::array_t<float> preds, py::array_t<float> targets) -> Tensor {
+            auto pBuf = preds.request();
+            auto tBuf = targets.request();
+            require_c_contiguous_float(pBuf);
+            require_c_contiguous_float(tBuf);
+            
+            if (pBuf.ndim != 2 || tBuf.ndim != 2 || pBuf.shape[0] != tBuf.shape[0] || pBuf.shape[1] != tBuf.shape[1])
+                throw std::runtime_error("cosine_similarity_loss: inputs must be 2D and equal shape");
+                
+            uint32_t batchSize = static_cast<uint32_t>(pBuf.shape[0]);
+            uint32_t dim = static_cast<uint32_t>(pBuf.shape[1]);
+            
+            py::array_t<float> losses(batchSize);
+            auto lBuf = losses.request();
+            
+            grilly::ops::CosineLossParams p{batchSize, dim};
+            {
+                py::gil_scoped_release release;
+                grilly::ops::cosineSimilarityLoss(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(pBuf.ptr),
+                    static_cast<const float*>(tBuf.ptr),
+                    static_cast<float*>(lBuf.ptr), p);
+            }
+            return Tensor::from_numpy(losses);
+        },
+        py::arg("device"), py::arg("preds"), py::arg("targets"),
+        "GPU Cosine Similarity loss forward");
 }

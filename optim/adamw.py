@@ -16,6 +16,8 @@ from collections.abc import Iterator
 
 import numpy as np
 
+from ..backend import _bridge
+from ..nn._helpers import _USE_CPP_BRIDGE, _bridge_to_numpy
 from .base import Optimizer
 
 
@@ -274,6 +276,18 @@ class AdamW(Optimizer):
         GPU-accelerated AdamW update using adamw-update.glsl shader.
         """
         try:
+            if _USE_CPP_BRIDGE:
+                result = _bridge.adamw_update(
+                    param, grad, exp_avg, exp_avg_sq,
+                    lr=lr, beta1=beta1, beta2=beta2, eps=eps,
+                    weight_decay=weight_decay,
+                    beta1_t=beta1_t, beta2_t=beta2_t,
+                    clear_grad=clear_grad
+                )
+                if result is not None:
+                    # _bridge.adamw_update returns (p, m1, m2)
+                    return result
+
             if hasattr(backend, "learning") and hasattr(backend.learning, "adamw_update"):
                 param, exp_avg, exp_avg_sq = backend.learning.adamw_update(
                     weights=param,

@@ -7,7 +7,15 @@ import pytest
 
 
 def pytest_configure(config):
-    """Register custom markers."""
+    """Register custom markers and configure environment."""
+    # Set non-interactive backend for everything to avoid Tkinter issues in tests
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+    except ImportError:
+        pass
+
     config.addinivalue_line(
         "markers", "gpu: marks tests that require Vulkan/GPU (deselect with '-m \"not gpu\"')"
     )

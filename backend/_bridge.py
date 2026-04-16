@@ -2467,3 +2467,160 @@ def blockcode_similarity(query, codebook, num_blocks, block_size):
             )
         sims[entry_idx] = dot_sum / num_blocks
     return sims
+
+
+# ── VSA Core (Bitpacked / Full-Vector) ───────────────────────────────────
+
+
+def vsa_bind(a, b):
+    """GPU VSA cyclic binding (circular convolution)."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.vsa_bind(dev, _ensure_f32_contiguous(a), _ensure_f32_contiguous(b))
+    except Exception as e:
+        _record_fallback("vsa_bind", e)
+        return None
+
+
+def vsa_bundle(a, b):
+    """GPU VSA bundling (vector addition)."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.vsa_bundle(dev, _ensure_f32_contiguous(a), _ensure_f32_contiguous(b))
+    except Exception as e:
+        _record_fallback("vsa_bundle", e)
+        return None
+
+
+def vsa_unbind(composite, key):
+    """GPU VSA unbinding (circular correlation)."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.vsa_unbind(dev, _ensure_f32_contiguous(composite), _ensure_f32_contiguous(key))
+    except Exception as e:
+        _record_fallback("vsa_unbind", e)
+        return None
+
+
+def vsa_bitpack(x):
+    """GPU VSA bitpacking: convert float vector to uint32 bitset."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.vsa_bitpack(dev, _ensure_f32_contiguous(x))
+    except Exception as e:
+        _record_fallback("vsa_bitpack", e)
+        return None
+
+
+def blake3_role(seed_string, dim):
+    """Generate a pseudo-random VSA role vector using BLAKE3 hashing."""
+    if not _NATIVE or not hasattr(_core, "blake3_role"):
+        return None
+    try:
+        return _core.blake3_role(str(seed_string), int(dim))
+    except Exception as e:
+        _record_fallback("blake3_role", e)
+        return None
+
+
+# ── Search & Retrieval ───────────────────────────────────────────────────
+
+
+def hamming_search(query, codebook):
+    """GPU Hamming search for nearest bitpacked vector."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        # Codebook should be uint32 (bitpacked)
+        return _core.hamming_search(dev, query, codebook)
+    except Exception as e:
+        _record_fallback("hamming_search", e)
+        return None
+
+
+# ── CubeMind & Cognitive Ops ─────────────────────────────────────────────
+
+
+def resonator_step(query, codebooks):
+    """GPU Resonator Network step for VSA factorisation."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        # codebooks should be a list of ndarrays
+        cbs = [_ensure_f32_contiguous(cb) for cb in codebooks]
+        return _core.resonator(dev, _ensure_f32_contiguous(query), cbs)
+    except Exception as e:
+        _record_fallback("resonator_step", e)
+        return None
+
+
+def semantic_assigner(x, semantic_codes):
+    """GPU Semantic Assigner: maps continuous features to VSA semantic space."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        return _core.semantic_assigner(
+            dev, _ensure_f32_contiguous(x), _ensure_f32_contiguous(semantic_codes)
+        )
+    except Exception as e:
+        _record_fallback("semantic_assigner", e)
+        return None
+
+
+# ── Optimized Transformer & Training ─────────────────────────────────────
+
+
+def flash_attention2(q, k, v, mask=None, scale=None, use_rope=False):
+    """GPU Flash Attention 2. Returns None on failure."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        q = _ensure_f32_contiguous(q)
+        k = _ensure_f32_contiguous(k)
+        v = _ensure_f32_contiguous(v)
+        mask = _ensure_f32_contiguous(mask)
+        # Use default scale if None
+        s = float(scale) if scale is not None else 1.0 / np.sqrt(q.shape[-1])
+        return _core.flash_attention2(dev, q, k, v, mask, s)
+    except Exception as e:
+        _record_fallback("flash_attention2", e)
+        return None
+
+
+def adamw_update(
+    weights, grad, m, v, lr=1e-3, beta1=0.9, beta2=0.999, eps=1e-8, weight_decay=0.01,
+    beta1_t=None, beta2_t=None, clear_grad=False
+):
+    """GPU AdamW optimizer update step."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    try:
+        # Use provided bias correction factors or compute from t
+        b1_t = float(beta1_t) if beta1_t is not None else 1.0
+        b2_t = float(beta2_t) if beta2_t is not None else 1.0
+        
+        return _core.adamw_update(
+            dev,
+            _ensure_f32_contiguous(weights),
+            _ensure_f32_contiguous(grad),
+            _ensure_f32_contiguous(m),
+            _ensure_f32_contiguous(v),
+            float(lr), float(beta1), float(beta2), float(eps),
+            float(weight_decay), b1_t, b2_t, bool(clear_grad)
+        )
+    except Exception as e:
+        _record_fallback("adamw_update", e)
+        return None

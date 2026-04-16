@@ -7,15 +7,7 @@ Uses: faiss-distance.glsl, faiss-topk.glsl, faiss-ivf-filter.glsl,
 
 import numpy as np
 
-
-def _to_numpy(result):
-    if result is None:
-        return None
-    if isinstance(result, np.ndarray):
-        return result
-    if hasattr(result, "numpy"):
-        return result.numpy()
-    return np.asarray(result)
+from ._helpers import _to_numpy
 
 
 def faiss_distance(query: np.ndarray, vectors: np.ndarray, distance_type: str = "l2") -> np.ndarray:
