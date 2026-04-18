@@ -151,11 +151,14 @@ void register_linear_ops(py::module_& m) {
             outShape.push_back(static_cast<int64_t>(outputDim));
 
             Tensor result(outShape);
+            float* oPtr = result.mutable_data();
 
-            grilly::ops::linear(
-                ctx.batch, ctx.pool, ctx.cache,
-                xPtr, wPtr, biasPtr,
-                result.mutable_data(), p);
+            {
+                py::gil_scoped_release release;
+                grilly::ops::linear(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    xPtr, wPtr, biasPtr, oPtr, p);
+            }
 
             if (xShape.size() == 1)
                 result = result.reshape(
@@ -211,55 +214,87 @@ void register_linear_ops(py::module_& m) {
         "CPU linear projection using Eigen (for verification)");
 
     // ── GPU linear backward (fp32 only for now; interface is fp16-ready) ──
+    //
+    // Returns a py::tuple (grad_input, grad_weight, grad_bias). Tuples are
+    // drastically cheaper than dicts to construct/destruct on every backward
+    // step (no string hashing, no dict allocation).
     m.def(
         "linear_backward",
         [](GrillyCoreContext& ctx,
            py::array grad_output, py::array input,
-           py::array weights) -> py::dict {
-            auto gBuf = grad_output.request();
-            auto iBuf = input.request();
-            auto wBuf = weights.request();
+           py::array weights) -> py::tuple {
+            const auto gItem = grad_output.itemsize();
+            const auto iItem = input.itemsize();
+            const auto wItem = weights.itemsize();
 
-            if (gBuf.itemsize != 2 && gBuf.itemsize != 4)
+            if (gItem != 2 && gItem != 4)
                 throw std::runtime_error(
                     "grilly linear_backward: grad_output must be fp32 or fp16");
-            if (gBuf.itemsize != iBuf.itemsize ||
-                gBuf.itemsize != wBuf.itemsize)
+            if (gItem != iItem || gItem != wItem)
                 throw std::runtime_error(
                     "grilly linear_backward: grad_output, input, weights "
                     "must share the same dtype");
 
-            const uint32_t elemSize = static_cast<uint32_t>(gBuf.itemsize);
-            const std::string npFormat = (elemSize == 2) ? "e" : "f";
+            const int gNdim = grad_output.ndim();
+            const int iNdim = input.ndim();
+            if (gNdim < 1 || iNdim < 1)
+                throw std::runtime_error(
+                    "grilly linear_backward: inputs must have rank >= 1");
 
-            auto [batchSeq, outputDim] = extractBatchAndLastDim(gBuf);
-            uint32_t inputDim = static_cast<uint32_t>(
-                iBuf.shape[iBuf.ndim - 1]);
+            const uint32_t elemSize = static_cast<uint32_t>(gItem);
+            const char npFormat = (elemSize == 2) ? 'e' : 'f';
+
+            // Flatten (batch, [seq,] out) -> batchSeq × outputDim.
+            uint32_t batchSeq = 1;
+            for (int i = 0; i < gNdim - 1; ++i)
+                batchSeq *= static_cast<uint32_t>(grad_output.shape(i));
+            if (gNdim == 1) batchSeq = 1;
+            const uint32_t outputDim =
+                static_cast<uint32_t>(grad_output.shape(gNdim - 1));
+            const uint32_t inputDim =
+                static_cast<uint32_t>(input.shape(iNdim - 1));
 
             grilly::ops::LinearParams p{
                 batchSeq, inputDim, outputDim, 1u, elemSize};
 
-            py::array gradInput(py::dtype(npFormat), iBuf.shape);
-            py::array gradWeight(py::dtype(npFormat), wBuf.shape);
-            // Explicit vector to disambiguate from py::array(handle, bool).
+            // Build output shape vectors directly from the array API (no
+            // buffer_info allocation).
+            std::vector<py::ssize_t> inputShape(iNdim);
+            for (int i = 0; i < iNdim; ++i)
+                inputShape[i] = input.shape(i);
+            std::vector<py::ssize_t> weightShape(weights.ndim());
+            for (int i = 0; i < weights.ndim(); ++i)
+                weightShape[i] = weights.shape(i);
             std::vector<py::ssize_t> biasShape = {
                 static_cast<py::ssize_t>(outputDim)};
-            py::array gradBias(py::dtype(npFormat), biasShape);
 
-            grilly::ops::linearBackward(
-                ctx.batch, ctx.pool, ctx.cache,
-                gBuf.ptr, iBuf.ptr, wBuf.ptr,
-                gradInput.request().ptr,
-                gradWeight.request().ptr,
-                gradBias.request().ptr, p);
+            py::array gradInput(py::dtype(std::string(1, npFormat)),
+                                inputShape);
+            py::array gradWeight(py::dtype(std::string(1, npFormat)),
+                                 weightShape);
+            py::array gradBias(py::dtype(std::string(1, npFormat)),
+                               biasShape);
 
-            py::dict result;
-            result["grad_input"]  = gradInput;
-            result["grad_weight"] = gradWeight;
-            result["grad_bias"]   = gradBias;
-            return result;
+            // Cache raw pointers BEFORE releasing the GIL — mutable_data()
+            // / data() are Python-API-adjacent and must be called under GIL.
+            const void* gPtr  = grad_output.data();
+            const void* iPtr  = input.data();
+            const void* wPtr  = weights.data();
+            void* gInPtr  = gradInput.mutable_data();
+            void* gWPtr   = gradWeight.mutable_data();
+            void* gBPtr   = gradBias.mutable_data();
+
+            {
+                py::gil_scoped_release release;
+                grilly::ops::linearBackward(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    gPtr, iPtr, wPtr,
+                    gInPtr, gWPtr, gBPtr, p);
+            }
+
+            return py::make_tuple(gradInput, gradWeight, gradBias);
         },
         py::arg("device"), py::arg("grad_output"), py::arg("input"),
         py::arg("weights"),
-        "GPU linear backward (supports fp32; fp16 interface ready for shader upgrade)");
+        "GPU linear backward — returns (grad_input, grad_weight, grad_bias).");
 }

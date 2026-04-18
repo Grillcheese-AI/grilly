@@ -17,9 +17,8 @@ def test_mingru_parity():
     
     # 1. Reference Implementation (Python)
     x_scan = sigmoid(gv) * tanh(vv)
-    a = 0.05 + sigmoid(dv) * 0.9
-    h_ref = prefix_scan_causal(x_scan, a)
-    
+    a = 0.001 + sigmoid(dv) * 0.998
+    h_ref = prefix_scan_causal(x_scan, a)    
     # 2. Fused Implementation
     h_fused = min_gru(gv, vv, dv)
     

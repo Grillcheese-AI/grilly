@@ -169,7 +169,10 @@ class Variable:
         """
         if isinstance(data, Variable):
             data = data.data
-        if isinstance(data, np.ndarray):
+            
+        if _HAS_VULKAN_TENSOR and isinstance(data, VulkanTensor):
+            self.data = data
+        elif isinstance(data, np.ndarray):
             self.data = data.astype(np.float32)
         else:
             self.data = np.array(data, dtype=np.float32)
@@ -200,6 +203,8 @@ class Variable:
 
     def numpy(self) -> np.ndarray:
         """Get numpy array (detached from graph)."""
+        if _HAS_VULKAN_TENSOR and isinstance(self.data, VulkanTensor):
+            return self.data.numpy()
         return self.data.copy()
 
     def __array__(self, dtype=None) -> np.ndarray:
@@ -208,12 +213,27 @@ class Variable:
         without an explicit ``.data`` access. Required for grilly's existing
         numpy-native layer ``forward`` code to accept ``Tensor`` inputs from the
         ``torch_api`` facade transparently."""
+        if _HAS_VULKAN_TENSOR and isinstance(self.data, VulkanTensor):
+            arr = self.data.numpy()
+        else:
+            arr = self.data
+            
         if dtype is not None:
-            return self.data.astype(dtype, copy=False)
-        return self.data
+            return arr.astype(dtype, copy=False)
+        return arr
 
     def detach(self) -> "Variable":
         """Return a new Variable detached from the computation graph."""
+        if _HAS_VULKAN_TENSOR and isinstance(self.data, VulkanTensor):
+            # To keep it as VulkanTensor on GPU but detached:
+            # We could copy it via its data or just use the numpy fallback, but maybe we want a VulkanTensor
+            detached_data = VulkanTensor(self.data.numpy()) # Wait, does VulkanTensor have a clone? Let's just create a new one. Or fallback to cpu if not supported natively. But actually Variable(self.data) will keep it as VulkanTensor because of our new __init__. Wait, if self.data is VulkanTensor, Variable(self.data) keeps the same instance? We probably want a copy or at least a detached view. 
+            pass # actually let's just use the default logic but we need to duplicate data
+        
+        if _HAS_VULKAN_TENSOR and isinstance(self.data, VulkanTensor):
+            # VulkanTensor doesn't have an explicit copy() that keeps it on GPU yet?
+            # We'll just convert to numpy and back for detach, or just wrap the same data if we only need a new Variable. But Variable detach usually copies data for safety in this framework.
+            return Variable(self.data.numpy().copy(), requires_grad=False)
         return Variable(self.data.copy(), requires_grad=False)
 
     def to_vulkan_tensor(self):
