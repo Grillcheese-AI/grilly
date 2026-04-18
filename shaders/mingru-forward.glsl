@@ -5,7 +5,7 @@
  *
  * Fuses the following computations:
  *   x_scan = sigmoid(g) * tanh(v)
- *   a      = 0.05 + 0.9 * sigmoid(d)
+ *   a      = 0.001 + 0.998 * sigmoid(d)
  *   h_t    = a_t * h_{t-1} + x_scan_t
  *
  * Inputs: G, V, D (B, S, D)
@@ -48,7 +48,7 @@ void main() {
         float d_t = D[idx];
         
         float x_scan_t = sigmoid(g_t) * tanh(v_t);
-        float a_t      = 0.05 + 0.9 * sigmoid(d_t);
+        float a_t      = 0.001 + 0.998 * sigmoid(d_t);
         
         h = a_t * h + x_scan_t;
         H[idx] = h;

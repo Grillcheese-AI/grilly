@@ -1,0 +1,220 @@
+#version 450
+// Required for 64-bit integer support and atomics on modern GPUs (like your RX 6750 XT)
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_atomic_int64 : require
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// ============================================================================
+// CONFIGURATION MACROS (Replace C++ Templates)
+// Set these via your Vulkan shader compiler (e.g., glslangValidator -D...)
+// ============================================================================
+#ifndef EVICTION_POLICY
+#define EVICTION_POLICY 0
+#endif
+
+#ifndef METADATA_COUNT
+#define METADATA_COUNT 0
+#endif
+
+#ifndef DISABLE_FALLBACK
+#define DISABLE_FALLBACK 0
+#endif
+
+#ifndef ID_FREQ
+#define ID_FREQ 0
+#endif
+
+#ifndef READONLY
+#define READONLY 0
+#endif
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+const int64_t kDefaultTensor = -1l;
+const int kMaxHours = 2147483647;
+
+// ============================================================================
+// BUFFER BINDINGS (Storage Buffers)
+// ============================================================================
+layout(std430, binding = 0) readonly buffer InputBuffer { int64_t input_data[]; };
+layout(std430, binding = 1) writeonly buffer OutputBuffer { int64_t output_data[]; };
+layout(std430, binding = 2) buffer EvictBuffer { int64_t evict_slots[]; };
+layout(std430, binding = 3) buffer Identities { int64_t identities[]; };
+layout(std430, binding = 4) buffer Metadata { int metadata[]; };
+layout(std430, binding = 5) readonly buffer InputMetadata { int input_metadata[]; };
+layout(std430, binding = 6) buffer ProcessLock { int process_lock[]; };
+layout(std430, binding = 7) buffer RuntimeMeta { int64_t runtime_meta[]; };
+
+// Push constants for flat configuration values passed from the host
+layout(push_constant) uniform PushConstants {
+    int64_t modulo;
+    int64_t max_probe;
+    int cur_hour;
+    int eviction_threshold;
+    int64_t opt_in_prob;
+    int64_t num_reserved_slots;
+    int64_t total_items;
+} pc;
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+// Basic implementation of MurmurHash3 (64-bit mix)
+uint64_t fmix64(uint64_t k) {
+    k ^= k >> 33;
+    k *= 0xff51afd7ed558ccdul;
+    k ^= k >> 33;
+    k *= 0xc4ceb9fe1a85ec53ul;
+    k ^= k >> 33;
+    return k;
+}
+
+uint64_t murmur_hash3_2x64(uint64_t item, uint64_t seed1, uint64_t seed2) {
+    // Simplified mixer for single 64-bit integer
+    uint64_t h1 = seed1;
+    uint64_t k1 = item;
+    k1 *= 0x87c37b91114253d5ul;
+    k1 = (k1 << 31) | (k1 >> (64 - 31));
+    k1 *= 0x4cf5ad432745937ful;
+    h1 ^= k1;
+    h1 = (h1 << 27) | (h1 >> (64 - 27));
+    h1 = h1 * 5 + 0x52dce729ul;
+    h1 ^= 8ul; // Length is 8 bytes
+    return fmix64(h1);
+}
+
+int64_t next_output_index(int64_t index, int64_t mod_val) {
+    return (index + 1l) % mod_val;
+}
+
+void increment_freq_counter(int64_t output_index) {
+#if ID_FREQ == 1
+    atomicAdd(runtime_meta[output_index], 1l);
+#endif
+}
+
+void reset_freq_counter(int64_t output_index) {
+#if ID_FREQ == 1
+    atomicExchange(runtime_meta[output_index], 1l);
+#endif
+}
+
+void update_metadata(int64_t output_index, int metadata_val) {
+#if METADATA_COUNT == 1
+    atomicMax(metadata[output_index], metadata_val);
+#endif
+}
+
+void update_metadata_lru(int64_t output_index, int val) {
+#if METADATA_COUNT == 1
+    atomicMax(metadata[output_index], val);
+    atomicExchange(process_lock[output_index], int(kDefaultTensor));
+#endif
+}
+
+bool check_evict(int64_t output_index, int eviction_threshold, int metadata_val) {
+#if METADATA_COUNT == 1
+    int identity_metadata = int(kDefaultTensor);
+    while (true) {
+        identity_metadata = atomicCompSwap(metadata[output_index], int(kDefaultTensor), int(kDefaultTensor));
+        if (identity_metadata != int(kDefaultTensor)) {
+            break;
+        }
+    }
+    bool is_more_recent = (identity_metadata < metadata_val);
+    bool threshold_met = (eviction_threshold > identity_metadata);
+    return threshold_met && is_more_recent;
+#else
+    return false;
+#endif
+}
+
+int64_t get_identity_slot(int64_t identity, int64_t output_index, int64_t offset, int64_t mod_val, int64_t max_probe) {
+    int64_t current_probe = max_probe;
+    while (current_probe-- > 0l) {
+        int64_t insert_idx = output_index + offset;
+        int64_t current_slot_identity = identities[insert_idx];
+        
+        if (current_slot_identity == kDefaultTensor) {
+            return -1l;
+        } else if (current_slot_identity == identity) {
+            return output_index;
+        }
+        output_index = next_output_index(output_index, mod_val);
+    }
+    return -1l;
+}
+
+// ============================================================================
+// MAIN KERNEL LOGIC
+// ============================================================================
+void main() {
+    uint global_id = gl_GlobalInvocationID.x;
+    if (global_id >= pc.total_items) return;
+
+    int64_t process_index = int64_t(global_id);
+    int64_t item = input_data[process_index];
+    
+    int64_t offset = 0l; // Simplified: Assuming no offsets array provided
+    int metadata_val = pc.cur_hour; // Simplified: Assuming no input_metadata array
+    
+    uint64_t hash = murmur_hash3_2x64(uint64_t(item), 0ul, 0ul);
+    int64_t opt_in_block_size = pc.opt_in_prob == -1l ? pc.modulo : pc.modulo - pc.num_reserved_slots;
+    int64_t output_index = int64_t(hash % uint64_t(opt_in_block_size));
+    
+    int64_t identity = item; 
+    int64_t max_probe_local = pc.max_probe;
+    int64_t old_value = kDefaultTensor;
+
+    int64_t identity_slot = get_identity_slot(identity, output_index, offset, opt_in_block_size, pc.max_probe);
+    bool opt_in = true;
+
+    // Probing loop
+    while (max_probe_local-- > 0l && opt_in) {
+        int64_t insert_idx = output_index + offset;
+        
+#if READONLY == 1
+        old_value = identities[insert_idx];
+        if (old_value == identity) {
+            update_metadata(insert_idx, metadata_val);
+            increment_freq_counter(insert_idx);
+            break;
+        }
+#else
+        old_value = atomicCompSwap(identities[insert_idx], kDefaultTensor, identity);
+        if (old_value == identity || old_value == kDefaultTensor) {
+            update_metadata(insert_idx, metadata_val);
+            increment_freq_counter(insert_idx);
+            break;
+        }
+#endif
+
+#if EVICTION_POLICY == 0
+        if (identity_slot == -1l && check_evict(insert_idx, pc.eviction_threshold, metadata_val)) {
+            int64_t current_slot_value = atomicCompSwap(identities[insert_idx], old_value, identity);
+            if (current_slot_value == old_value || current_slot_value == identity) {
+                evict_slots[process_index] = insert_idx;
+                update_metadata(insert_idx, metadata_val);
+                reset_freq_counter(insert_idx);
+                break;
+            }
+        }
+#endif
+        output_index = next_output_index(output_index, opt_in_block_size);
+    }
+
+    // Fallback if probe fails
+    if (max_probe_local < 0l) {
+#if DISABLE_FALLBACK == 1
+        output_index = -1l;
+        offset = 0l;
+#else
+        output_index = pc.opt_in_prob == -1l ? int64_t(hash % uint64_t(pc.modulo)) : opt_in_block_size + int64_t(hash % uint64_t(pc.num_reserved_slots));
+#endif
+    }
+
+    output_data[process_index] = output_index + offset;
+}

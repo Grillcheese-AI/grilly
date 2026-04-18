@@ -60,7 +60,7 @@ void main() {
         float sig_d = sigmoid(d_t);
         
         float x_scan_t = sig_g * tanh_v;
-        float a_t      = 0.05 + 0.9 * sig_d;
+        float a_t      = 0.001 + 0.998 * sig_d;
         
         // Gradient from output + gradient from next time step
         float dh_total = DH[idx] + dh_next;
@@ -73,7 +73,7 @@ void main() {
         // 2. Grad w.r.t a_t
         float h_prev = (t > 0) ? H[idx - stride_t] : 0.0;
         float d_a_t = dh_total * h_prev;
-        DD[idx] = d_a_t * 0.9 * sigmoid_grad(sig_d);
+        DD[idx] = d_a_t * 0.998 * sigmoid_grad(sig_d);
         
         // 3. Propagate to previous step
         dh_next = dh_total * a_t;

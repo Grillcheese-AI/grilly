@@ -141,11 +141,20 @@ class GPUBackwardOps:
             )
 
         try:
-            # Use _bridge.linear_backward directly
+            # _core.linear_backward now returns a tuple (grad_input,
+            # grad_weight, grad_bias) — tuples are far cheaper than dicts
+            # to construct on every backward step.
             result = self.backend.linear_backward(grad_output, input_data, weights)
-            grad_input = np.asarray(result['grad_input']) if 'grad_input' in result else None
-            grad_weight = np.asarray(result['grad_weight']) if 'grad_weight' in result else None
-            grad_bias = np.asarray(result['grad_bias']) if 'grad_bias' in result else None
+            if isinstance(result, dict):
+                # Back-compat with older extension builds.
+                grad_input = np.asarray(result['grad_input']) if 'grad_input' in result else None
+                grad_weight = np.asarray(result['grad_weight']) if 'grad_weight' in result else None
+                grad_bias = np.asarray(result['grad_bias']) if 'grad_bias' in result else None
+            else:
+                gi, gw, gb = result
+                grad_input = np.asarray(gi) if gi is not None else None
+                grad_weight = np.asarray(gw) if gw is not None else None
+                grad_bias = np.asarray(gb) if gb is not None else None
 
             # Filter outputs based on what was requested
             if not compute_input_grad:
