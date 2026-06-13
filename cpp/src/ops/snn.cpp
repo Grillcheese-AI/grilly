@@ -1,6 +1,9 @@
 #include "grilly/ops/snn.h"
 
 #include <cstring>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 
 namespace grilly {
 namespace ops {
@@ -374,6 +377,245 @@ void gifNeuronStep(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     pool.release(bufTRefrac);
     pool.release(bufSpikes);
     pool.release(bufTLastSpike);
+}
+
+// ── Event-driven sparse synaptic scatter ─────────────────────────────────
+
+void spikeScatter(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+                  const float* firedIdx, const float* firedCount,
+                  const float* weights, float* iAcc,
+                  uint32_t nFired, const SpikeScatterParams& p) {
+    const size_t accBytes = size_t(p.n) * sizeof(float);
+    const size_t wBytes   = size_t(p.n) * p.n * sizeof(float);
+    const size_t cntBytes = sizeof(uint32_t);
+    // iAcc is pre-zeroed by the caller; with no spikes there is nothing to add.
+    if (nFired == 0) return;
+    const size_t idxBytes = size_t(nFired) * sizeof(uint32_t);
+
+    GrillyBuffer bufIdx = pool.acquire(idxBytes);
+    GrillyBuffer bufCnt = pool.acquire(cntBytes);
+    GrillyBuffer bufW   = pool.acquire(wBytes);
+    GrillyBuffer bufAcc = pool.acquire(accBytes);
+
+    pool.upload(bufIdx, firedIdx, idxBytes);
+    pool.upload(bufCnt, firedCount, cntBytes);
+    pool.upload(bufW, weights, wBytes);
+    pool.upload(bufAcc, iAcc, accBytes);  // zeroed
+
+    PipelineEntry pipe = cache.getOrCreate("spike-scatter", 4,
+                                           sizeof(SpikeScatterParams));
+
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {bufIdx.handle, 0, idxBytes},
+        {bufCnt.handle, 0, cntBytes},
+        {bufW.handle,   0, wBytes},
+        {bufAcc.handle, 0, accBytes},
+    };
+    VkDescriptorSet descSet = cache.allocDescriptorSet("spike-scatter", bufInfos);
+
+    uint32_t gx = static_cast<uint32_t>((uint64_t(p.n) + 255) / 256);
+
+    batch.begin();
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
+                   &p, sizeof(p));
+    batch.submitDeferred();
+    batch.waitForCompletion();
+
+    pool.download(bufAcc, iAcc, accBytes);
+
+    pool.release(bufIdx);
+    pool.release(bufCnt);
+    pool.release(bufW);
+    pool.release(bufAcc);
+}
+
+// ── Resident-weight benchmark loop ───────────────────────────────────────
+
+void residentBench(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+                   uint32_t mode, const float* firedIdx,
+                   const float* firedCount, const float* spikes,
+                   const float* weights, float* iAcc,
+                   uint32_t nFired, uint32_t n, uint32_t iters,
+                   uint32_t batched) {
+    const size_t accBytes = size_t(n) * sizeof(float);
+    const size_t wBytes   = size_t(n) * n * sizeof(float);
+    const size_t spkBytes = size_t(n) * sizeof(float);
+    const size_t cntBytes = sizeof(uint32_t);
+    const size_t idxBytes = size_t(nFired ? nFired : 1) * sizeof(uint32_t);
+
+    GrillyBuffer bufIdx = pool.acquire(idxBytes);
+    GrillyBuffer bufCnt = pool.acquire(cntBytes);
+    GrillyBuffer bufSpk = pool.acquire(spkBytes);
+    GrillyBuffer bufW   = pool.acquire(wBytes);
+    GrillyBuffer bufAcc = pool.acquire(accBytes);
+
+    // Upload everything ONCE — W stays resident across all iters.
+    if (nFired) pool.upload(bufIdx, firedIdx, size_t(nFired) * sizeof(uint32_t));
+    pool.upload(bufCnt, firedCount, cntBytes);
+    pool.upload(bufSpk, spikes, spkBytes);
+    pool.upload(bufW, weights, wBytes);
+    pool.upload(bufAcc, iAcc, accBytes);
+
+    SpikeScatterParams p{n};
+    const char* shader = (mode == 0) ? "spike-scatter" : "synapse-dense";
+    uint32_t nBuf = (mode == 0) ? 4u : 3u;
+
+    PipelineEntry pipe = cache.getOrCreate(shader, nBuf, sizeof(p));
+    std::vector<VkDescriptorBufferInfo> bufInfos;
+    if (mode == 0) {
+        bufInfos = {
+            {bufIdx.handle, 0, idxBytes},
+            {bufCnt.handle, 0, cntBytes},
+            {bufW.handle,   0, wBytes},
+            {bufAcc.handle, 0, accBytes},
+        };
+    } else {
+        bufInfos = {
+            {bufSpk.handle, 0, spkBytes},
+            {bufW.handle,   0, wBytes},
+            {bufAcc.handle, 0, accBytes},
+        };
+    }
+    VkDescriptorSet descSet = cache.allocDescriptorSet(shader, bufInfos);
+
+    uint32_t gx = static_cast<uint32_t>((uint64_t(n) + 255) / 256);
+
+    if (batched) {
+        // One submit for all iters; compute barrier serializes timesteps.
+        batch.begin();
+        for (uint32_t it = 0; it < iters; ++it) {
+            batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
+                           &p, sizeof(p));
+            batch.barrier();
+        }
+        batch.submitDeferred();
+        batch.waitForCompletion();
+    } else {
+        // One submit + host wait per iter (per-step overhead floor).
+        for (uint32_t it = 0; it < iters; ++it) {
+            batch.begin();
+            batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
+                           &p, sizeof(p));
+            batch.submitDeferred();
+            batch.waitForCompletion();
+        }
+    }
+
+    pool.download(bufAcc, iAcc, accBytes);
+
+    pool.release(bufIdx);
+    pool.release(bufCnt);
+    pool.release(bufSpk);
+    pool.release(bufW);
+    pool.release(bufAcc);
+}
+
+// ── Batched event-driven propagation (production primitive) ──────────────
+
+void spikePropagateBatch(CommandBatch& batch, BufferPool& pool,
+                         PipelineCache& cache, const float* firedIdx,
+                         const float* firedOffsets, const float* firedCounts,
+                         const float* weights, float* out, const float* firedVals,
+                         uint32_t nFiredTotal, uint32_t nIn, uint32_t nOut,
+                         uint32_t M) {
+    const size_t idxBytes = size_t(nFiredTotal ? nFiredTotal : 1) * sizeof(uint32_t);
+    const size_t valBytes = size_t(nFiredTotal ? nFiredTotal : 1) * sizeof(float);
+    const size_t offBytes = size_t(M) * sizeof(uint32_t);
+    const size_t cntBytes = size_t(M) * sizeof(uint32_t);
+    const size_t wBytes   = size_t(nIn) * nOut * sizeof(float);
+    const size_t outBytes = size_t(M) * nOut * sizeof(float);
+
+    // DEVICE_LOCAL compute buffers (cached VRAM — the shader reads these).
+    GrillyBuffer bufIdx = pool.acquireDeviceLocal(idxBytes);
+    GrillyBuffer bufOff = pool.acquireDeviceLocal(offBytes);
+    GrillyBuffer bufCnt = pool.acquireDeviceLocal(cntBytes);
+    GrillyBuffer bufW   = pool.acquireDeviceLocal(wBytes);
+    GrillyBuffer bufOut = pool.acquireDeviceLocal(outBytes);
+    GrillyBuffer bufVal = pool.acquireDeviceLocal(valBytes);
+
+    // Stage-IN (CPU writes -> WC memory, fast sequential memcpy).
+    GrillyBuffer stgIdx = pool.acquire(idxBytes);
+    GrillyBuffer stgOff = pool.acquire(offBytes);
+    GrillyBuffer stgCnt = pool.acquire(cntBytes);
+    GrillyBuffer stgW   = pool.acquire(wBytes);
+    GrillyBuffer stgVal = pool.acquire(valBytes);
+    // Stage-OUT (CPU reads -> MUST be HOST_CACHED, else readback is ~25 MB/s).
+    GrillyBuffer stgOut = pool.acquireReadback(outBytes);
+
+    using clk = std::chrono::high_resolution_clock;
+    const bool prof = std::getenv("PPB_PROF") != nullptr;
+    auto t0 = clk::now();
+
+    if (nFiredTotal) {
+        pool.upload(stgIdx, firedIdx, size_t(nFiredTotal) * sizeof(uint32_t));
+        pool.upload(stgVal, firedVals, size_t(nFiredTotal) * sizeof(float));
+    }
+    pool.upload(stgOff, firedOffsets, offBytes);
+    pool.upload(stgCnt, firedCounts, cntBytes);
+    pool.upload(stgW, weights, wBytes);
+    auto t1 = clk::now();
+
+    SpikePropagateBatchParams p{nOut, M};
+    PipelineEntry pipe = cache.getOrCreate("spike-propagate-batch", 6,
+                                           sizeof(SpikePropagateBatchParams));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {bufIdx.handle, 0, idxBytes},
+        {bufOff.handle, 0, offBytes},
+        {bufCnt.handle, 0, cntBytes},
+        {bufW.handle,   0, wBytes},
+        {bufOut.handle, 0, outBytes},
+        {bufVal.handle, 0, valBytes},
+    };
+    VkDescriptorSet descSet =
+        cache.allocDescriptorSet("spike-propagate-batch", bufInfos);
+    auto t2 = clk::now();
+
+    uint32_t gx = static_cast<uint32_t>((uint64_t(M) * nOut + 255) / 256);
+
+    // Single command buffer: stage-in DMA -> barrier -> compute -> barrier -> stage-out DMA
+    batch.begin();
+    if (nFiredTotal) {
+        batch.copyBuffer(stgIdx, bufIdx, idxBytes);
+        batch.copyBuffer(stgVal, bufVal, valBytes);
+    }
+    batch.copyBuffer(stgOff, bufOff, offBytes);
+    batch.copyBuffer(stgCnt, bufCnt, cntBytes);
+    batch.copyBuffer(stgW,   bufW,   wBytes);
+    batch.transferComputeBarrier();
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
+                   &p, sizeof(p));
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufOut, stgOut, outBytes);
+    batch.submitDeferred();
+    batch.waitForCompletion();
+    auto t3 = clk::now();
+
+    pool.download(stgOut, out, outBytes);  // HOST_CACHED ~7 GB/s
+    auto t4 = clk::now();
+
+    if (prof) {
+        auto ms = [](auto a, auto b) {
+            return std::chrono::duration<double, std::milli>(b - a).count();
+        };
+        std::fprintf(stderr,
+            "[PPB] M=%u nIn=%u nOut=%u nFired=%u | upload=%.3f desc=%.3f "
+            "compute+dma=%.3f download=%.3f total=%.3f ms\n",
+            M, nIn, nOut, nFiredTotal, ms(t0, t1), ms(t1, t2),
+            ms(t2, t3), ms(t3, t4), ms(t0, t4));
+    }
+
+    pool.release(bufIdx);
+    pool.release(bufOff);
+    pool.release(bufCnt);
+    pool.release(bufW);
+    pool.release(bufOut);
+    pool.release(bufVal);
+    pool.release(stgIdx);
+    pool.release(stgOff);
+    pool.release(stgCnt);
+    pool.release(stgW);
+    pool.release(stgVal);
+    pool.release(stgOut);
 }
 
 }  // namespace ops

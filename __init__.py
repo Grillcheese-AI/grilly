@@ -32,6 +32,18 @@ _pkg_dir = _os.path.dirname(_os.path.abspath(__file__))
 if _pkg_dir not in _sys.path:
     _sys.path.insert(0, _pkg_dir)
 
+# Load the compiled core as a package submodule and register it under its
+# top-level name, so `import grilly_core` works for any consumer that has
+# imported grilly first — without copying the .pyd into site-packages.
+# PyTorch ships torch._C exactly this way. This resolves for both editable
+# installs (the .pyd sits in this source dir, on grilly.__path__) and real
+# wheels (package-data bundles grilly_core.*.pyd inside the grilly package).
+try:
+    from . import grilly_core as _grilly_core
+    _sys.modules.setdefault("grilly_core", _grilly_core)
+except ImportError:
+    pass  # core not built (CPU-only); the backend probe reports unavailable
+
 import grilly.functional as functional
 import grilly.nn as nn
 import grilly.optim as optim
