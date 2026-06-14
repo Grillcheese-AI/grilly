@@ -132,6 +132,12 @@ session_log("experiment", ...) → run_smoke_test → session_log("result", ...)
 > that runs the whole training step on-GPU (forward outputs and gradient buffers
 > never leave VRAM). **`AUTOGRAD_STATE.md` is the detailed source of truth**;
 > this is the orientation map.
+>
+> **Status (June 2026):** the resident forward op set is COMPLETE --
+> embedding / rmsnorm / linear / mingru / swiglu all run resident and are
+> parity-verified, and the full resident gradcheck passes. The NEXT step is the
+> single-tape full-trunk integration + linking cubby's trunk onto it; the precise
+> plan is in `AUTOGRAD_STATE.md` ("NEXT: single-tape full-trunk integration").
 
 ## Where the work lives
 
@@ -145,9 +151,11 @@ session_log("experiment", ...) → run_smoke_test → session_log("result", ...)
     Stable baseline. Online training (fresh random batch/step), `gradcheck` mode
     vs finite-diff. ~0.945 train / ~0.891 test acc (chance 0.25).
   - `train_full_resident.py` ? same block, **fully resident** (forward also on-GPU
-    via `forward_rmsnorm`/`forward_linear`/`forward_swiglu`). Same accuracy.
-  - `test_backward_*.py` (8 files: linear, chain, ce, silu, fanout, rmsnorm,
+    via `forward_rmsnorm`/`forward_linear`/`forward_swiglu`/`forward_mingru`). Same accuracy.
+  - `test_backward_*.py` (8 files in the REPO ROOT: linear, chain, ce, silu, fanout, rmsnorm,
     mingru, swiglu) ? per-op gradient unit tests. Keep all green.
+  - `ttr_mingru_fwd.py` / `ttr_embedding_fwd.py` -- parity tests for resident
+    forward_mingru (1.5e-7 vs numpy) and forward_embedding (exact gather).
   - `ttr3.py` ? minimal resident-forward repro (was the crash repro; passes now).
   - `ttr8.py` ? proof the multi-tape t/t2/t3 backward runs clean.
 
@@ -213,10 +221,11 @@ data ? a **dangling reference / use-after-free**, not a GPU bug.
   `CommandBatch::dispatch` (`cpp/src/command_batch.cpp` ~L94): the order of
   `vkCmdBindPipeline` / `vkCmdBindDescriptorSets` / `vkCmdPushConstants` and
   which layout the push uses.
-- **NOTE for whoever picks this up**: there is currently temporary
-  `[PIPE-CREATE]` stderr instrumentation (an `fprintf` + `#include <cstdio>`) in
-  `getOrCreate` in `cpp/src/pipeline_cache.cpp`, built into the active `.pyd`.
-  **Remove it before the final commit** for this issue.
+- **Investigation note**: the temporary `[PIPE-CREATE]` getOrCreate instrumentation
+  has been REMOVED (build is clean). It confirmed `rms-norm` IS created with
+  `pushConstSize=20` and is the only 20-byte push in ttr3, so the layout is correct
+  -- the warning comes from the dispatch passing the wrong/stale layout for the push
+  (look at `CommandBatch::dispatch`). Still open, still non-fatal.
 
 ## Relationship to cubby-lm
 
