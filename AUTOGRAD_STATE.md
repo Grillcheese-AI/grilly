@@ -418,8 +418,20 @@ global-norm grad readback 1.68 s (39%), fwd+bwd 1.21 s (28%), E numpy AdamW 1.04
   +1 became +32 (= wavefront). Use atomicCompSwap on the uint bit-pattern (a true
   per-lane RMW) for scattered float adds. (reduce-sumsq's one-atomic-per-workgroup
   pattern is unaffected and keeps plain atomicAdd.)
-Remaining cost is fwd+bwd (~1.2 s) -- the legitimate matmuls; the trunk is now
-compute-bound. Next throughput lever is op fusion / fewer dispatches.
+Then profiling fwd+bwd showed the BACKWARD was 88% (996 ms vs 126 ms forward) --
+NOT dispatch count, so op fusion would not have helped. The forward fnn-linear is
+TILED; the backward fnn-linear-backward grad_input pass was the NAIVE one (each
+thread serially loops output_dim at low occupancy -- brutal for the V=65536 head).
+- Route grad_input = grad_out @ W through the existing TILED gemm_tiled.glsl
+  (C=A@B, fp32, shared-mem + 4x4 register blocking). W is stored out x in = K x N,
+  so it maps exactly with no transpose. 0.77 -> 0.97 it/s; loss identical, parity
+  2e-6 (fp32, exact). Backward 996 -> 721 ms.
+NOTE on coopmat: the RX 6750 XT is RDNA2 -- NO cooperative-matrix hardware, so the
+coopmat path runs in DRIVER EMULATION (fp16 vector ops), no tensor-core speedup.
+The real lever here is tiling, done in fp32 (safe, exact) -- not coopmat/fp16.
+Total: 0.23 -> 0.97 it/s (4.2x). Remaining backward is mostly grad_weight =
+grad_out^T @ x (naive, memory-bound) -- tiling it needs a transpose (no A^T@B GEMM
+exists); next lever if more throughput is wanted.
 
 ## NEXT (downstream cubby ladder)
 A longer v3.3 run to convergence (warmup + more steps), then 0.0.2 chunked

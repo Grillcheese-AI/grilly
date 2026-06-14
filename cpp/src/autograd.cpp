@@ -297,20 +297,32 @@ void BackwardEngine::backward_linear(Node* node) {
     VkDescriptorSet descSet =
         cache_.allocDescriptorSet("fnn-linear-backward", bufInfos);
 
-    // Zero the accumulation targets GPU-side (passes 1 and 2 atomic-add).
-    // grad_input (pass 0) is fully written, but zero it too for safety.
-    batch_.fillZero(gradInBuf, gradInBytes);
+    // grad_weight/grad_bias write directly but zero for safety.
     batch_.fillZero(gradWBuf, gradWBytes);
     batch_.fillZero(gradBiasBuf, gradBiasBytes);
     batch_.transferComputeBarrier();
 
     grilly::ops::LinearBackwardParams p{batchSeq, inputDim, outputDim, 0};
 
-    // Pass 0: grad_input = grad_output @ W
-    p.passType = 0;
-    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
-                    (inputDim + 15) / 16, (batchSeq + 15) / 16, 1,
-                    &p, sizeof(p));
+    // Pass 0: grad_input = grad_output @ W -- via the TILED GEMM (gemm_tiled),
+    // NOT the naive fnn-linear-backward pass (which had each thread serially loop
+    // output_dim at low occupancy -- the v3.3 backward bottleneck, esp. the
+    // V=65536 head). grad_out (M=batchSeq, K=outputDim) @ W (K=outputDim,
+    // N=inputDim, stored out x in) = grad_input (M x N). fp32, exact.
+    {
+        PipelineEntry gpipe =
+            cache_.getOrCreate("gemm_tiled", 3, 3 * sizeof(uint32_t));
+        std::vector<VkDescriptorBufferInfo> gbuf = {
+            {gradOut.handle,   0, gradOutBytes},   // A = grad_output (M x K)
+            {wBuf.handle,      0, gradWBytes},     // B = W (K x N)
+            {gradInBuf.handle, 0, gradInBytes},    // C = grad_input (M x N)
+        };
+        VkDescriptorSet gds = cache_.allocDescriptorSet("gemm_tiled", gbuf);
+        struct { uint32_t M, K, N; } gp = {batchSeq, outputDim, inputDim};
+        batch_.dispatch(gpipe.pipeline, gpipe.layout, gds,
+                        (inputDim + 63u) / 64u, (batchSeq + 63u) / 64u, 1,
+                        &gp, sizeof(gp));
+    }
     batch_.barrier();
 
     // Pass 1: grad_weight = grad_output^T @ x
