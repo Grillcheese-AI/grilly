@@ -35,6 +35,14 @@ grad, dispatch the existing backward shader, publish id".
 - `backward_cross_entropy` — real cross-entropy-backward, dL/dlogits =
   softmax-onehot. CE->Linear chain grad_W and grad_h correct to ~2e-7. This is the
   training entry point. (test_backward_ce.py)
+- `backward_activation` (shared 3-buffer helper) -> backward_relu/gelu/silu wire
+  the existing activation-*-backward shaders. SiLU grad correct to 1.2e-7.
+  (test_backward_silu.py)
+- `backward_add` (was already correct: routes grad_output to both inputs) +
+  FAN-OUT accumulation VERIFIED: x -> two Linears -> Add backprops
+  grad_x = grad_y@W1 + grad_y@W2 EXACTLY (0.0 err). This exercises the
+  find_or_insert_grad batchedAdd path — the residual-connection pattern.
+  (test_backward_fanout.py)
 - Python surface: `cpp/python/bindings_autograd.cpp` (NEW, compiled file added to
   CMakeLists + bindings_core). Exposes OpType / TensorRef / TapeContext /
   AutogradNode + register_input (float32) / register_input_u32 / read_buffer.
@@ -51,13 +59,26 @@ grad, dispatch the existing backward shader, publish id".
 - TapeContext member init order: registry_ MUST be declared before engine_
   (engine holds a ref to it).
 
-## STILL STUBBED (placeholders, the next slices)
-- backward_silu, backward_rmsnorm/layernorm  (trunk: SwiGLU FFN, every block)
-- backward_add / backward_mul  (residuals/splits — backward_add is what finally
-  EXERCISES the fan-out path, which is coded+compiled but not yet hit by a test)
-- backward shape ops: sum/mean/transpose still `= 1` placeholders
-- MinGRU: NOT an OpType; stays its own mingru_forward/backward kernel, handled
-  separately from the OpGraph/BackwardEngine.
+## STILL STUBBED / MISSING (the next slices)
+- backward_rmsnorm / backward_layernorm — NO rms-norm-backward SHADER EXISTS
+  (only forward rms-norm, rms-norm-linear-fused, snn-rmsnorm). This is the ONE
+  genuine net-new GLSL kernel the trunk needs. Math for y=(x/rms(x))*w:
+    dL/dx = (w*dy)/rms - x*(sum(w*dy*x))/(n*rms^3)
+    dL/dw = sum(dy * x/rms)   (over batch)
+  Author rms-norm-backward.glsl, compile (full rebuild compiles shaders), wire a
+  handler (resolve x + w + grad_out, alloc grad_x + grad_w, dispatch), validate.
+- backward_mul (dL/da = dy*b, dL/db = dy*a) still `= 1` placeholders.
+- backward shape ops: sum/mean/transpose still `= 1` placeholders.
+- MinGRU: mingru-backward.spv ALREADY EXISTS. MinGRU is NOT an OpType; wire it as
+  its own standalone op/handler (resolve, dispatch mingru-backward, publish), not
+  through the OpType switch. This is a wiring slice, not a kernel-authoring slice.
+
+## Trunk readiness
+Enough is proven to train embed -> linear -> ... -> CE graphs WITH residuals and
+SwiGLU gating (linear, CE, silu/relu/gelu, add+fanout all verified). The two
+remaining trunk-specific gaps: (1) rms-norm-backward shader [kernel authoring],
+(2) MinGRU handler wiring [shader exists]. Shape ops (reshape/transpose) pass-
+through where trivial; sum/mean only needed if the trunk reduces.
 
 ## Forward side (separate, not this branch)
 Forward resident execution already works in C++: nn::Tensor + ComputeBackend
@@ -68,10 +89,12 @@ need the ComputeBackend dispatch primitives bound (createBuffer/upload/dispatch/
 beginBatch/endBatch/setGraphMode) — NOT done yet.
 
 ## Recommended next step
-backward_add (proves fan-out) or backward_silu+backward_rmsnorm (unblocks the
-full Cubby trunk: embed -> [RMSNorm -> MinGRU -> RMSNorm -> SwiGLU]xL -> RMSNorm
--> tied head -> CE). Each is the same recipe as backward_linear/CE now that the
-infrastructure is proven.
+Author the `rms-norm-backward` GLSL shader — the one missing kernel. It's a
+self-contained slice: write the shader (math above), let the full rebuild
+compile it, wire backward_rmsnorm (resolve x/w/grad_out, alloc grad_x/grad_w,
+2 passes if needed for the reduction then the weight-grad), validate vs numpy.
+After that, the MinGRU handler-wiring slice (shader already exists). Those two
+close the Cubby trunk's backward path.
 
 ## Tests (run from grilly root, cubby-lm venv)
   & "C:\Users\grill\Documents\GitHub\cubby-lm\.venv\Scripts\python.exe" test_backward_linear.py
