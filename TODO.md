@@ -116,6 +116,30 @@ order; each step has a gate that must pass before the next.
 
 ---
 
+## CONV OPS (off the Cubby critical path; vision cortex is 0.1.0)
+
+- [x] **conv2d FIXED** on the C++ core. Two dispatch bugs found + fixed in
+      `cpp/src/ops/conv.cpp` (the GLSL shaders were correct):
+        1. backward-weight grid mismatch (gx dropped the kH factor; gy had a
+           spurious kH) -> wrong dW for any multi-channel / kH>1 kernel.
+        2. forward GEMM output was (C_out, batch*HW) channel-major, not
+           de-interleaved to (batch, C_out, HW) -> wrong forward for batch>1.
+      Validated vs torch (fwd/dX/dW/dB ~1e-6, incl. batch>1, multi-channel,
+      grouped). nn.Conv2d now routes through the C++ bridge; legacy ctypes path
+      kept as fallback. xfail markers removed. Commit 0ae21e1.
+- [x] **conv1d FIXED** for free (wraps Conv2d, height=1); validated vs torch.
+- [ ] **conv3d: ADD (net-new).** Not present (`_core.conv3d` absent). Needs:
+      conv3d-forward.glsl (+ backward-input / backward-weight) with a depth loop
+      and depth push-constants; a `conv3d` C++ op in conv.cpp (direct path
+      mirrors conv2d-forward, or extend im2col with a D axis for the GEMM path);
+      `_core.conv3d` + backward bindings; an `nn.Conv3d` class (+ export in
+      nn/__init__.py); tests. Full rebuild (shaders change -> no -SkipShaders).
+      Validate each stage vs torch.nn.functional.conv3d (fwd, then dX, then dW).
+- [ ] Test-infra: tests/test_conv2d.py uses a `Compute()` fixture (legacy ctypes
+      backend) needing the `vulkan` pip package, absent in the C++-core venv ->
+      the in-repo gpu conv tests don't execute there. Correctness was validated
+      directly vs torch instead. Consider a bridge-based fixture.
+
 ## STRATEGIC ? VM-facing contracts to freeze EARLY (cubby-lm)
 
 Not coupling the VM into trunk training (that repeats the v4 mistake), but pin the
