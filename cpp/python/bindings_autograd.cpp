@@ -130,6 +130,16 @@ void register_autograd_ops(py::module_& m) {
              py::arg("array"),
              "Allocate a resident buffer, upload a uint32 numpy array (e.g. "
              "class-index targets), return its id.")
+        .def("forward_begin", &ag::TapeContext::forward_begin,
+             "Open the resident forward command batch.")
+        .def("forward_submit", &ag::TapeContext::forward_submit,
+             "Submit the resident forward command batch and wait.")
+        .def("forward_linear", &ag::TapeContext::forward_linear,
+             py::arg("in_id"), py::arg("weight_id"), py::arg("bias_id"),
+             py::arg("M"), py::arg("K"), py::arg("N"),
+             "Resident forward Linear: out = in @ weight^T (+bias). "
+             "weight (N,K), in (M,K) -> out (M,N). bias_id=0 for none. "
+             "Returns the resident output buffer id.")
         .def("read_buffer",
              [](ag::TapeContext& tape, uint32_t buffer_id,
                 const std::vector<uint32_t>& shape) -> py::array_t<float> {

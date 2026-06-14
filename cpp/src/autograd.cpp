@@ -907,7 +907,9 @@ TapeContext::TapeContext(BufferPool& pool, CommandBatch& batch,
                          PipelineCache& cache, size_t arena_capacity)
     : arena_(arena_capacity),
       registry_(pool),
-      engine_(pool, batch, cache, registry_) {}
+      engine_(pool, batch, cache, registry_),
+      batch_(batch),
+      cache_(cache) {}
 
 void TapeContext::begin() {
     arena_.reset();
@@ -915,6 +917,36 @@ void TapeContext::begin() {
     engine_.clear_grads();
     seq_counter_ = 0;
     recording_ = true;
+}
+
+// ── Resident forward pass ────────────────────────────────────────────────
+
+void TapeContext::forward_begin() {
+    batch_.begin();
+}
+
+void TapeContext::forward_submit() {
+    batch_.submit();
+}
+
+uint32_t TapeContext::forward_linear(uint32_t in_id, uint32_t weight_id,
+                                     uint32_t bias_id, uint32_t M, uint32_t K,
+                                     uint32_t N) {
+    // out = in @ weight^T (+ bias). in (M,K), weight (N,K) -> out (M,N).
+    const size_t outBytes = size_t(M) * N * 4;
+    uint32_t outId = registry_.alloc(outBytes);
+
+    GrillyBuffer& inBuf = registry_.resolve(in_id);
+    GrillyBuffer& wBuf = registry_.resolve(weight_id);
+    GrillyBuffer& outBuf = registry_.resolve(outId);
+    const GrillyBuffer* biasPtr =
+        (bias_id != 0) ? &registry_.resolve(bias_id) : nullptr;
+
+    grilly::ops::batchedLinear(batch_, cache_, inBuf, wBuf, biasPtr, outBuf,
+                               M, K, N);
+    // Order this dispatch before any consumer reads outId in the same batch.
+    batch_.transferComputeBarrier();
+    return outId;
 }
 
 Node* TapeContext::record_op(OpType op,

@@ -365,6 +365,21 @@ public:
     /// Save buffer IDs needed for backward (weight, activation cache, etc.)
     void save_for_backward(Node* node, const uint32_t* buffer_ids, uint32_t count);
 
+    // ── Resident forward pass ────────────────────────────────────────────
+    // Run forward shaders into a command batch on the SAME registry, so the
+    // resident output buffers feed straight into the backward tape (no numpy
+    // round-trip, no re-upload of saved tensors). Lifecycle:
+    //   forward_begin(); id_out = forward_linear(...); ...; forward_submit();
+    //   ... record_op(... id_out ...) ...; backward(...);
+    void forward_begin();
+    void forward_submit();
+
+    /// Forward Linear: out = in @ weight^T (+ bias). weight is (N, K), in is
+    /// (M, K) -> out (M, N). Returns the resident output buffer id. Pass
+    /// bias_id = 0 for no bias.
+    uint32_t forward_linear(uint32_t in_id, uint32_t weight_id, uint32_t bias_id,
+                            uint32_t M, uint32_t K, uint32_t N);
+
     /// Run backward from the loss node.
     void backward(Node* loss_node, uint32_t grad_output_buffer);
 
@@ -387,6 +402,8 @@ private:
     TapeArena arena_;
     BufferRegistry registry_;
     BackwardEngine engine_;
+    CommandBatch& batch_;     // shared with engine_; used for resident forward
+    PipelineCache& cache_;    // shared with engine_; used for resident forward
     bool recording_ = false;
     uint32_t seq_counter_ = 0;
 };
