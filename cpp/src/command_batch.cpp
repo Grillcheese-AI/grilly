@@ -168,6 +168,17 @@ void CommandBatch::copyBuffer(const GrillyBuffer& src, GrillyBuffer& dst, size_t
     vkCmdCopyBuffer(cmd_, src.handle, dst.handle, 1, &region);
 }
 
+void CommandBatch::fillZero(GrillyBuffer& buf, size_t bytes) {
+    if (!recording_)
+        throw std::runtime_error("CommandBatch::fillZero() called without begin()");
+
+    // vkCmdFillBuffer requires the size to be a multiple of 4. Round down;
+    // gradient/activation buffers are fp32 (4-byte) so this is exact.
+    VkDeviceSize fillSize = static_cast<VkDeviceSize>(bytes & ~size_t(3));
+    if (fillSize == 0) return;
+    vkCmdFillBuffer(cmd_, buf.handle, 0, fillSize, 0u);
+}
+
 // ── Submission ──────────────────────────────────────────────────────────────
 
 void CommandBatch::submit() {

@@ -40,6 +40,14 @@ public:
     /// GPU-to-GPU buffer copy (no CPU involvement).
     void copyBuffer(const GrillyBuffer& src, GrillyBuffer& dst, size_t bytes);
 
+    /// Zero-fill a buffer range entirely GPU-side (vkCmdFillBuffer, no CPU
+    /// staging). `bytes` is rounded down to a multiple of 4 as Vulkan
+    /// requires; pass a 4-byte-aligned size. This is a TRANSFER operation —
+    /// the caller must issue a transferComputeBarrier() before any compute
+    /// dispatch that reads the zeroed buffer. Used to initialize gradient
+    /// buffers before shaders that accumulate into them via atomic adds.
+    void fillZero(GrillyBuffer& buf, size_t bytes);
+
     void submit();
     void submitAsync(VkSemaphore timeline, uint64_t signalValue);
 

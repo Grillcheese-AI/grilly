@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <vector>
+
+#include "grilly/ops/linear.h"
 
 namespace grilly {
 namespace autograd {
@@ -12,8 +15,8 @@ namespace autograd {
 // ═════════════════════════════════════════════════════════════════════════
 
 BackwardEngine::BackwardEngine(BufferPool& pool, CommandBatch& batch,
-                               PipelineCache& cache)
-    : pool_(pool), batch_(batch), cache_(cache) {
+                               PipelineCache& cache, BufferRegistry& registry)
+    : pool_(pool), batch_(batch), cache_(cache), registry_(registry) {
     clear_grads();
 }
 
@@ -23,6 +26,11 @@ void BackwardEngine::backward(TapeArena& tape, Node* loss_node,
 
     // 1. Seed the loss node's gradient: dL/d(loss) flows in from outside
     loss_node->grad_output_buffer = grad_output_buffer;
+
+    // Open a single command batch. Every backward handler records its shader
+    // dispatches into batch_ without submitting; the whole backward pass is
+    // one submit at the end (resident — grad buffers never leave VRAM).
+    batch_.begin();
 
     // 2. Walk the Wengert list backward: tail → prev → prev → nullptr
     //
@@ -84,6 +92,10 @@ void BackwardEngine::backward(TapeArena& tape, Node* loss_node,
 
         current = current->prev_in_tape;
     }
+
+    // Submit the whole backward pass as one batch and wait for completion,
+    // so gradient buffers are valid for readback / the optimizer step.
+    batch_.submit();
 }
 
 void BackwardEngine::dispatch_node_backward(Node* node) {
@@ -180,48 +192,111 @@ void BackwardEngine::accumulate_grad(Node* target_node, uint32_t input_idx,
 // the existing GLSL shaders in shaders/spv/.
 
 void BackwardEngine::backward_linear(Node* node) {
-    // Linear: y = x @ W^T + b
-    // Backward:
-    //   dL/dx = dL/dy @ W         (shader: fnn-linear-backward or matmul)
-    //   dL/dW = x^T @ dL/dy       (shader: fnn-weight-grad or matmul)
-    //   dL/db = sum(dL/dy, dim=0)  (shader: reduction-sum-rows)
+    // Linear: y = x @ W^T (+ b). W has shape (outputDim, inputDim).
+    // Backward (all via the fnn-linear-backward shader, 3 passes):
+    //   pass 0: dL/dx = dL/dy @ W
+    //   pass 1: dL/dW = dL/dy^T @ x   (atomic accumulate -> needs zero init)
+    //   pass 2: dL/db = sum(dL/dy, dim=0) (atomic accumulate -> needs zero init)
     //
     // inputs[0] = x, inputs[1] = W, (optional) inputs[2] = b
-    // saved_buffer_ids[0] = x (saved for weight grad)
-    // saved_buffer_ids[1] = W (saved for input grad)
+    // saved_buffer_ids[0] = x, saved_buffer_ids[1] = W
+    // grad_output_buffer holds dL/dy (resident).
+
+    // Shapes. W is (outputDim, inputDim); x is (..., inputDim) flattened to
+    // (batchSeq, inputDim). Derive dims from the weight ref (unambiguous) and
+    // batchSeq from x's element count.
+    const TensorRef& xRef = node->inputs[0];
+    const TensorRef& wRef = node->inputs[1];
+    if (wRef.ndim < 2) {
+        stats_.cpu_fallbacks++;
+        return;
+    }
+    const uint32_t outputDim = wRef.shape[0];
+    const uint32_t inputDim  = wRef.shape[1];
+    if (inputDim == 0) { stats_.cpu_fallbacks++; return; }
+    const uint32_t batchSeq =
+        static_cast<uint32_t>(xRef.numel() / inputDim);
+
+    // Resolve resident inputs from the registry.
+    GrillyBuffer& gradOut = registry_.resolve(node->grad_output_buffer);
+    // x and W come from saved buffers (fall back to input refs if unsaved).
+    uint32_t xId = (node->num_saved > 0 && node->saved_buffer_ids[0] != 0)
+                       ? node->saved_buffer_ids[0] : xRef.buffer_id;
+    uint32_t wId = (node->num_saved > 1 && node->saved_buffer_ids[1] != 0)
+                       ? node->saved_buffer_ids[1] : wRef.buffer_id;
+    GrillyBuffer& xBuf = registry_.resolve(xId);
+    GrillyBuffer& wBuf = registry_.resolve(wId);
+
+    // Byte sizes (fp32).
+    const size_t gradOutBytes = size_t(batchSeq) * outputDim * 4;
+    const size_t gradInBytes  = size_t(batchSeq) * inputDim * 4;
+    const size_t gradWBytes   = size_t(outputDim) * inputDim * 4;
+    const size_t gradBiasBytes = size_t(outputDim) * 4;
+
+    // Allocate resident grad buffers (DEVICE_LOCAL) and record their real ids.
+    // The shader writes all three bindings every pass, so all three must
+    // exist even if a given input doesn't requires_grad; we allocate them and
+    // only publish ids for inputs that need them.
+    uint32_t gradInId = registry_.alloc(gradInBytes);
+    uint32_t gradWId  = registry_.alloc(gradWBytes);
+    uint32_t gradBiasId = registry_.alloc(gradBiasBytes);
+    GrillyBuffer& gradInBuf = registry_.resolve(gradInId);
+    GrillyBuffer& gradWBuf  = registry_.resolve(gradWId);
+    GrillyBuffer& gradBiasBuf = registry_.resolve(gradBiasId);
+
+    // Descriptor set: 6 buffers in the order the shader expects.
+    PipelineEntry pipe = cache_.getOrCreate("fnn-linear-backward", 6,
+                                             sizeof(grilly::ops::LinearBackwardParams));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {gradOut.handle,     0, gradOutBytes},
+        {xBuf.handle,        0, size_t(batchSeq) * inputDim * 4},
+        {wBuf.handle,        0, gradWBytes},
+        {gradInBuf.handle,   0, gradInBytes},
+        {gradWBuf.handle,    0, gradWBytes},
+        {gradBiasBuf.handle, 0, gradBiasBytes},
+    };
+    VkDescriptorSet descSet =
+        cache_.allocDescriptorSet("fnn-linear-backward", bufInfos);
+
+    // Zero the accumulation targets GPU-side (passes 1 and 2 atomic-add).
+    // grad_input (pass 0) is fully written, but zero it too for safety.
+    batch_.fillZero(gradInBuf, gradInBytes);
+    batch_.fillZero(gradWBuf, gradWBytes);
+    batch_.fillZero(gradBiasBuf, gradBiasBytes);
+    batch_.transferComputeBarrier();
+
+    grilly::ops::LinearBackwardParams p{batchSeq, inputDim, outputDim, 0};
+
+    // Pass 0: grad_input = grad_output @ W
+    p.passType = 0;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (inputDim + 15) / 16, (batchSeq + 15) / 16, 1,
+                    &p, sizeof(p));
+    batch_.barrier();
+
+    // Pass 1: grad_weight = grad_output^T @ x
+    p.passType = 1;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (inputDim + 15) / 16, (outputDim + 15) / 16, 1,
+                    &p, sizeof(p));
+    batch_.barrier();
+
+    // Pass 2: grad_bias = sum(grad_output, dim=0)
+    p.passType = 2;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (outputDim + 255) / 256, 1, 1,
+                    &p, sizeof(p));
 
     stats_.shaders_dispatched++;
 
-    // Allocate gradient buffers for inputs
-    if (node->inputs[0].requires_grad) {
-        size_t grad_x_size = node->inputs[0].size_bytes();
-        GrillyBuffer grad_x = pool_.acquire(grad_x_size);
-        node->grad_input_buffers[0] = 1;  // placeholder — real ID from BufferPool
-
-        // TODO: Dispatch fnn-linear-backward.glsl
-        //   binding 0: grad_output (dL/dy)
-        //   binding 1: weight (W)
-        //   binding 2: grad_input (dL/dx, output)
-        //   push constants: {M, N, K}
-        pool_.release(grad_x);
-    }
-
-    if (node->num_inputs > 1 && node->inputs[1].requires_grad) {
-        size_t grad_w_size = node->inputs[1].size_bytes();
-        GrillyBuffer grad_w = pool_.acquire(grad_w_size);
-        node->grad_input_buffers[1] = 1;  // placeholder
-
-        // TODO: Dispatch weight gradient shader
-        //   dL/dW = x^T @ dL/dy
-        pool_.release(grad_w);
-    }
-
-    if (node->num_inputs > 2 && node->inputs[2].requires_grad) {
-        // Bias gradient: dL/db = sum(dL/dy, axis=0)
-        node->grad_input_buffers[2] = 1;  // placeholder
-
-        // TODO: Dispatch reduction-sum-rows shader
-    }
+    // Publish gradient ids for inputs that require grad. Buffers for inputs
+    // that don't require grad were still allocated (shader writes them) and
+    // will be released by registry_.clear() at the next begin().
+    if (xRef.requires_grad) node->grad_input_buffers[0] = gradInId;
+    if (node->num_inputs > 1 && wRef.requires_grad)
+        node->grad_input_buffers[1] = gradWId;
+    if (node->num_inputs > 2 && node->inputs[2].requires_grad)
+        node->grad_input_buffers[2] = gradBiasId;
 }
 
 void BackwardEngine::backward_matmul(Node* node) {
@@ -528,10 +603,13 @@ void BackwardEngine::backward_mean(Node* node) {
 
 TapeContext::TapeContext(BufferPool& pool, CommandBatch& batch,
                          PipelineCache& cache, size_t arena_capacity)
-    : arena_(arena_capacity), engine_(pool, batch, cache) {}
+    : arena_(arena_capacity),
+      registry_(pool),
+      engine_(pool, batch, cache, registry_) {}
 
 void TapeContext::begin() {
     arena_.reset();
+    registry_.clear();
     engine_.clear_grads();
     seq_counter_ = 0;
     recording_ = true;

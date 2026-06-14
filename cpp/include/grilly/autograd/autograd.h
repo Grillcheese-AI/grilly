@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "grilly/autograd/buffer_registry.h"
 #include "grilly/autograd/tape_arena.h"
 #include "grilly/buffer_pool.h"
 #include "grilly/command_batch.h"
@@ -231,7 +232,11 @@ T* TapeArena::allocate_node(Args&&... args) {
 
 class BackwardEngine {
 public:
-    BackwardEngine(BufferPool& pool, CommandBatch& batch, PipelineCache& cache);
+    BackwardEngine(BufferPool& pool, CommandBatch& batch, PipelineCache& cache,
+                   BufferRegistry& registry);
+
+    /// Access the buffer registry (maps buffer_id <-> GrillyBuffer).
+    BufferRegistry& registry() { return registry_; }
 
     /// Run backward from `loss_node` through the tape.
     ///
@@ -301,6 +306,7 @@ private:
     BufferPool& pool_;
     CommandBatch& batch_;
     PipelineCache& cache_;
+    BufferRegistry& registry_;
     Stats stats_{};
 
     // Gradient accumulation: input_buffer_id → accumulated_grad_buffer_id
@@ -355,6 +361,7 @@ public:
 
     bool is_recording() const { return recording_; }
     TapeArena& arena() { return arena_; }
+    BufferRegistry& registry() { return registry_; }
     BackwardEngine::Stats last_backward_stats() const { return engine_.last_stats(); }
 
     // Arena stats
@@ -363,6 +370,7 @@ public:
 
 private:
     TapeArena arena_;
+    BufferRegistry registry_;
     BackwardEngine engine_;
     bool recording_ = false;
     uint32_t seq_counter_ = 0;
