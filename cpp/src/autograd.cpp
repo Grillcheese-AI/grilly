@@ -1,6 +1,7 @@
 #include "grilly/autograd/autograd.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -1215,6 +1216,52 @@ void TapeContext::embedding_scatter_add(uint32_t emb_grad_id, uint32_t ids_id,
                     &push, sizeof(push));
     batch_.transferComputeBarrier();
     batch_.submit();   // synchronous; E_grad now = head grad + embedding scatter
+}
+
+std::vector<float> TapeContext::bench_gemm(uint32_t M, uint32_t K, uint32_t N,
+                                           uint32_t iters) {
+    // Time gemm_tiled (fp32) vs gemm-coopmat-shared (fp16->fp32) for an MxKxN
+    // GEMM, iters dispatches per submit (barrier between). Returns {fp32_ms,
+    // fp16_ms} per iter. Values are garbage (timing only).
+    const size_t mn32 = size_t(M) * N * 4;
+    uint32_t a32 = registry_.alloc(size_t(M) * K * 4);
+    uint32_t b32 = registry_.alloc(size_t(K) * N * 4);
+    uint32_t c32 = registry_.alloc(mn32);
+    uint32_t a16 = registry_.alloc(size_t(M) * K * 2);
+    uint32_t b16 = registry_.alloc(size_t(K) * N * 2);
+    uint32_t c16 = registry_.alloc(mn32);
+    GrillyBuffer& A32 = registry_.resolve(a32); GrillyBuffer& B32 = registry_.resolve(b32);
+    GrillyBuffer& C32 = registry_.resolve(c32);
+    GrillyBuffer& A16 = registry_.resolve(a16); GrillyBuffer& B16 = registry_.resolve(b16);
+    GrillyBuffer& C16 = registry_.resolve(c16);
+    struct { uint32_t M, K, N; } pc = {M, K, N};
+
+    PipelineEntry tp = cache_.getOrCreate("gemm_tiled", 3, sizeof(pc));
+    std::vector<VkDescriptorBufferInfo> tb = {
+        {A32.handle, 0, size_t(M) * K * 4}, {B32.handle, 0, size_t(K) * N * 4}, {C32.handle, 0, mn32}};
+    VkDescriptorSet tds = cache_.allocDescriptorSet("gemm_tiled", tb);
+    PipelineEntry cp = cache_.getOrCreate("gemm-coopmat-shared", 3, sizeof(pc));
+    std::vector<VkDescriptorBufferInfo> cb = {
+        {A16.handle, 0, size_t(M) * K * 2}, {B16.handle, 0, size_t(K) * N * 2}, {C16.handle, 0, mn32}};
+    VkDescriptorSet cds = cache_.allocDescriptorSet("gemm-coopmat-shared", cb);
+
+    auto timeIt = [&](VkPipeline pl, VkPipelineLayout ly, VkDescriptorSet ds,
+                      uint32_t gx, uint32_t gy) {
+        batch_.begin();
+        for (uint32_t i = 0; i < iters; ++i) {
+            batch_.dispatch(pl, ly, ds, gx, gy, 1, &pc, sizeof(pc));
+            batch_.barrier();
+        }
+        auto t0 = std::chrono::high_resolution_clock::now();
+        batch_.submit();
+        auto t1 = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration<float, std::milli>(t1 - t0).count() / iters;
+    };
+    timeIt(tp.pipeline, tp.layout, tds, (N + 63u) / 64u, (M + 63u) / 64u);  // warmup
+    float fp32 = timeIt(tp.pipeline, tp.layout, tds, (N + 63u) / 64u, (M + 63u) / 64u);
+    timeIt(cp.pipeline, cp.layout, cds, N / 64u, M / 16u);                   // warmup
+    float fp16 = timeIt(cp.pipeline, cp.layout, cds, N / 64u, M / 16u);
+    return {fp32, fp16};
 }
 
 float TapeContext::sum_squares(const std::vector<uint32_t>& ids,

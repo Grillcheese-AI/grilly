@@ -434,6 +434,11 @@ public:
     float sum_squares(const std::vector<uint32_t>& ids,
                       const std::vector<uint32_t>& numels);
 
+    /// Benchmark gemm_tiled (fp32) vs gemm-coopmat-shared (fp16->fp32) for an
+    /// MxKxN GEMM. Returns {fp32_ms, fp16_ms} per iter. Diagnostic only.
+    std::vector<float> bench_gemm(uint32_t M, uint32_t K, uint32_t N,
+                                  uint32_t iters);
+
     /// Run backward from the loss node.
     void backward(Node* loss_node, uint32_t grad_output_buffer);
 

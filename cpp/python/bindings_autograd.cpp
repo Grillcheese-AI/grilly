@@ -185,6 +185,10 @@ void register_autograd_ops(py::module_& m) {
              py::arg("ids"), py::arg("numels"),
              "On-GPU sum of squares over many resident buffers -> one float "
              "(global grad L2 norm without the per-buffer host readback).")
+        .def("bench_gemm", &ag::TapeContext::bench_gemm,
+             py::arg("M"), py::arg("K"), py::arg("N"), py::arg("iters"),
+             "Benchmark gemm_tiled (fp32) vs gemm-coopmat-shared (fp16) for MxKxN "
+             "-> (fp32_ms, fp16_ms) per iter.")
         .def("embedding_scatter_add", &ag::TapeContext::embedding_scatter_add,
              py::arg("emb_grad_id"), py::arg("ids_id"), py::arg("e_grad_id"),
              py::arg("tokens"), py::arg("dim"),

@@ -426,9 +426,15 @@ thread serially loops output_dim at low occupancy -- brutal for the V=65536 head
   (C=A@B, fp32, shared-mem + 4x4 register blocking). W is stored out x in = K x N,
   so it maps exactly with no transpose. 0.77 -> 0.97 it/s; loss identical, parity
   2e-6 (fp32, exact). Backward 996 -> 721 ms.
-NOTE on coopmat: the RX 6750 XT is RDNA2 -- NO cooperative-matrix hardware, so the
-coopmat path runs in DRIVER EMULATION (fp16 vector ops), no tensor-core speedup.
-The real lever here is tiling, done in fp32 (safe, exact) -- not coopmat/fp16.
+NOTE on coopmat (QUERIED + BENCHMARKED, not assumed): the RX 6750 XT DOES expose
+VK_KHR_cooperative_matrix -- Device.cooperative_matrix_configs() reports 11 configs
+incl. 16x16x16 fp16xfp16->fp32. BUT TapeContext.bench_gemm shows coopmat fp16 is
+only 1.03-1.17x faster than the fp32 gemm_tiled on these shapes -- RDNA2 has no
+WMMA matrix hardware, so coopmat lowers to the driver's packed-fp16 SIMD, not
+tensor cores. That ~1.1x is eaten by fp16-conversion overhead (the trunk is fp32)
+and costs precision (fp16 grads ~1e-3 vs the exact fp32 2e-6). So the lever here
+is TILING in fp32 (safe, exact) -- NOT coopmat. Coopmat would be a real multi-x
+win on RDNA3 / NVIDIA tensor cores; the query + bench are in place to revisit.
 - grad_weight = grad_out^T @ x: transpose grad_out (tensor-transpose.glsl) ->
   (out x BS), then gemm_tiled (M=out, K=BS, N=in). Tiled + coalesced vs the naive
   strided pass. 0.97 -> 1.25 it/s; parity 2e-6 (exact).
