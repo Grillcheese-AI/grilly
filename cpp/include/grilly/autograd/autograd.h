@@ -289,6 +289,7 @@ private:
     void backward_sigmoid(Node* node);
     void backward_softmax(Node* node);
     void backward_layernorm(Node* node);
+    void backward_rmsnorm(Node* node);
     void backward_attention(Node* node);
     void backward_conv2d(Node* node);
     void backward_conv1d(Node* node);

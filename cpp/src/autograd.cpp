@@ -8,6 +8,7 @@
 #include "grilly/ops/linear.h"
 #include "grilly/ops/batched_ops.h"
 #include "grilly/ops/loss.h"
+#include "grilly/ops/rmsnorm.h"
 
 namespace grilly {
 namespace autograd {
@@ -127,6 +128,7 @@ void BackwardEngine::dispatch_node_backward(Node* node) {
         case OpType::Sigmoid:   backward_sigmoid(node); break;
         case OpType::Softmax:   backward_softmax(node); break;
         case OpType::LayerNorm: backward_layernorm(node); break;
+        case OpType::RMSNorm:   backward_rmsnorm(node); break;
         case OpType::FlashAttention2: backward_attention(node); break;
         case OpType::Conv2d:    backward_conv2d(node); break;
         case OpType::Conv1d:    backward_conv1d(node); break;
@@ -418,6 +420,85 @@ void BackwardEngine::backward_layernorm(Node* node) {
         node->grad_input_buffers[0] = 1;
         // TODO: dispatch layernorm-backward.glsl
     }
+}
+
+void BackwardEngine::backward_rmsnorm(Node* node) {
+    // RMSNorm: y_i = w_f * x_i * r,  r = inversesqrt(mean(x^2) + eps).
+    // 2-pass rms-norm-backward shader (no atomics, one thread per output cell):
+    //   pass 0: grad_input  (batch*seq*features threads)
+    //   pass 1: grad_weight (features threads)
+    //
+    // inputs[0] = x (B*S, features), inputs[1] = weight (features,)
+    // saved_buffer_ids[0] = x, saved_buffer_ids[1] = weight
+    if (!node->inputs[0].requires_grad &&
+        !(node->num_inputs > 1 && node->inputs[1].requires_grad)) {
+        return;
+    }
+
+    const TensorRef& xRef = node->inputs[0];
+    if (xRef.ndim < 1) { stats_.cpu_fallbacks++; return; }
+    const uint32_t features = xRef.shape[xRef.ndim - 1];
+    if (features == 0) { stats_.cpu_fallbacks++; return; }
+    const uint32_t totalPositions =
+        static_cast<uint32_t>(xRef.numel() / features);
+    const uint32_t totalElements = totalPositions * features;
+
+    uint32_t xId = (node->num_saved > 0 && node->saved_buffer_ids[0] != 0)
+                       ? node->saved_buffer_ids[0] : xRef.buffer_id;
+    uint32_t wId = (node->num_saved > 1 && node->saved_buffer_ids[1] != 0)
+                       ? node->saved_buffer_ids[1]
+                       : (node->num_inputs > 1 ? node->inputs[1].buffer_id : 0);
+    if (xId == 0 || wId == 0 || node->grad_output_buffer == 0) {
+        stats_.cpu_fallbacks++; return;
+    }
+
+    GrillyBuffer& gradOut = registry_.resolve(node->grad_output_buffer);
+    GrillyBuffer& xBuf = registry_.resolve(xId);
+    GrillyBuffer& wBuf = registry_.resolve(wId);
+
+    const size_t elemBytes = size_t(totalElements) * 4;
+    const size_t featBytes = size_t(features) * 4;
+
+    uint32_t gradXId = registry_.alloc(elemBytes);
+    uint32_t gradWId = registry_.alloc(featBytes);
+    GrillyBuffer& gradXBuf = registry_.resolve(gradXId);
+    GrillyBuffer& gradWBuf = registry_.resolve(gradWId);
+
+    PipelineEntry pipe = cache_.getOrCreate(
+        "rms-norm-backward", 5, sizeof(grilly::ops::RMSNormParams));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {gradOut.handle,  0, elemBytes},
+        {xBuf.handle,     0, elemBytes},
+        {wBuf.handle,     0, featBytes},
+        {gradXBuf.handle, 0, elemBytes},
+        {gradWBuf.handle, 0, featBytes},
+    };
+    VkDescriptorSet descSet =
+        cache_.allocDescriptorSet("rms-norm-backward", bufInfos);
+
+    // The op encodes (batch, seq); the shader only uses batch_size*seq_len, so
+    // pack totalPositions into batch_size and seq_len=1. eps default 1e-6.
+    grilly::ops::RMSNormParams p{};
+    p.batchSize = totalPositions;
+    p.seqLen = 1;
+    p.features = features;
+    p.eps = 1e-6f;
+
+    // Pass 0: grad_input
+    p.passType = 0;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (totalElements + 255) / 256, 1, 1, &p, sizeof(p));
+    batch_.barrier();
+
+    // Pass 1: grad_weight
+    p.passType = 1;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (features + 255) / 256, 1, 1, &p, sizeof(p));
+
+    stats_.shaders_dispatched++;
+    if (xRef.requires_grad) node->grad_input_buffers[0] = gradXId;
+    if (node->num_inputs > 1 && node->inputs[1].requires_grad)
+        node->grad_input_buffers[1] = gradWId;
 }
 
 void BackwardEngine::backward_attention(Node* node) {
