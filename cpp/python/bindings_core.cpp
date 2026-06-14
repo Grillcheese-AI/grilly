@@ -45,6 +45,12 @@ PYBIND11_MODULE(grilly_core, m) {
                                [](const GrillyCoreContext& ctx) {
                                    return ctx.device.hasFloat16();
                                })
+        .def("cooperative_matrix_configs",
+             [](const GrillyCoreContext& ctx) {
+                 return ctx.device.cooperativeMatrixConfigs();
+             },
+             "Supported cooperative-matrix configs (MxNxK + dtypes) from "
+             "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR.")
         .def("pool_stats",
              [](const GrillyCoreContext& ctx) {
                  auto s = ctx.pool.stats();
