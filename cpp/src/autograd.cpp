@@ -330,36 +330,57 @@ void BackwardEngine::backward_matmul(Node* node) {
     }
 }
 
-void BackwardEngine::backward_relu(Node* node) {
-    // ReLU: y = max(0, x)
-    // dL/dx = dL/dy * (x > 0)
-    // Uses saved pre-activation x to compute the mask.
-    stats_.shaders_dispatched++;
+void BackwardEngine::backward_activation(Node* node, const char* shaderName) {
+    // Pointwise activation backward. Shader takes 3 buffers:
+    //   binding 0: grad_output (dL/dy, resident incoming gradient)
+    //   binding 1: input       (saved pre-activation x)
+    //   binding 2: grad_input  (dL/dx, output)
+    // push = ActivationParams{totalElements}; gx = (N+255)/256.
+    if (!node->inputs[0].requires_grad) return;
+    if (node->grad_output_buffer == 0) { stats_.cpu_fallbacks++; return; }
 
-    if (node->inputs[0].requires_grad) {
-        node->grad_input_buffers[0] = 1;  // placeholder
-        // TODO: dispatch activation-relu-backward.glsl
-        //   binding 0: grad_output
-        //   binding 1: saved input (x)
-        //   binding 2: grad_input (output)
-    }
+    uint32_t inId = (node->num_saved > 0 && node->saved_buffer_ids[0] != 0)
+                        ? node->saved_buffer_ids[0] : node->inputs[0].buffer_id;
+    if (inId == 0) { stats_.cpu_fallbacks++; return; }
+
+    uint32_t totalElements = static_cast<uint32_t>(node->inputs[0].numel());
+    const size_t bytes = size_t(totalElements) * 4;
+
+    GrillyBuffer& gradOut = registry_.resolve(node->grad_output_buffer);
+    GrillyBuffer& inBuf   = registry_.resolve(inId);
+    uint32_t gradInId = registry_.alloc(bytes);
+    GrillyBuffer& gradInBuf = registry_.resolve(gradInId);
+
+    PipelineEntry pipe = cache_.getOrCreate(shaderName, 3, sizeof(uint32_t));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {gradOut.handle,   0, bytes},
+        {inBuf.handle,     0, bytes},
+        {gradInBuf.handle, 0, bytes},
+    };
+    VkDescriptorSet descSet = cache_.allocDescriptorSet(shaderName, bufInfos);
+
+    uint32_t push = totalElements;
+    uint32_t gx = (totalElements + 255) / 256;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
+                    &push, sizeof(push));
+
+    stats_.shaders_dispatched++;
+    node->grad_input_buffers[0] = gradInId;
+}
+
+void BackwardEngine::backward_relu(Node* node) {
+    // ReLU: dL/dx = dL/dy * (x > 0). Uses saved pre-activation x.
+    backward_activation(node, "activation-relu-backward");
 }
 
 void BackwardEngine::backward_gelu(Node* node) {
-    // GELU backward — uses the pre-activation value
-    stats_.shaders_dispatched++;
-    if (node->inputs[0].requires_grad) {
-        node->grad_input_buffers[0] = 1;
-        // TODO: dispatch activation-gelu-backward.glsl
-    }
+    // GELU backward — uses the pre-activation value.
+    backward_activation(node, "activation-gelu-backward");
 }
 
 void BackwardEngine::backward_silu(Node* node) {
-    stats_.shaders_dispatched++;
-    if (node->inputs[0].requires_grad) {
-        node->grad_input_buffers[0] = 1;
-        // TODO: dispatch activation-silu-backward.glsl
-    }
+    // SiLU: dL/dx = dL/dy * (sigmoid(x) + x*sigmoid(x)*(1-sigmoid(x))).
+    backward_activation(node, "activation-silu-backward");
 }
 
 void BackwardEngine::backward_tanh(Node* node) {

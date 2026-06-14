@@ -278,6 +278,10 @@ private:
     /// Shader dispatch helpers for specific op types
     void backward_linear(Node* node);
     void backward_matmul(Node* node);
+    /// Shared pointwise activation backward: resolve grad_output + saved input,
+    /// dispatch a 3-buffer {grad_out, input, grad_in} shader. Used by
+    /// relu/gelu/silu (and any pointwise activation that uses pre-activation x).
+    void backward_activation(Node* node, const char* shaderName);
     void backward_relu(Node* node);
     void backward_gelu(Node* node);
     void backward_silu(Node* node);
