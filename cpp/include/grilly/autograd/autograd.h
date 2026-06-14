@@ -135,6 +135,10 @@ enum class OpType : uint8_t {
     // (the scan isn't pointwise); this tag only routes the BACKWARD dispatch.
     MinGRU,
 
+    // SwiGLU — gated FFN activation. out = x1 * silu(x2), input is
+    // [x1:hidden][x2:hidden] concatenated (2*hidden wide) -> hidden wide.
+    SwiGLU,
+
     _Count  // sentinel
 };
 
@@ -295,6 +299,7 @@ private:
     void backward_layernorm(Node* node);
     void backward_rmsnorm(Node* node);
     void backward_mingru(Node* node);
+    void backward_swiglu(Node* node);
     void backward_attention(Node* node);
     void backward_conv2d(Node* node);
     void backward_conv1d(Node* node);

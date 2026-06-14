@@ -130,6 +130,7 @@ void BackwardEngine::dispatch_node_backward(Node* node) {
         case OpType::LayerNorm: backward_layernorm(node); break;
         case OpType::RMSNorm:   backward_rmsnorm(node); break;
         case OpType::MinGRU:    backward_mingru(node); break;
+        case OpType::SwiGLU:    backward_swiglu(node); break;
         case OpType::FlashAttention2: backward_attention(node); break;
         case OpType::Conv2d:    backward_conv2d(node); break;
         case OpType::Conv1d:    backward_conv1d(node); break;
@@ -568,6 +569,57 @@ void BackwardEngine::backward_mingru(Node* node) {
     if (gRef.requires_grad) node->grad_input_buffers[0] = gradGId;
     if (node->inputs[1].requires_grad) node->grad_input_buffers[1] = gradVId;
     if (node->inputs[2].requires_grad) node->grad_input_buffers[2] = gradDId;
+}
+
+void BackwardEngine::backward_swiglu(Node* node) {
+    // SwiGLU: out = x1 * silu(x2). Input is [x1:hidden][x2:hidden] concatenated
+    // (last dim = 2*hidden); output is hidden wide.
+    // Shader activation-swiglu-backward: 3 buffers
+    //   {grad_output (output_elements), input (2*hidden), grad_input (2*hidden)},
+    //   push {output_elements, hidden_dim}, gx=(output_elements+255)/256.
+    //
+    // inputs[0] = concatenated [x1|x2]; saved_buffer_ids[0] = that input.
+    if (!node->inputs[0].requires_grad) return;
+    if (node->grad_output_buffer == 0) { stats_.cpu_fallbacks++; return; }
+
+    const TensorRef& inRef = node->inputs[0];
+    if (inRef.ndim < 1) { stats_.cpu_fallbacks++; return; }
+    const uint32_t inWidth = inRef.shape[inRef.ndim - 1];   // = 2*hidden
+    if (inWidth == 0 || (inWidth & 1u)) { stats_.cpu_fallbacks++; return; }
+    const uint32_t hiddenDim = inWidth / 2u;
+    const uint32_t rows =
+        static_cast<uint32_t>(inRef.numel() / inWidth);
+    const uint32_t outputElements = rows * hiddenDim;
+
+    uint32_t inId = (node->num_saved > 0 && node->saved_buffer_ids[0] != 0)
+                        ? node->saved_buffer_ids[0] : inRef.buffer_id;
+    if (inId == 0) { stats_.cpu_fallbacks++; return; }
+
+    GrillyBuffer& gradOut = registry_.resolve(node->grad_output_buffer);
+    GrillyBuffer& inBuf = registry_.resolve(inId);
+    const size_t inBytes = size_t(rows) * inWidth * 4;
+    const size_t outBytes = size_t(outputElements) * 4;
+    uint32_t gradInId = registry_.alloc(inBytes);
+    GrillyBuffer& gradInBuf = registry_.resolve(gradInId);
+
+    PipelineEntry pipe =
+        cache_.getOrCreate("activation-swiglu-backward", 3, 2 * sizeof(uint32_t));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {gradOut.handle,   0, outBytes},
+        {inBuf.handle,     0, inBytes},
+        {gradInBuf.handle, 0, inBytes},
+    };
+    VkDescriptorSet descSet =
+        cache_.allocDescriptorSet("activation-swiglu-backward", bufInfos);
+
+    struct { uint32_t outputElements; uint32_t hiddenDim; } push =
+        {outputElements, hiddenDim};
+    uint32_t gx = (outputElements + 255u) / 256u;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
+                    &push, sizeof(push));
+
+    stats_.shaders_dispatched++;
+    node->grad_input_buffers[0] = gradInId;
 }
 
 void BackwardEngine::backward_attention(Node* node) {

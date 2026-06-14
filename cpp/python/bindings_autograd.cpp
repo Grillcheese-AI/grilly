@@ -41,6 +41,7 @@ void register_autograd_ops(py::module_& m) {
         .value("CubeMindSurprise", ag::OpType::CubeMindSurprise)
         .value("TemporalSurprise", ag::OpType::TemporalSurprise)
         .value("MinGRU", ag::OpType::MinGRU)
+        .value("SwiGLU", ag::OpType::SwiGLU)
         .export_values();
 
     py::class_<ag::TensorRef>(m, "TensorRef")
