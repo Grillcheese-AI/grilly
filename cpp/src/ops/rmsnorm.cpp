@@ -31,15 +31,23 @@ void rmsnorm(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     const size_t weightBytes = size_t(features) * sizeof(float);
     const size_t rmsBytes    = size_t(totalPositions) * sizeof(float);
 
-    // Acquire 4 buffers
-    GrillyBuffer bufInput  = pool.acquire(inputBytes);
-    GrillyBuffer bufOutput = pool.acquire(outputBytes);
-    GrillyBuffer bufWeight = pool.acquire(weightBytes);
-    GrillyBuffer bufRms    = pool.acquire(rmsBytes);
+    // DEVICE_LOCAL compute buffers (cached VRAM ~432 GB/s — the shader
+    // reads/writes these). bufRms is GPU-only scratch (pass 0 writes it,
+    // pass 1 reads it), so it never needs a host-side staging buffer.
+    GrillyBuffer bufInput  = pool.acquireDeviceLocal(inputBytes);
+    GrillyBuffer bufOutput = pool.acquireDeviceLocal(outputBytes);
+    GrillyBuffer bufWeight = pool.acquireDeviceLocal(weightBytes);
+    GrillyBuffer bufRms    = pool.acquireDeviceLocal(rmsBytes);
 
-    // Upload input data
-    pool.upload(bufInput, input, inputBytes);
-    pool.upload(bufWeight, weight, weightBytes);
+    // Stage-IN (CPU writes -> WC memory, fast sequential memcpy ~9 GB/s).
+    GrillyBuffer stgInput  = pool.acquire(inputBytes);
+    GrillyBuffer stgWeight = pool.acquire(weightBytes);
+    // Stage-OUT (CPU reads -> MUST be HOST_CACHED via acquireReadback;
+    // reading back from WC memory runs at ~25 MB/s — 2.4 s for 32 MB here).
+    GrillyBuffer stgOutput = pool.acquireReadback(outputBytes);
+
+    pool.upload(stgInput,  input,  inputBytes);
+    pool.upload(stgWeight, weight, weightBytes);
 
     // Get pipeline: 4 buffers, 20 bytes push constants
     PipelineEntry pipe = cache.getOrCreate("rms-norm", 4,
@@ -55,33 +63,35 @@ void rmsnorm(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     VkDescriptorSet descSet = cache.allocDescriptorSet("rms-norm",
                                                         bufInfos);
 
-    // 2-pass dispatch
-    batch.begin();
-
-    // Pass 0: compute mean(x^2)
-    RMSNormParams push0{batchSize, seqLen, features, eps, 0};
+    RMSNormParams push0{batchSize, seqLen, features, eps, 0};  // mean(x^2)
+    RMSNormParams push1{batchSize, seqLen, features, eps, 1};  // normalize
     uint32_t gx0 = (totalPositions + 255) / 256;
+    uint32_t gx1 = (totalElements  + 255) / 256;
+
+    // Single command buffer: stage-in DMA -> 2-pass compute -> stage-out DMA.
+    batch.begin();
+    batch.copyBuffer(stgInput,  bufInput,  inputBytes);
+    batch.copyBuffer(stgWeight, bufWeight, weightBytes);
+    batch.transferComputeBarrier();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx0, 1, 1,
                    &push0, sizeof(push0));
-    batch.barrier();
-
-    // Pass 1: normalize
-    RMSNormParams push1{batchSize, seqLen, features, eps, 1};
-    uint32_t gx1 = (totalElements + 255) / 256;
+    batch.barrier();  // mean(x^2) must be ready before normalize
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx1, 1, 1,
                    &push1, sizeof(push1));
-
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufOutput, stgOutput, outputBytes);
     batch.submitDeferred();
     batch.waitForCompletion();
 
-    // Download result
-    pool.download(bufOutput, output, outputBytes);
+    pool.download(stgOutput, output, outputBytes);  // HOST_CACHED ~7 GB/s
 
-    // Release all buffers
     pool.release(bufInput);
     pool.release(bufOutput);
     pool.release(bufWeight);
     pool.release(bufRms);
+    pool.release(stgInput);
+    pool.release(stgWeight);
+    pool.release(stgOutput);
 }
 
 }  // namespace ops

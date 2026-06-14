@@ -196,12 +196,16 @@ void softmax(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     const size_t dataBytes = size_t(totalElements) * sizeof(float);
     const size_t auxBytes  = size_t(totalPositions) * sizeof(float);
 
-    GrillyBuffer bufInput  = pool.acquire(dataBytes);
-    GrillyBuffer bufOutput = pool.acquire(dataBytes);
-    GrillyBuffer bufMax    = pool.acquire(auxBytes);
-    GrillyBuffer bufSumExp = pool.acquire(auxBytes);
+    // Compute buffers (DEVICE_LOCAL, cached VRAM). bufMax/bufSumExp are
+    // GPU-only scratch (per-pass aux), so no host staging needed.
+    GrillyBuffer bufInput  = pool.acquireDeviceLocal(dataBytes);
+    GrillyBuffer bufOutput = pool.acquireDeviceLocal(dataBytes);
+    GrillyBuffer bufMax    = pool.acquireDeviceLocal(auxBytes);
+    GrillyBuffer bufSumExp = pool.acquireDeviceLocal(auxBytes);
+    GrillyBuffer stgInput  = pool.acquire(dataBytes);          // CPU write (WC ok)
+    GrillyBuffer stgOutput = pool.acquireReadback(dataBytes);  // CPU read (HOST_CACHED)
 
-    pool.upload(bufInput, input, dataBytes);
+    pool.upload(stgInput, input, dataBytes);
 
     PipelineEntry pipe = cache.getOrCreate("activation-softmax", 4,
                                            sizeof(SoftmaxParams));
@@ -215,37 +219,36 @@ void softmax(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     VkDescriptorSet descSet = cache.allocDescriptorSet("activation-softmax",
                                                         bufInfos);
 
-    uint32_t gx = (totalPositions + 255) / 256;
+    uint32_t gx  = (totalPositions + 255) / 256;
+    uint32_t gx2 = (totalElements  + 255) / 256;
+    SoftmaxParams push0{batchSize, seqLen, features, 0, features};  // max
+    SoftmaxParams push1{batchSize, seqLen, features, 1, features};  // sum_exp
+    SoftmaxParams push2{batchSize, seqLen, features, 2, features};  // normalize
 
     batch.begin();
-
-    // Pass 0: find max
-    SoftmaxParams push0{batchSize, seqLen, features, 0, features};
+    batch.copyBuffer(stgInput, bufInput, dataBytes);
+    batch.transferComputeBarrier();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push0, sizeof(push0));
     batch.barrier();
-
-    // Pass 1: sum_exp
-    SoftmaxParams push1{batchSize, seqLen, features, 1, features};
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push1, sizeof(push1));
     batch.barrier();
-
-    // Pass 2: normalize
-    SoftmaxParams push2{batchSize, seqLen, features, 2, features};
-    uint32_t gx2 = (totalElements + 255) / 256;
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx2, 1, 1,
                    &push2, sizeof(push2));
-
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufOutput, stgOutput, dataBytes);
     batch.submitDeferred();
     batch.waitForCompletion();
 
-    pool.download(bufOutput, output, dataBytes);
+    pool.download(stgOutput, output, dataBytes);
 
     pool.release(bufInput);
     pool.release(bufOutput);
     pool.release(bufMax);
     pool.release(bufSumExp);
+    pool.release(stgInput);
+    pool.release(stgOutput);
 }
 
 // ── Softmax backward ─────────────────────────────────────────────────────
@@ -257,12 +260,15 @@ void softmaxBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     const uint32_t total = batchSize * seqLen * numClasses;
     const size_t bytes = size_t(total) * sizeof(float);
 
-    GrillyBuffer bufGradOut  = pool.acquire(bytes);
-    GrillyBuffer bufSoftmax  = pool.acquire(bytes);
-    GrillyBuffer bufGradIn   = pool.acquire(bytes);
+    GrillyBuffer bufGradOut  = pool.acquireDeviceLocal(bytes);
+    GrillyBuffer bufSoftmax  = pool.acquireDeviceLocal(bytes);
+    GrillyBuffer bufGradIn   = pool.acquireDeviceLocal(bytes);
+    GrillyBuffer stgGradOut  = pool.acquire(bytes);
+    GrillyBuffer stgSoftmax  = pool.acquire(bytes);
+    GrillyBuffer stgGradIn   = pool.acquireReadback(bytes);
 
-    pool.upload(bufGradOut, gradOutput, bytes);
-    pool.upload(bufSoftmax, softmaxOutput, bytes);
+    pool.upload(stgGradOut, gradOutput, bytes);
+    pool.upload(stgSoftmax, softmaxOutput, bytes);
 
     PipelineEntry pipe = cache.getOrCreate("activation-softmax-backward", 3,
                                            sizeof(SoftmaxBackwardParams));
@@ -279,16 +285,24 @@ void softmaxBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache
     uint32_t gx = (batchSize * seqLen + 255) / 256;
 
     batch.begin();
+    batch.copyBuffer(stgGradOut, bufGradOut, bytes);
+    batch.copyBuffer(stgSoftmax, bufSoftmax, bytes);
+    batch.transferComputeBarrier();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
                    &push, sizeof(push));
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufGradIn, stgGradIn, bytes);
     batch.submitDeferred();
     batch.waitForCompletion();
 
-    pool.download(bufGradIn, gradInput, bytes);
+    pool.download(stgGradIn, gradInput, bytes);
 
     pool.release(bufGradOut);
     pool.release(bufSoftmax);
     pool.release(bufGradIn);
+    pool.release(stgGradOut);
+    pool.release(stgSoftmax);
+    pool.release(stgGradIn);
 }
 
 // ── Multiplication-free softmax (mf-softmax.glsl) ─────────────────────────
@@ -302,12 +316,14 @@ void mfSoftmax(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     const size_t dataBytes = size_t(totalElements) * sizeof(float);
     const size_t auxBytes = size_t(totalPositions) * sizeof(float);
 
-    GrillyBuffer bufInput = pool.acquire(dataBytes);
-    GrillyBuffer bufOutput = pool.acquire(dataBytes);
-    GrillyBuffer bufMax = pool.acquire(auxBytes);
-    GrillyBuffer bufSumPos = pool.acquire(auxBytes);
+    GrillyBuffer bufInput = pool.acquireDeviceLocal(dataBytes);
+    GrillyBuffer bufOutput = pool.acquireDeviceLocal(dataBytes);
+    GrillyBuffer bufMax = pool.acquireDeviceLocal(auxBytes);
+    GrillyBuffer bufSumPos = pool.acquireDeviceLocal(auxBytes);
+    GrillyBuffer stgInput = pool.acquire(dataBytes);
+    GrillyBuffer stgOutput = pool.acquireReadback(dataBytes);
 
-    pool.upload(bufInput, input, dataBytes);
+    pool.upload(stgInput, input, dataBytes);
 
     PipelineEntry pipe =
         cache.getOrCreate("mf-softmax", 4, sizeof(SoftmaxParams));
@@ -321,33 +337,35 @@ void mfSoftmax(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     VkDescriptorSet descSet = cache.allocDescriptorSet("mf-softmax", bufInfos);
 
     uint32_t gx = (totalPositions + 255) / 256;
+    uint32_t gx2 = (totalElements + 255) / 256;
+    SoftmaxParams push0{batchSize, seqLen, features, 0, features};
+    SoftmaxParams push1{batchSize, seqLen, features, 1, features};
+    SoftmaxParams push2{batchSize, seqLen, features, 2, features};
 
     batch.begin();
-
-    SoftmaxParams push0{batchSize, seqLen, features, 0, features};
+    batch.copyBuffer(stgInput, bufInput, dataBytes);
+    batch.transferComputeBarrier();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1, &push0,
                    sizeof(push0));
     batch.barrier();
-
-    SoftmaxParams push1{batchSize, seqLen, features, 1, features};
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1, &push1,
                    sizeof(push1));
     batch.barrier();
-
-    SoftmaxParams push2{batchSize, seqLen, features, 2, features};
-    uint32_t gx2 = (totalElements + 255) / 256;
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx2, 1, 1, &push2,
                    sizeof(push2));
-
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufOutput, stgOutput, dataBytes);
     batch.submitDeferred();
     batch.waitForCompletion();
 
-    pool.download(bufOutput, output, dataBytes);
+    pool.download(stgOutput, output, dataBytes);
 
     pool.release(bufInput);
     pool.release(bufOutput);
     pool.release(bufMax);
     pool.release(bufSumPos);
+    pool.release(stgInput);
+    pool.release(stgOutput);
 }
 
 // Push layout must match mf-softplus.glsl: uint total_elements; float c;
@@ -365,10 +383,12 @@ void mfSoftplus(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     const float c = 4.f / (beta * beta);
     const size_t bytes = size_t(totalElements) * sizeof(float);
 
-    GrillyBuffer bufIn = pool.acquire(bytes);
-    GrillyBuffer bufOut = pool.acquire(bytes);
+    GrillyBuffer bufIn = pool.acquireDeviceLocal(bytes);
+    GrillyBuffer bufOut = pool.acquireDeviceLocal(bytes);
+    GrillyBuffer stgIn = pool.acquire(bytes);
+    GrillyBuffer stgOut = pool.acquireReadback(bytes);
 
-    pool.upload(bufIn, input, bytes);
+    pool.upload(stgIn, input, bytes);
 
     PipelineEntry pipe =
         cache.getOrCreate("mf-softplus", 2, sizeof(MfSoftplusParams));
@@ -383,15 +403,21 @@ void mfSoftplus(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     uint32_t gx = (totalElements + 255) / 256;
 
     batch.begin();
+    batch.copyBuffer(stgIn, bufIn, bytes);
+    batch.transferComputeBarrier();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1, &push,
                    sizeof(push));
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufOut, stgOut, bytes);
     batch.submitDeferred();
     batch.waitForCompletion();
 
-    pool.download(bufOut, output, bytes);
+    pool.download(stgOut, output, bytes);
 
     pool.release(bufIn);
     pool.release(bufOut);
+    pool.release(stgIn);
+    pool.release(stgOut);
 }
 
 void mfSigmoid(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
