@@ -20,6 +20,7 @@
 /// `== 0` invalid checks throughout the autograd code).
 
 #include <cstdint>
+#include <deque>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -138,7 +139,11 @@ private:
     };
 
     BufferPool& pool_;
-    std::vector<Entry> entries_;
+    // deque, NOT vector: resolve() hands out GrillyBuffer& into this container and
+    // callers hold those references across subsequent alloc() calls. deque::push_back
+    // keeps existing element references valid; vector::push_back would reallocate and
+    // dangle them (root cause of the resident-forward 0xC0000005 / invalid-VkBuffer crash).
+    std::deque<Entry> entries_;
 };
 
 }  // namespace autograd
