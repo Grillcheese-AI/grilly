@@ -360,7 +360,8 @@ if 'gradcheck' in sys.argv:
 if TINY:
     import time as _time
     lr, b1, b2, eps, wd = 3e-3, 0.9, 0.95, 1e-8, 0.0
-    N, LOG = 200, 20
+    N = int(sys.argv[sys.argv.index('--steps') + 1]) if '--steps' in sys.argv else 200
+    LOG = max(1, N // 25)
     t = gc.TapeContext(dev)
     pw = {}
     def reg(name, arr):
