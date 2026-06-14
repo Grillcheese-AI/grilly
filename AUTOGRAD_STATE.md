@@ -136,19 +136,39 @@ The two hardest trunk backward ops now both TRAIN, not just match numpy.
   bisect_block.py = the A-E cross-op regression test that localized the two sync
   races fixed in this slice.
 
+## RESIDENT FORWARD — opened (Linear), feeds the backward tape directly
+TapeContext now stores batch_/cache_ refs and exposes a resident forward path
+that reuses the SAME registry/batch as backward (no separate ComputeBackend
+graphMode binding needed — the backward infra already had everything):
+  forward_begin();  out_id = forward_linear(in_id, w_id, bias_id, M,K,N);  forward_submit();
+forward_linear dispatches the existing fnn-linear shader (via batchedLinear) and
+returns a RESIDENT output buffer id. That id flows straight into record_op +
+backward — the forward output is never computed in numpy and never re-uploaded.
+Verified: forward_linear == numpy exactly (0.0); resident-forward logits -> CE
+backward gives grad_W 6e-8, grad_X 7e-9 (logits never touched by numpy).
+Remaining forward ops are mechanical: rms-norm, mingru-forward, activation-swiglu
+shaders all exist — add forward_rmsnorm/forward_mingru/forward_swiglu the same way
+(dispatch existing shader on registry buffers, return resident id, barrier).
+
 ## Recommended next step
-Backward is COMPLETE and the full block trains. The remaining work is no longer
-kernels — it is making the FORWARD pass resident so a real Cubby trains entirely
-on-GPU (today: numpy forward seeds the saved tensors; backward is resident):
-  1. Bind the ComputeBackend dispatch primitives to Python (createBuffer/upload/
-     dispatch/beginBatch/endBatch/setGraphMode) so forward can run resident and
-     feed its real output buffers straight into the tape (no numpy seeding, no
-     re-upload of saved tensors).
-  2. Scale the block trainer to multi-layer + real seq>1 (MinGRU scan over time),
-     then to the full cubby-lm config, and confirm loss descends on real token
-     batches.
-  3. Optional cleanups: backward_mul / shape-op backward if the real graph needs
-     them; fix the latent loss.cpp::crossEntropyBackward gx bug.
+Resident forward is proven for Linear. Next:
+  1. Add forward_rmsnorm / forward_swiglu / forward_mingru (+ embedding lookup)
+     the same way forward_linear works — each wraps an existing forward shader,
+     allocs a resident output, returns its id, transferComputeBarrier after.
+  2. Rebuild train_block.py to run its forward fully resident (chain the
+     forward_* calls, save the resident intermediate ids for backward), so the
+     whole block is forward+backward on-GPU with zero numpy in the step.
+  3. Then scale: multi-layer, real seq>1 (MinGRU scan over time), real token
+     batches via embedding lookup, confirm loss descends.
+  4. Optional cleanups: backward_mul / shape-op backward if needed; fix latent
+     loss.cpp::crossEntropyBackward gx bug.
+
+## (superseded) earlier next-step notes
+Backward is COMPLETE and the full block trains. Making the FORWARD pass resident
+was the named frontier — now opened for Linear (see above). The original plan
+considered binding ComputeBackend's graphMode primitives; the simpler route that
+worked was adding forward dispatch directly to TapeContext on the existing
+registry/batch.
 
 ## Tests (run from grilly root, cubby-lm venv) — ALL GREEN
   test_backward_linear.py   linear (grad_x, grad_W)
