@@ -121,3 +121,106 @@ session_recall("<topic>") → consult("cto", "<question>") → session_log("deci
 # Training experiment
 session_log("experiment", ...) → run_smoke_test → session_log("result", ...)
 ```
+
+
+---
+
+# Resident Autograd (branch: `autograd-resident-backward`)
+
+> Added June 2026. The sections above describe the Python/Vulkan framework. This
+> section covers the **C++ resident autograd engine** ? a reverse-mode autograd
+> that runs the whole training step on-GPU (forward outputs and gradient buffers
+> never leave VRAM). **`AUTOGRAD_STATE.md` is the detailed source of truth**;
+> this is the orientation map.
+
+## Where the work lives
+
+- **C++ engine**: `cpp/src/autograd.cpp` + `cpp/include/grilly/autograd/`
+  (`BackwardEngine`, `TapeContext`, `BufferRegistry`).
+- **Compiled Python binding surface**: `cpp/python/bindings_autograd.cpp`.
+  **`cpp/python/bindings.cpp` is DEAD CODE** ? it is NOT in the build. Editing it
+  does nothing. Confirm against `CMakeLists.txt` before touching any binding.
+- **Tests / milestones**: `experimental/resident_train/`
+  - `train_full.py` ? composed Cubby block, **numpy forward + resident backward**.
+    Stable baseline. Online training (fresh random batch/step), `gradcheck` mode
+    vs finite-diff. ~0.945 train / ~0.891 test acc (chance 0.25).
+  - `train_full_resident.py` ? same block, **fully resident** (forward also on-GPU
+    via `forward_rmsnorm`/`forward_linear`/`forward_swiglu`). Same accuracy.
+  - `test_backward_*.py` (8 files: linear, chain, ce, silu, fanout, rmsnorm,
+    mingru, swiglu) ? per-op gradient unit tests. Keep all green.
+  - `ttr3.py` ? minimal resident-forward repro (was the crash repro; passes now).
+  - `ttr8.py` ? proof the multi-tape t/t2/t3 backward runs clean.
+
+## Build & run (Windows, AMD RX 6750 XT / RADV)
+
+There is **no CUDA**. The engine is C++ compiled to `grilly_core.cp312-win_amd64.pyd`.
+
+```powershell
+# Rebuild after C++/header changes (skip shader recompile):
+Get-Process python | Stop-Process -Force      # a live python LOCKS the .pyd and blocks the copy
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\rebuild.ps1" -SkipShaders
+# Omit -SkipShaders only when a .glsl changed. Build prints "Build OK" then copies the .pyd.
+
+# Run against the engine with the cubby-lm venv python (grilly editable-installed there):
+& "C:\Users\grill\Documents\GitHub\cubby-lm\.venv\Scripts\python.exe" experimental\resident_train\train_full_resident.py
+```
+
+Crash exit codes: `0` ok, `1` Python exception, `-1073741819` (0xC0000005) =
+access violation / heap corruption (C++ level). For crashes, redirect to a temp
+file (`> $env:TEMP\out.txt 2>&1`) and check `$LASTEXITCODE` ? piping through
+Select-String can drop the tail.
+
+## The Vulkan validation layer is the primary debugger
+
+Installed, no rebuild needed. Enable per-run:
+
+```powershell
+$env:VK_INSTANCE_LAYERS="VK_LAYER_KHRONOS_validation"
+```
+
+It reports invalid/destroyed `VkBuffer` handles, descriptor mismatches, and
+push-constant range violations with the offending handle. **Use it before
+guessing.** A `VkBuffer` handle that decodes to ASCII (e.g. a value ending
+`...2eadc26e` = `"part."`) means a C++ struct field was overwritten by string
+data ? a **dangling reference / use-after-free**, not a GPU bug.
+
+## Invariants ? do not regress these
+
+- **`BufferRegistry` stores entries in a `std::deque`, NOT `std::vector`**
+  (`cpp/include/grilly/autograd/buffer_registry.h`). `resolve()` hands out
+  `GrillyBuffer&` references held across later `alloc()` calls. A vector would
+  reallocate on `push_back` and dangle those references ? 0xC0000005 during
+  backward once enough buffers are registered. This was the root-cause crash;
+  deque keeps element references stable. (Commit f74e58e.)
+- **Barrier discipline in `BackwardEngine::backward`**: a node reads
+  `grad_output_buffer` that may have been built by accumulation writes from
+  downstream nodes. Handlers that `fillZero` (a TRANSFER write) need
+  `transferComputeBarrier` (not plain `barrier`) so the zero is ordered against a
+  downstream shader read. Two real bugs lived here (MinGRU?Linear race;
+  three-branch RMSNorm accumulation race). Don't weaken these barriers.
+- **`getOrCreate` caches pipelines by NAME only** (`cpp/src/pipeline_cache.cpp`):
+  the first creation's `numBuffers`/`pushConstSize` wins; later calls with
+  different sizes are ignored. Keep each shader's push-constant struct size
+  consistent across every call site.
+
+## Known open issue
+
+- A **non-fatal push-constant validation warning** (`VUID-vkCmdPushConstants-offset-01795`):
+  a 20-byte push (rms-norm `RMSNormParams`) is flagged against a layout reported
+  as having no COMPUTE range, even though `rms-norm` is created with
+  `pushConstSize=20`. Forward is numerically correct (gradchecks pass), so it's
+  latent, not breaking ? RADV tolerates it. Under investigation in
+  `CommandBatch::dispatch` (`cpp/src/command_batch.cpp` ~L94): the order of
+  `vkCmdBindPipeline` / `vkCmdBindDescriptorSets` / `vkCmdPushConstants` and
+  which layout the push uses.
+- **NOTE for whoever picks this up**: there is currently temporary
+  `[PIPE-CREATE]` stderr instrumentation (an `fprintf` + `#include <cstdio>`) in
+  `getOrCreate` in `cpp/src/pipeline_cache.cpp`, built into the active `.pyd`.
+  **Remove it before the final commit** for this issue.
+
+## Relationship to cubby-lm
+
+This branch builds the **resident GPU training path** that the sibling `cubby-lm`
+repo needs for its `0.0.1 perf #2` (resident activations ? the ~25 ms/dispatch
+floor). `cubby-lm` imports grilly as an editable path source and loads this
+`.pyd` automatically. See `../cubby-lm/CLAUDE.md`.
