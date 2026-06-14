@@ -1150,6 +1150,64 @@ void TapeContext::adamw_update(uint32_t w_id, uint32_t grad_id, uint32_t m_id,
     batch_.transferComputeBarrier();
 }
 
+void TapeContext::embedding_scatter_add(uint32_t emb_grad_id, uint32_t ids_id,
+                                        uint32_t e_grad_id, uint32_t tokens,
+                                        uint32_t dim) {
+    GrillyBuffer& gBuf = registry_.resolve(emb_grad_id);
+    GrillyBuffer& idsBuf = registry_.resolve(ids_id);
+    GrillyBuffer& egBuf = registry_.resolve(e_grad_id);
+    const uint32_t total = tokens * dim;
+
+    PipelineEntry pipe =
+        cache_.getOrCreate("embedding-backward", 3, 2 * sizeof(uint32_t));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {gBuf.handle,   0, size_t(total) * 4},
+        {idsBuf.handle, 0, size_t(tokens) * 4},
+        {egBuf.handle,  0, VK_WHOLE_SIZE},
+    };
+    VkDescriptorSet ds = cache_.allocDescriptorSet("embedding-backward", bufInfos);
+    struct { uint32_t tokens; uint32_t dim; } push = {tokens, dim};
+    batch_.begin();
+    // Make prior writes to E_grad (the head-weight grad from backward, or an
+    // upload) visible to this dispatch's atomicAdd read-modify-write.
+    batch_.transferComputeBarrier();
+    batch_.dispatch(pipe.pipeline, pipe.layout, ds, (total + 255u) / 256u, 1, 1,
+                    &push, sizeof(push));
+    batch_.transferComputeBarrier();
+    batch_.submit();   // synchronous; E_grad now = head grad + embedding scatter
+}
+
+float TapeContext::sum_squares(const std::vector<uint32_t>& ids,
+                               const std::vector<uint32_t>& numels) {
+    // acc[0] += sum x^2 over each buffer (reduce-sumsq.glsl, atomic accumulate).
+    // One batch, one 4-byte readback. Each dispatch atomic-adds to the same acc,
+    // so no inter-dispatch barrier is needed (atomics serialize the writes).
+    uint32_t accId = registry_.alloc(4, BufferRegistry::Kind::Readback);
+    GrillyBuffer& accBuf = registry_.resolve(accId);
+
+    batch_.begin();
+    batch_.fillZero(accBuf, 4);
+    batch_.transferComputeBarrier();
+    PipelineEntry pipe = cache_.getOrCreate("reduce-sumsq", 2, sizeof(uint32_t));
+    for (size_t i = 0; i < ids.size(); ++i) {
+        GrillyBuffer& inBuf = registry_.resolve(ids[i]);
+        uint32_t n = numels[i];
+        std::vector<VkDescriptorBufferInfo> bufInfos = {
+            {inBuf.handle,  0, size_t(n) * 4},
+            {accBuf.handle, 0, 4},
+        };
+        VkDescriptorSet ds = cache_.allocDescriptorSet("reduce-sumsq", bufInfos);
+        batch_.dispatch(pipe.pipeline, pipe.layout, ds, (n + 255u) / 256u, 1, 1,
+                        &n, sizeof(n));
+    }
+    batch_.transferComputeBarrier();
+    batch_.submit();   // synchronous: acc ready
+
+    float result = 0.0f;
+    registry_.download(accId, &result, 4);
+    return result;
+}
+
 Node* TapeContext::record_op(OpType op,
                               const TensorRef* inputs, uint32_t num_inputs,
                               const TensorRef* outputs, uint32_t num_outputs,

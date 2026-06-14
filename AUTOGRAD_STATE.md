@@ -401,6 +401,26 @@ words. The 0.0.1 production-shape run is unblocked.
 NOTE: the clip currently reads all grad buffers back to host for the global norm
 (correct but a transfer cost); a GPU sum-of-squares reduction is the perf TODO.
 
+## v3.3 THROUGHPUT: 0.23 -> 0.77 it/s (3.3x), now compute-bound
+Profiling the v3.3 step (4.26 s) showed it was ~99% HOST TRANSFER, not compute:
+global-norm grad readback 1.68 s (39%), fwd+bwd 1.21 s (28%), E numpy AdamW 1.04 s
+(24%). Two new resident ops removed the host costs:
+- reduce-sumsq.glsl + TapeContext::sum_squares(ids, numels): global gradient L2
+  norm ON-GPU (atomic-accumulate Sg^2 -> one 4-byte readback, not ~1 GB). 0.23 ->
+  0.34 it/s.
+- embedding-backward.glsl + TapeContext::embedding_scatter_add: scatter the
+  embedding-output grad INTO E's grad buffer (which holds the tied-head weight
+  grad) so the tied embedding trains FULLY RESIDENT (joins the resident AdamW +
+  GPU norm; no head readback, no host scatter, no numpy AdamW, no E re-upload).
+  0.34 -> 0.77 it/s. Loss curve byte-identical to the host-E path.
+  GOTCHA (RDNA): float atomicAdd (GL_EXT_shader_atomic_float / OpAtomicFAddEXT) is
+  WAVE-COALESCED INCORRECTLY when lanes scatter to different addresses -- a single
+  +1 became +32 (= wavefront). Use atomicCompSwap on the uint bit-pattern (a true
+  per-lane RMW) for scattered float adds. (reduce-sumsq's one-atomic-per-workgroup
+  pattern is unaffected and keeps plain atomicAdd.)
+Remaining cost is fwd+bwd (~1.2 s) -- the legitimate matmuls; the trunk is now
+compute-bound. Next throughput lever is op fusion / fewer dispatches.
+
 ## NEXT (downstream cubby ladder)
 A longer v3.3 run to convergence (warmup + more steps), then 0.0.2 chunked
 sliding-window attention, etc.

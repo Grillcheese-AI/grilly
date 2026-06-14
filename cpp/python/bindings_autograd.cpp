@@ -181,6 +181,15 @@ void register_autograd_ops(py::module_& m) {
              "Resident AdamW update on persistent W/m/v from grad (in place). "
              "grad_scale multiplies the gradient BEFORE m/v (global-norm clip + "
              "mean-CE 1/B). Wrap calls in forward_begin()/forward_submit().")
+        .def("sum_squares", &ag::TapeContext::sum_squares,
+             py::arg("ids"), py::arg("numels"),
+             "On-GPU sum of squares over many resident buffers -> one float "
+             "(global grad L2 norm without the per-buffer host readback).")
+        .def("embedding_scatter_add", &ag::TapeContext::embedding_scatter_add,
+             py::arg("emb_grad_id"), py::arg("ids_id"), py::arg("e_grad_id"),
+             py::arg("tokens"), py::arg("dim"),
+             "Embedding backward: scatter-add emb_grad rows into E_grad by ids, "
+             "in place (merges with the tied-head weight grad). Resident.")
         .def("read_buffer",
              [](ag::TapeContext& tape, uint32_t buffer_id,
                 const std::vector<uint32_t>& shape) -> py::array_t<float> {

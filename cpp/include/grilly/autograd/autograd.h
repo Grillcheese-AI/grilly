@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 #include "grilly/autograd/buffer_registry.h"
 #include "grilly/autograd/tape_arena.h"
@@ -418,6 +419,20 @@ public:
                       uint32_t v_id, uint32_t numel, float lr, float beta1,
                       float beta2, float eps, float weight_decay, float beta1_t,
                       float beta2_t, bool clear_grad, float grad_scale = 1.0f);
+
+    /// Embedding backward: scatter-ADD emb_grad rows into E_grad by ids, on-GPU
+    /// and in place (E_grad already holds the tied-head weight grad, so the two
+    /// merge). emb_grad is (tokens, dim); ids is u32 (tokens); E_grad is
+    /// (vocab, dim). Lets the tied embedding train fully resident.
+    void embedding_scatter_add(uint32_t emb_grad_id, uint32_t ids_id,
+                               uint32_t e_grad_id, uint32_t tokens, uint32_t dim);
+
+    /// Sum of squares over many resident buffers, on-GPU: returns
+    /// sum_b sum_i buf_b[i]^2 with a SINGLE 4-byte readback (vs pulling every
+    /// buffer to host). Used for the global gradient L2 norm (grad clipping)
+    /// without the ~1 GB/step grad readback. ids[k] has numels[k] floats.
+    float sum_squares(const std::vector<uint32_t>& ids,
+                      const std::vector<uint32_t>& numels);
 
     /// Run backward from the loss node.
     void backward(Node* loss_node, uint32_t grad_output_buffer);
