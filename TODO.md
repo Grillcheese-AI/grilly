@@ -109,13 +109,24 @@ order; each step has a gate that must pass before the next.
       descent, no NaN. Confirms the resident single-tape trunk LEARNS LANGUAGE --
       the v3.3-shape head (V=65k tied) + deep trunk are correct end to end.
 
-- [ ] **5. Link into cubby-lm (parity-gated, non-destructive).**
-      Add a resident execution path in `cubby-lm/cubby/trunk/` ALONGSIDE the
-      existing Python-tape `model.py` (do not delete it). Wire `CubbyLM` forward
-      to the resident TapeContext ops.
-      GATE: forward parity vs the numpy trunk (max_abs_diff, per cubby port
-      discipline) AND gradient parity; then a short TinyStories run matches the
-      numpy-path loss curve. Only then flip the default.
+- [~] **5. Link into cubby-lm (parity-gated, non-destructive). IN PROGRESS.**
+      `cubby-lm/cubby/trunk/resident.py` (ResidentTrunk) -- a resident execution
+      path ALONGSIDE model.py, reading CubbyLM's Variables straight into persistent
+      resident weights. Handles cubby's fused gvd proj (split into 3 (d,d) blocks,
+      no Slice op needed), the real SwiGLU FFN (gate_up + down) with the half-swap
+      (cubby = silu(gate)*up; resident forward_swiglu = x1*silu(x2) -> register
+      gate_up as [up|gate]), and the tied head.
+      GATES PASSED: forward parity max_abs_diff 7.9e-7; GRADIENT parity per-param
+      rel_err <=2.0e-6 vs model.py's Python-tape backward (embed/final/n1/n2/proj/
+      gate_up/down -- the fused-split re-concat and swiglu un-swap all map back).
+      GOTCHA: model.py uses grilly.backend._bridge (a 2nd Vulkan context) for its
+      linears/softmax -> competes with the resident grilly_core.Device(), corrupts
+      grads + fastfails at teardown. Force the reference to numpy (gpu_linear._GPU=
+      False, model._GPU=False) so only the resident path owns the GPU.
+      REMAINING: short TinyStories run matching the numpy-path loss curve, then
+      flip the default. The resident training step already works end to end
+      (train_trunk_lm.py `--tinystories`); the remaining wiring is a CubbyLM-driven
+      optimizer loop (register_weight + grads() + adamw_update) + the eval/parity.
 
 ---
 
