@@ -43,6 +43,10 @@ grad, dispatch the existing backward shader, publish id".
   grad_x = grad_y@W1 + grad_y@W2 EXACTLY (0.0 err). This exercises the
   find_or_insert_grad batchedAdd path — the residual-connection pattern.
   (test_backward_fanout.py)
+- `backward_rmsnorm` + NEW `rms-norm-backward.glsl` kernel (none existed). 2-pass,
+  no atomics (one thread per output cell). grad_x 3.6e-7, grad_w 2.4e-7 vs numpy.
+  Added OpType::RMSNorm to the dispatch switch (was hitting default no-op).
+  (test_backward_rmsnorm.py)
 - Python surface: `cpp/python/bindings_autograd.cpp` (NEW, compiled file added to
   CMakeLists + bindings_core). Exposes OpType / TensorRef / TapeContext /
   AutogradNode + register_input (float32) / register_input_u32 / read_buffer.
@@ -60,25 +64,24 @@ grad, dispatch the existing backward shader, publish id".
   (engine holds a ref to it).
 
 ## STILL STUBBED / MISSING (the next slices)
-- backward_rmsnorm / backward_layernorm — NO rms-norm-backward SHADER EXISTS
-  (only forward rms-norm, rms-norm-linear-fused, snn-rmsnorm). This is the ONE
-  genuine net-new GLSL kernel the trunk needs. Math for y=(x/rms(x))*w:
-    dL/dx = (w*dy)/rms - x*(sum(w*dy*x))/(n*rms^3)
-    dL/dw = sum(dy * x/rms)   (over batch)
-  Author rms-norm-backward.glsl, compile (full rebuild compiles shaders), wire a
-  handler (resolve x + w + grad_out, alloc grad_x + grad_w, dispatch), validate.
-- backward_mul (dL/da = dy*b, dL/db = dy*a) still `= 1` placeholders.
-- backward shape ops: sum/mean/transpose still `= 1` placeholders.
 - MinGRU: mingru-backward.spv ALREADY EXISTS. MinGRU is NOT an OpType; wire it as
   its own standalone op/handler (resolve, dispatch mingru-backward, publish), not
   through the OpType switch. This is a wiring slice, not a kernel-authoring slice.
+  THIS IS THE LAST TRUNK PIECE.
+- backward_mul (dL/da = dy*b, dL/db = dy*a) still `= 1` placeholders. Only needed
+  if the trunk uses elementwise products outside SwiGLU.
+- backward shape ops: sum/mean/transpose still `= 1` placeholders. Only needed if
+  the trunk reduces/transposes on the autograd path.
+- backward_layernorm still stubbed (no layernorm-backward shader). Cubby uses
+  RMSNorm, not LayerNorm, so not on the critical path.
 
 ## Trunk readiness
-Enough is proven to train embed -> linear -> ... -> CE graphs WITH residuals and
-SwiGLU gating (linear, CE, silu/relu/gelu, add+fanout all verified). The two
-remaining trunk-specific gaps: (1) rms-norm-backward shader [kernel authoring],
-(2) MinGRU handler wiring [shader exists]. Shape ops (reshape/transpose) pass-
-through where trivial; sum/mean only needed if the trunk reduces.
+ALL per-op KERNELS the Cubby trunk needs now exist and are verified: linear, CE,
+silu/relu/gelu, add+fanout (residuals), rms-norm-backward. Plus driver
+propagation + loss seeding + single-batch residency. The ONLY remaining trunk
+piece is wiring MinGRU backward (its shader exists). After that the full
+embed -> [RMSNorm -> MinGRU -> RMSNorm -> SwiGLU]xL -> RMSNorm -> tied head -> CE
+backward path is closed and the trunk can train resident.
 
 ## Forward side (separate, not this branch)
 Forward resident execution already works in C++: nn::Tensor + ComputeBackend
@@ -89,12 +92,13 @@ need the ComputeBackend dispatch primitives bound (createBuffer/upload/dispatch/
 beginBatch/endBatch/setGraphMode) — NOT done yet.
 
 ## Recommended next step
-Author the `rms-norm-backward` GLSL shader — the one missing kernel. It's a
-self-contained slice: write the shader (math above), let the full rebuild
-compile it, wire backward_rmsnorm (resolve x/w/grad_out, alloc grad_x/grad_w,
-2 passes if needed for the reduction then the weight-grad), validate vs numpy.
-After that, the MinGRU handler-wiring slice (shader already exists). Those two
-close the Cubby trunk's backward path.
+Wire MinGRU backward — the last trunk piece. mingru-backward.spv already exists;
+read the forward mingru op (cpp/src/ops/mingru.cpp) + mingru-backward.glsl for the
+buffer layout/params, then wire a handler that resolves the saved forward state,
+dispatches mingru-backward on resident buffers, and publishes grad ids. MinGRU is
+NOT an OpType (the scan isn't pointwise) — give it a dedicated path. After that,
+build the first end-to-end resident trunk micro-step (one block + CE) and confirm
+loss decreases over a few steps.
 
 ## Tests (run from grilly root, cubby-lm venv)
   & "C:\Users\grill\Documents\GitHub\cubby-lm\.venv\Scripts\python.exe" test_backward_linear.py
