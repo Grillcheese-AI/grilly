@@ -357,9 +357,50 @@ SwiGLU FFN (gate_up + down) with the swiglu half-swap, tied head.
   grilly_core.Device() is then the ONLY Vulkan context (two contexts were
   intermittently corrupting each other; ~1/3 flaky before).
 
-All P0 resident-trunk-integration steps (1,2,2b,3,4,5) are DONE. Next is the
-downstream cubby ladder: the d=1024/L=18/V=65k (v3.3) production run (0.0.1
-throughput milestone), then 0.0.2 chunked sliding-window attention, etc. The resident step now exists and trains end to end
-   (train_trunk_lm.py is the reference assembly); the link is wiring CubbyLM's
-   forward/backward/optimizer onto register_weight + forward_* + record_trunk +
-   adamw_update, plus the host embedding scatter for E.
+All P0 resident-trunk-integration steps (1,2,2b,3,4,5) are DONE.
+
+## DEEP-TRUNK (L>=7) CORRECTNESS - descriptor-set cache bug FIXED (the big one)
+Bringing up the v3.3 shape (d=1024/L=18) exposed a SILENT grad-corruption bug that
+the small parity configs (L<=4) never hit. Two parts, both in the descriptor-set
+cache (cpp/.../vk_pipeline_cache.h, pipeline_cache.cpp):
+1. IN-FLIGHT EVICTION. The descriptor cache is an LRU capped at kMaxCachedDescSets
+   (was 100). The backward of one tape is a SINGLE command batch; each dispatch
+   allocates a distinct descriptor set (fresh buffers) recorded into the still
+   un-submitted command buffer. At ~15 sets/layer, L>=7 exceeds 100, so on a miss
+   the LRU FREES a set still referenced by the in-flight command buffer -> submit
+   reads a freed set -> garbage/zero grads (scattered: worst 2e12 / nan at L=12-18,
+   while L=4 was clean). FIX: kMaxCachedDescSets 100 -> 4096 and pool defaults
+   500/1000 -> 8192/131072, so the cap exceeds any realistic single batch (~L=250).
+2. CROSS-STEP STALE REUSE. With sets now persisting across steps, the cache (keyed
+   by shader+buffer-handle) falsely reused a stale set after the buffer POOL
+   recycled a handle for a different buffer -> NON-DETERMINISTIC grads (loss-curve
+   parity went flaky: 0.36 then 0.12 run-to-run). FIX: TapeContext::begin() calls
+   cache_.clearDescriptorCache() each step -- safe because every CommandBatch
+   submit() is synchronous (GPU idle at the step boundary), so no set is in-flight.
+RESULT: gradient parity vs model.py now clean+DETERMINISTIC at L=4..24 (2-6e-6;
+was nan at L>=12); loss-curve match back to 7.033e-6 identical across runs.
+The probe instrumentation that found it: a per-step global grad-NORM print -- it
+read 0.00e+00 at v3.3 step 1 (impossible for a real step), revealing the grads
+were CORRUPTED (not just spiking), which the bisect (L=4 ok / L=12 garbage) +
+reading allocDescriptorSet localized to the LRU.
+
+## v3.3 DEEP-LM TRAINING HYGIENE (resident grad clip + warmup + lr)
+With correct grads, an L=18/350M trunk from scratch still needs standard hygiene
+or it NaNs on the first gradient spike (cold-Adam oversized steps):
+- adamw-update.glsl gained a `grad_scale` push const applied to the gradient
+  BEFORE the m/v update (Adam normalizes by sqrt(v), so scaling lr != scaling the
+  grad). cubby train_step folds (global-norm clip * mean-CE 1/B) into grad_scale;
+  skips the step entirely if the global grad-norm is non-finite.
+- enable_residual_scale (config 0.0.1): GPT-2-style 1/sqrt(2L) init of each
+  residual branch's output proj (model.py Block) -- bounds the forward residual
+  stream; pure init, backend-agnostic (parity preserved).
+- train_cubby_resident: linear LR warmup + lower peak lr (3e-4).
+RESULT: v3.3 (d=1024/L=18/V=65536, 350M params) trains STABLY -- CE 11.24 ->
+6.30, ppl 76188 -> 543 in 30 steps (lr=3e-4, clip=1.0), no NaN, emits English
+words. The 0.0.1 production-shape run is unblocked.
+NOTE: the clip currently reads all grad buffers back to host for the global norm
+(correct but a transfer cost); a GPU sum-of-squares reduction is the perf TODO.
+
+## NEXT (downstream cubby ladder)
+A longer v3.3 run to convergence (warmup + more steps), then 0.0.2 chunked
+sliding-window attention, etc.

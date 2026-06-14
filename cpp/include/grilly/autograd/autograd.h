@@ -417,7 +417,7 @@ public:
     void adamw_update(uint32_t w_id, uint32_t grad_id, uint32_t m_id,
                       uint32_t v_id, uint32_t numel, float lr, float beta1,
                       float beta2, float eps, float weight_decay, float beta1_t,
-                      float beta2_t, bool clear_grad);
+                      float beta2_t, bool clear_grad, float grad_scale = 1.0f);
 
     /// Run backward from the loss node.
     void backward(Node* loss_node, uint32_t grad_output_buffer);

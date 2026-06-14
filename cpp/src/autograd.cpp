@@ -914,6 +914,12 @@ TapeContext::TapeContext(BufferPool& pool, CommandBatch& batch,
 void TapeContext::begin() {
     arena_.reset();
     registry_.clear();
+    // Free cached descriptor sets between steps: the buffer pool recycles handles
+    // each step (step-scoped buffers are released by registry_.clear() above), so
+    // a descriptor set cached under an old handle would be falsely reused for a
+    // different buffer. Safe here -- every batch submit() is synchronous, so the
+    // prior step's GPU work has completed.
+    cache_.clearDescriptorCache();
     engine_.clear_grads();
     seq_counter_ = 0;
     recording_ = true;
@@ -1112,10 +1118,11 @@ void TapeContext::adamw_update(uint32_t w_id, uint32_t grad_id, uint32_t m_id,
                                uint32_t v_id, uint32_t numel, float lr,
                                float beta1, float beta2, float eps,
                                float weight_decay, float beta1_t, float beta2_t,
-                               bool clear_grad) {
+                               bool clear_grad, float grad_scale) {
     // Dispatch adamw-update.glsl: 4 buffers {W, grad, m, v}, push matches the
-    // shader's PushConsts exactly. In-place on W/m/v. No begin/submit here --
-    // the caller batches all param updates into one forward_begin/forward_submit.
+    // shader's PushConsts exactly. In-place on W/m/v. grad_scale multiplies the
+    // gradient BEFORE the m/v update (global grad-norm clip + mean-CE 1/B). No
+    // begin/submit here -- the caller batches all updates into one submit.
     GrillyBuffer& wBuf = registry_.resolve(w_id);
     GrillyBuffer& gBuf = registry_.resolve(grad_id);
     GrillyBuffer& mBuf = registry_.resolve(m_id);
@@ -1126,8 +1133,9 @@ void TapeContext::adamw_update(uint32_t w_id, uint32_t grad_id, uint32_t m_id,
         uint32_t total_weights;
         float learning_rate, beta1, beta2, epsilon, weight_decay, beta1_t, beta2_t;
         uint32_t clear_grad;
+        float grad_scale;
     } push = {numel, lr, beta1, beta2, eps, weight_decay, beta1_t, beta2_t,
-              clear_grad ? 1u : 0u};
+              clear_grad ? 1u : 0u, grad_scale};
 
     PipelineEntry pipe = cache_.getOrCreate("adamw-update", 4, sizeof(push));
     std::vector<VkDescriptorBufferInfo> bufInfos = {

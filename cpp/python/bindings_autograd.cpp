@@ -177,9 +177,10 @@ void register_autograd_ops(py::module_& m) {
              py::arg("w_id"), py::arg("grad_id"), py::arg("m_id"), py::arg("v_id"),
              py::arg("numel"), py::arg("lr"), py::arg("beta1"), py::arg("beta2"),
              py::arg("eps"), py::arg("weight_decay"), py::arg("beta1_t"),
-             py::arg("beta2_t"), py::arg("clear_grad"),
+             py::arg("beta2_t"), py::arg("clear_grad"), py::arg("grad_scale") = 1.0f,
              "Resident AdamW update on persistent W/m/v from grad (in place). "
-             "Wrap calls in forward_begin()/forward_submit() for one batch.")
+             "grad_scale multiplies the gradient BEFORE m/v (global-norm clip + "
+             "mean-CE 1/B). Wrap calls in forward_begin()/forward_submit().")
         .def("read_buffer",
              [](ag::TapeContext& tape, uint32_t buffer_id,
                 const std::vector<uint32_t>& shape) -> py::array_t<float> {

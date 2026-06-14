@@ -214,6 +214,15 @@ PipelineEntry PipelineCache::getOrCreate(const std::string& name,
 
 // ── Public: descriptor set allocation with LRU cache ────────────────────────
 
+void PipelineCache::clearDescriptorCache() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& kv : descCache_) {
+        vkFreeDescriptorSets(device_.device(), descriptorPool_, 1, &kv.second.set);
+    }
+    descCache_.clear();
+    lruList_.clear();
+}
+
 VkDescriptorSet PipelineCache::allocDescriptorSet(
     const std::string& name,
     const std::vector<VkDescriptorBufferInfo>& buffers) {
