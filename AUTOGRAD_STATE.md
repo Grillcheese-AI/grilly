@@ -338,12 +338,28 @@ d=256 L=6): CE 11.60->4.08, perplexity 108697->59.4 over 200 steps (628 ms/step)
 no NaN. The resident single-tape trunk LEARNS LANGUAGE -- v3.3-shape head (V=65k
 tied) + deep trunk correct end to end.
 
-## NEXT: cubby link (step 5) - the last P0 item
-Steps 1, 2, 2b (resident forward), 3, 4 are done. Remaining:
-5. cubby link: add a resident execution path in cubby-lm/cubby/trunk (ALONGSIDE
-   the existing Python-tape model.py, not replacing it), gate it on forward parity
-   vs the numpy trunk (max_abs_diff) per cubby's port discipline, then switch the
-   default once green. The resident step now exists and trains end to end
+## CUBBY LINK (step 5) - DONE; P0 RESIDENT TRUNK INTEGRATION COMPLETE
+cubby-lm/cubby/trunk/resident.py (ResidentTrunk), ALONGSIDE model.py. Reads a
+CubbyLM's Variables into persistent resident weights (+ Adam moments); E (tied
+embedding) on the host path. Handles cubby's fused gvd proj (split 3), real
+SwiGLU FFN (gate_up + down) with the swiglu half-swap, tied head.
+- GATES (all green, now DETERMINISTIC): forward parity 7.9e-7, gradient parity
+  per-param <=2e-6 vs model.py's Python-tape backward, loss-curve match 7e-6
+  (resident-grad training vs numpy training, identical descent).
+- train_step (resident adamw_update on persistent weights + E numpy AdamW) +
+  autoregressive generate + cubby.trace per-block emission (read back only when a
+  tracer is active -> zero overhead at OFF).
+- THE FLIP: main.py train defaults to --backend resident (train_cubby_resident);
+  --backend tape keeps model.py. Resident train->generate on TinyStories: CE
+  11.16->4.49 / ppl ->89 in 150 steps, coherent English; trace 6/6 blocks.
+- determinism fix: force_numpy_reference() short-circuits grilly.nn.autograd's
+  LAZY gpu-backward singleton so model.py's backward stays numpy -- the resident
+  grilly_core.Device() is then the ONLY Vulkan context (two contexts were
+  intermittently corrupting each other; ~1/3 flaky before).
+
+All P0 resident-trunk-integration steps (1,2,2b,3,4,5) are DONE. Next is the
+downstream cubby ladder: the d=1024/L=18/V=65k (v3.3) production run (0.0.1
+throughput milestone), then 0.0.2 chunked sliding-window attention, etc. The resident step now exists and trains end to end
    (train_trunk_lm.py is the reference assembly); the link is wiring CubbyLM's
    forward/backward/optimizer onto register_weight + forward_* + record_trunk +
    adamw_update, plus the host embedding scatter for E.

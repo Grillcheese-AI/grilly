@@ -30,11 +30,14 @@ Priority: (P0) critical path to resident training  (P1) needed soon  (P2) later
 
 ---
 
-## P0 ? RESIDENT TRUNK INTEGRATION  (the gating milestone)
+## P0 ? RESIDENT TRUNK INTEGRATION  (the gating milestone) -- COMPLETE
 
-The per-op resident forward+backward are all in place. Remaining: compose them
-into ONE tape for Cubby's real architecture and switch cubby onto it. Build in
-order; each step has a gate that must pass before the next.
+ALL 5 STEPS DONE. The per-op resident forward+backward were composed into ONE
+tape for Cubby's real architecture and cubby is switched onto it: `main.py train`
+defaults to the GPU-resident single-tape backend, parity-validated vs model.py
+(forward 7.9e-7, gradient 2e-6, loss-curve 7e-6) and generating coherent English
+on TinyStories. This unblocks the full d=1024/L=18/V=65k (v3.3) run -- the 0.0.1
+throughput milestone. Build order below; each step's gate passed before the next.
 
 - [x] **1. Single-tape full trunk forward+backward.** DONE+VERIFIED.
       `experimental/resident_train/train_trunk_lm.py`. Records, in ONE tape:
@@ -109,7 +112,7 @@ order; each step has a gate that must pass before the next.
       descent, no NaN. Confirms the resident single-tape trunk LEARNS LANGUAGE --
       the v3.3-shape head (V=65k tied) + deep trunk are correct end to end.
 
-- [~] **5. Link into cubby-lm (parity-gated, non-destructive). IN PROGRESS.**
+- [x] **5. Link into cubby-lm (parity-gated, non-destructive). DONE.**
       `cubby-lm/cubby/trunk/resident.py` (ResidentTrunk) -- a resident execution
       path ALONGSIDE model.py, reading CubbyLM's Variables straight into persistent
       resident weights. Handles cubby's fused gvd proj (split into 3 (d,d) blocks,
@@ -130,12 +133,18 @@ order; each step has a gate that must pass before the next.
       (gpu_linear._GPU=False, model._GPU=False) so only the resident path owns the
       GPU. (2) _snapshot must COPY init params (model.py AdamW mutates p.data in
       place; a view aliases the trained weights).
-      REMAINING -- THE FLIP (now unlocked): route CubbyLM's forward/backward/
-      optimizer through the resident engine (a ResidentTrunk.train_step using
-      persistent weights + adamw_update + the E host path -- the perf machinery
-      proven in train_trunk_lm.py `--tinystories`), WIRE cubby.trace emission
-      (the standing observability invariant), and gate on GENERATION quality
-      before making it the hard default.
+      FLIP DONE: `main.py train` now defaults to `--backend resident`
+      (train_cubby_resident); `--backend tape` keeps numpy/Python-tape model.py.
+        - ResidentTrunk.train_step: persistent per-layer+final weights with Adam
+          moments -> resident adamw_update in place; E (tied) host AdamW + scatter,
+          step-scoped reg each forward (no new grilly binding).
+        - cubby.trace WIRED into the resident forward (per-block probe, read back
+          only when a tracer is active -> zero overhead at OFF). 6/6 block records.
+        - GENERATION gate: resident train->generate on TinyStories (V=65536, d=256,
+          L=6) CE 11.16->4.49 / ppl ->89 in 150 steps, emits coherent English.
+        - parity now DETERMINISTIC: force_numpy_reference() short-circuits
+          grilly.nn.autograd's lazy GPU-backward singleton so model.py's backward
+          stays numpy (ONE Vulkan context; two were intermittently corrupting).
 
 ---
 
