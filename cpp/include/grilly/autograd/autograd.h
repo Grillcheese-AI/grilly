@@ -131,6 +131,10 @@ enum class OpType : uint8_t {
     // CubeMind — Temporal Foresight (counterfactual contradiction penalty)
     TemporalSurprise,
 
+    // MinGRU — fused gated recurrence (scan). Not fused in the forward OpGraph
+    // (the scan isn't pointwise); this tag only routes the BACKWARD dispatch.
+    MinGRU,
+
     _Count  // sentinel
 };
 
@@ -290,6 +294,7 @@ private:
     void backward_softmax(Node* node);
     void backward_layernorm(Node* node);
     void backward_rmsnorm(Node* node);
+    void backward_mingru(Node* node);
     void backward_attention(Node* node);
     void backward_conv2d(Node* node);
     void backward_conv1d(Node* node);

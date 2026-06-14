@@ -129,6 +129,7 @@ void BackwardEngine::dispatch_node_backward(Node* node) {
         case OpType::Softmax:   backward_softmax(node); break;
         case OpType::LayerNorm: backward_layernorm(node); break;
         case OpType::RMSNorm:   backward_rmsnorm(node); break;
+        case OpType::MinGRU:    backward_mingru(node); break;
         case OpType::FlashAttention2: backward_attention(node); break;
         case OpType::Conv2d:    backward_conv2d(node); break;
         case OpType::Conv1d:    backward_conv1d(node); break;
@@ -499,6 +500,74 @@ void BackwardEngine::backward_rmsnorm(Node* node) {
     if (xRef.requires_grad) node->grad_input_buffers[0] = gradXId;
     if (node->num_inputs > 1 && node->inputs[1].requires_grad)
         node->grad_input_buffers[1] = gradWId;
+}
+
+void BackwardEngine::backward_mingru(Node* node) {
+    // Fused MinGRU backward. Forward:
+    //   x_scan = sigmoid(g)*tanh(v);  a = 0.05+0.9*sigmoid(d)
+    //   h_t = a_t*h_{t-1} + x_scan_t
+    // Shader mingru-backward: 8 buffers {gradH, G, V, D, H, gradG, gradV, gradD},
+    // push {seqLen, hiddenDim}, dispatch gx=(hiddenDim+63)/64, gy=batchSize.
+    //
+    // inputs[0]=G, inputs[1]=V, inputs[2]=D (the three projections).
+    // saved_buffer_ids = [G, V, D, H]  (H = forward output, needed for backward).
+    if (node->num_inputs < 3) { stats_.cpu_fallbacks++; return; }
+    if (node->grad_output_buffer == 0) { stats_.cpu_fallbacks++; return; }
+    if (node->num_saved < 4) { stats_.cpu_fallbacks++; return; }
+
+    const TensorRef& gRef = node->inputs[0];
+    // G is (batch, seq, hidden). Derive dims from shape: last = hidden.
+    if (gRef.ndim < 1) { stats_.cpu_fallbacks++; return; }
+    const uint32_t hiddenDim = gRef.shape[gRef.ndim - 1];
+    if (hiddenDim == 0) { stats_.cpu_fallbacks++; return; }
+    uint32_t seqLen = 1, batchSize = 1;
+    if (gRef.ndim >= 3) {
+        seqLen = gRef.shape[gRef.ndim - 2];
+        batchSize = static_cast<uint32_t>(gRef.numel() / (size_t(seqLen) * hiddenDim));
+    } else {
+        // Fall back to (positions, hidden) with seq packed in batch.
+        batchSize = static_cast<uint32_t>(gRef.numel() / hiddenDim);
+        seqLen = 1;
+    }
+
+    GrillyBuffer& gradH = registry_.resolve(node->grad_output_buffer);
+    GrillyBuffer& gBuf = registry_.resolve(node->saved_buffer_ids[0]);
+    GrillyBuffer& vBuf = registry_.resolve(node->saved_buffer_ids[1]);
+    GrillyBuffer& dBuf = registry_.resolve(node->saved_buffer_ids[2]);
+    GrillyBuffer& hBuf = registry_.resolve(node->saved_buffer_ids[3]);
+
+    const size_t elemBytes = size_t(batchSize) * seqLen * hiddenDim * 4;
+    uint32_t gradGId = registry_.alloc(elemBytes);
+    uint32_t gradVId = registry_.alloc(elemBytes);
+    uint32_t gradDId = registry_.alloc(elemBytes);
+    GrillyBuffer& gradGBuf = registry_.resolve(gradGId);
+    GrillyBuffer& gradVBuf = registry_.resolve(gradVId);
+    GrillyBuffer& gradDBuf = registry_.resolve(gradDId);
+
+    PipelineEntry pipe =
+        cache_.getOrCreate("mingru-backward", 8, 2 * sizeof(uint32_t));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {gradH.handle,    0, elemBytes},
+        {gBuf.handle,     0, elemBytes},
+        {vBuf.handle,     0, elemBytes},
+        {dBuf.handle,     0, elemBytes},
+        {hBuf.handle,     0, elemBytes},
+        {gradGBuf.handle, 0, elemBytes},
+        {gradVBuf.handle, 0, elemBytes},
+        {gradDBuf.handle, 0, elemBytes},
+    };
+    VkDescriptorSet descSet = cache_.allocDescriptorSet("mingru-backward", bufInfos);
+
+    struct { uint32_t seqLen; uint32_t hiddenDim; } push = {seqLen, hiddenDim};
+    uint32_t gx = (hiddenDim + 63u) / 64u;
+    uint32_t gy = batchSize;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
+                    &push, sizeof(push));
+
+    stats_.shaders_dispatched++;
+    if (gRef.requires_grad) node->grad_input_buffers[0] = gradGId;
+    if (node->inputs[1].requires_grad) node->grad_input_buffers[1] = gradVId;
+    if (node->inputs[2].requires_grad) node->grad_input_buffers[2] = gradDId;
 }
 
 void BackwardEngine::backward_attention(Node* node) {
