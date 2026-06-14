@@ -36,24 +36,41 @@ The per-op resident forward+backward are all in place. Remaining: compose them
 into ONE tape for Cubby's real architecture and switch cubby onto it. Build in
 order; each step has a gate that must pass before the next.
 
-- [ ] **1. Single-tape full trunk forward+backward.**
-      Record, in ONE tape:
-        embedding -> [ rmsnorm -> fused gvd Linear(d->3d) -> mingru ->
-                       Add(residual) -> rmsnorm -> Linear -> swiglu ->
-                       Add(residual) ]xL -> final rmsnorm -> tied head
-                       Linear(weight=E) -> per-token CrossEntropy
-      then call backward() ONCE (no hand-stitched 3-tape split).
-      - Residuals are OpType.Add (real backward + fan-out accumulate ? present).
-      - NOTE: per-token CE means NO mean-pool node (CE /N handles the mean), so
-        the stubbed Sum/Mean backward are NOT on this path. Keep it that way.
-      GATE: gradcheck vs finite-diff at small dims (d=64, L=2), rel < 1e-2, before
-      trusting. Add `experimental/resident_train/train_trunk_lm.py` (gradcheck mode).
+- [x] **1. Single-tape full trunk forward+backward.** DONE+VERIFIED.
+      `experimental/resident_train/train_trunk_lm.py`. Records, in ONE tape:
+        embedding -> [ rmsnorm -> WG/WV/WD Linear -> mingru -> Add(residual) ->
+                       rmsnorm -> Wg Linear -> swiglu -> Add(residual) ]xL ->
+                       final rmsnorm -> tied head Linear(weight=E) -> per-token CE
+      then calls backward() ONCE (no hand-stitched 3-tape split). Residuals are
+      OpType.Add with fan-out across layers; per-token CE, NO mean-pool node (so
+      the stubbed Sum/Mean backward stay off this path).
+      GATE PASSED: gradcheck vs FINITE-DIFF at d=64, L=2 -> all 14 param groups
+      rel_err ~1e-5 (<< 1e-2). Train sanity: loss 2.42 -> 0.001 in 40 AdamW steps.
+      NOTE: uses 3 separate WG/WV/WD Linears, NOT the fused gvd Linear(d->3d) +
+      slice -- mathematically identical, and the fuse (1 dispatch) is a step-3
+      throughput optimization that needs a Slice backward op (not yet wired). The
+      finite-diff reference runs in float64 (forward(...,f64=True)); float32 fd
+      truncation on the saturating MinGRU path floored at ~2e-4 and produced
+      spurious marginal fails -- float64 dropped the floor to ~1e-6.
 
-- [ ] **2. Tied embedding/head gradient merge.**
-      Register E once; the head Linear's weight-grad accumulates into E's grad
-      slot; the embedding grad (host scatter-add from the grad flowing into the
-      emb-output buffer) is ADDED to it.
-      GATE: gradcheck on E specifically passes with the tie (vs an untied control).
+- [x] **2. Tied embedding/head gradient merge.** DONE+VERIFIED (in the same
+      train_trunk_lm.py). E is registered ONCE; the head Linear uses E as its
+      weight so its weight-grad lands in E's grad slot; the embedding gather grad
+      (host scatter-add from emb-leaf's grad) is ADDED to it.
+      GATE PASSED: gradcheck on E with the tie (rel 5.2e-5) AND the `--untied`
+      control (separate Whead; E gets embedding-grad only, rel 5.7e-5) both pass
+      -- the merge is correct, not masking a sign/scale error.
+
+- [x] **2b. Resident FORWARD on the single tape.** DONE+VERIFIED
+      (train_trunk_lm.py `--resident`). The whole forward runs on-GPU
+      (forward_embedding/rmsnorm/linear/mingru/add/swiglu) and feeds the same
+      backward tape -- no activation leaves VRAM. Added NEW grilly op
+      `TapeContext::forward_add` (non-destructive out=a+b for residuals; built
+      from fillZero + batchedAdd, no new shader) -- the residual Add was the one
+      op the "resident forward set complete" note actually lacked.
+      GATE PASSED: resident logits parity vs numpy 1.07e-6; gradcheck all 14
+      params rel ~1e-5 (TIED + --untied). Prereq for step 3 (numpy forward would
+      force a per-step weight upload).
 
 - [ ] **3. Persistent resident weights + resident AdamW.**
       Keep params + Adam moments resident across steps; run the update on resident
