@@ -380,6 +380,15 @@ public:
     uint32_t forward_linear(uint32_t in_id, uint32_t weight_id, uint32_t bias_id,
                             uint32_t M, uint32_t K, uint32_t N);
 
+    /// Forward RMSNorm: out = weight * x * rsqrt(mean(x^2)+eps). x is
+    /// (positions, features). Returns the resident output buffer id. eps=1e-6.
+    uint32_t forward_rmsnorm(uint32_t in_id, uint32_t weight_id,
+                             uint32_t positions, uint32_t features);
+
+    /// Forward SwiGLU: out = x1*silu(x2). input is [x1|x2] (rows, 2*hidden) ->
+    /// out (rows, hidden). Returns the resident output buffer id.
+    uint32_t forward_swiglu(uint32_t in_id, uint32_t rows, uint32_t hidden);
+
     /// Run backward from the loss node.
     void backward(Node* loss_node, uint32_t grad_output_buffer);
 

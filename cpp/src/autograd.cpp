@@ -949,6 +949,77 @@ uint32_t TapeContext::forward_linear(uint32_t in_id, uint32_t weight_id,
     return outId;
 }
 
+uint32_t TapeContext::forward_rmsnorm(uint32_t in_id, uint32_t weight_id,
+                                      uint32_t positions, uint32_t features) {
+    // out = weight * x * rsqrt(mean(x^2)+eps). 2-pass rms-norm shader:
+    //   4 buffers {input, output, weight, rms_vals(positions)}.
+    //   pass 0 (gx=positions): rms_vals[p] = mean(x^2)
+    //   pass 1 (gx=positions*features): normalize.
+    const uint32_t totalElements = positions * features;
+    const size_t elemBytes = size_t(totalElements) * 4;
+    const size_t rmsBytes = size_t(positions) * 4;
+
+    uint32_t outId = registry_.alloc(elemBytes);
+    uint32_t rmsId = registry_.alloc(rmsBytes);
+    GrillyBuffer& inBuf = registry_.resolve(in_id);
+    GrillyBuffer& outBuf = registry_.resolve(outId);
+    GrillyBuffer& wBuf = registry_.resolve(weight_id);
+    GrillyBuffer& rmsBuf = registry_.resolve(rmsId);
+
+    PipelineEntry pipe = cache_.getOrCreate(
+        "rms-norm", 4, sizeof(grilly::ops::RMSNormParams));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {inBuf.handle,  0, elemBytes},
+        {outBuf.handle, 0, elemBytes},
+        {wBuf.handle,   0, size_t(features) * 4},
+        {rmsBuf.handle, 0, rmsBytes},
+    };
+    VkDescriptorSet descSet = cache_.allocDescriptorSet("rms-norm", bufInfos);
+
+    grilly::ops::RMSNormParams p{};
+    p.batchSize = positions;
+    p.seqLen = 1;
+    p.features = features;
+    p.eps = 1e-6f;
+
+    p.passType = 0;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (positions + 255) / 256, 1, 1, &p, sizeof(p));
+    batch_.barrier();
+    p.passType = 1;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (totalElements + 255) / 256, 1, 1, &p, sizeof(p));
+    batch_.transferComputeBarrier();
+    return outId;
+}
+
+uint32_t TapeContext::forward_swiglu(uint32_t in_id, uint32_t rows,
+                                     uint32_t hidden) {
+    // out = x1*silu(x2). input [x1|x2] (rows, 2*hidden) -> out (rows, hidden).
+    // 2 buffers {input(2*hidden), output(hidden)}, push {output_elements, hidden}.
+    const uint32_t outputElements = rows * hidden;
+    const size_t inBytes = size_t(rows) * (2u * hidden) * 4;
+    const size_t outBytes = size_t(outputElements) * 4;
+
+    uint32_t outId = registry_.alloc(outBytes);
+    GrillyBuffer& inBuf = registry_.resolve(in_id);
+    GrillyBuffer& outBuf = registry_.resolve(outId);
+
+    PipelineEntry pipe =
+        cache_.getOrCreate("activation-swiglu", 2, 2 * sizeof(uint32_t));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {inBuf.handle,  0, inBytes},
+        {outBuf.handle, 0, outBytes},
+    };
+    VkDescriptorSet descSet = cache_.allocDescriptorSet("activation-swiglu", bufInfos);
+
+    struct { uint32_t outputElements; uint32_t hidden; } push = {outputElements, hidden};
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (outputElements + 255) / 256, 1, 1, &push, sizeof(push));
+    batch_.transferComputeBarrier();
+    return outId;
+}
+
 Node* TapeContext::record_op(OpType op,
                               const TensorRef* inputs, uint32_t num_inputs,
                               const TensorRef* outputs, uint32_t num_outputs,
