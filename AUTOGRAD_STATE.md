@@ -51,6 +51,14 @@ grad, dispatch the existing backward shader, publish id".
   {gradH,G,V,D,H,gradG,gradV,gradD}). Node: 3 inputs (G,V,D), saves [G,V,D,H].
   grad_g/v/d all ~1e-7 vs numpy. Added OpType::MinGRU (routes BACKWARD only;
   not fused in forward OpGraph). (test_backward_mingru.py)
+- `backward_swiglu` — wired activation-swiglu-backward (3 buffers, input is
+  [x1|x2] 2*hidden wide -> hidden out). grad 6e-8 vs numpy. OpType::SwiGLU.
+  (test_backward_swiglu.py)
+- FULL CUBBY BLOCK composes, gradient-checks, and TRAINS:
+  RMSNorm->3 Linears->MinGRU->residual->RMSNorm->Linear->SwiGLU->residual->
+  head->CE. dL/dX matches finite-diff to rel 3.3e-4; loss 1.21->~0, acc->1.00
+  by step 15 (AdamW). (experimental/resident_train/train_block.py;
+  bisect_block.py is the A-E cross-op composition regression test.)
 - Python surface: `cpp/python/bindings_autograd.cpp` (NEW, compiled file added to
   CMakeLists + bindings_core). Exposes OpType / TensorRef / TapeContext /
   AutogradNode + register_input (float32) / register_input_u32 / read_buffer.
@@ -68,6 +76,23 @@ grad, dispatch the existing backward shader, publish id".
   (engine holds a ref to it).
 - MinGRU forward `a = 0.001 + 0.998*sigmoid(d)` per the SHADER (mingru-*.glsl).
   The mingru.h HEADER COMMENT says 0.05+0.9 — it is STALE/WRONG. Trust the shader.
+- BACKWARD-PASS SYNC: the driver walk needs transferComputeBarrier in TWO places
+  per node (both required; per-op unit tests don't catch these — only cross-op
+  composition does, via bisect_block.py / full block):
+    (1) BEFORE dispatch_node_backward — the node reads grad_output_buffer which
+        may have been built by batchedAdd accumulation while processing
+        downstream nodes (e.g. RMSNorm reading an n1 grad summed from 3 Linear
+        branches). Without it, the read races the adds.
+    (2) AFTER dispatch — the handler's grad writes (incl. fillZero TRANSFER_WRITE
+        in backward_linear) must be visible before accumulation reads them and
+        before the next batchedAdd in a same-buffer fan-out (e.g. MinGRU G==V==D).
+  Use transferComputeBarrier (covers TRANSFER+COMPUTE), NOT plain barrier
+  (compute-only) — fillZero is a transfer write.
+- Gradient-check composed graphs against finite differences (or an independent
+  analytic), not just "loss goes down". Both sync races above produced
+  plausible-but-wrong grads that still partially trained; only the fd check at
+  rel<1e-2 caught them. analytic-vs-fd agreeing to ~1e-5 confirms the numpy ref
+  before blaming the engine.
 
 ## STILL STUBBED / MISSING (not on the trunk critical path)
 - backward_mul (dL/da = dy*b, dL/db = dy*a) still `= 1` placeholders. Only needed
@@ -104,22 +129,26 @@ experimental/resident_train/ — numpy forward + numpy AdamW, RESIDENT backward.
   mean-pool -> Linear head -> CE. loss 1.1049 -> ~0, acc -> 1.00 by step 15.
   Proves backward-in-time grad flows into all 3 projections with usable scale.
 The two hardest trunk backward ops now both TRAIN, not just match numpy.
+- train_block.py: the FULL block (RMSNorm->3Lin->MinGRU->res->RMSNorm->Lin->
+  SwiGLU->res->head->CE) gradient-checks (dL/dX vs finite-diff rel 3.3e-4) AND
+  trains (loss 1.21->~0, acc->1.00 by step 15, AdamW on all params). This is the
+  composition proof — every op type + both residual fan-outs compose correctly.
+  bisect_block.py = the A-E cross-op regression test that localized the two sync
+  races fixed in this slice.
 
 ## Recommended next step
-Two remaining pieces for a FULL single-block trainer:
-  1. Wire backward_swiglu (NOT yet wired — no OpType/handler exists, but the
-     shader activation-swiglu-backward DOES). Forward: out = x1*silu(x2), input
-     is [x1:hidden][x2:hidden] concatenated -> output hidden. Backward shader: 3
-     buffers {grad_out, input, grad_in}, push {output_elements, hidden_dim},
-     gx=(output_elements+255)/256. Same easy pattern as backward_activation but
-     input is 2*hidden wide and output is hidden wide. Add OpType::SwiGLU + binding.
-  2. Then a full-block trainer: embed -> RMSNorm -> MinGRU -> RMSNorm -> SwiGLU
-     (+residuals) -> RMSNorm -> tied head -> CE, all backward resident, confirm
-     loss drops. RMSNorm/SwiGLU/residual/MinGRU/Linear/CE all individually verified;
-     this only tests their COMPOSITION (saved-tensor conventions lining up).
-The harder follow-on is driving FORWARD resident too (bind ComputeBackend dispatch
-primitives) so forward+backward are both single-submit on-GPU. Until then forward
-uses _bridge staging ops and only backward is resident.
+Backward is COMPLETE and the full block trains. The remaining work is no longer
+kernels — it is making the FORWARD pass resident so a real Cubby trains entirely
+on-GPU (today: numpy forward seeds the saved tensors; backward is resident):
+  1. Bind the ComputeBackend dispatch primitives to Python (createBuffer/upload/
+     dispatch/beginBatch/endBatch/setGraphMode) so forward can run resident and
+     feed its real output buffers straight into the tape (no numpy seeding, no
+     re-upload of saved tensors).
+  2. Scale the block trainer to multi-layer + real seq>1 (MinGRU scan over time),
+     then to the full cubby-lm config, and confirm loss descends on real token
+     batches.
+  3. Optional cleanups: backward_mul / shape-op backward if the real graph needs
+     them; fix the latent loss.cpp::crossEntropyBackward gx bug.
 
 ## Tests (run from grilly root, cubby-lm venv) — ALL GREEN
   test_backward_linear.py   linear (grad_x, grad_W)
@@ -129,6 +158,9 @@ uses _bridge staging ops and only backward is resident.
   test_backward_fanout.py   fan-out accumulation (residual pattern)
   test_backward_rmsnorm.py  RMSNorm (grad_x, grad_w)
   test_backward_mingru.py   MinGRU (grad_g, grad_v, grad_d)
+  test_backward_swiglu.py   SwiGLU (2*hidden input split)
+  experimental/resident_train/bisect_block.py   cross-op composition (A-E)
+  experimental/resident_train/train_block.py    full block gradcheck + train
 Run e.g.:
   & "C:\Users\grill\Documents\GitHub\cubby-lm\.venv\Scripts\python.exe" test_backward_mingru.py
 Rebuild after C++ edits (add full, no flag, when a .glsl changes):
