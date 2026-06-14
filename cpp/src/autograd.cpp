@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "grilly/ops/linear.h"
+#include "grilly/ops/batched_ops.h"
 
 namespace grilly {
 namespace autograd {
@@ -44,6 +45,22 @@ void BackwardEngine::backward(TapeArena& tape, Node* loss_node,
     while (current != nullptr) {
         stats_.nodes_visited++;
 
+        // Pull: a node activates if a downstream consumer has already
+        // deposited a gradient under one of this node's OUTPUT buffer_ids.
+        // (The walk is tail->head, so all consumers of `current` ran first.)
+        // The loss node already has grad_output_buffer seeded above.
+        if (current->grad_output_buffer == 0) {
+            for (uint32_t o = 0; o < current->num_outputs; ++o) {
+                uint32_t out_buf = current->outputs[o].buffer_id;
+                if (out_buf == 0) continue;
+                uint32_t g = get_grad_buffer(out_buf);
+                if (g != 0) {
+                    current->grad_output_buffer = g;
+                    break;
+                }
+            }
+        }
+
         if (current->grad_output_buffer != 0) {
             stats_.nodes_with_grad++;
 
@@ -64,22 +81,16 @@ void BackwardEngine::backward(TapeArena& tape, Node* loss_node,
                     // First gradient contribution — just store it
                     accum = current->grad_input_buffers[i];
                 } else {
-                    // Fan-out: add this gradient to the accumulated one.
-                    // Dispatch an element-wise add shader: accum += new_grad
-                    //
-                    // We use the existing "activation-add" shader which does:
-                    //   output[i] = input_a[i] + input_b[i]
-                    // Here we read from accum + new_grad, write back to accum.
-                    size_t grad_size = current->inputs[i].size_bytes();
-                    GrillyBuffer accum_buf = pool_.acquire(grad_size);
-                    GrillyBuffer new_grad_buf = pool_.acquire(grad_size);
-
-                    // For now, mark that accumulation happened.
-                    // The actual Vulkan add dispatch is wired in Phase 2
-                    // when we connect specific backward shaders.
-                    // TODO: dispatch element-wise add shader
-                    (void)accum_buf;
-                    (void)new_grad_buf;
+                    // Fan-out: accum += new_grad (in place), via the existing
+                    // elementwise-add shader. Both ids resolve through the
+                    // registry to resident buffers; no CPU round-trip.
+                    uint32_t numel =
+                        static_cast<uint32_t>(current->inputs[i].numel());
+                    GrillyBuffer& accum_buf = registry_.resolve(accum);
+                    GrillyBuffer& new_grad_buf =
+                        registry_.resolve(current->grad_input_buffers[i]);
+                    grilly::ops::batchedAdd(batch_, cache_, accum_buf,
+                                            new_grad_buf, numel);
                 }
 
                 // Propagate: set the input node's grad_output_buffer so
