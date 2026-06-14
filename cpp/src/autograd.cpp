@@ -69,8 +69,23 @@ void BackwardEngine::backward(TapeArena& tape, Node* loss_node,
         if (current->grad_output_buffer != 0 || is_loss_node) {
             stats_.nodes_with_grad++;
 
+            // Barrier BEFORE dispatch: this node reads grad_output_buffer, which
+            // may have been built by accumulation (batchedAdd) writes while
+            // processing downstream nodes. Those writes must be visible before
+            // this node's shader reads them. (Without this, e.g. RMSNorm reading
+            // an n1 grad accumulated from three Linear branches races the adds.)
+            batch_.transferComputeBarrier();
+
             // Dispatch the backward shader for this operation
             dispatch_node_backward(current);
+
+            // Barrier: the handler's grad writes must be visible before any
+            // accumulation reads them (and before downstream nodes read them).
+            // Use transferComputeBarrier (not plain barrier) because some
+            // handlers (e.g. backward_linear) zero grad buffers with fillZero,
+            // a TRANSFER_WRITE; a compute-only barrier wouldn't order that
+            // against a downstream node's shader read (the MinGRU<-Linear bug).
+            batch_.transferComputeBarrier();
 
             // Accumulate gradients into input nodes.
             // For each input that requires_grad, find/create a grad buffer
@@ -89,6 +104,11 @@ void BackwardEngine::backward(TapeArena& tape, Node* loss_node,
                     // Fan-out: accum += new_grad (in place), via the existing
                     // elementwise-add shader. Both ids resolve through the
                     // registry to resident buffers; no CPU round-trip.
+                    // NOTE: when the SAME input buffer feeds multiple inputs of
+                    // one node (e.g. MinGRU with G==V==D), this loop runs several
+                    // times read-modify-writing `accum`; a barrier before each
+                    // add orders them so the contributions sum correctly.
+                    batch_.transferComputeBarrier();
                     uint32_t numel =
                         static_cast<uint32_t>(current->inputs[i].numel());
                     GrillyBuffer& accum_buf = registry_.resolve(accum);
