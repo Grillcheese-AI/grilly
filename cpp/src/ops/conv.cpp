@@ -178,23 +178,23 @@ void conv2d(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
         batch.submitDeferred();
     batch.waitForCompletion();
 
-        // Download from the correct buffer (biased output if shader was
-        // available, raw GEMM output otherwise)
-        if (hasBias && bias && cache.hasShader("bias-add")) {
-            pool.download(bufOutput, output, gemmOutBytes);
-        } else {
-            pool.download(bufGemm, output, gemmOutBytes);
-
-            // Fallback: CPU bias addition when bias-add shader isn't loaded
-            if (hasBias && bias) {
-                for (uint32_t b = 0; b < batchSize; ++b) {
-                    for (uint32_t oc = 0; oc < outChannels; ++oc) {
-                        float biasVal = bias[oc];
-                        size_t offset = (size_t(oc) * N_cols + b * outH * outW);
-                        for (uint32_t hw = 0; hw < outH * outW; ++hw) {
-                            output[offset + hw] += biasVal;
-                        }
-                    }
+        // The GEMM buffer is laid out (out_channels, batch*out_h*out_w):
+        //   gemm[oc][n], n = b*(outH*outW) + hw   (channel-major over batch)
+        // but the expected output layout is (batch, out_channels, out_h, out_w).
+        // Download to a temp and de-interleave the batch dimension. For
+        // batch==1 this is a straight copy; for batch>1 it fixes the wrong
+        // (C,B,HW) ordering the raw GEMM produced.
+        const size_t HW = size_t(outH) * outW;
+        const bool biasOnGpu = hasBias && bias && cache.hasShader("bias-add");
+        std::vector<float> gemmTmp(size_t(M) * N_cols);
+        pool.download(biasOnGpu ? bufOutput : bufGemm, gemmTmp.data(), gemmOutBytes);
+        for (uint32_t b = 0; b < batchSize; ++b) {
+            for (uint32_t oc = 0; oc < outChannels; ++oc) {
+                const float biasVal = (!biasOnGpu && hasBias && bias) ? bias[oc] : 0.0f;
+                const float* src = gemmTmp.data() + (size_t(oc) * N_cols + size_t(b) * HW);
+                float* dst = output + (size_t(b) * outChannels * HW + size_t(oc) * HW);
+                for (size_t hw = 0; hw < HW; ++hw) {
+                    dst[hw] = src[hw] + biasVal;
                 }
             }
         }
@@ -384,8 +384,13 @@ void conv2dBackwardWeight(CommandBatch& batch, BufferPool& pool,
                                                         bufInfos);
 
     uint32_t inPerGroup = p.inChannels / p.groups;
-    uint32_t gx = (p.kernelW * inPerGroup + 15) / 16;
-    uint32_t gy = (p.outChannels * p.kernelH + 15) / 16;
+    // Grid MUST match conv2d-backward-weight.glsl's indexing:
+    //   gl_GlobalInvocationID.x = weight_spatial over (inPerGroup * kH * kW)
+    //   gl_GlobalInvocationID.y = oc            over (outChannels)
+    // (the old grid put kH on y and dropped it from x, leaving most weight
+    //  elements uncomputed for any kernel with height > 1 -> wrong dW)
+    uint32_t gx = (inPerGroup * p.kernelH * p.kernelW + 15) / 16;
+    uint32_t gy = (p.outChannels + 15) / 16;
 
     batch.begin();
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
