@@ -389,6 +389,20 @@ public:
     /// out (rows, hidden). Returns the resident output buffer id.
     uint32_t forward_swiglu(uint32_t in_id, uint32_t rows, uint32_t hidden);
 
+    /// Forward MinGRU: H = scan(G,V,D). G/V/D/H are (batch, seqLen, hidden),
+    /// laid out [b][t][d]. Same convention as backward_mingru / numpy ref.
+    /// Returns the resident output buffer id.
+    uint32_t forward_mingru(uint32_t g_id, uint32_t v_id, uint32_t d_id,
+                            uint32_t batch, uint32_t seqLen, uint32_t hidden);
+
+    /// Forward embedding lookup: out[b,s,:] = table[ids[b,s]]. ids are uint32
+    /// (batch*seq); table is (vocab, dim). Returns a resident output id of
+    /// shape (batch*seq, dim). Backward (scatter-add into the table) is handled
+    /// host-side (cheap, not in the per-layer hot path).
+    uint32_t forward_embedding(uint32_t ids_id, uint32_t table_id,
+                               uint32_t batch, uint32_t seqLen,
+                               uint32_t vocab, uint32_t dim);
+
     /// Run backward from the loss node.
     void backward(Node* loss_node, uint32_t grad_output_buffer);
 

@@ -1020,6 +1020,72 @@ uint32_t TapeContext::forward_swiglu(uint32_t in_id, uint32_t rows,
     return outId;
 }
 
+uint32_t TapeContext::forward_mingru(uint32_t g_id, uint32_t v_id, uint32_t d_id,
+                                     uint32_t batch, uint32_t seqLen,
+                                     uint32_t hidden) {
+    // H = MinGRU(G,V,D). G/V/D/H all (batch, seqLen, hidden), laid out [b][t][d].
+    // Fused activation + causal scan via mingru-forward.glsl: one thread per
+    // (batch, hidden), sequential time loop. x_scan=sigmoid(g)*tanh(v),
+    // a=0.001+0.998*sigmoid(d), h_t=a*h_{t-1}+x_scan -- matches backward_mingru
+    // and the numpy reference exactly.
+    const size_t elemBytes = size_t(batch) * seqLen * hidden * 4;
+    uint32_t outId = registry_.alloc(elemBytes);
+    GrillyBuffer& gBuf = registry_.resolve(g_id);
+    GrillyBuffer& vBuf = registry_.resolve(v_id);
+    GrillyBuffer& dBuf = registry_.resolve(d_id);
+    GrillyBuffer& outBuf = registry_.resolve(outId);
+
+    PipelineEntry pipe =
+        cache_.getOrCreate("mingru-forward", 4, 2 * sizeof(uint32_t));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {gBuf.handle,   0, elemBytes},
+        {vBuf.handle,   0, elemBytes},
+        {dBuf.handle,   0, elemBytes},
+        {outBuf.handle, 0, elemBytes},
+    };
+    VkDescriptorSet descSet =
+        cache_.allocDescriptorSet("mingru-forward", bufInfos);
+
+    struct { uint32_t seqLen; uint32_t hiddenDim; } push = {seqLen, hidden};
+    uint32_t gx = (hidden + 63u) / 64u;
+    uint32_t gy = batch;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
+                    &push, sizeof(push));
+    batch_.transferComputeBarrier();
+    return outId;
+}
+
+uint32_t TapeContext::forward_embedding(uint32_t ids_id, uint32_t table_id,
+                                        uint32_t batch, uint32_t seqLen,
+                                        uint32_t vocab, uint32_t dim) {
+    // out[t,:] = table[ids[t]]; ids uint32 (batch*seq), table (vocab,dim).
+    // embedding-lookup.glsl: one thread per token, copies dim floats.
+    const uint32_t tokens = batch * seqLen;
+    const size_t outBytes = size_t(tokens) * dim * 4;
+    uint32_t outId = registry_.alloc(outBytes);
+    GrillyBuffer& idsBuf = registry_.resolve(ids_id);
+    GrillyBuffer& tblBuf = registry_.resolve(table_id);
+    GrillyBuffer& outBuf = registry_.resolve(outId);
+
+    PipelineEntry pipe =
+        cache_.getOrCreate("embedding-lookup", 3, 4 * sizeof(uint32_t));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {idsBuf.handle, 0, size_t(tokens) * 4},
+        {tblBuf.handle, 0, size_t(vocab) * dim * 4},
+        {outBuf.handle, 0, outBytes},
+    };
+    VkDescriptorSet descSet =
+        cache_.allocDescriptorSet("embedding-lookup", bufInfos);
+
+    struct { uint32_t batch; uint32_t seqLen; uint32_t vocab; uint32_t dim; }
+        push = {batch, seqLen, vocab, dim};
+    uint32_t gx = (tokens + 255u) / 256u;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
+                    &push, sizeof(push));
+    batch_.transferComputeBarrier();
+    return outId;
+}
+
 Node* TapeContext::record_op(OpType op,
                               const TensorRef* inputs, uint32_t num_inputs,
                               const TensorRef* outputs, uint32_t num_outputs,

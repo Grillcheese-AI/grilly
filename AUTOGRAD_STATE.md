@@ -197,11 +197,7 @@ fixed the full BL=192 training (still crashed with margin). The shaders
 along. Lesson: "margin makes it vanish" is necessary-not-sufficient for overflow;
 confirm with validation before concluding. The margin was reverted.
 
-REMAINING (separate, non-fatal): validation also shows
-VUID-vkCmdPushConstants-offset-01795 ? the rms-norm dispatch pushes 20 bytes to a
-pipeline layout whose push-constant range does not cover them. Forward is
-numerically correct regardless (gradchecks pass), so it is latent, not breaking.
-Likely a getOrCreate("rms-norm", ...) push-size vs RMSNormParams mismatch. Fix next.
+REMAINING (separate, non-fatal): VUID-vkCmdPushConstants-offset-01795 - a 20-byte rms-norm push flagged against a layout reported as having no COMPUTE range. INVESTIGATED: instrumented getOrCreate (instrumentation since REMOVED) confirms rms-norm IS created with pushConstSize=20 and is the only 20-byte push in ttr3 - so the layout is correct and the warning comes from the dispatch using the wrong/stale layout for the push. Next: inspect CommandBatch::dispatch (cpp/src/command_batch.cpp ~L94) - the vkCmdPushConstants call and which layout it passes. Forward is numerically correct (gradchecks pass); latent, not breaking.
 
 ## FULLY RESIDENT TRAINING ? works post-fix (DONE)
 experimental/resident_train/train_full_resident.py ? same block + online task as
@@ -240,3 +236,46 @@ Run e.g.:
   & "C:\Users\grill\Documents\GitHub\cubby-lm\.venv\Scripts\python.exe" test_backward_mingru.py
 Rebuild after C++ edits (add full, no flag, when a .glsl changes):
   powershell -NoProfile -ExecutionPolicy Bypass -File .\rebuild.ps1 -SkipShaders
+
+
+## RESIDENT FORWARD OP SET COMPLETE (mingru + embedding added) - June 2026
+Added the two missing resident forward ops so the ENTIRE Cubby trunk forward can
+run on-GPU with no numpy round-trip:
+- TapeContext.forward_mingru(g_id,v_id,d_id, batch,seqLen,hidden) - wires the
+  existing mingru-forward.glsl (4 buf {G,V,D,H}, push {seqLen,hidden},
+  gx=(hidden+63)/64, gy=batch). Parity vs numpy mingru_fwd: max_abs_diff 1.5e-7.
+  (experimental/resident_train/ttr_mingru_fwd.py)
+- TapeContext.forward_embedding(ids_id,table_id, batch,seqLen,vocab,dim) - wires
+  embedding-lookup.glsl (3 buf {ids(u32),table,out}, push {batch,seqLen,vocab,dim},
+  gx=(batch*seqLen+255)/256). ids uploaded via register_input_u32. Exact gather,
+  parity 0.0. (ttr_embedding_fwd.py)
+Resident forward op set is now: embedding, rmsnorm, linear, mingru, swiglu - all
+parity-verified. Backward already covers all of these (embedding backward = host
+scatter-add, cheap, off the hot path). No regression: the full resident gradcheck
+(train_full_resident.py gradcheck) still PASSES all 8 params after these edits, on
+a clean build with the [PIPE-CREATE] instrumentation removed.
+
+## NEXT: single-tape full-trunk integration + cubby link (NOT yet done)
+Per-op resident forward + backward are all in place; what remains is composing
+them into ONE tape for cubby's real architecture and switching cubby over:
+1. Single-tape full trunk: record embedding -> [rmsnorm -> fused gvd Linear ->
+   mingru -> Add(residual) -> rmsnorm -> Linear -> swiglu -> Add(residual)]xL ->
+   final rmsnorm -> tied head Linear(weight=E) -> per-token CE, in ONE tape, and
+   call backward() once. The engine already has Add (residual) + fan-out accumulate
+   + Mean backward handlers, so the tail->head walk should route it - VALIDATE with
+   a gradcheck at small dims (d=64, L=2) before trusting. (train_full_resident.py
+   hand-stitches 3 tapes for the toy mean-pool task; the LM path is per-token CE +
+   tied head, a different stitch.)
+2. Tied head: register E once; the head Linear weight-grad accumulates into E's
+   grad slot; the embedding grad (host scatter from the grad into the emb buffer)
+   is added to it. Validate the two merge correctly.
+3. Persist resident weights + Adam state across steps and run a resident AdamW
+   (adamw-update.glsl exists) on resident grad+weight buffers - otherwise the
+   per-step weight upload / grad readback eats the dispatch-fusion win. THIS is the
+   actual 0.0.1 perf #2 throughput payoff.
+4. cubby link: add a resident execution path in cubby-lm/cubby/trunk (ALONGSIDE
+   the existing Python-tape model.py, not replacing it), gate it on forward parity
+   vs the numpy trunk (max_abs_diff) per cubby's port discipline, then switch the
+   default once green.
+Capacity note: bump TapeArena capacity + check BackwardEngine kMaxGradEntries
+(4096) and the BufferRegistry deque hold an L=18 trunk's node/buffer/grad count.

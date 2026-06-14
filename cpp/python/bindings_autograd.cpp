@@ -147,6 +147,14 @@ void register_autograd_ops(py::module_& m) {
         .def("forward_swiglu", &ag::TapeContext::forward_swiglu,
              py::arg("in_id"), py::arg("rows"), py::arg("hidden"),
              "Resident forward SwiGLU: [x1|x2](rows,2*hidden)->out(rows,hidden).")
+        .def("forward_mingru", &ag::TapeContext::forward_mingru,
+             py::arg("g_id"), py::arg("v_id"), py::arg("d_id"),
+             py::arg("batch"), py::arg("seqLen"), py::arg("hidden"),
+             "Resident forward MinGRU: H=scan(G,V,D), all (batch,seqLen,hidden).")
+        .def("forward_embedding", &ag::TapeContext::forward_embedding,
+             py::arg("ids_id"), py::arg("table_id"),
+             py::arg("batch"), py::arg("seqLen"), py::arg("vocab"), py::arg("dim"),
+             "Resident forward embedding lookup -> resident (batch*seq,dim) id.")
         .def("read_buffer",
              [](ag::TapeContext& tape, uint32_t buffer_id,
                 const std::vector<uint32_t>& shape) -> py::array_t<float> {
