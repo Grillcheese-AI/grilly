@@ -1086,6 +1086,62 @@ uint32_t TapeContext::forward_embedding(uint32_t ids_id, uint32_t table_id,
     return outId;
 }
 
+uint32_t TapeContext::forward_add(uint32_t a_id, uint32_t b_id,
+                                  uint32_t totalElements) {
+    // out = a + b, NON-destructive (a and b survive for the backward tape).
+    // Built from the verified fillZero + in-place batchedAdd primitives: zero
+    // out, then out += a, out += b. Barriers order the transfer-write before the
+    // first add and each read-modify-write of `out` before the next (the same
+    // discipline the backward fan-out accumulation uses).
+    const size_t bytes = size_t(totalElements) * 4;
+    uint32_t outId = registry_.alloc(bytes);
+    GrillyBuffer& outBuf = registry_.resolve(outId);
+    GrillyBuffer& aBuf = registry_.resolve(a_id);
+    GrillyBuffer& bBuf = registry_.resolve(b_id);
+
+    batch_.fillZero(outBuf, bytes);
+    batch_.transferComputeBarrier();
+    grilly::ops::batchedAdd(batch_, cache_, outBuf, aBuf, totalElements);
+    batch_.transferComputeBarrier();
+    grilly::ops::batchedAdd(batch_, cache_, outBuf, bBuf, totalElements);
+    batch_.transferComputeBarrier();
+    return outId;
+}
+
+void TapeContext::adamw_update(uint32_t w_id, uint32_t grad_id, uint32_t m_id,
+                               uint32_t v_id, uint32_t numel, float lr,
+                               float beta1, float beta2, float eps,
+                               float weight_decay, float beta1_t, float beta2_t,
+                               bool clear_grad) {
+    // Dispatch adamw-update.glsl: 4 buffers {W, grad, m, v}, push matches the
+    // shader's PushConsts exactly. In-place on W/m/v. No begin/submit here --
+    // the caller batches all param updates into one forward_begin/forward_submit.
+    GrillyBuffer& wBuf = registry_.resolve(w_id);
+    GrillyBuffer& gBuf = registry_.resolve(grad_id);
+    GrillyBuffer& mBuf = registry_.resolve(m_id);
+    GrillyBuffer& vBuf = registry_.resolve(v_id);
+    const size_t bytes = size_t(numel) * 4;
+
+    struct AdamWPush {
+        uint32_t total_weights;
+        float learning_rate, beta1, beta2, epsilon, weight_decay, beta1_t, beta2_t;
+        uint32_t clear_grad;
+    } push = {numel, lr, beta1, beta2, eps, weight_decay, beta1_t, beta2_t,
+              clear_grad ? 1u : 0u};
+
+    PipelineEntry pipe = cache_.getOrCreate("adamw-update", 4, sizeof(push));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {wBuf.handle, 0, bytes},
+        {gBuf.handle, 0, bytes},
+        {mBuf.handle, 0, bytes},
+        {vBuf.handle, 0, bytes},
+    };
+    VkDescriptorSet descSet = cache_.allocDescriptorSet("adamw-update", bufInfos);
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (numel + 255u) / 256u, 1, 1, &push, sizeof(push));
+    batch_.transferComputeBarrier();
+}
+
 Node* TapeContext::record_op(OpType op,
                               const TensorRef* inputs, uint32_t num_inputs,
                               const TensorRef* outputs, uint32_t num_outputs,

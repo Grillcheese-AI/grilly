@@ -130,6 +130,20 @@ void register_autograd_ops(py::module_& m) {
              py::arg("array"),
              "Allocate a resident buffer, upload a uint32 numpy array (e.g. "
              "class-index targets), return its id.")
+        .def("register_weight",
+             [](ag::TapeContext& tape,
+                py::array_t<float, py::array::c_style | py::array::forcecast> arr)
+                 -> uint32_t {
+                 auto info = arr.request();
+                 size_t bytes = static_cast<size_t>(info.size) * sizeof(float);
+                 uint32_t id = tape.registry().alloc_persistent(bytes);
+                 tape.registry().upload(id, info.ptr, bytes);
+                 return id;
+             },
+             py::arg("array"),
+             "Allocate a PERSISTENT resident buffer (weight / Adam moment) that "
+             "survives begin()/clear() with a stable id; upload a float32 array. "
+             "Register all such buffers BEFORE any step-scoped register_input.")
         .def("forward_begin", &ag::TapeContext::forward_begin,
              "Open the resident forward command batch.")
         .def("forward_submit", &ag::TapeContext::forward_submit,
@@ -155,6 +169,17 @@ void register_autograd_ops(py::module_& m) {
              py::arg("ids_id"), py::arg("table_id"),
              py::arg("batch"), py::arg("seqLen"), py::arg("vocab"), py::arg("dim"),
              "Resident forward embedding lookup -> resident (batch*seq,dim) id.")
+        .def("forward_add", &ag::TapeContext::forward_add,
+             py::arg("a_id"), py::arg("b_id"), py::arg("total_elements"),
+             "Resident forward elementwise add (residual): out=a+b, "
+             "non-destructive -> resident output id.")
+        .def("adamw_update", &ag::TapeContext::adamw_update,
+             py::arg("w_id"), py::arg("grad_id"), py::arg("m_id"), py::arg("v_id"),
+             py::arg("numel"), py::arg("lr"), py::arg("beta1"), py::arg("beta2"),
+             py::arg("eps"), py::arg("weight_decay"), py::arg("beta1_t"),
+             py::arg("beta2_t"), py::arg("clear_grad"),
+             "Resident AdamW update on persistent W/m/v from grad (in place). "
+             "Wrap calls in forward_begin()/forward_submit() for one batch.")
         .def("read_buffer",
              [](ag::TapeContext& tape, uint32_t buffer_id,
                 const std::vector<uint32_t>& shape) -> py::array_t<float> {

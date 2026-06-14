@@ -12,9 +12,14 @@
 ///       Registered for resolution only; never released by the registry.
 ///   - owned:    buffers the registry allocated from BufferPool (gradient
 ///       and temporary buffers). Released back to the pool on clear().
+///   - persistent: buffers (weights + optimizer moments) that must survive
+///       clear() with a STABLE id across training steps. Registered ONCE,
+///       before any step-scoped buffer. Released only at destruction.
 ///
-/// Lifecycle: ids are step-scoped. clear() releases owned buffers and wipes
-/// the table; call it from TapeContext::begin() alongside arena_.reset().
+/// Lifecycle: step-scoped ids are step-scoped. clear() releases owned
+/// step-scoped buffers and truncates the table back to the persistent prefix;
+/// call it from TapeContext::begin() alongside arena_.reset(). Persistent
+/// entries (ids 1..persistent_watermark_-1) keep their buffers and ids.
 ///
 /// id 0 is reserved to mean "none" (matches TensorRef::none() and the
 /// `== 0` invalid checks throughout the autograd code).
@@ -44,7 +49,13 @@ public:
         entries_.push_back(Entry{});
     }
 
-    ~BufferRegistry() { clear(); }
+    ~BufferRegistry() {
+        clear();
+        // release persistent owned buffers too (object is dying).
+        for (size_t i = 1; i < persistent_watermark_; ++i) {
+            if (entries_[i].owned) pool_.release(entries_[i].buf);
+        }
+    }
 
     BufferRegistry(const BufferRegistry&) = delete;
     BufferRegistry& operator=(const BufferRegistry&) = delete;
@@ -67,6 +78,26 @@ public:
             default:                buf = pool_.acquireDeviceLocal(bytes); break;
         }
         entries_.push_back(Entry{buf, /*owned=*/true});
+        return static_cast<uint32_t>(entries_.size() - 1);
+    }
+
+    /// Allocate a PERSISTENT buffer (weight / optimizer moment) that survives
+    /// clear() with a stable id. Must be called before any step-scoped buffer
+    /// exists (else the watermark would swallow them). Released at destruction.
+    uint32_t alloc_persistent(size_t bytes, Kind kind = Kind::Compute) {
+        if (entries_.size() != persistent_watermark_) {
+            throw std::runtime_error(
+                "BufferRegistry: alloc_persistent must precede step-scoped buffers");
+        }
+        GrillyBuffer buf;
+        switch (kind) {
+            case Kind::Readback:    buf = pool_.acquireReadback(bytes); break;
+            case Kind::HostVisible: buf = pool_.acquire(bytes); break;
+            case Kind::Compute:
+            default:                buf = pool_.acquireDeviceLocal(bytes); break;
+        }
+        entries_.push_back(Entry{buf, /*owned=*/true, /*persistent=*/true});
+        persistent_watermark_ = entries_.size();
         return static_cast<uint32_t>(entries_.size() - 1);
     }
 
@@ -120,25 +151,30 @@ public:
         }
     }
 
-    /// Release all owned buffers back to the pool and reset the table.
-    /// External (unowned) buffers are left untouched — their owner frees them.
+    /// Release step-scoped owned buffers back to the pool and truncate the
+    /// table to the persistent prefix. Persistent entries (and their ids) and
+    /// external step buffers' owners are untouched. Erasing the suffix of a
+    /// deque keeps references to the surviving persistent prefix valid.
     void clear() {
-        for (size_t i = 1; i < entries_.size(); ++i) {
+        for (size_t i = persistent_watermark_; i < entries_.size(); ++i) {
             if (entries_[i].owned) {
                 pool_.release(entries_[i].buf);
             }
         }
-        entries_.clear();
-        entries_.push_back(Entry{});  // restore reserved id-0 slot
+        entries_.erase(entries_.begin() + persistent_watermark_, entries_.end());
     }
 
 private:
     struct Entry {
         GrillyBuffer buf{};
         bool owned = false;
+        bool persistent = false;
     };
 
     BufferPool& pool_;
+    // First index past the persistent prefix (== entries_.size() when only the
+    // persistent + reserved id-0 slots exist). clear() truncates back to here.
+    size_t persistent_watermark_ = 1;
     // deque, NOT vector: resolve() hands out GrillyBuffer& into this container and
     // callers hold those references across subsequent alloc() calls. deque::push_back
     // keeps existing element references valid; vector::push_back would reallocate and

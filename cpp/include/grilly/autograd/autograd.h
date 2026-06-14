@@ -403,6 +403,22 @@ public:
                                uint32_t batch, uint32_t seqLen,
                                uint32_t vocab, uint32_t dim);
 
+    /// Forward elementwise add (residual): out = a + b, NON-destructive (a and b
+    /// survive for backward). totalElements = product of the shared shape.
+    /// Returns the resident output buffer id.
+    uint32_t forward_add(uint32_t a_id, uint32_t b_id, uint32_t totalElements);
+
+    /// Resident AdamW update (decoupled weight decay) on the adamw-update.glsl
+    /// kernel: W,m,v updated in place from grad. w/m/v are persistent resident
+    /// ids (register_weight); grad is the backward grad buffer for W. Pass the
+    /// bias-correction terms beta1_t=beta1^t, beta2_t=beta2^t. clear_grad zeros
+    /// grad after. NO begin/submit inside -- wrap calls with forward_begin() /
+    /// forward_submit() so all param updates land in ONE batch/submit.
+    void adamw_update(uint32_t w_id, uint32_t grad_id, uint32_t m_id,
+                      uint32_t v_id, uint32_t numel, float lr, float beta1,
+                      float beta2, float eps, float weight_decay, float beta1_t,
+                      float beta2_t, bool clear_grad);
+
     /// Run backward from the loss node.
     void backward(Node* loss_node, uint32_t grad_output_buffer);
 

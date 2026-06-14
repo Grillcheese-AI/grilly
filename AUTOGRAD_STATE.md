@@ -255,27 +255,95 @@ scatter-add, cheap, off the hot path). No regression: the full resident gradchec
 (train_full_resident.py gradcheck) still PASSES all 8 params after these edits, on
 a clean build with the [PIPE-CREATE] instrumentation removed.
 
-## NEXT: single-tape full-trunk integration + cubby link (NOT yet done)
-Per-op resident forward + backward are all in place; what remains is composing
-them into ONE tape for cubby's real architecture and switching cubby over:
-1. Single-tape full trunk: record embedding -> [rmsnorm -> fused gvd Linear ->
-   mingru -> Add(residual) -> rmsnorm -> Linear -> swiglu -> Add(residual)]xL ->
-   final rmsnorm -> tied head Linear(weight=E) -> per-token CE, in ONE tape, and
-   call backward() once. The engine already has Add (residual) + fan-out accumulate
-   + Mean backward handlers, so the tail->head walk should route it - VALIDATE with
-   a gradcheck at small dims (d=64, L=2) before trusting. (train_full_resident.py
-   hand-stitches 3 tapes for the toy mean-pool task; the LM path is per-token CE +
-   tied head, a different stitch.)
-2. Tied head: register E once; the head Linear weight-grad accumulates into E's
-   grad slot; the embedding grad (host scatter from the grad into the emb buffer)
-   is added to it. Validate the two merge correctly.
-3. Persist resident weights + Adam state across steps and run a resident AdamW
-   (adamw-update.glsl exists) on resident grad+weight buffers - otherwise the
-   per-step weight upload / grad readback eats the dispatch-fusion win. THIS is the
-   actual 0.0.1 perf #2 throughput payoff.
-4. cubby link: add a resident execution path in cubby-lm/cubby/trunk (ALONGSIDE
+## SINGLE-TAPE FULL-TRUNK INTEGRATION - steps 1 & 2 DONE (June 2026)
+`experimental/resident_train/train_trunk_lm.py`. The full Cubby LM trunk now
+records in ONE tape and backprops with ONE backward() call:
+  embedding -> [rmsnorm -> WG/WV/WD Linear -> mingru -> Add(res) -> rmsnorm ->
+  Wg Linear -> swiglu -> Add(res)]xL -> final rmsnorm -> tied head Linear(E) ->
+  per-token CE.
+- ONE backward(): the pull-walk routes the whole tail->head graph including the
+  residual Add fan-outs ACROSS layers (r2 of layer l feeds both rmsnorm and the
+  next Add) - no hand-stitched 3-tape split (the toy train_full*.py needed 3
+  tapes only because of its numpy mean-pool + pooled CE).
+- per-token CE, NO mean-pool node -> the stubbed Sum/Mean backward stay off path.
+- tied-E merge (step 2): E registered once, used as the head Linear weight (its
+  weight-grad lands in E's grad slot); the embedding gather grad host-scatters
+  into the SAME dE. GATE: gradcheck on E with the tie (rel 5.2e-5) AND an
+  `--untied` control (separate Whead; E = embedding-grad only, rel 5.7e-5) both
+  pass -> the merge is correct, not masking a sign/scale bug.
+- GATE PASSED: gradcheck vs finite-diff at d=64, L=2 -> all 14 param groups
+  rel_err ~1e-5 (<< 1e-2). Trains: loss 2.42 -> 0.001 in 40 AdamW steps.
+- gotcha (gradcheck harness, not the engine): float32 finite-diff on the
+  saturating MinGRU path floors at ~2e-4 max_abs and gives spurious marginal
+  fails (WG[1]/WD[1] ~1-2e-2). Run the fd REFERENCE in float64
+  (forward(...,f64=True)) -> floor drops to ~1e-6, all pass cleanly. Make the
+  reference more accurate; do NOT loosen the threshold.
+- NOTE: uses 3 separate WG/WV/WD Linears, not the fused gvd Linear(d->3d) + slice
+  (mathematically identical). Fusing to 1 dispatch is a step-3 throughput item
+  and needs a Slice backward op (OpType.Slice exists in the enum but no backward
+  handler is wired).
+
+## RESIDENT FORWARD on the single tape - DONE (forward_add added)
+train_trunk_lm.py `--resident` runs the WHOLE forward on-GPU and feeds the same
+backward tape: forward_embedding -> [forward_rmsnorm -> forward_linear x3 ->
+forward_mingru -> forward_add -> forward_rmsnorm -> forward_linear ->
+forward_swiglu -> forward_add]xL -> forward_rmsnorm -> tied head forward_linear.
+No activation leaves VRAM during the forward (only the grad read-back + embedding
+scatter remain - step 3 kills the read-back).
+- NEW op `TapeContext::forward_add(a_id,b_id,totalElements)` (autograd.cpp +
+  autograd.h + bindings_autograd.cpp): NON-destructive out=a+b for residuals
+  (both operands must survive for backward). Built from the verified fillZero +
+  in-place batchedAdd primitives (zero out; out+=a; out+=b) with a
+  transferComputeBarrier before each RMW - no new shader. This is the op the
+  "resident forward set complete" note was actually missing (residual Add).
+- GATES PASSED: resident-forward logits parity vs numpy max_abs_diff 1.07e-6;
+  gradcheck all 14 params rel ~1e-5 (TIED and --untied). register_input_u32 takes
+  ONLY the array (no requires_grad bool) - gotcha.
+
+## PERSISTENT RESIDENT WEIGHTS + RESIDENT AdamW (step 3) - DONE
+BufferRegistry gained a PERSISTENT entry class: weights + Adam m/v registered
+ONCE survive begin()/clear() with a STABLE id. clear() now truncates only the
+step-scoped suffix (`persistent_watermark_`); erasing a deque suffix preserves
+references to the persistent prefix (same deque-ref-safety the crash fix relied
+on). New surface:
+- `BufferRegistry::alloc_persistent` + watermark + dtor releases persistent owned.
+- `TapeContext::register_weight(arr)` -> persistent resident id (upload once).
+- `TapeContext::adamw_update(w,grad,m,v,numel,lr,b1,b2,eps,wd,b1t,b2t,clear_grad)`
+  dispatches adamw-update.glsl in place; NO own begin/submit, so all param
+  updates batch into one forward_begin/forward_submit.
+Training loop (train_trunk_lm.py `--resident-opt`): per-layer weights + moments
+stay resident; backward grads feed adamw_update directly -- no per-step weight
+upload, no per-layer grad readback.
+GATES PASSED:
+- resident AdamW == numpy AdamW to <9e-7 over 25 steps with persistent W/m/v
+  (test_resident_adamw.py) -- proves persistence across clear() + optimizer math.
+- end-to-end loss curve matches the numpy-AdamW reference to <4e-6 over 40 steps
+  (identical init/batch, same un-normalized grads). 4 ms/step vs 7 ms/step even
+  at toy d=64/L=2.
+SCOPE: E (tied embedding) stays on the host path (numpy AdamW + embedding
+scatter) -- resident embedding BACKWARD is the deferred P1 op; E is tiny. The
+transfer-elimination payoff scales with weight size -> material at d=1024/L=18.
+No regression: train_full_resident.py gradcheck still PASSES all 8 params.
+
+## CAPACITY FOR L=18 (step 4) - DONE, + REAL-DATA VALIDATION
+No constant bumps were needed: kMaxGradEntries=4096 >> ~290 grad entries for
+L=18; the 64 MB TapeArena resets each begin() and holds one pass. `--big` records
+the full v3.3 trunk (V=65000/d=1024/L=18, 183 nodes) in 0.2 MB / 64 MB arena
+(0.26%) and backprops + resident AdamW with no overflow/OOM (resident grads finite
+at step 1). The toy random-65k-target task NaNs after a few steps -- DEGENERATE
+objective, not a capacity bug.
+REAL DATA (`--tinystories`): the full persistent-weights + resident
+forward/backward/AdamW stack trains a real LM on TinyStories (BBPE-65k V=65536,
+d=256 L=6): CE 11.60->4.08, perplexity 108697->59.4 over 200 steps (628 ms/step),
+no NaN. The resident single-tape trunk LEARNS LANGUAGE -- v3.3-shape head (V=65k
+tied) + deep trunk correct end to end.
+
+## NEXT: cubby link (step 5) - the last P0 item
+Steps 1, 2, 2b (resident forward), 3, 4 are done. Remaining:
+5. cubby link: add a resident execution path in cubby-lm/cubby/trunk (ALONGSIDE
    the existing Python-tape model.py, not replacing it), gate it on forward parity
    vs the numpy trunk (max_abs_diff) per cubby's port discipline, then switch the
-   default once green.
-Capacity note: bump TapeArena capacity + check BackwardEngine kMaxGradEntries
-(4096) and the BufferRegistry deque hold an L=18 trunk's node/buffer/grad count.
+   default once green. The resident step now exists and trains end to end
+   (train_trunk_lm.py is the reference assembly); the link is wiring CubbyLM's
+   forward/backward/optimizer onto register_weight + forward_* + record_trunk +
+   adamw_update, plus the host embedding scatter for E.
