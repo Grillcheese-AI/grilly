@@ -165,54 +165,60 @@ This is the end-to-end proof: the resident reverse-mode engine trains a fully
 composed block to GENERALIZE on a real aggregation task, gradients verified.
 grads() uses the t/t2/t3 multi-tape structure with NUMPY forward seeds.
 
-## RESIDENT-FORWARD CRASH (0xC0000005) ? root cause + fix path
-Symptom: train_full.py's original grads() (resident forward feeding the backward
-tape) crashes with exit -1073741819 (access violation / heap corruption) inside
-the first grads() call. Non-deterministic across trivial code edits -- classic
-undefined-behavior / memory-stomp signature.
-Bisection (experimental/resident_train/ttr*.py, file-based, exit-code-gated):
-  - ttr8: the EXACT t/t2/t3 backward structure with NUMPY-forward seeds runs 3
-    full iterations CLEAN (exit 0). => the backward engine is NOT the culprit,
-    even multi-tape.
-  - ttr4/ttr5: a SINGLE resident forward op (or rmsnorm + up to 3 linears) then a
-    backward runs clean in isolation.
-  - ttr3: resident forward (rmsnorm+linear) with NO read-back of the forward
-    outputs, then a backward -> CRASH. Adding a read_buffer of the forward output
-    (ttr6/ttr7) makes that specific crash vanish (and exposes a correctness bug:
-    grads come back 0.0 when the forward output is not read back).
-  => The stomping code is one of the resident FORWARD shaders/dispatches, and
-     whether it faults depends on what the shared BufferPool packs adjacent to the
-     forward output (padding = clean, live backward struct = access violation).
-Architecture context: every gc.TapeContext(dev) SHARES ctx.pool / ctx.batch /
-ctx.cache (bindings_autograd.cpp ctor TapeContext(ctx.pool,ctx.batch,ctx.cache)).
-BufferRegistry (buffer_registry.h) hands owned buffers back to the shared pool on
-clear(); PipelineCache has an LRU descriptor-set cache keyed on raw buffer handle
-(suspect for stale-handle aliasing across tapes). grilly uses VMA ("VMA allocator
-initialized" at init), so VMA debug margins are available.
-Leading hypothesis (tail-end vectorized overwrite): forward_linear with N=24
-dispatches gx=(24+15)/16 = 2 workgroups = 32 columns, but only 24 are valid -- if
-the linear shader does not clamp the column index, every row writes 8 garbage
-floats past its end. Invisible in isolation (lands on padding), fatal when the
-pool packs a live backward struct after it.
-FIX PATH (deterministic, do this to make forward resident):
-  1. Build with VMA_DEBUG_MARGIN 64 + VMA_DEBUG_DETECT_CORRUPTION 1. If the crash
-     vanishes -> proof of tail-end overflow; the corruption-detector pinpoints the
-     overflowing allocation.
-  2. Run with VK_LAYER_KHRONOS_validation + VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT
-     for the exact shader line + binding index (no validation-layer hook in the
-     instance-creation code yet -- would need adding, or set via env/vkconfig).
-  3. Audit the forward shaders' global-write guards (fnn-linear, rms-norm,
-     activation-swiglu) for index < element_count clamps; fix the offender.
-  4. Separately: invalidate / key the PipelineCache descriptor LRU by buffer
-     generation (not raw handle) so a reused pool handle can't bind a stale set.
-Once forward is safe: rebuild train_full.py grads() to run forward resident and
-chain the resident intermediate ids into backward -> fully on-GPU training step.
+## RESIDENT-FORWARD CRASH (0xC0000005) ? ROOT-CAUSED + FIXED
+Symptom: resident forward feeding the backward tape crashed with exit -1073741819
+(access violation) inside grads(). Non-deterministic across trivial edits ? a
+heap-corruption signature.
+
+ROOT CAUSE (confirmed with VK_LAYER_KHRONOS_validation ? installed; enable via
+env VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation, no code hook needed):
+validation flagged vkCmdDispatch storage buffer descriptor ["GradOutput"] using
+VkBuffer 0x0 "invalid or has been destroyed", and vkUpdateDescriptorSets Invalid
+VkBuffer 0x706172742eadc26e. That hex decodes to ASCII "part." ? a VkBuffer handle
+field overwritten with string data, i.e. a DANGLING C++ REFERENCE. BufferRegistry
+stored entries in std::vector and resolve() returns GrillyBuffer&. The dispatch
+code resolves several buffers into references, then alloc()s a grad buffer; that
+push_back reallocated the vector and dangled the held references, so .handle read
+freed memory. Resident forward adds enough owned buffers (forward outputs +
+rms_vals + re-registered intermediates) to cross a realloc boundary DURING backward
+that numpy-forward (ttr8) never hit ? exactly why ttr8 was clean and resident
+forward crashed.
+
+FIX (committed): std::vector<Entry> -> std::deque<Entry> in buffer_registry.h.
+deque::push_back invalidates iterators but NOT references to existing elements.
+One word, zero behavior change. After the fix: ttr3 shows ZERO invalid-VkBuffer
+errors under validation, and the fully-resident step trains (below).
+
+Note on the earlier VMA_DEBUG_MARGIN experiment: margin made ttr3 stop crashing,
+which looked like proof of a tail overflow ? it was a RED HERRING. Margin only
+shifted heap layout so the dangling read landed on non-fatal memory; it never
+fixed the full BL=192 training (still crashed with margin). The shaders
+(fnn-linear, rms-norm, activation-swiglu) were all correctly bounds-clamped all
+along. Lesson: "margin makes it vanish" is necessary-not-sufficient for overflow;
+confirm with validation before concluding. The margin was reverted.
+
+REMAINING (separate, non-fatal): validation also shows
+VUID-vkCmdPushConstants-offset-01795 ? the rms-norm dispatch pushes 20 bytes to a
+pipeline layout whose push-constant range does not cover them. Forward is
+numerically correct regardless (gradchecks pass), so it is latent, not breaking.
+Likely a getOrCreate("rms-norm", ...) push-size vs RMSNormParams mismatch. Fix next.
+
+## FULLY RESIDENT TRAINING ? works post-fix (DONE)
+experimental/resident_train/train_full_resident.py ? same block + online task as
+train_full.py, but grads() runs the forward resident (forward_rmsnorm /
+forward_linear / forward_swiglu on-GPU) and feeds the backward tape, no numpy
+forward. RESULT after the deque fix: gradcheck PASSES all 8 params (rel_err
+<4e-3); 400-step online training exits 0 with train_acc 0.945 / test_acc 0.891
+(identical to the numpy-forward milestone ? resident forward computes the same
+values). This is the fully-on-GPU training step. (train_full.py keeps numpy
+forward as the simple stable baseline; both are committed and pass.)
 
 ## (history) backward path + block composition
 Backward is COMPLETE and the full block both gradient-checks and trains; see the
-"Done + VERIFIED" and "Integration" sections above. Resident forward was opened
-and per-op verified; the crash above is the remaining blocker to a fully-resident
-step.
+"Done + VERIFIED" and "Integration" sections above. Resident forward is opened,
+per-op verified, AND the dangling-reference crash that blocked feeding it into the
+backward tape is fixed (deque) ? the fully-resident step now trains (see "FULLY
+RESIDENT TRAINING").
 
 ## Tests (run from grilly root, cubby-lm venv) ? ALL GREEN
   test_backward_linear.py   linear (grad_x, grad_W)
@@ -225,9 +231,11 @@ step.
   test_backward_swiglu.py   SwiGLU (2*hidden input split)
   experimental/resident_train/bisect_block.py   cross-op composition (A-E)
   experimental/resident_train/train_block.py    full block gradcheck + train
-  experimental/resident_train/train_full.py     full training: gradcheck | (no-arg) online train
+  experimental/resident_train/train_full.py     full training (NUMPY forward + resident backward): gradcheck | (no-arg) train
     - gradcheck: validates stitched 3-tape backward vs finite-diff (8 params)
     - no-arg: 400-step online train, expect test_acc>0.5 (got ~0.89)
+  experimental/resident_train/train_full_resident.py  SAME but RESIDENT forward (on-GPU); trains post deque-fix (~0.89)
+  Validation: env VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation surfaces invalid-buffer / push-constant VUIDs (layer installed).
 Run e.g.:
   & "C:\Users\grill\Documents\GitHub\cubby-lm\.venv\Scripts\python.exe" test_backward_mingru.py
 Rebuild after C++ edits (add full, no flag, when a .glsl changes):
