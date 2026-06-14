@@ -150,27 +150,71 @@ Remaining forward ops are mechanical: rms-norm, mingru-forward, activation-swigl
 shaders all exist — add forward_rmsnorm/forward_mingru/forward_swiglu the same way
 (dispatch existing shader on registry buffers, return resident id, barrier).
 
-## Recommended next step
-Resident forward is proven for Linear. Next:
-  1. Add forward_rmsnorm / forward_swiglu / forward_mingru (+ embedding lookup)
-     the same way forward_linear works — each wraps an existing forward shader,
-     allocs a resident output, returns its id, transferComputeBarrier after.
-  2. Rebuild train_block.py to run its forward fully resident (chain the
-     forward_* calls, save the resident intermediate ids for backward), so the
-     whole block is forward+backward on-GPU with zero numpy in the step.
-  3. Then scale: multi-layer, real seq>1 (MinGRU scan over time), real token
-     batches via embedding lookup, confirm loss descends.
-  4. Optional cleanups: backward_mul / shape-op backward if needed; fix latent
-     loss.cpp::crossEntropyBackward gx bug.
+## FULL TRAINING MILESTONE ? resident backward generalizes (DONE)
+experimental/resident_train/train_full.py. One Cubby block, ONLINE training
+(fresh random batch every step, so memorization is impossible and falling loss
+== generalization). Task: bucket the length-L token sum into C quartile classes
+(monotonic aggregation -- learnable + generalizable, unlike the first attempt
+sum-mod-C which is adversarial to smooth approximators and only memorized).
+  RESULT: train_acc 0.945 / test_acc 0.891 (chance 0.25); train & test track
+  each other (both are held-out under online training). 400 AdamW steps, exit 0,
+  no crash. `gradcheck` mode PASSES all 8 param groups vs finite-diff (rel_err
+  <8e-3) -- validates the hand-stitched 3-tape backward routing (mean-CE /B,
+  mean-pool /L, the two residual additions, embedding scatter np.add.at).
+This is the end-to-end proof: the resident reverse-mode engine trains a fully
+composed block to GENERALIZE on a real aggregation task, gradients verified.
+grads() uses the t/t2/t3 multi-tape structure with NUMPY forward seeds.
 
-## (superseded) earlier next-step notes
-Backward is COMPLETE and the full block trains. Making the FORWARD pass resident
-was the named frontier — now opened for Linear (see above). The original plan
-considered binding ComputeBackend's graphMode primitives; the simpler route that
-worked was adding forward dispatch directly to TapeContext on the existing
-registry/batch.
+## RESIDENT-FORWARD CRASH (0xC0000005) ? root cause + fix path
+Symptom: train_full.py's original grads() (resident forward feeding the backward
+tape) crashes with exit -1073741819 (access violation / heap corruption) inside
+the first grads() call. Non-deterministic across trivial code edits -- classic
+undefined-behavior / memory-stomp signature.
+Bisection (experimental/resident_train/ttr*.py, file-based, exit-code-gated):
+  - ttr8: the EXACT t/t2/t3 backward structure with NUMPY-forward seeds runs 3
+    full iterations CLEAN (exit 0). => the backward engine is NOT the culprit,
+    even multi-tape.
+  - ttr4/ttr5: a SINGLE resident forward op (or rmsnorm + up to 3 linears) then a
+    backward runs clean in isolation.
+  - ttr3: resident forward (rmsnorm+linear) with NO read-back of the forward
+    outputs, then a backward -> CRASH. Adding a read_buffer of the forward output
+    (ttr6/ttr7) makes that specific crash vanish (and exposes a correctness bug:
+    grads come back 0.0 when the forward output is not read back).
+  => The stomping code is one of the resident FORWARD shaders/dispatches, and
+     whether it faults depends on what the shared BufferPool packs adjacent to the
+     forward output (padding = clean, live backward struct = access violation).
+Architecture context: every gc.TapeContext(dev) SHARES ctx.pool / ctx.batch /
+ctx.cache (bindings_autograd.cpp ctor TapeContext(ctx.pool,ctx.batch,ctx.cache)).
+BufferRegistry (buffer_registry.h) hands owned buffers back to the shared pool on
+clear(); PipelineCache has an LRU descriptor-set cache keyed on raw buffer handle
+(suspect for stale-handle aliasing across tapes). grilly uses VMA ("VMA allocator
+initialized" at init), so VMA debug margins are available.
+Leading hypothesis (tail-end vectorized overwrite): forward_linear with N=24
+dispatches gx=(24+15)/16 = 2 workgroups = 32 columns, but only 24 are valid -- if
+the linear shader does not clamp the column index, every row writes 8 garbage
+floats past its end. Invisible in isolation (lands on padding), fatal when the
+pool packs a live backward struct after it.
+FIX PATH (deterministic, do this to make forward resident):
+  1. Build with VMA_DEBUG_MARGIN 64 + VMA_DEBUG_DETECT_CORRUPTION 1. If the crash
+     vanishes -> proof of tail-end overflow; the corruption-detector pinpoints the
+     overflowing allocation.
+  2. Run with VK_LAYER_KHRONOS_validation + VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT
+     for the exact shader line + binding index (no validation-layer hook in the
+     instance-creation code yet -- would need adding, or set via env/vkconfig).
+  3. Audit the forward shaders' global-write guards (fnn-linear, rms-norm,
+     activation-swiglu) for index < element_count clamps; fix the offender.
+  4. Separately: invalidate / key the PipelineCache descriptor LRU by buffer
+     generation (not raw handle) so a reused pool handle can't bind a stale set.
+Once forward is safe: rebuild train_full.py grads() to run forward resident and
+chain the resident intermediate ids into backward -> fully on-GPU training step.
 
-## Tests (run from grilly root, cubby-lm venv) — ALL GREEN
+## (history) backward path + block composition
+Backward is COMPLETE and the full block both gradient-checks and trains; see the
+"Done + VERIFIED" and "Integration" sections above. Resident forward was opened
+and per-op verified; the crash above is the remaining blocker to a fully-resident
+step.
+
+## Tests (run from grilly root, cubby-lm venv) ? ALL GREEN
   test_backward_linear.py   linear (grad_x, grad_W)
   test_backward_chain.py    2-layer Linear chain (propagation)
   test_backward_ce.py       cross-entropy + CE->Linear
@@ -181,6 +225,9 @@ registry/batch.
   test_backward_swiglu.py   SwiGLU (2*hidden input split)
   experimental/resident_train/bisect_block.py   cross-op composition (A-E)
   experimental/resident_train/train_block.py    full block gradcheck + train
+  experimental/resident_train/train_full.py     full training: gradcheck | (no-arg) online train
+    - gradcheck: validates stitched 3-tape backward vs finite-diff (8 params)
+    - no-arg: 400-step online train, expect test_acc>0.5 (got ~0.89)
 Run e.g.:
   & "C:\Users\grill\Documents\GitHub\cubby-lm\.venv\Scripts\python.exe" test_backward_mingru.py
 Rebuild after C++ edits (add full, no flag, when a .glsl changes):
