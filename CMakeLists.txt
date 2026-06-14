@@ -318,6 +318,7 @@ pybind11_add_module(grilly_core
     cpp/python/bindings_mingru.cpp
     cpp/python/bindings_bandit.cpp
     cpp/python/bindings_eggroll.cpp
+    cpp/python/bindings_autograd.cpp
 )
 target_link_libraries(grilly_core PRIVATE grilly_core_lib)
 
