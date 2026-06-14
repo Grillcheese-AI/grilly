@@ -116,17 +116,26 @@ order; each step has a gate that must pass before the next.
       no Slice op needed), the real SwiGLU FFN (gate_up + down) with the half-swap
       (cubby = silu(gate)*up; resident forward_swiglu = x1*silu(x2) -> register
       gate_up as [up|gate]), and the tied head.
-      GATES PASSED: forward parity max_abs_diff 7.9e-7; GRADIENT parity per-param
-      rel_err <=2.0e-6 vs model.py's Python-tape backward (embed/final/n1/n2/proj/
-      gate_up/down -- the fused-split re-concat and swiglu un-swap all map back).
-      GOTCHA: model.py uses grilly.backend._bridge (a 2nd Vulkan context) for its
-      linears/softmax -> competes with the resident grilly_core.Device(), corrupts
-      grads + fastfails at teardown. Force the reference to numpy (gpu_linear._GPU=
-      False, model._GPU=False) so only the resident path owns the GPU.
-      REMAINING: short TinyStories run matching the numpy-path loss curve, then
-      flip the default. The resident training step already works end to end
-      (train_trunk_lm.py `--tinystories`); the remaining wiring is a CubbyLM-driven
-      optimizer loop (register_weight + grads() + adamw_update) + the eval/parity.
+      ALL THREE FLIP-GATES PASSED:
+        - forward parity max_abs_diff 7.9e-7;
+        - GRADIENT parity per-param rel_err <=2.0e-6 vs model.py's Python-tape
+          backward (embed/final/n1/n2/proj/gate_up/down -- the fused-split
+          re-concat and swiglu un-swap all map back);
+        - LOSS-CURVE match: resident-grad-driven training vs model.py numpy
+          training (identical init+batch+AdamW) tracks to worst |loss diff| 7.0e-6
+          over 30 steps; both descend 5.579 -> 0.0001 identically.
+      GOTCHAS: (1) model.py uses grilly.backend._bridge (a 2nd Vulkan context) for
+      its linears/softmax -> competes with the resident grilly_core.Device(),
+      corrupts grads + fastfails at teardown. Force the reference to numpy
+      (gpu_linear._GPU=False, model._GPU=False) so only the resident path owns the
+      GPU. (2) _snapshot must COPY init params (model.py AdamW mutates p.data in
+      place; a view aliases the trained weights).
+      REMAINING -- THE FLIP (now unlocked): route CubbyLM's forward/backward/
+      optimizer through the resident engine (a ResidentTrunk.train_step using
+      persistent weights + adamw_update + the E host path -- the perf machinery
+      proven in train_trunk_lm.py `--tinystories`), WIRE cubby.trace emission
+      (the standing observability invariant), and gate on GENERATION quality
+      before making it the hard default.
 
 ---
 
