@@ -325,11 +325,39 @@ void BackwardEngine::backward_linear(Node* node) {
     }
     batch_.barrier();
 
-    // Pass 1: grad_weight = grad_output^T @ x
-    p.passType = 1;
-    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
-                    (inputDim + 15) / 16, (outputDim + 15) / 16, 1,
-                    &p, sizeof(p));
+    // Pass 1: grad_weight = grad_out^T @ x -- TILED, was the naive memory-bound
+    // pass (strided reads over batchSeq per thread). transpose grad_out
+    // (batchSeq x outputDim) -> (outputDim x batchSeq), then gemm_tiled
+    // (M=outputDim, K=batchSeq, N=inputDim).
+    uint32_t gradOutTId = registry_.alloc(gradOutBytes);
+    GrillyBuffer& gradOutTBuf = registry_.resolve(gradOutTId);
+    {
+        PipelineEntry tpipe =
+            cache_.getOrCreate("tensor-transpose", 2, 2 * sizeof(uint32_t));
+        std::vector<VkDescriptorBufferInfo> tbuf = {
+            {gradOut.handle,     0, gradOutBytes},
+            {gradOutTBuf.handle, 0, gradOutBytes},
+        };
+        VkDescriptorSet tds = cache_.allocDescriptorSet("tensor-transpose", tbuf);
+        struct { uint32_t rows, cols; } tp = {batchSeq, outputDim};
+        batch_.dispatch(tpipe.pipeline, tpipe.layout, tds,
+                        (batchSeq * outputDim + 255u) / 256u, 1, 1, &tp, sizeof(tp));
+    }
+    batch_.barrier();
+    {
+        PipelineEntry gpipe =
+            cache_.getOrCreate("gemm_tiled", 3, 3 * sizeof(uint32_t));
+        std::vector<VkDescriptorBufferInfo> gbuf = {
+            {gradOutTBuf.handle, 0, gradOutBytes},                     // A = grad_out^T (out x BS)
+            {xBuf.handle,        0, size_t(batchSeq) * inputDim * 4},  // B = x (BS x in)
+            {gradWBuf.handle,    0, gradWBytes},                       // C = grad_weight (out x in)
+        };
+        VkDescriptorSet gds = cache_.allocDescriptorSet("gemm_tiled", gbuf);
+        struct { uint32_t M, K, N; } gp = {outputDim, batchSeq, inputDim};
+        batch_.dispatch(gpipe.pipeline, gpipe.layout, gds,
+                        (inputDim + 63u) / 64u, (outputDim + 63u) / 64u, 1,
+                        &gp, sizeof(gp));
+    }
     batch_.barrier();
 
     // Pass 2: grad_bias = sum(grad_output, dim=0)

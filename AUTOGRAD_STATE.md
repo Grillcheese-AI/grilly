@@ -429,9 +429,12 @@ thread serially loops output_dim at low occupancy -- brutal for the V=65536 head
 NOTE on coopmat: the RX 6750 XT is RDNA2 -- NO cooperative-matrix hardware, so the
 coopmat path runs in DRIVER EMULATION (fp16 vector ops), no tensor-core speedup.
 The real lever here is tiling, done in fp32 (safe, exact) -- not coopmat/fp16.
-Total: 0.23 -> 0.97 it/s (4.2x). Remaining backward is mostly grad_weight =
-grad_out^T @ x (naive, memory-bound) -- tiling it needs a transpose (no A^T@B GEMM
-exists); next lever if more throughput is wanted.
+- grad_weight = grad_out^T @ x: transpose grad_out (tensor-transpose.glsl) ->
+  (out x BS), then gemm_tiled (M=out, K=BS, N=in). Tiled + coalesced vs the naive
+  strided pass. 0.97 -> 1.25 it/s; parity 2e-6 (exact).
+Total: 0.23 -> 1.25 it/s (5.4x), loss byte-identical throughout. Both backward
+GEMMs now tiled; forward fnn-linear already tiled. Remaining: mingru scan backward
++ the small elementwise ops + per-dispatch/barrier overhead.
 
 ## NEXT (downstream cubby ladder)
 A longer v3.3 run to convergence (warmup + more steps), then 0.0.2 chunked
