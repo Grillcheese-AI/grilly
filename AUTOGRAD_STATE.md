@@ -95,18 +95,31 @@ fused submit). cubby-lm currently uses the NON-resident _bridge staging ops
 need the ComputeBackend dispatch primitives bound (createBuffer/upload/dispatch/
 beginBatch/endBatch/setGraphMode) — NOT done yet.
 
+## Integration — RESIDENT GRADS ARE USABLE (training loops, not just pointwise)
+experimental/resident_train/ — numpy forward + numpy AdamW, RESIDENT backward.
+- train_linear_ce.py: Linear+CE on a 16x8->4 memorize task. loss 1.2565 -> 0.0204
+  monotonic, acc -> 1.00 by step 40. Proves the read-back -> optimizer ->
+  re-register loop and correct grad sign/scale. Confirms the /B mean-CE scaling.
+- train_mingru_ce.py: train THROUGH the MinGRU scan. G,V,D learnable -> MinGRU ->
+  mean-pool -> Linear head -> CE. loss 1.1049 -> ~0, acc -> 1.00 by step 15.
+  Proves backward-in-time grad flows into all 3 projections with usable scale.
+The two hardest trunk backward ops now both TRAIN, not just match numpy.
+
 ## Recommended next step
-Backward path is complete. Next is INTEGRATION: build the first end-to-end
-resident trunk micro-step and confirm loss decreases over a few steps.
-  1. Forward (numpy-seeded ok for now): embed -> 1 block (RMSNorm -> MinGRU ->
-     RMSNorm -> SwiGLU + residuals) -> RMSNorm -> tied head -> logits.
-  2. Record the op tape, save the forward tensors each handler needs, run
-     backward, read grads.
-  3. Apply an optimizer step (grilly has adamw-update; or numpy AdamW for a
-     first loop), re-run, confirm loss drops over ~10-50 steps on a tiny batch.
-The harder follow-on is driving the FORWARD resident too (bind ComputeBackend
-dispatch primitives) so forward+backward are both single-submit on-GPU. Until
-then, forward can use the _bridge staging ops and only backward is resident.
+Two remaining pieces for a FULL single-block trainer:
+  1. Wire backward_swiglu (NOT yet wired — no OpType/handler exists, but the
+     shader activation-swiglu-backward DOES). Forward: out = x1*silu(x2), input
+     is [x1:hidden][x2:hidden] concatenated -> output hidden. Backward shader: 3
+     buffers {grad_out, input, grad_in}, push {output_elements, hidden_dim},
+     gx=(output_elements+255)/256. Same easy pattern as backward_activation but
+     input is 2*hidden wide and output is hidden wide. Add OpType::SwiGLU + binding.
+  2. Then a full-block trainer: embed -> RMSNorm -> MinGRU -> RMSNorm -> SwiGLU
+     (+residuals) -> RMSNorm -> tied head -> CE, all backward resident, confirm
+     loss drops. RMSNorm/SwiGLU/residual/MinGRU/Linear/CE all individually verified;
+     this only tests their COMPOSITION (saved-tensor conventions lining up).
+The harder follow-on is driving FORWARD resident too (bind ComputeBackend dispatch
+primitives) so forward+backward are both single-submit on-GPU. Until then forward
+uses _bridge staging ops and only backward is resident.
 
 ## Tests (run from grilly root, cubby-lm venv) — ALL GREEN
   test_backward_linear.py   linear (grad_x, grad_W)
