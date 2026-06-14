@@ -7,6 +7,7 @@
 
 #include "grilly/ops/linear.h"
 #include "grilly/ops/batched_ops.h"
+#include "grilly/ops/loss.h"
 
 namespace grilly {
 namespace autograd {
@@ -48,8 +49,11 @@ void BackwardEngine::backward(TapeArena& tape, Node* loss_node,
         // Pull: a node activates if a downstream consumer has already
         // deposited a gradient under one of this node's OUTPUT buffer_ids.
         // (The walk is tail->head, so all consumers of `current` ran first.)
-        // The loss node already has grad_output_buffer seeded above.
-        if (current->grad_output_buffer == 0) {
+        // The loss node always activates: loss handlers (CE/MSE) compute their
+        // own gradient from inputs+targets and don't read grad_output_buffer,
+        // so a zero grad_output_buffer is fine for them.
+        bool is_loss_node = (current == loss_node);
+        if (current->grad_output_buffer == 0 && !is_loss_node) {
             for (uint32_t o = 0; o < current->num_outputs; ++o) {
                 uint32_t out_buf = current->outputs[o].buffer_id;
                 if (out_buf == 0) continue;
@@ -61,7 +65,7 @@ void BackwardEngine::backward(TapeArena& tape, Node* loss_node,
             }
         }
 
-        if (current->grad_output_buffer != 0) {
+        if (current->grad_output_buffer != 0 || is_loss_node) {
             stats_.nodes_with_grad++;
 
             // Dispatch the backward shader for this operation
@@ -477,13 +481,57 @@ void BackwardEngine::backward_div(Node* node) {
 }
 
 void BackwardEngine::backward_cross_entropy(Node* node) {
-    // Cross-entropy: combined softmax + NLL for numerical stability
-    // dL/dx = softmax(x) - one_hot(target)
+    // Cross-entropy (combined softmax + NLL). This is a loss node: it has no
+    // incoming grad_output buffer; the gradient w.r.t. logits is computed
+    // directly from logits and targets:
+    //   dL/dx = softmax(x) - one_hot(target)
+    //
+    // inputs[0] = logits (batchSize, numClasses), requires_grad
+    // saved_buffer_ids[0] = logits buffer id
+    // saved_buffer_ids[1] = targets buffer id (uint32 class indices)
+    if (!node->inputs[0].requires_grad) return;
+
+    const TensorRef& logitsRef = node->inputs[0];
+    if (logitsRef.ndim < 1) { stats_.cpu_fallbacks++; return; }
+
+    const uint32_t numClasses = logitsRef.shape[logitsRef.ndim - 1];
+    if (numClasses == 0) { stats_.cpu_fallbacks++; return; }
+    const uint32_t batchSize =
+        static_cast<uint32_t>(logitsRef.numel() / numClasses);
+
+    uint32_t logitsId = (node->num_saved > 0 && node->saved_buffer_ids[0] != 0)
+                            ? node->saved_buffer_ids[0] : logitsRef.buffer_id;
+    uint32_t targetsId = (node->num_saved > 1) ? node->saved_buffer_ids[1] : 0;
+    if (logitsId == 0 || targetsId == 0) { stats_.cpu_fallbacks++; return; }
+
+    GrillyBuffer& logitsBuf = registry_.resolve(logitsId);
+    GrillyBuffer& targetsBuf = registry_.resolve(targetsId);
+
+    const size_t logitBytes = size_t(batchSize) * numClasses * 4;
+    const size_t targetBytes = size_t(batchSize) * 4;
+
+    uint32_t gradId = registry_.alloc(logitBytes);
+    GrillyBuffer& gradBuf = registry_.resolve(gradId);
+
+    PipelineEntry pipe = cache_.getOrCreate(
+        "cross-entropy-backward", 3, sizeof(grilly::ops::CrossEntropyBackwardParams));
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {logitsBuf.handle,  0, logitBytes},
+        {targetsBuf.handle, 0, targetBytes},
+        {gradBuf.handle,    0, logitBytes},
+    };
+    VkDescriptorSet descSet =
+        cache_.allocDescriptorSet("cross-entropy-backward", bufInfos);
+
+    grilly::ops::CrossEntropyBackwardParams p{batchSize, numClasses};
+    // The shader uses one workgroup per batch row (batch_idx = gl_WorkGroupID.x),
+    // so dispatch exactly batchSize workgroups.
+    uint32_t gx = batchSize;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
+                    &p, sizeof(p));
+
     stats_.shaders_dispatched++;
-    if (node->inputs[0].requires_grad) {
-        node->grad_input_buffers[0] = 1;
-        // TODO: dispatch cross-entropy-backward.glsl
-    }
+    node->grad_input_buffers[0] = gradId;
 }
 
 void BackwardEngine::backward_mse(Node* node) {

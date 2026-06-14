@@ -115,6 +115,19 @@ void register_autograd_ops(py::module_& m) {
              },
              py::arg("array"), py::arg("requires_grad") = true,
              "Allocate a resident buffer, upload a numpy array, return its id.")
+        .def("register_input_u32",
+             [](ag::TapeContext& tape,
+                py::array_t<uint32_t, py::array::c_style | py::array::forcecast> arr)
+                 -> uint32_t {
+                 auto info = arr.request();
+                 size_t bytes = static_cast<size_t>(info.size) * sizeof(uint32_t);
+                 uint32_t id = tape.registry().alloc(bytes);
+                 tape.registry().upload(id, info.ptr, bytes);
+                 return id;
+             },
+             py::arg("array"),
+             "Allocate a resident buffer, upload a uint32 numpy array (e.g. "
+             "class-index targets), return its id.")
         .def("read_buffer",
              [](ag::TapeContext& tape, uint32_t buffer_id,
                 const std::vector<uint32_t>& shape) -> py::array_t<float> {
