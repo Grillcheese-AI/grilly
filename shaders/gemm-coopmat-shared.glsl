@@ -66,11 +66,15 @@ void main() {
         }
 
         // ── 2. Stage B tile (16x64 = 1024 elements, 4 per thread) ──
+        // B is the weight matrix, stored (N, K) row-major (stride K), and the
+        // linear op computes y = x . W^T. So the K x N tile this kernel needs
+        // is W^T: logical element [k_row, n_col] = W[n_col, k_row].
+        // Read transposed from the (N,K) buffer: W[(tile_col+b_c)*K + (k+b_r)].
         for (uint i = 0u; i < 4u; ++i) {
             uint b_idx = linear_id + (i * 256u);
-            uint b_r   = b_idx / 64u;
-            uint b_c   = b_idx % 64u;
-            Bsub[b_idx] = B[(k + b_r) * params.N + (tile_col + b_c)];
+            uint b_r   = b_idx / 64u;   // K index within tile (0..15)
+            uint b_c   = b_idx % 64u;   // N index within tile (0..63)
+            Bsub[b_idx] = B[(tile_col + b_c) * params.K + (k + b_r)];
         }
 
         barrier();
