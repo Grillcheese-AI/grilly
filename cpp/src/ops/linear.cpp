@@ -103,10 +103,10 @@ void linear(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     // ── Get or create pipeline ──
     const std::string shaderName = useCoopMat ? "gemm-coopmat-shared"
                                                : "fnn-linear";
-    // gemm-coopmat-shared has 3 bindings (A, B, C); push constants = 12 bytes.
-    // fnn-linear has 4 bindings (input, weights, bias, output); push 16 bytes.
+    // gemm-coopmat-shared has 3 bindings (A, B, C); push constants = 16 bytes
+    // ({M,K,N,transpose_b}). fnn-linear has 4 bindings; push 16 bytes too.
     const uint32_t numBindings = useCoopMat ? 3u : 4u;
-    const uint32_t pushSize    = useCoopMat ? 12u : 16u;
+    const uint32_t pushSize    = 16u;
     PipelineEntry pipe = cache.getOrCreate(shaderName, numBindings, pushSize);
 
     // ── Allocate descriptor set ──
@@ -155,12 +155,15 @@ void linear(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.transferComputeBarrier();
 
     if (useCoopMat) {
-        // Coopmat push constants: {M, K, N} (12 bytes)
+        // Coopmat push constants: {M, K, N, transpose_b} (16 bytes).
+        // The linear op computes y = x . W^T, with W stored (outputDim,inputDim)
+        // = (N,K). transpose_b=1 tells the kernel B is weights and to read W^T.
         struct CoopPush {
             uint32_t M;
             uint32_t K;
             uint32_t N;
-        } coopPush = {p.batchSeq, p.inputDim, p.outputDim};
+            uint32_t transpose_b;
+        } coopPush = {p.batchSeq, p.inputDim, p.outputDim, 1u};
         batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
                        &coopPush, sizeof(coopPush));
     } else {

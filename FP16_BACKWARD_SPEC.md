@@ -140,12 +140,16 @@ which helps). Gate each shape:
 1. ✓ DONE — `cast-f32-f16.glsl` + `transpose-f32-f16.glsl` written + compiled
    (SPVs in shaders/spv). ✓ DONE — fixed + validated `gemm-coopmat-shared`
    forward (parity ~2.9e-04).
-2. NEXT — add the `transpose_b` push-constant flag to `gemm-coopmat-shared`
-   (selects plain `A·B` vs `A·Bᵀ` staging). Re-validate forward (transpose_b=1)
-   stays correct, and add a plain-`A·B` parity probe (transpose_b=0) vs numpy.
-   This is a 12→16 byte push-constant change → touches the C++ push struct in
-   `ops::linear` + bench, so it needs a rebuild. Until then, forward-only fp16
-   works with the current 12-byte kernel.
+2. ✓ DONE — added the `transpose_b` push-constant flag to `gemm-coopmat-shared`
+   (transpose_b=1 -> A·Bᵀ weights/forward; transpose_b=0 -> plain A·B).
+   Push grew 12→16 bytes; updated both C++ callers (`ops::linear` sets =1,
+   `bench_gemm` sets =0 with a separate 12-byte pc3 for gemm_tiled) and rebuilt
+   (Build OK). Forward RE-VALIDATED post-rebuild: ~2.9e-04 across all trunk
+   shapes — the flag did not regress the forward path.
+   NOTE: the transpose_b=0 *code path* itself is compiled but not yet exercised
+   from Python (no binding sets the flag). Its plain-A·B math is validated
+   indirectly (forward with pre-transposed W gives 2.9e-04), but its first true
+   test is step 3, where grad_weight invokes it. Gate it there.
 3. fp16 branch in `ops::linearBackward` + alignment fallback. Parity-test BOTH
    grad_input (transpose_b=1) and grad_weight (transpose_b=0) vs the fp32
    `gemm_tiled` path on one aligned shape. **No autograd/hot-path change yet.**

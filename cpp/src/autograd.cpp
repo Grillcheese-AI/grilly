@@ -1234,9 +1234,11 @@ std::vector<float> TapeContext::bench_gemm(uint32_t M, uint32_t K, uint32_t N,
     GrillyBuffer& C32 = registry_.resolve(c32);
     GrillyBuffer& A16 = registry_.resolve(a16); GrillyBuffer& B16 = registry_.resolve(b16);
     GrillyBuffer& C16 = registry_.resolve(c16);
-    struct { uint32_t M, K, N; } pc = {M, K, N};
+    struct { uint32_t M, K, N, transpose_b; } pc = {M, K, N, 0u};
+    // bench allocates B16 as a plain (K,N) row-major matrix, so transpose_b=0.
+    struct { uint32_t M, K, N; } pc3 = {M, K, N};
 
-    PipelineEntry tp = cache_.getOrCreate("gemm_tiled", 3, sizeof(pc));
+    PipelineEntry tp = cache_.getOrCreate("gemm_tiled", 3, sizeof(pc3));
     std::vector<VkDescriptorBufferInfo> tb = {
         {A32.handle, 0, size_t(M) * K * 4}, {B32.handle, 0, size_t(K) * N * 4}, {C32.handle, 0, mn32}};
     VkDescriptorSet tds = cache_.allocDescriptorSet("gemm_tiled", tb);
@@ -1246,10 +1248,11 @@ std::vector<float> TapeContext::bench_gemm(uint32_t M, uint32_t K, uint32_t N,
     VkDescriptorSet cds = cache_.allocDescriptorSet("gemm-coopmat-shared", cb);
 
     auto timeIt = [&](VkPipeline pl, VkPipelineLayout ly, VkDescriptorSet ds,
-                      uint32_t gx, uint32_t gy) {
+                      uint32_t gx, uint32_t gy,
+                      const void* push, uint32_t pushSize) {
         batch_.begin();
         for (uint32_t i = 0; i < iters; ++i) {
-            batch_.dispatch(pl, ly, ds, gx, gy, 1, &pc, sizeof(pc));
+            batch_.dispatch(pl, ly, ds, gx, gy, 1, push, pushSize);
             batch_.barrier();
         }
         auto t0 = std::chrono::high_resolution_clock::now();
@@ -1257,10 +1260,11 @@ std::vector<float> TapeContext::bench_gemm(uint32_t M, uint32_t K, uint32_t N,
         auto t1 = std::chrono::high_resolution_clock::now();
         return std::chrono::duration<float, std::milli>(t1 - t0).count() / iters;
     };
-    timeIt(tp.pipeline, tp.layout, tds, (N + 63u) / 64u, (M + 63u) / 64u);  // warmup
-    float fp32 = timeIt(tp.pipeline, tp.layout, tds, (N + 63u) / 64u, (M + 63u) / 64u);
-    timeIt(cp.pipeline, cp.layout, cds, N / 64u, M / 16u);                   // warmup
-    float fp16 = timeIt(cp.pipeline, cp.layout, cds, N / 64u, M / 16u);
+    // gemm_tiled gets the 12-byte {M,K,N} push; coopmat gets 16-byte {M,K,N,transpose_b}.
+    timeIt(tp.pipeline, tp.layout, tds, (N + 63u) / 64u, (M + 63u) / 64u, &pc3, sizeof(pc3));  // warmup
+    float fp32 = timeIt(tp.pipeline, tp.layout, tds, (N + 63u) / 64u, (M + 63u) / 64u, &pc3, sizeof(pc3));
+    timeIt(cp.pipeline, cp.layout, cds, N / 64u, M / 16u, &pc, sizeof(pc));                   // warmup
+    float fp16 = timeIt(cp.pipeline, cp.layout, cds, N / 64u, M / 16u, &pc, sizeof(pc));
     return {fp32, fp16};
 }
 
