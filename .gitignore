@@ -1,210 +1,25 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
+# Examples 1:
 
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
+# Example 2 (Project with artifacts):
+#Compiled and build artifacts
+*.pyc
+pycache/
+*.o
+*.obj
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-docs/api/generated/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
-# pipenv
-Pipfile.lock
-
-# PEP 582
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
+build/
+#Dependencies
+.venv/
 venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# Ruff
-.ruff_cache/
-
-# IDEs
+node_modules/
+#Logs and temp files
+*.log
+*.tmp
+*.swp
+#Environment
+.env
+.env.local
+.env.*
+#Editors
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Shader compilation artifacts (optional - keep if you want to track compiled shaders)
-# shaders/spv/*.spv
-*.DS_Store
-*.sublime-project
-*.sublime-workspace
-# OS files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-desktop.ini
-# Project-specific
-_version.py
-debug_*.py
-check_*.py
-PROJECT.md
-PLAN.md
-*.jsonl
-pyvma
-*.gz
-VulkanMemoryAllocator
-!third_party/VulkanMemoryAllocator
-datasets/cifar-10-python.tar.gz
-datasets/cifar-10-python.tar.gz
-datasets/cifar-10-python.tar.gz
-./datasets/*.tar.gz
-/brain
-/docs.old
-/examples.excluded
-/experimental_todo
-*.zip
-scripts/publish_pypi.ps1
-.claude/settings.local.json
-NUL
-codegraph.html
-/personas_prompts
-/private
-Makefile
-/mcp-servers/grilly/node_modules
-mcp-servers/elephant-coder/=5.0.0
-LINKEDIN_ARTICLE.md
-LINKEDIN_POST.md
-LINKEDIN_STRATEGY.md
-MEDIUM_ARTICLE.md
-MEDIUM_STRATEGY.md
-7492_Towards_Lossless_Memory_e.pdf
-osgm-best-hypergrad/
-snn_plan.md
-SNN_URGENT_TO_DO.md
-/build312
-/docs/plans
-VSA_TODO.md
-/.claude
-external/
-docs/new_aten_md.md
-docs/seer.md
-docs/symp_former.md
-/build2
-/third_party
-third_party/BLAKE3
-third_party/VulkanMemoryAllocator
-docs/BRIDGE_MIGRATION_CHECKLIST.md
-docs/GPU_OPTIMIZATION_REVIEW.md
-docs/PYTORCH_PARITY_STATUS.md
-docs/PYTORCH_PARITY_TASKLIST.md
-/build_verify_pybind
-/build_verify_pybind2
-docs/MIGRATION_PYTORCH.md
