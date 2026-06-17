@@ -1,38 +1,67 @@
-# Examples 1:
-
-# Example 2 (Project with artifacts):
-#Compiled and build artifacts
-*.pyc
-pycache/
+```
+# Compiled and build artifacts
 *.o
 *.obj
+*.exe
+*.dll
+*.so
+*.a
+*.out
+
+# Dependencies
+venv/
+.venv/
+__pycache__/
+*.egg-info/
 dist/
 build/
-#Dependencies
-.venv/
-venv/
-node_modules/
-#Logs and temp files
+target/
+
+# Logs and temp files
 *.log
 *.tmp
 *.swp
-#Environment
+*.swo
+
+# Environment
 .env
 .env.local
-.env.*
-#Editors
+*.env.*
+
+# Editors
 .vscode/
 .idea/
-/build2
-/build_verify_pybind
-7492_Towards_Lossless_Memory_e.pdf
-/build_verify_pybind2
-/experimental_datasets
-/osgm-best-hypergrad
-/personas_prompts/mindmark
-/private/models
-/site
-grilly_core.cp312-win_amd64.pyd
-/third_party
-/.claude
-/external
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+```
