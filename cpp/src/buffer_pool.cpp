@@ -390,7 +390,13 @@ void BufferPool::transferSubmitAndWait() {
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &transferCmd_;
 
-    vkCheck(vkQueueSubmit(device_.computeQueue(), 1, &submitInfo, transferFence_),
+    // Submit to the correct queue based on which queue family the transfer
+    // command pool was created from. If a separate transfer queue exists,
+    // use it; otherwise fall back to the compute queue.
+    VkQueue submitQueue = device_.hasSeparateTransferQueue()
+        ? device_.transferQueue()
+        : device_.computeQueue();
+    vkCheck(vkQueueSubmit(submitQueue, 1, &submitInfo, transferFence_),
             "transfer submit failed");
     vkCheck(vkWaitForFences(device_.device(), 1, &transferFence_, VK_TRUE, UINT64_MAX),
             "transfer wait failed");
