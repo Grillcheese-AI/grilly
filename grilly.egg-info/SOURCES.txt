@@ -1,5 +1,6 @@
 .coverage
 .readthedocs.yaml
+7492_Towards_Lossless_Memory_e.pdf
 AUTOGRAD_STATE.md
 CHANGELOG.md
 CLAUDE.md
@@ -40,7 +41,6 @@ torch_api_example.py
 uv.lock
 ./__init__.py
 ./_version.py
-./grilly_core.cp312-win_amd64.pyd
 ./main.py
 ./test_backward_ce.py
 ./test_backward_chain.py
@@ -666,6 +666,8 @@ cpp/include/grilly/compute_backend.h
 cpp/include/grilly/device.h
 cpp/include/grilly/op_graph.h
 cpp/include/grilly/pipeline_cache.h
+cpp/include/grilly/profiling.h
+cpp/include/grilly/scratch_arena.h
 cpp/include/grilly/shader_fusion.h
 cpp/include/grilly/system_profile.h
 cpp/include/grilly/thread_safe_queue.h
@@ -773,6 +775,7 @@ cpp/src/command_batch.cpp
 cpp/src/device.cpp
 cpp/src/op_graph.cpp
 cpp/src/pipeline_cache.cpp
+cpp/src/profiling.cpp
 cpp/src/shader_fusion.cpp
 cpp/src/channels/channel.cpp
 cpp/src/cognitive/world_model.cpp

@@ -1,29 +1,21 @@
 ```
-# Compiled and build artifacts
-*.o
-*.obj
-*.exe
-*.dll
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Build artifacts
+build/
+dist/
 *.so
-*.a
-*.out
+*.dylib
+*.dll
 
 # Dependencies
-venv/
 .venv/
-__pycache__/
-*.egg-info/
-dist/
-build/
-target/
-
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-*.swo
-
-# Environment
+venv/
 .env
 .env.local
 *.env.*
@@ -31,17 +23,24 @@ target/
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# System files
+# Logs
+*.log
+
+# OS
 .DS_Store
 Thumbs.db
 
-# Coverage
+# Testing
+.coverage
 coverage/
 htmlcov/
-.coverage
+.pytest_cache/
+.mypy_cache/
 
-# Compressed files
+# Compressed
 *.zip
 *.gz
 *.tar
@@ -60,22 +59,4 @@ htmlcov/
 *.Z
 *.lz
 *.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
 ```
-/build2
-/build_verify_pybind2/CMakeFiles/7d03cb867a8e6a035aea0b4ca8f520a6
-/build_verify_pybind2
-/site
-/private
-grilly_core.cp312-win_amd64.pyd
-/grilly.egg-info
-/external
-/build_verify_pybind
-/.claude
-/experimental_datasets
-/osgm-best-hypergrad
-/personas_prompts
-/third_party
