@@ -66,18 +66,7 @@ public:
         return spirvCode_.count(name) > 0 || pendingFiles_.count(name) > 0;
     }
     
-    /// Get cache statistics including lazy-loading metrics
-    struct ExtendedStats : CacheStats {
-        size_t pendingShaders = 0;
-        uint64_t lazyLoads = 0;
-    };
-    ExtendedStats extendedStats() const;
-
-    /// Access the underlying device for capability queries
-    /// (e.g. ``hasCooperativeMatrix()``).
-    GrillyDevice& getDevice() { return device_; }
-    const GrillyDevice& getDevice() const { return device_; }
-
+    /// Cache statistics structure
     struct CacheStats {
         uint64_t hits = 0;
         uint64_t misses = 0;
@@ -85,6 +74,13 @@ public:
         size_t cachedSets = 0;
     };
     CacheStats cacheStats() const;
+    
+    /// Get cache statistics including lazy-loading metrics
+    struct ExtendedStats : public CacheStats {
+        size_t pendingShaders = 0;
+        uint64_t lazyLoads = 0;
+    };
+    ExtendedStats extendedStats() const;
 
 private:
     VkDescriptorSetLayout createDescLayout(uint32_t numBuffers);
