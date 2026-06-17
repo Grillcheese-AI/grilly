@@ -157,5 +157,53 @@ void gifNeuronStep(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
                    float* spikes, float* tLastSpike,
                    const GIFParams& p);
 
+// ── Event-driven sparse synaptic scatter ─────────────────────────────────
+// Shader: spike-scatter.spv
+// local_size: (256, 1, 1)
+// Buffers: fired_idx(0) uint, fired_count(1) uint, weights(2), i_acc(3) rw
+// Grid = ceil(nFired*N / 256). firedIdx/firedCount are uint32 data passed as
+// raw float* bytes (upload is a plain memcpy). iAcc must be pre-zeroed.
+
+struct SpikeScatterParams {
+    uint32_t n;  // post dimension (matches GLSL push_constant {uint N;})
+};
+
+void spikeScatter(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+                  const float* firedIdx, const float* firedCount,
+                  const float* weights, float* iAcc,
+                  uint32_t nFired, const SpikeScatterParams& p);
+
+// ── Resident-weight benchmark loop ───────────────────────────────────────
+// Uploads W (and inputs) ONCE, then dispatches the chosen kernel `iters` times
+// into the resident buffers. Models the real SNN loop (W fixed, spikes stream).
+// mode 0 = spike-scatter (gather over fired list), 1 = synapse-dense (full GEMV).
+// Caller times the whole call and divides by iters for per-step resident cost.
+
+void residentBench(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
+                   uint32_t mode, const float* firedIdx,
+                   const float* firedCount, const float* spikes,
+                   const float* weights, float* iAcc,
+                   uint32_t nFired, uint32_t n, uint32_t iters,
+                   uint32_t batched);
+
+// ── Batched event-driven propagation (production primitive) ──────────────
+// Shader: spike-propagate-batch.spv. Propagates M spike vectors through one
+// resident (N_in x N_out) W in a single dispatch/submit.
+// out[m,post] = sum over fired pre of vector m of W[pre*N_out+post].
+// fired_idx is the concatenation of all vectors' fired indices; firedOffsets[M]
+// and firedCounts[M] slice it. uint inputs passed as raw float* bytes.
+
+struct SpikePropagateBatchParams {
+    uint32_t nOut;
+    uint32_t m;
+};
+
+void spikePropagateBatch(CommandBatch& batch, BufferPool& pool,
+                         PipelineCache& cache, const float* firedIdx,
+                         const float* firedOffsets, const float* firedCounts,
+                         const float* weights, float* out, const float* firedVals,
+                         uint32_t nFiredTotal, uint32_t nIn, uint32_t nOut,
+                         uint32_t M);
+
 }  // namespace ops
 }  // namespace grilly

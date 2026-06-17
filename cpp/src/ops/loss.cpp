@@ -152,6 +152,72 @@ void crossEntropyBackward(CommandBatch& batch, BufferPool& pool,
     pool.release(bufTargetStage);
     pool.release(bufGradStage);
 }
+
+// â”€â”€ Cross-entropy FUSED loss + gradient â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ONE dispatch: per-row loss AND grad_logits = softmax - one_hot, sharing a
+// single subgroup-reduced max + sum_exp pass per row. Workgroup-per-row, so
+// gx = batchSize (NOT (batchSize+255)/256 like the tree-reduction backward).
+
+void crossEntropyFused(CommandBatch& batch, BufferPool& pool,
+                       PipelineCache& cache,
+                       const float* logits, const uint32_t* targets,
+                       float* losses, float* gradLogits,
+                       const CrossEntropyFusedParams& p) {
+    const size_t logitBytes  = size_t(p.batchSize) * p.numClasses * sizeof(float);
+    const size_t targetBytes = size_t(p.batchSize) * sizeof(uint32_t);
+    const size_t lossBytes   = size_t(p.batchSize) * sizeof(float);
+
+    // 2 stage-in (logits, targets), 2 stage-out (losses, gradLogits).
+    GrillyBuffer bufLogitsDL = pool.acquireDeviceLocal(logitBytes);
+    GrillyBuffer bufTargetDL = pool.acquireDeviceLocal(targetBytes);
+    GrillyBuffer bufLossDL   = pool.acquireDeviceLocal(lossBytes);
+    GrillyBuffer bufGradDL   = pool.acquireDeviceLocal(logitBytes);
+
+    GrillyBuffer bufLogitsStage = pool.acquire(logitBytes);
+    GrillyBuffer bufTargetStage = pool.acquire(targetBytes);
+    GrillyBuffer bufLossStage   = pool.acquireReadback(lossBytes);
+    GrillyBuffer bufGradStage   = pool.acquireReadback(logitBytes);
+
+    pool.upload(bufLogitsStage, logits, logitBytes);
+    pool.upload(bufTargetStage, reinterpret_cast<const float*>(targets), targetBytes);
+
+    PipelineEntry pipe = cache.getOrCreate("loss-ce-fused", 4,
+                                           sizeof(CrossEntropyFusedParams));
+
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {bufLogitsDL.handle, 0, logitBytes},
+        {bufTargetDL.handle, 0, targetBytes},
+        {bufLossDL.handle,   0, lossBytes},
+        {bufGradDL.handle,   0, logitBytes},
+    };
+    VkDescriptorSet descSet = cache.allocDescriptorSet("loss-ce-fused", bufInfos);
+
+    uint32_t gx = p.batchSize;  // one workgroup per row
+
+    batch.begin();
+    batch.copyBuffer(bufLogitsStage, bufLogitsDL, logitBytes);
+    batch.copyBuffer(bufTargetStage, bufTargetDL, targetBytes);
+    batch.transferComputeBarrier();
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
+                   &p, sizeof(p));
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufLossDL, bufLossStage, lossBytes);
+    batch.copyBuffer(bufGradDL, bufGradStage, logitBytes);
+    batch.submitDeferred();
+    batch.waitForCompletion();
+
+    pool.download(bufLossStage, losses, lossBytes);
+    pool.download(bufGradStage, gradLogits, logitBytes);
+
+    pool.release(bufLogitsDL);
+    pool.release(bufTargetDL);
+    pool.release(bufLossDL);
+    pool.release(bufGradDL);
+    pool.release(bufLogitsStage);
+    pool.release(bufTargetStage);
+    pool.release(bufLossStage);
+    pool.release(bufGradStage);
+}
 // ── MSE Loss ─────────────────────────────────────────────────────────────
 
 void mseLoss(CommandBatch& batch, BufferPool& pool,

@@ -146,7 +146,6 @@ class TestConv2dBasic:
 class TestConv2dVsPyTorch:
     """Tests comparing Grilly Conv2d with PyTorch"""
 
-    @pytest.mark.xfail(reason="GPU conv GEMM path has numerical issues on some drivers")
     def test_conv2d_correctness_basic(self, backend):
         """Compare Grilly Conv2d output with PyTorch (basic case)"""
         from grilly.nn import Conv2d as GrillyConv2d
@@ -238,7 +237,6 @@ class TestConv2dVsPyTorch:
         except Exception as e:
             pytest.fail(f"Unexpected error during grouped convolution test: {e}")
 
-    @pytest.mark.xfail(reason="GPU conv backward path has numerical issues on some drivers")
     def test_conv2d_backward_correctness(self, backend):
         """Compare gradients with PyTorch"""
         from grilly.nn import Conv2d as GrillyConv2d

@@ -2,7 +2,9 @@
 
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
+#include "grilly/autograd/buffer_registry.h"
 #include "grilly/autograd/tape_arena.h"
 #include "grilly/buffer_pool.h"
 #include "grilly/command_batch.h"
@@ -130,6 +132,14 @@ enum class OpType : uint8_t {
     // CubeMind — Temporal Foresight (counterfactual contradiction penalty)
     TemporalSurprise,
 
+    // MinGRU — fused gated recurrence (scan). Not fused in the forward OpGraph
+    // (the scan isn't pointwise); this tag only routes the BACKWARD dispatch.
+    MinGRU,
+
+    // SwiGLU — gated FFN activation. out = x1 * silu(x2), input is
+    // [x1:hidden][x2:hidden] concatenated (2*hidden wide) -> hidden wide.
+    SwiGLU,
+
     _Count  // sentinel
 };
 
@@ -231,7 +241,11 @@ T* TapeArena::allocate_node(Args&&... args) {
 
 class BackwardEngine {
 public:
-    BackwardEngine(BufferPool& pool, CommandBatch& batch, PipelineCache& cache);
+    BackwardEngine(BufferPool& pool, CommandBatch& batch, PipelineCache& cache,
+                   BufferRegistry& registry);
+
+    /// Access the buffer registry (maps buffer_id <-> GrillyBuffer).
+    BufferRegistry& registry() { return registry_; }
 
     /// Run backward from `loss_node` through the tape.
     ///
@@ -273,6 +287,10 @@ private:
     /// Shader dispatch helpers for specific op types
     void backward_linear(Node* node);
     void backward_matmul(Node* node);
+    /// Shared pointwise activation backward: resolve grad_output + saved input,
+    /// dispatch a 3-buffer {grad_out, input, grad_in} shader. Used by
+    /// relu/gelu/silu (and any pointwise activation that uses pre-activation x).
+    void backward_activation(Node* node, const char* shaderName);
     void backward_relu(Node* node);
     void backward_gelu(Node* node);
     void backward_silu(Node* node);
@@ -280,6 +298,9 @@ private:
     void backward_sigmoid(Node* node);
     void backward_softmax(Node* node);
     void backward_layernorm(Node* node);
+    void backward_rmsnorm(Node* node);
+    void backward_mingru(Node* node);
+    void backward_swiglu(Node* node);
     void backward_attention(Node* node);
     void backward_conv2d(Node* node);
     void backward_conv1d(Node* node);
@@ -301,6 +322,7 @@ private:
     BufferPool& pool_;
     CommandBatch& batch_;
     PipelineCache& cache_;
+    BufferRegistry& registry_;
     Stats stats_{};
 
     // Gradient accumulation: input_buffer_id → accumulated_grad_buffer_id
@@ -344,6 +366,79 @@ public:
     /// Save buffer IDs needed for backward (weight, activation cache, etc.)
     void save_for_backward(Node* node, const uint32_t* buffer_ids, uint32_t count);
 
+    // ── Resident forward pass ────────────────────────────────────────────
+    // Run forward shaders into a command batch on the SAME registry, so the
+    // resident output buffers feed straight into the backward tape (no numpy
+    // round-trip, no re-upload of saved tensors). Lifecycle:
+    //   forward_begin(); id_out = forward_linear(...); ...; forward_submit();
+    //   ... record_op(... id_out ...) ...; backward(...);
+    void forward_begin();
+    void forward_submit();
+
+    /// Forward Linear: out = in @ weight^T (+ bias). weight is (N, K), in is
+    /// (M, K) -> out (M, N). Returns the resident output buffer id. Pass
+    /// bias_id = 0 for no bias.
+    uint32_t forward_linear(uint32_t in_id, uint32_t weight_id, uint32_t bias_id,
+                            uint32_t M, uint32_t K, uint32_t N);
+
+    /// Forward RMSNorm: out = weight * x * rsqrt(mean(x^2)+eps). x is
+    /// (positions, features). Returns the resident output buffer id. eps=1e-6.
+    uint32_t forward_rmsnorm(uint32_t in_id, uint32_t weight_id,
+                             uint32_t positions, uint32_t features);
+
+    /// Forward SwiGLU: out = x1*silu(x2). input is [x1|x2] (rows, 2*hidden) ->
+    /// out (rows, hidden). Returns the resident output buffer id.
+    uint32_t forward_swiglu(uint32_t in_id, uint32_t rows, uint32_t hidden);
+
+    /// Forward MinGRU: H = scan(G,V,D). G/V/D/H are (batch, seqLen, hidden),
+    /// laid out [b][t][d]. Same convention as backward_mingru / numpy ref.
+    /// Returns the resident output buffer id.
+    uint32_t forward_mingru(uint32_t g_id, uint32_t v_id, uint32_t d_id,
+                            uint32_t batch, uint32_t seqLen, uint32_t hidden);
+
+    /// Forward embedding lookup: out[b,s,:] = table[ids[b,s]]. ids are uint32
+    /// (batch*seq); table is (vocab, dim). Returns a resident output id of
+    /// shape (batch*seq, dim). Backward (scatter-add into the table) is handled
+    /// host-side (cheap, not in the per-layer hot path).
+    uint32_t forward_embedding(uint32_t ids_id, uint32_t table_id,
+                               uint32_t batch, uint32_t seqLen,
+                               uint32_t vocab, uint32_t dim);
+
+    /// Forward elementwise add (residual): out = a + b, NON-destructive (a and b
+    /// survive for backward). totalElements = product of the shared shape.
+    /// Returns the resident output buffer id.
+    uint32_t forward_add(uint32_t a_id, uint32_t b_id, uint32_t totalElements);
+
+    /// Resident AdamW update (decoupled weight decay) on the adamw-update.glsl
+    /// kernel: W,m,v updated in place from grad. w/m/v are persistent resident
+    /// ids (register_weight); grad is the backward grad buffer for W. Pass the
+    /// bias-correction terms beta1_t=beta1^t, beta2_t=beta2^t. clear_grad zeros
+    /// grad after. NO begin/submit inside -- wrap calls with forward_begin() /
+    /// forward_submit() so all param updates land in ONE batch/submit.
+    void adamw_update(uint32_t w_id, uint32_t grad_id, uint32_t m_id,
+                      uint32_t v_id, uint32_t numel, float lr, float beta1,
+                      float beta2, float eps, float weight_decay, float beta1_t,
+                      float beta2_t, bool clear_grad, float grad_scale = 1.0f);
+
+    /// Embedding backward: scatter-ADD emb_grad rows into E_grad by ids, on-GPU
+    /// and in place (E_grad already holds the tied-head weight grad, so the two
+    /// merge). emb_grad is (tokens, dim); ids is u32 (tokens); E_grad is
+    /// (vocab, dim). Lets the tied embedding train fully resident.
+    void embedding_scatter_add(uint32_t emb_grad_id, uint32_t ids_id,
+                               uint32_t e_grad_id, uint32_t tokens, uint32_t dim);
+
+    /// Sum of squares over many resident buffers, on-GPU: returns
+    /// sum_b sum_i buf_b[i]^2 with a SINGLE 4-byte readback (vs pulling every
+    /// buffer to host). Used for the global gradient L2 norm (grad clipping)
+    /// without the ~1 GB/step grad readback. ids[k] has numels[k] floats.
+    float sum_squares(const std::vector<uint32_t>& ids,
+                      const std::vector<uint32_t>& numels);
+
+    /// Benchmark gemm_tiled (fp32) vs gemm-coopmat-shared (fp16->fp32) for an
+    /// MxKxN GEMM. Returns {fp32_ms, fp16_ms} per iter. Diagnostic only.
+    std::vector<float> bench_gemm(uint32_t M, uint32_t K, uint32_t N,
+                                  uint32_t iters);
+
     /// Run backward from the loss node.
     void backward(Node* loss_node, uint32_t grad_output_buffer);
 
@@ -355,6 +450,7 @@ public:
 
     bool is_recording() const { return recording_; }
     TapeArena& arena() { return arena_; }
+    BufferRegistry& registry() { return registry_; }
     BackwardEngine::Stats last_backward_stats() const { return engine_.last_stats(); }
 
     // Arena stats
@@ -363,7 +459,10 @@ public:
 
 private:
     TapeArena arena_;
+    BufferRegistry registry_;
     BackwardEngine engine_;
+    CommandBatch& batch_;     // shared with engine_; used for resident forward
+    PipelineCache& cache_;    // shared with engine_; used for resident forward
     bool recording_ = false;
     uint32_t seq_counter_ = 0;
 };

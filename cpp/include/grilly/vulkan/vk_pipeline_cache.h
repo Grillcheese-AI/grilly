@@ -25,8 +25,12 @@ struct PipelineEntry {
 /// Pipeline and descriptor set cache with LRU eviction.
 class PipelineCache {
 public:
-    PipelineCache(GrillyDevice& device, uint32_t maxDescriptorSets = 500,
-                  uint32_t maxStorageBuffers = 1000);
+    // Pool must hold MORE sets than kMaxCachedDescSets (so eviction frees a
+    // cached set before the pool itself is exhausted -- the OOM "evict all" path
+    // would otherwise free IN-FLIGHT sets). maxStorageBuffers covers
+    // kMaxCachedDescSets * (max bindings/set, <=8) with margin.
+    PipelineCache(GrillyDevice& device, uint32_t maxDescriptorSets = 8192,
+                  uint32_t maxStorageBuffers = 131072);
     ~PipelineCache();
 
     PipelineCache(const PipelineCache&) = delete;
@@ -41,6 +45,15 @@ public:
     VkDescriptorSet allocDescriptorSet(
         const std::string& name,
         const std::vector<VkDescriptorBufferInfo>& buffers);
+
+    /// Free ALL cached descriptor sets and reset the LRU. Call ONLY when the GPU
+    /// is idle (no in-flight command buffer references the sets). The descriptor
+    /// cache is keyed by (shader, buffer handles); across steps the buffer pool
+    /// recycles handles, so a stale cached set can be falsely reused for a
+    /// different logical buffer -> nondeterministic/wrong results. Clearing at
+    /// each step boundary (TapeContext::begin(), where prior synchronous submits
+    /// have completed) forces correct fresh bindings each step.
+    void clearDescriptorCache();
 
     bool hasShader(const std::string& name) const {
         return spirvCode_.count(name) > 0;
@@ -82,7 +95,17 @@ private:
         size_t operator()(const DescCacheKey& k) const;
     };
 
-    static constexpr size_t kMaxCachedDescSets = 100;
+    // INVARIANT: must EXCEED the number of distinct descriptor sets allocated in
+    // any single un-submitted command batch. The descriptor-set cache is keyed by
+    // (shader, buffer handles), so every dispatch in a batch with fresh buffers
+    // takes a distinct set; on a miss when full, the LRU evicts+frees a set. If
+    // that evicted set is still recorded in the in-flight command buffer (i.e. the
+    // batch needs > kMaxCachedDescSets sets), the submit reads a freed set ->
+    // garbage/zero results. The Cubby trunk's backward batch is ~15 sets/layer, so
+    // L=6 (~90) was just under the old cap of 100 and L>=12 silently corrupted
+    // grads. 4096 covers ~L=250 with margin; pool maxSets (8192) stays above it so
+    // the pool never OOMs first.
+    static constexpr size_t kMaxCachedDescSets = 4096;
 
     using LRUList = std::list<DescCacheKey>;
     LRUList lruList_;

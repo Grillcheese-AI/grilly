@@ -45,6 +45,12 @@ PYBIND11_MODULE(grilly_core, m) {
                                [](const GrillyCoreContext& ctx) {
                                    return ctx.device.hasFloat16();
                                })
+        .def("cooperative_matrix_configs",
+             [](const GrillyCoreContext& ctx) {
+                 return ctx.device.cooperativeMatrixConfigs();
+             },
+             "Supported cooperative-matrix configs (MxNxK + dtypes) from "
+             "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR.")
         .def("pool_stats",
              [](const GrillyCoreContext& ctx) {
                  auto s = ctx.pool.stats();
@@ -447,4 +453,6 @@ PYBIND11_MODULE(grilly_core, m) {
     register_mingru_ops(m);
     register_bandit_ops(m);
     register_eggroll_ops(m);
+    register_autograd_ops(m);
+    register_distillation_ops(m);
 }

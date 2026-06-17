@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
 #include <iostream>
 #include <stdexcept>
 
@@ -458,6 +459,60 @@ bool GrillyDevice::hasCooperativeMatrix() const {
 bool GrillyDevice::hasFloat16() const {
     return hasExtension("VK_KHR_shader_float16_int8") &&
            hasExtension("VK_KHR_16bit_storage");
+}
+
+std::vector<std::string> GrillyDevice::cooperativeMatrixConfigs() const {
+    std::vector<std::string> out;
+    if (instance_ == VK_NULL_HANDLE || physicalDevice_ == VK_NULL_HANDLE)
+        return out;
+    auto fn = reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
+        vkGetInstanceProcAddr(instance_,
+                              "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
+    if (!fn) return out;
+    uint32_t count = 0;
+    if (fn(physicalDevice_, &count, nullptr) != VK_SUCCESS || count == 0)
+        return out;
+    std::vector<VkCooperativeMatrixPropertiesKHR> props(count);
+    for (auto& p : props) {
+        p.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
+        p.pNext = nullptr;
+    }
+    if (fn(physicalDevice_, &count, props.data()) != VK_SUCCESS) return out;
+
+    auto ty = [](VkComponentTypeKHR t) -> const char* {
+        switch (t) {
+            case VK_COMPONENT_TYPE_FLOAT16_KHR: return "fp16";
+            case VK_COMPONENT_TYPE_FLOAT32_KHR: return "fp32";
+            case VK_COMPONENT_TYPE_FLOAT64_KHR: return "fp64";
+            case VK_COMPONENT_TYPE_SINT8_KHR:   return "s8";
+            case VK_COMPONENT_TYPE_SINT16_KHR:  return "s16";
+            case VK_COMPONENT_TYPE_SINT32_KHR:  return "s32";
+            case VK_COMPONENT_TYPE_SINT64_KHR:  return "s64";
+            case VK_COMPONENT_TYPE_UINT8_KHR:   return "u8";
+            case VK_COMPONENT_TYPE_UINT16_KHR:  return "u16";
+            case VK_COMPONENT_TYPE_UINT32_KHR:  return "u32";
+            case VK_COMPONENT_TYPE_UINT64_KHR:  return "u64";
+            default: return "?";
+        }
+    };
+    auto sc = [](VkScopeKHR s) -> const char* {
+        switch (s) {
+            case VK_SCOPE_DEVICE_KHR:       return "device";
+            case VK_SCOPE_WORKGROUP_KHR:    return "workgroup";
+            case VK_SCOPE_SUBGROUP_KHR:     return "subgroup";
+            case VK_SCOPE_QUEUE_FAMILY_KHR: return "queuefamily";
+            default: return "?";
+        }
+    };
+    char buf[256];
+    for (const auto& p : props) {
+        std::snprintf(buf, sizeof(buf),
+            "M=%u N=%u K=%u  A=%s B=%s C=%s Result=%s  scope=%s sat=%u",
+            p.MSize, p.NSize, p.KSize, ty(p.AType), ty(p.BType), ty(p.CType),
+            ty(p.ResultType), sc(p.scope), (unsigned)p.saturatingAccumulation);
+        out.emplace_back(buf);
+    }
+    return out;
 }
 
 }  // namespace grilly

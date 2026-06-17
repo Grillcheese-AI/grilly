@@ -411,4 +411,129 @@ void register_snn_ops(py::module_& m) {
         py::arg("gate_strength") = 1.0f,
         py::arg("t_refrac_period") = 0.0f,
         "GPU GIF (Generalized Integrate-and-Fire) neuron step");
+
+    // ── Event-driven sparse synaptic scatter ─────────────────────────────
+    m.def(
+        "spike_scatter",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> fired_idx,
+           py::array_t<float> fired_count,
+           py::array_t<float> weights,
+           uint32_t n) -> Tensor {
+            auto idxBuf = fired_idx.request();
+            auto cntBuf = fired_count.request();
+            auto wBuf = weights.request();
+            require_c_contiguous_float(idxBuf);
+            require_c_contiguous_float(cntBuf);
+            require_c_contiguous_float(wBuf);
+
+            uint32_t nFired = static_cast<uint32_t>(idxBuf.size);
+
+            py::array_t<float> iAcc(std::vector<py::ssize_t>{
+                static_cast<py::ssize_t>(n)});
+            auto accBuf = iAcc.request();
+            std::memset(accBuf.ptr, 0, size_t(n) * sizeof(float));
+
+            grilly::ops::SpikeScatterParams p{n};
+
+            {
+                py::gil_scoped_release release;
+                grilly::ops::spikeScatter(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(idxBuf.ptr),
+                    static_cast<const float*>(cntBuf.ptr),
+                    static_cast<const float*>(wBuf.ptr),
+                    static_cast<float*>(accBuf.ptr),
+                    nFired, p);
+            }
+
+            return Tensor::from_numpy(iAcc);
+        },
+        py::arg("device"), py::arg("fired_idx"), py::arg("fired_count"),
+        py::arg("weights"), py::arg("n"),
+        "GPU event-driven sparse synaptic scatter (Tier-0 measurement op)");
+
+    // ── Resident-weight benchmark loop ───────────────────────────────────
+    m.def(
+        "resident_bench",
+        [](GrillyCoreContext& ctx, uint32_t mode,
+           py::array_t<float> fired_idx, py::array_t<float> fired_count,
+           py::array_t<float> spikes, py::array_t<float> weights,
+           uint32_t n, uint32_t iters, uint32_t batched) -> Tensor {
+            auto idxBuf = fired_idx.request();
+            auto cntBuf = fired_count.request();
+            auto spkBuf = spikes.request();
+            auto wBuf = weights.request();
+            require_c_contiguous_float(idxBuf);
+            require_c_contiguous_float(cntBuf);
+            require_c_contiguous_float(spkBuf);
+            require_c_contiguous_float(wBuf);
+            uint32_t nFired = static_cast<uint32_t>(idxBuf.size);
+
+            py::array_t<float> iAcc(std::vector<py::ssize_t>{
+                static_cast<py::ssize_t>(n)});
+            auto accBuf = iAcc.request();
+            std::memset(accBuf.ptr, 0, size_t(n) * sizeof(float));
+
+            {
+                py::gil_scoped_release release;
+                grilly::ops::residentBench(
+                    ctx.batch, ctx.pool, ctx.cache, mode,
+                    static_cast<const float*>(idxBuf.ptr),
+                    static_cast<const float*>(cntBuf.ptr),
+                    static_cast<const float*>(spkBuf.ptr),
+                    static_cast<const float*>(wBuf.ptr),
+                    static_cast<float*>(accBuf.ptr),
+                    nFired, n, iters, batched);
+            }
+            return Tensor::from_numpy(iAcc);
+        },
+        py::arg("device"), py::arg("mode"), py::arg("fired_idx"),
+        py::arg("fired_count"), py::arg("spikes"), py::arg("weights"),
+        py::arg("n"), py::arg("iters"), py::arg("batched") = 0,
+        "Resident-W benchmark loop (mode 0=scatter, 1=dense; batched=single submit)");
+
+    // ── Batched event-driven propagation (production primitive) ──────────
+    m.def(
+        "spike_propagate_batch",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> fired_idx, py::array_t<float> fired_offsets,
+           py::array_t<float> fired_counts, py::array_t<float> weights,
+           py::array_t<float> fired_vals,
+           uint32_t n_in, uint32_t n_out, uint32_t m_vecs) -> Tensor {
+            auto idxBuf = fired_idx.request();
+            auto offBuf = fired_offsets.request();
+            auto cntBuf = fired_counts.request();
+            auto wBuf = weights.request();
+            auto valBuf = fired_vals.request();
+            require_c_contiguous_float(idxBuf);
+            require_c_contiguous_float(offBuf);
+            require_c_contiguous_float(cntBuf);
+            require_c_contiguous_float(wBuf);
+            require_c_contiguous_float(valBuf);
+            uint32_t nFiredTotal = static_cast<uint32_t>(idxBuf.size);
+
+            py::array_t<float> out(std::vector<py::ssize_t>{
+                static_cast<py::ssize_t>(m_vecs),
+                static_cast<py::ssize_t>(n_out)});
+            auto oBuf = out.request();
+
+            {
+                py::gil_scoped_release release;
+                grilly::ops::spikePropagateBatch(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(idxBuf.ptr),
+                    static_cast<const float*>(offBuf.ptr),
+                    static_cast<const float*>(cntBuf.ptr),
+                    static_cast<const float*>(wBuf.ptr),
+                    static_cast<float*>(oBuf.ptr),
+                    static_cast<const float*>(valBuf.ptr),
+                    nFiredTotal, n_in, n_out, m_vecs);
+            }
+            return Tensor::from_numpy(out);
+        },
+        py::arg("device"), py::arg("fired_idx"), py::arg("fired_offsets"),
+        py::arg("fired_counts"), py::arg("weights"), py::arg("fired_vals"),
+        py::arg("n_in"), py::arg("n_out"), py::arg("m"),
+        "Batched event-driven sparse propagation (M vectors, resident W, 1 submit)");
 }

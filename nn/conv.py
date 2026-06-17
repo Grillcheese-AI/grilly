@@ -131,11 +131,24 @@ class Conv2d(Module):
             else None
         )
 
-        # NOTE: C++ bridge conv2d disabled — multi-channel kernel has correctness
-        # issues (max diff ~25 vs PyTorch). Linear/activation bridge paths are
-        # correct and provide the main speedup. Conv2d fix tracked separately.
+        # C++ bridge fast path — correct as of the conv2d dispatch fix
+        # (backward-weight grid + forward batch de-interleave). The legacy
+        # ctypes Vulkan path below needs the 'vulkan' pip package and is only
+        # used as a fallback when the bridge is unavailable.
+        if _USE_CPP_BRIDGE:
+            result = _bridge.conv2d(
+                x,
+                weight,
+                bias,
+                stride=self.stride,
+                padding=self.padding,
+                dilation=self.dilation,
+                groups=self.groups,
+            )
+            if result is not None:
+                return np.asarray(result, dtype=np.float32)
 
-        # Legacy Python ctypes Vulkan path
+        # Legacy Python ctypes Vulkan path (fallback)
         return backend.conv.conv2d(
             x,
             weight,
@@ -166,30 +179,60 @@ class Conv2d(Module):
             raise RuntimeError("backward() called but no cached input from forward pass")
 
         backend = self._get_backend()
-        weight = self.weight.data if hasattr(self.weight, "data") else np.asarray(self.weight)
+        weight = np.asarray(self.weight, dtype=np.float32)
 
-        # Compute gradient w.r.t. input (for backprop to previous layers)
-        grad_input = backend.conv.conv2d_backward_input(
-            grad_output,
-            weight,
-            self._cache_input.shape,
-            stride=self.stride,
-            padding=self.padding,
-            dilation=self.dilation,
-            groups=self.groups,
-        )
+        grad_input = None
+        grad_weight = None
+        grad_bias = None
 
-        # Compute gradient w.r.t. weights and bias (for parameter updates)
-        grad_weight, grad_bias = backend.conv.conv2d_backward_weight(
-            grad_output,
-            self._cache_input,
-            self.kernel_size,
-            stride=self.stride,
-            padding=self.padding,
-            dilation=self.dilation,
-            groups=self.groups,
-            has_bias=(self.bias is not None),
-        )
+        # C++ bridge fast path (now correct for batch>1, multi-channel, grouped)
+        if _USE_CPP_BRIDGE:
+            gi = _bridge.conv2d_backward_input(
+                grad_output,
+                weight,
+                self._cache_input.shape,
+                stride=self.stride,
+                padding=self.padding,
+                dilation=self.dilation,
+                groups=self.groups,
+            )
+            gw = _bridge.conv2d_backward_weight(
+                grad_output,
+                self._cache_input,
+                weight.shape,
+                stride=self.stride,
+                padding=self.padding,
+                dilation=self.dilation,
+                groups=self.groups,
+                has_bias=(self.bias is not None),
+            )
+            if gi is not None and gw is not None:
+                grad_input = np.asarray(gi, dtype=np.float32)
+                grad_weight = np.asarray(gw["grad_weight"], dtype=np.float32)
+                if self.bias is not None and gw.get("grad_bias") is not None:
+                    grad_bias = np.asarray(gw["grad_bias"], dtype=np.float32)
+
+        # Legacy ctypes Vulkan fallback (only if the bridge was unavailable)
+        if grad_input is None:
+            grad_input = backend.conv.conv2d_backward_input(
+                grad_output,
+                weight,
+                self._cache_input.shape,
+                stride=self.stride,
+                padding=self.padding,
+                dilation=self.dilation,
+                groups=self.groups,
+            )
+            grad_weight, grad_bias = backend.conv.conv2d_backward_weight(
+                grad_output,
+                self._cache_input,
+                self.kernel_size,
+                stride=self.stride,
+                padding=self.padding,
+                dilation=self.dilation,
+                groups=self.groups,
+                has_bias=(self.bias is not None),
+            )
 
         # Store gradients in parameters
         if self.weight.grad is None:

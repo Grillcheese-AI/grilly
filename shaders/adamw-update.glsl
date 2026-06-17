@@ -35,6 +35,7 @@ layout(push_constant) uniform PushConsts {
     float beta1_t;
     float beta2_t;
     uint clear_grad;
+    float grad_scale;          // global grad-norm clip (+ mean-CE 1/B) applied BEFORE m/v
 };
 
 void main() {
@@ -43,7 +44,7 @@ void main() {
         return;
     }
 
-    float g = grad[idx];
+    float g = grad[idx] * grad_scale;
     float m_new = beta1 * m[idx] + (1.0 - beta1) * g;
     float v_new = beta2 * v[idx] + (1.0 - beta2) * g * g;
     m[idx] = m_new;

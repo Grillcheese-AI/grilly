@@ -2756,6 +2756,35 @@ PYBIND11_MODULE(grilly_core, m) {
         .def("get_grad_buffer",
              &grilly::autograd::TapeContext::get_grad_buffer,
              py::arg("input_buffer_id"))
+        .def("register_input",
+             [](grilly::autograd::TapeContext& tape,
+                py::array_t<float, py::array::c_style | py::array::forcecast> arr,
+                bool requires_grad) -> uint32_t {
+                 auto info = arr.request();
+                 size_t bytes = static_cast<size_t>(info.size) * sizeof(float);
+                 uint32_t id = tape.registry().alloc(bytes);
+                 tape.registry().upload(id, info.ptr, bytes);
+                 (void)requires_grad;  // tracked on the TensorRef, not the buffer
+                 return id;
+             },
+             py::arg("array"), py::arg("requires_grad") = true,
+             "Allocate a resident buffer, upload a numpy array into it, and "
+             "return its registry buffer_id.")
+        .def("read_buffer",
+             [](grilly::autograd::TapeContext& tape, uint32_t buffer_id,
+                const std::vector<uint32_t>& shape) -> py::array_t<float> {
+                 size_t numel = 1;
+                 for (uint32_t s : shape) numel *= s;
+                 size_t bytes = numel * sizeof(float);
+                 py::array_t<float> out(static_cast<py::ssize_t>(numel));
+                 auto info = out.request();
+                 tape.registry().download(buffer_id, info.ptr, bytes);
+                 out.resize(std::vector<py::ssize_t>(shape.begin(), shape.end()));
+                 return out;
+             },
+             py::arg("buffer_id"), py::arg("shape"),
+             "Download a resident buffer by id into a numpy array of the given "
+             "shape.")
         .def("record_temporal_surprise",
              [](grilly::autograd::TapeContext& tape,
                 const grilly::autograd::TensorRef& input,

@@ -38,6 +38,12 @@ public:
     bool hasCooperativeMatrix() const;
     bool hasFloat16() const;
 
+    /// Enumerate the device's supported cooperative-matrix configurations via
+    /// vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR. One human-readable
+    /// string per config (MxNxK, A/B/C/Result component types, scope). Empty if
+    /// the extension/entrypoint is absent or the driver reports no configs.
+    std::vector<std::string> cooperativeMatrixConfigs() const;
+
     /// GPU name reported by the driver.
     const std::string& deviceName() const { return deviceName_; }
 

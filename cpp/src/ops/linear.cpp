@@ -103,10 +103,10 @@ void linear(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     // ── Get or create pipeline ──
     const std::string shaderName = useCoopMat ? "gemm-coopmat-shared"
                                                : "fnn-linear";
-    // gemm-coopmat-shared has 3 bindings (A, B, C); push constants = 12 bytes.
-    // fnn-linear has 4 bindings (input, weights, bias, output); push 16 bytes.
+    // gemm-coopmat-shared has 3 bindings (A, B, C); push constants = 16 bytes
+    // ({M,K,N,transpose_b}). fnn-linear has 4 bindings; push 16 bytes too.
     const uint32_t numBindings = useCoopMat ? 3u : 4u;
-    const uint32_t pushSize    = useCoopMat ? 12u : 16u;
+    const uint32_t pushSize    = 16u;
     PipelineEntry pipe = cache.getOrCreate(shaderName, numBindings, pushSize);
 
     // ── Allocate descriptor set ──
@@ -155,12 +155,15 @@ void linear(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     batch.transferComputeBarrier();
 
     if (useCoopMat) {
-        // Coopmat push constants: {M, K, N} (12 bytes)
+        // Coopmat push constants: {M, K, N, transpose_b} (16 bytes).
+        // The linear op computes y = x . W^T, with W stored (outputDim,inputDim)
+        // = (N,K). transpose_b=1 tells the kernel B is weights and to read W^T.
         struct CoopPush {
             uint32_t M;
             uint32_t K;
             uint32_t N;
-        } coopPush = {p.batchSeq, p.inputDim, p.outputDim};
+            uint32_t transpose_b;
+        } coopPush = {p.batchSeq, p.inputDim, p.outputDim, 1u};
         batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
                        &coopPush, sizeof(coopPush));
     } else {
@@ -373,9 +376,11 @@ void linearBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
                    &bwdParams, sizeof(bwdParams));
     batch.barrier();
 
-    // Pass 2: grad_bias
+    // Pass 2: grad_bias. fnn-linear-backward is a 16x16 workgroup and pass 2
+    // indexes outputs by GlobalInvocationID.x, so the X grid is ceil(out/16).
+    // (Was ceil(out/256) â€” a latent bug that left 15/16 of grad_bias zeroed.)
     bwdParams.passType = 2;
-    uint32_t gx2 = (p.outputDim + 255) / 256;
+    uint32_t gx2 = (p.outputDim + 15) / 16;
     batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx2, 1, 1,
                    &bwdParams, sizeof(bwdParams));
 
@@ -409,6 +414,167 @@ void linearBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
     pool.release(bufGradWStage);
     pool.release(bufGradBiasStage);
 }
+
+// â”€â”€ GPU linear backward via fp16 cooperative-matrix GEMMs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//
+// Same math as linearBackward (fp32), but the two heavy GEMMs run through the
+// fixed gemm-coopmat-shared kernel (fp16 in, fp32 accumulate). Inputs and
+// outputs are fp32 â€” conversion to/from fp16 happens internally, so the
+// resident fp32 trunk can call this with no boundary conversion.
+//
+//   grad_input  = g  @ W      (transpose_b=0, plain A.B; B=W read as (out,in))
+//   grad_weight = g^T @ x     (g^T built fp16 via transpose-f32-f16; plain A.B)
+//   grad_bias   = sum(g,0)    (fp32, via fnn-linear-backward pass 2)
+//
+// Caller MUST ensure coopmat alignment for BOTH gemms:
+//   grad_input : BS%16, out%16, in%64
+//   grad_weight: out%16, BS%16, in%64
+// i.e. BS%16 && out%16 && in%64 (out also needs %64 as it is grad_weight's N?
+// no: grad_weight N=in). Both reduce to BS%16 && out%16 && in%64, EXCEPT
+// grad_input's N=in needs %64 and grad_weight's M=out needs %16. Net required:
+//   BS%16==0, in%64==0, out%16==0, and for grad_input N=in%64 (same), and
+//   grad_weight uses out as M (%16). So: BS%16, out%16, in%64. Verified by caller.
+void linearBackwardCoopmat(CommandBatch& batch, BufferPool& pool,
+                           PipelineCache& cache,
+                           const void* gradOutput, const void* input,
+                           const void* weights,
+                           void* gradInput, void* gradWeight, void* gradBias,
+                           const LinearParams& p) {
+    const uint32_t BS  = p.batchSeq;
+    const uint32_t in  = p.inputDim;
+    const uint32_t out = p.outputDim;
+
+    // â”€â”€ byte sizes â”€â”€
+    const size_t gF32 = size_t(BS) * out * 4;     // g  (BS,out) fp32
+    const size_t xF32 = size_t(BS) * in  * 4;     // x  (BS,in)  fp32
+    const size_t wF32 = size_t(out) * in * 4;     // W  (out,in) fp32
+    const size_t g16B = size_t(BS) * out * 2;     // g16
+    const size_t x16B = size_t(BS) * in  * 2;     // x16
+    const size_t w16B = size_t(out) * in * 2;     // W16
+    const size_t gT16B = size_t(out) * BS * 2;    // g^T fp16 (out,BS)
+    const size_t giF32 = xF32;                    // grad_input (BS,in) fp32
+    const size_t gwF32 = wF32;                    // grad_weight (out,in) fp32
+    const size_t gbF32 = size_t(out) * 4;         // grad_bias (out) fp32
+
+    // â”€â”€ DEVICE_LOCAL compute buffers â”€â”€
+    GrillyBuffer gDL  = pool.acquireDeviceLocal(gF32);
+    GrillyBuffer xDL  = pool.acquireDeviceLocal(xF32);
+    GrillyBuffer wDL  = pool.acquireDeviceLocal(wF32);
+    GrillyBuffer g16  = pool.acquireDeviceLocal(g16B);
+    GrillyBuffer x16  = pool.acquireDeviceLocal(x16B);
+    GrillyBuffer w16  = pool.acquireDeviceLocal(w16B);
+    GrillyBuffer gT16 = pool.acquireDeviceLocal(gT16B);
+    GrillyBuffer giDL = pool.acquireDeviceLocal(giF32);
+    GrillyBuffer gwDL = pool.acquireDeviceLocal(gwF32);
+    GrillyBuffer gbDL = pool.acquireDeviceLocal(gbF32);
+    // grad_bias reuses the 6-binding fnn-linear-backward; it also needs
+    // grad_input/grad_weight bindings present even though pass 2 only writes
+    // grad_bias. We point those at the real gi/gw DL buffers (already allocated).
+
+    // â”€â”€ staging in (fp32 g/x/W) â”€â”€
+    GrillyBuffer gS = pool.acquire(gF32);
+    GrillyBuffer xS = pool.acquire(xF32);
+    GrillyBuffer wS = pool.acquire(wF32);
+    pool.upload(gS, reinterpret_cast<const float*>(gradOutput), gF32);
+    pool.upload(xS, reinterpret_cast<const float*>(input), xF32);
+    pool.upload(wS, reinterpret_cast<const float*>(weights), wF32);
+
+    // â”€â”€ readback staging (fp32 grads) â”€â”€
+    GrillyBuffer giS = pool.acquireReadback(giF32);
+    GrillyBuffer gwS = pool.acquireReadback(gwF32);
+    GrillyBuffer gbS = pool.acquireReadback(gbF32);
+
+    // pipelines
+    PipelineEntry castPipe = cache.getOrCreate("cast-f32-f16", 2, sizeof(uint32_t));
+    PipelineEntry trPipe   = cache.getOrCreate("transpose-f32-f16", 2, 2 * sizeof(uint32_t));
+    PipelineEntry gemmPipe = cache.getOrCreate("gemm-coopmat-shared", 3, 4 * sizeof(uint32_t));
+    PipelineEntry bwPipe   = cache.getOrCreate("fnn-linear-backward", 6, sizeof(LinearBackwardParams));
+
+    auto castInto = [&](GrillyBuffer& src, GrillyBuffer& dst, uint32_t n) {
+        std::vector<VkDescriptorBufferInfo> bi = {
+            {src.handle, 0, size_t(n) * 4}, {dst.handle, 0, size_t(n) * 2}};
+        VkDescriptorSet ds = cache.allocDescriptorSet("cast-f32-f16", bi);
+        batch.dispatch(castPipe.pipeline, castPipe.layout, ds,
+                       (n + 255u) / 256u, 1, 1, &n, sizeof(n));
+    };
+
+    struct CoopPush { uint32_t M, K, N, transpose_b; };
+
+    batch.begin();
+    // stage-in
+    batch.copyBuffer(gS, gDL, gF32);
+    batch.copyBuffer(xS, xDL, xF32);
+    batch.copyBuffer(wS, wDL, wF32);
+    batch.transferComputeBarrier();
+
+    // casts: g->g16, x->x16, W->w16
+    castInto(gDL, g16, BS * out);
+    castInto(xDL, x16, BS * in);
+    castInto(wDL, w16, out * in);
+    // g^T fp16 via fused transpose-cast on fp32 g (rows=BS, cols=out)
+    {
+        std::vector<VkDescriptorBufferInfo> bi = {
+            {gDL.handle, 0, gF32}, {gT16.handle, 0, gT16B}};
+        VkDescriptorSet ds = cache.allocDescriptorSet("transpose-f32-f16", bi);
+        struct { uint32_t rows, cols; } tp = {BS, out};
+        batch.dispatch(trPipe.pipeline, trPipe.layout, ds,
+                       (BS * out + 255u) / 256u, 1, 1, &tp, sizeof(tp));
+    }
+    batch.transferComputeBarrier();
+
+    // grad_input = g @ W   (A=g16 (BS,out), B=w16 plain (out,in), transpose_b=0)
+    {
+        std::vector<VkDescriptorBufferInfo> bi = {
+            {g16.handle, 0, g16B}, {w16.handle, 0, w16B}, {giDL.handle, 0, giF32}};
+        VkDescriptorSet ds = cache.allocDescriptorSet("gemm-coopmat-shared", bi);
+        CoopPush pc = {BS, out, in, 0u};
+        batch.dispatch(gemmPipe.pipeline, gemmPipe.layout, ds,
+                       in / 64u, BS / 16u, 1, &pc, sizeof(pc));
+    }
+    // grad_weight = g^T @ x  (A=gT16 (out,BS), B=x16 plain (BS,in), transpose_b=0)
+    {
+        std::vector<VkDescriptorBufferInfo> bi = {
+            {gT16.handle, 0, gT16B}, {x16.handle, 0, x16B}, {gwDL.handle, 0, gwF32}};
+        VkDescriptorSet ds = cache.allocDescriptorSet("gemm-coopmat-shared", bi);
+        CoopPush pc = {out, BS, in, 0u};
+        batch.dispatch(gemmPipe.pipeline, gemmPipe.layout, ds,
+                       in / 64u, out / 16u, 1, &pc, sizeof(pc));
+    }
+
+    // grad_bias = sum(g, axis=0) via fnn-linear-backward pass 2 (fp32).
+    batch.fillZero(gbDL, gbF32);
+    batch.transferComputeBarrier();
+    {
+        std::vector<VkDescriptorBufferInfo> bi = {
+            {gDL.handle, 0, gF32}, {xDL.handle, 0, xF32}, {wDL.handle, 0, wF32},
+            {giDL.handle, 0, giF32}, {gwDL.handle, 0, gwF32}, {gbDL.handle, 0, gbF32}};
+        VkDescriptorSet ds = cache.allocDescriptorSet("fnn-linear-backward", bi);
+        LinearBackwardParams bp{BS, in, out, 2u};
+        // fnn-linear-backward is a 16x16 workgroup; pass 2 uses GlobalInvocationID.x
+        // for out_idx, so the X grid must be ceil(out/16), NOT ceil(out/256).
+        batch.dispatch(bwPipe.pipeline, bwPipe.layout, ds,
+                       (out + 15u) / 16u, 1, 1, &bp, sizeof(bp));
+    }
+    batch.transferComputeBarrier();
+
+    // stage-out
+    batch.copyBuffer(giDL, giS, giF32);
+    batch.copyBuffer(gwDL, gwS, gwF32);
+    batch.copyBuffer(gbDL, gbS, gbF32);
+    batch.submitDeferred();
+    batch.waitForCompletion();
+
+    pool.download(giS, reinterpret_cast<float*>(gradInput), giF32);
+    pool.download(gwS, reinterpret_cast<float*>(gradWeight), gwF32);
+    pool.download(gbS, reinterpret_cast<float*>(gradBias), gbF32);
+
+    pool.release(gDL); pool.release(xDL); pool.release(wDL);
+    pool.release(g16); pool.release(x16); pool.release(w16); pool.release(gT16);
+    pool.release(giDL); pool.release(gwDL); pool.release(gbDL);
+    pool.release(gS); pool.release(xS); pool.release(wS);
+    pool.release(giS); pool.release(gwS); pool.release(gbS);
+}
+
 
 // ── GPU dropout ──────────────────────────────────────────────────────────
 

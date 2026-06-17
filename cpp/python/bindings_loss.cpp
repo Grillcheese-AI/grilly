@@ -83,6 +83,42 @@ void register_loss_ops(py::module_& m) {
         py::arg("device"), py::arg("logits"), py::arg("targets"),
         "GPU cross-entropy backward");
 
+    // â”€â”€ Cross-entropy FUSED loss + gradient â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    m.def(
+        "cross_entropy_fused",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> logits,
+           py::array_t<uint32_t> targets) -> py::tuple {
+            auto lBuf = logits.request();
+            require_c_contiguous_float(lBuf);
+            if (lBuf.ndim != 2)
+                throw std::runtime_error("cross_entropy_fused: logits must be 2D (batch, num_classes)");
+            uint32_t batchSize = static_cast<uint32_t>(lBuf.shape[0]);
+            uint32_t numClasses = static_cast<uint32_t>(lBuf.shape[1]);
+
+            py::array_t<float> losses(batchSize);
+            py::array_t<float> gradLogits(lBuf.shape);
+            auto tBuf = targets.request();
+            require_c_contiguous_uint32(tBuf);
+            auto lossBuf = losses.request();
+            auto gBuf = gradLogits.request();
+
+            grilly::ops::CrossEntropyFusedParams p{batchSize, numClasses};
+            {
+                py::gil_scoped_release release;
+                grilly::ops::crossEntropyFused(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(lBuf.ptr),
+                    static_cast<const uint32_t*>(tBuf.ptr),
+                    static_cast<float*>(lossBuf.ptr),
+                    static_cast<float*>(gBuf.ptr), p);
+            }
+            return py::make_tuple(Tensor::from_numpy(losses),
+                                  Tensor::from_numpy(gradLogits));
+        },
+        py::arg("device"), py::arg("logits"), py::arg("targets"),
+        "GPU fused cross-entropy loss + gradient (one dispatch)");
+
     // ── MSE Loss ─────────────────────────────────────────────────────────
     m.def(
         "mse_loss",
