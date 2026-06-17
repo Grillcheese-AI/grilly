@@ -61,14 +61,19 @@ GrillyDevice::GrillyDevice(GrillyDevice&& other) noexcept
     : instance_(other.instance_),
       physicalDevice_(other.physicalDevice_),
       device_(other.device_),
-      queue_(other.queue_),
-      queueFamily_(other.queueFamily_),
+      computeQueue_(other.computeQueue_),
+      computeQueueFamily_(other.computeQueueFamily_),
+      transferQueue_(other.transferQueue_),
+      transferQueueFamily_(other.transferQueueFamily_),
       enabledExtensions_(std::move(other.enabledExtensions_)),
       deviceName_(std::move(other.deviceName_)) {
     other.instance_ = VK_NULL_HANDLE;
     other.physicalDevice_ = VK_NULL_HANDLE;
     other.device_ = VK_NULL_HANDLE;
-    other.queue_ = VK_NULL_HANDLE;
+    other.computeQueue_ = VK_NULL_HANDLE;
+    other.computeQueueFamily_ = 0;
+    other.transferQueue_ = VK_NULL_HANDLE;
+    other.transferQueueFamily_ = UINT32_MAX;
 }
 
 GrillyDevice& GrillyDevice::operator=(GrillyDevice&& other) noexcept {
@@ -84,15 +89,20 @@ GrillyDevice& GrillyDevice::operator=(GrillyDevice&& other) noexcept {
         instance_ = other.instance_;
         physicalDevice_ = other.physicalDevice_;
         device_ = other.device_;
-        queue_ = other.queue_;
-        queueFamily_ = other.queueFamily_;
+        computeQueue_ = other.computeQueue_;
+        computeQueueFamily_ = other.computeQueueFamily_;
+        transferQueue_ = other.transferQueue_;
+        transferQueueFamily_ = other.transferQueueFamily_;
         enabledExtensions_ = std::move(other.enabledExtensions_);
         deviceName_ = std::move(other.deviceName_);
 
         other.instance_ = VK_NULL_HANDLE;
         other.physicalDevice_ = VK_NULL_HANDLE;
         other.device_ = VK_NULL_HANDLE;
-        other.queue_ = VK_NULL_HANDLE;
+        other.computeQueue_ = VK_NULL_HANDLE;
+        other.computeQueueFamily_ = 0;
+        other.transferQueue_ = VK_NULL_HANDLE;
+        other.transferQueueFamily_ = UINT32_MAX;
     }
     return *this;
 }
@@ -161,7 +171,7 @@ void GrillyDevice::initVulkan() {
         std::cout << std::endl;
     }
 
-    // ── Find compute queue family ──
+    // ── Find compute and transfer queue families ──
     uint32_t queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice_,
                                               &queueFamilyCount, nullptr);
@@ -170,23 +180,64 @@ void GrillyDevice::initVulkan() {
                                               &queueFamilyCount,
                                               queueFamilies.data());
 
-    queueFamily_ = UINT32_MAX;
+    // Find dedicated compute queue (prefer one without graphics for better async)
+    computeQueueFamily_ = UINT32_MAX;
     for (uint32_t i = 0; i < queueFamilyCount; ++i) {
-        if (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
-            queueFamily_ = i;
+        // Prefer pure compute queue (no graphics bit)
+        if ((queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT) &&
+            !(queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+            computeQueueFamily_ = i;
             break;
         }
     }
-    if (queueFamily_ == UINT32_MAX)
+    // Fallback: any compute queue
+    if (computeQueueFamily_ == UINT32_MAX) {
+        for (uint32_t i = 0; i < queueFamilyCount; ++i) {
+            if (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+                computeQueueFamily_ = i;
+                break;
+            }
+        }
+    }
+    if (computeQueueFamily_ == UINT32_MAX)
         throw std::runtime_error("No compute queue family found");
 
-    // ── Create logical device ──
-    float queuePriority = 1.0f;
-    VkDeviceQueueCreateInfo queueCreateInfo{};
-    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queueCreateInfo.queueFamilyIndex = queueFamily_;
-    queueCreateInfo.queueCount = 1;
-    queueCreateInfo.pQueuePriorities = &queuePriority;
+    // Find dedicated transfer queue (async DMA engine)
+    transferQueueFamily_ = UINT32_MAX;
+    for (uint32_t i = 0; i < queueFamilyCount; ++i) {
+        // Look for transfer-only queue (no compute, no graphics)
+        if ((queueFamilies[i].queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+            !(queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT) &&
+            !(queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+            transferQueueFamily_ = i;
+            break;
+        }
+    }
+
+    // ── Create logical device with compute + transfer queues ──
+    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+    std::vector<float> queuePriorities;
+    
+    // Compute queue
+    queuePriorities.push_back(1.0f);
+    VkDeviceQueueCreateInfo computeQueueInfo{};
+    computeQueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    computeQueueInfo.queueFamilyIndex = computeQueueFamily_;
+    computeQueueInfo.queueCount = 1;
+    computeQueueInfo.pQueuePriorities = &queuePriorities[0];
+    queueCreateInfos.push_back(computeQueueInfo);
+    
+    // Transfer queue (if separate from compute)
+    if (transferQueueFamily_ != UINT32_MAX && 
+        transferQueueFamily_ != computeQueueFamily_) {
+        queuePriorities.push_back(1.0f);
+        VkDeviceQueueCreateInfo transferQueueInfo{};
+        transferQueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        transferQueueInfo.queueFamilyIndex = transferQueueFamily_;
+        transferQueueInfo.queueCount = 1;
+        transferQueueInfo.pQueuePriorities = &queuePriorities[1];
+        queueCreateInfos.push_back(transferQueueInfo);
+    }
 
     // ── Build pNext feature chain (mirrors core.py:240-326) ──
     // We query each feature struct from the physical device and only request
@@ -339,8 +390,9 @@ void GrillyDevice::initVulkan() {
 
     VkDeviceCreateInfo deviceCreateInfo{};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    deviceCreateInfo.queueCreateInfoCount = 1;
-    deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
+    deviceCreateInfo.queueCreateInfoCount = 
+        static_cast<uint32_t>(queueCreateInfos.size());
+    deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
     deviceCreateInfo.enabledExtensionCount =
         static_cast<uint32_t>(enabledExtPtrs.size());
     deviceCreateInfo.ppEnabledExtensionNames = enabledExtPtrs.data();
@@ -351,7 +403,20 @@ void GrillyDevice::initVulkan() {
                            &device_),
             "vkCreateDevice failed");
 
-    vkGetDeviceQueue(device_, queueFamily_, 0, &queue_);
+    // Get compute queue
+    vkGetDeviceQueue(device_, computeQueueFamily_, 0, &computeQueue_);
+    
+    // Get transfer queue if separate
+    if (transferQueueFamily_ != UINT32_MAX && 
+        transferQueueFamily_ != computeQueueFamily_) {
+        vkGetDeviceQueue(device_, transferQueueFamily_, 0, &transferQueue_);
+        std::cout << "[OK] Separate transfer queue on family " 
+                  << transferQueueFamily_ << " (async DMA enabled)" << std::endl;
+    } else {
+        transferQueue_ = computeQueue_;  // Use compute queue for transfers
+        std::cout << "[INFO] No separate transfer queue - using compute queue" 
+                  << std::endl;
+    }
 
     std::cout << "[OK] Vulkan device initialized (C++ backend)" << std::endl;
 }

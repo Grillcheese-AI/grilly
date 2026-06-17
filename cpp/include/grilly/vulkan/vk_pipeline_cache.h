@@ -3,6 +3,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include <atomic>
 #include <cstdint>
 #include <list>
 #include <mutex>
@@ -22,7 +23,9 @@ struct PipelineEntry {
     VkShaderModule shaderModule = VK_NULL_HANDLE;
 };
 
-/// Pipeline and descriptor set cache with LRU eviction.
+/// Pipeline and descriptor set cache with LRU eviction and lazy shader loading.
+/// Shaders are loaded on-demand instead of eagerly at startup to reduce
+/// initialization time and memory usage for unused shaders.
 class PipelineCache {
 public:
     // Pool must hold MORE sets than kMaxCachedDescSets (so eviction frees a
@@ -38,6 +41,10 @@ public:
 
     void loadSPIRV(const std::string& name, const std::vector<uint8_t>& code);
     void loadSPIRVFile(const std::string& name, const std::string& path);
+    
+    /// Lazy-load SPIR-V from file on first use. The path is stored and the
+    /// shader is loaded only when getOrCreate() is called for this shader.
+    void registerSPIRVFile(const std::string& name, const std::string& path);
 
     PipelineEntry getOrCreate(const std::string& name, uint32_t numBuffers,
                               uint32_t pushConstSize = 0);
@@ -56,8 +63,15 @@ public:
     void clearDescriptorCache();
 
     bool hasShader(const std::string& name) const {
-        return spirvCode_.count(name) > 0;
+        return spirvCode_.count(name) > 0 || pendingFiles_.count(name) > 0;
     }
+    
+    /// Get cache statistics including lazy-loading metrics
+    struct ExtendedStats : CacheStats {
+        size_t pendingShaders = 0;
+        uint64_t lazyLoads = 0;
+    };
+    ExtendedStats extendedStats() const;
 
     /// Access the underlying device for capability queries
     /// (e.g. ``hasCooperativeMatrix()``).
@@ -79,12 +93,18 @@ private:
     VkPipeline createPipeline(const std::vector<uint8_t>& spirv,
                               VkPipelineLayout pipeLayout,
                               VkShaderModule& outModule);
+    
+    /// Internal: lazy-load a registered shader on first use
+    void ensureShaderLoaded(const std::string& name);
 
     GrillyDevice& device_;
     VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
 
     std::unordered_map<std::string, std::vector<uint8_t>> spirvCode_;
+    std::unordered_map<std::string, std::string> pendingFiles_;  // name -> path for lazy loading
     std::unordered_map<std::string, PipelineEntry> pipelines_;
+    
+    mutable std::atomic<uint64_t> lazyLoadCount_{0};
 
     struct DescCacheKey {
         std::string shaderName;
