@@ -92,6 +92,18 @@ void linearBackward(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
                     void* gradInput, void* gradWeight, void* gradBias,
                     const LinearParams& p);
 
+/// fp16 cooperative-matrix backward. Same math + signature as linearBackward,
+/// but the grad_input / grad_weight GEMMs run through gemm-coopmat-shared
+/// (fp16 in, fp32 accumulate). Inputs AND outputs are fp32 (conversion is
+/// internal). Caller MUST ensure coopmat alignment: BS%16, out%16, in%64.
+/// grad_bias is computed in fp32 via fnn-linear-backward pass 2.
+void linearBackwardCoopmat(CommandBatch& batch, BufferPool& pool,
+                           PipelineCache& cache,
+                           const void* gradOutput, const void* input,
+                           const void* weights,
+                           void* gradInput, void* gradWeight, void* gradBias,
+                           const LinearParams& p);
+
 /// Dropout push constants — matches fnn-dropout.glsl.
 struct DropoutParams {
     uint32_t totalElements;

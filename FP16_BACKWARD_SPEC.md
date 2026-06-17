@@ -150,9 +150,23 @@ which helps). Gate each shape:
    from Python (no binding sets the flag). Its plain-A·B math is validated
    indirectly (forward with pre-transposed W gives 2.9e-04), but its first true
    test is step 3, where grad_weight invokes it. Gate it there.
-3. fp16 branch in `ops::linearBackward` + alignment fallback. Parity-test BOTH
-   grad_input (transpose_b=1) and grad_weight (transpose_b=0) vs the fp32
-   `gemm_tiled` path on one aligned shape. **No autograd/hot-path change yet.**
+3. ✓ DONE — added `linearBackwardCoopmat` (fp32 in/out, fp16 coopmat GEMMs
+   internally) + binding `linear_backward_coopmat`. Both backward GEMMs use
+   transpose_b=0 (plain A·B): grad_input = g·W (B=W read plain as (out,in)),
+   grad_weight = gᵀ·x (gᵀ built fp16 via transpose-f32-f16). grad_bias fp32 via
+   fnn-linear-backward pass 2. Parity vs numpy ref, 6 shapes (incl. MinGRU-proj
+   512x1024x3072, SwiGLU-down 512x4096x1024): grad_input/grad_weight ~7.7e-04,
+   grad_bias EXACT — ALL PASS <1e-2. No autograd/hot-path change. NOTE: this
+   means grad_input also uses transpose_b=0, NOT transpose_b=1 as the earlier
+   key-finding guessed — because W is stored (out,in) which IS already the plain
+   (K=out,N=in) operand, so no Báµ€ needed. The transpose_b=1 path remains the
+   forward-only case.
+   BONUS FIX: found + fixed a latent bug in the EXISTING fp32 `ops::linearBackward`
+   — grad_bias pass 2 dispatched ceil(out/256) workgroups but the shader is a
+   16-wide workgroup, so only the first 64 of 1024 bias entries were ever
+   computed (15/16 left zero). Now ceil(out/16). This bug only affected the
+   `ops::linearBackward` binding, not the resident autograd path (which has its
+   own bias handling).
 4. Wire `backward_linear` (autograd.cpp) option (B) behind the autotuner table,
    one shape at a time, parity-gated. Measure END-TO-END step time, not µbench —
    the cast+transpose dispatches eat into the kernel win.

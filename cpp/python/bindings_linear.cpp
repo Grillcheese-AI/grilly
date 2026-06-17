@@ -297,4 +297,72 @@ void register_linear_ops(py::module_& m) {
         py::arg("device"), py::arg("grad_output"), py::arg("input"),
         py::arg("weights"),
         "GPU linear backward — returns (grad_input, grad_weight, grad_bias).");
+
+    // â”€â”€ GPU linear backward via fp16 coopmat (fp32 in/out) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    //
+    // Mirrors linear_backward but routes grad_input / grad_weight through the
+    // fp16 cooperative-matrix kernel. Inputs and outputs are fp32. Caller MUST
+    // pass coopmat-aligned shapes: batchSeq%16, outputDim%16, inputDim%64.
+    // For parity testing the fp16 path against the fp32 linear_backward.
+    m.def(
+        "linear_backward_coopmat",
+        [](GrillyCoreContext& ctx,
+           py::array_t<float> grad_output, py::array_t<float> input,
+           py::array_t<float> weights) -> py::tuple {
+            const int gNdim = grad_output.ndim();
+            const int iNdim = input.ndim();
+            if (gNdim < 1 || iNdim < 1)
+                throw std::runtime_error(
+                    "linear_backward_coopmat: inputs must have rank >= 1");
+
+            uint32_t batchSeq = 1;
+            for (int i = 0; i < gNdim - 1; ++i)
+                batchSeq *= static_cast<uint32_t>(grad_output.shape(i));
+            if (gNdim == 1) batchSeq = 1;
+            const uint32_t outputDim =
+                static_cast<uint32_t>(grad_output.shape(gNdim - 1));
+            const uint32_t inputDim =
+                static_cast<uint32_t>(input.shape(iNdim - 1));
+
+            if (batchSeq % 16u || outputDim % 16u || inputDim % 64u)
+                throw std::runtime_error(
+                    "linear_backward_coopmat: shape not coopmat-aligned "
+                    "(need batchSeq%16, outputDim%16, inputDim%64)");
+
+            grilly::ops::LinearParams p{
+                batchSeq, inputDim, outputDim, 1u, 4u};
+
+            std::vector<py::ssize_t> inputShape(iNdim);
+            for (int i = 0; i < iNdim; ++i)
+                inputShape[i] = input.shape(i);
+            std::vector<py::ssize_t> weightShape(weights.ndim());
+            for (int i = 0; i < weights.ndim(); ++i)
+                weightShape[i] = weights.shape(i);
+            std::vector<py::ssize_t> biasShape = {
+                static_cast<py::ssize_t>(outputDim)};
+
+            py::array_t<float> gradInput(inputShape);
+            py::array_t<float> gradWeight(weightShape);
+            py::array_t<float> gradBias(biasShape);
+
+            const void* gPtr = grad_output.data();
+            const void* iPtr = input.data();
+            const void* wPtr = weights.data();
+            void* gInPtr = gradInput.mutable_data();
+            void* gWPtr  = gradWeight.mutable_data();
+            void* gBPtr  = gradBias.mutable_data();
+
+            {
+                py::gil_scoped_release release;
+                grilly::ops::linearBackwardCoopmat(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    gPtr, iPtr, wPtr,
+                    gInPtr, gWPtr, gBPtr, p);
+            }
+
+            return py::make_tuple(gradInput, gradWeight, gradBias);
+        },
+        py::arg("device"), py::arg("grad_output"), py::arg("input"),
+        py::arg("weights"),
+        "fp16-coopmat linear backward (fp32 in/out) for parity testing.");
 }
