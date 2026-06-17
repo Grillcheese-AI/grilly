@@ -355,7 +355,10 @@ void BufferPool::ensureTransferContext() {
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    poolInfo.queueFamilyIndex = device_.queueFamily();
+    // Use transfer queue family if separate, otherwise compute queue
+    poolInfo.queueFamilyIndex = device_.hasSeparateTransferQueue() 
+        ? device_.transferQueueFamily() 
+        : device_.computeQueueFamily();
     vkCheck(vkCreateCommandPool(device_.device(), &poolInfo, nullptr, &transferPool_),
             "transfer pool creation failed");
 

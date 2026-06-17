@@ -22,7 +22,7 @@ CommandBatch::CommandBatch(GrillyDevice& device) : device_(device) {
     // (same flags as core.py:343-348)
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.queueFamilyIndex = device_.queueFamily();
+    poolInfo.queueFamilyIndex = device_.computeQueueFamily();
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     vkCheck(vkCreateCommandPool(device_.device(), &poolInfo, nullptr, &pool_),

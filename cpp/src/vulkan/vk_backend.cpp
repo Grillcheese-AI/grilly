@@ -14,9 +14,17 @@ VulkanBackend::VulkanBackend()
 VulkanBackend::~VulkanBackend() {
     // Release all tracked buffers
     auto alloc = pool_.allocator();
-    for (auto& [handle, buf] : handles_) {
-        if (buf.handle != VK_NULL_HANDLE)
-            vmaDestroyBuffer(alloc, buf.handle, buf.allocation);
+    for (auto& [handle, bufPtr] : handles_) {
+        if (bufPtr && bufPtr->handle != VK_NULL_HANDLE) {
+            // Exception safety: don't throw during destruction
+            try {
+                vmaDestroyBuffer(alloc, bufPtr->handle, bufPtr->allocation);
+            } catch (...) {
+                // Log but don't propagate - throwing from destructor causes std::terminate
+                std::cerr << "[WARN] vmaDestroyBuffer failed for handle " 
+                          << handle << " during cleanup" << std::endl;
+            }
+        }
     }
     handles_.clear();
 }
@@ -30,20 +38,20 @@ std::string VulkanBackend::deviceName() const {
 // ── Buffer management ───────────────────────────────────────────────────────
 
 uint64_t VulkanBackend::createBuffer(const BufferDesc& desc) {
-    GrillyBuffer buf;
+    auto buf = std::make_shared<GrillyBuffer>();
     switch (desc.usage) {
         case BufferDesc::DeviceLocal:
-            buf = pool_.acquireDeviceLocal(desc.size);
+            *buf = pool_.acquireDeviceLocal(desc.size);
             break;
         case BufferDesc::Readback:
-            buf = pool_.acquireReadback(desc.size);
+            *buf = pool_.acquireReadback(desc.size);
             break;
         case BufferDesc::PreferDevice:
-            buf = pool_.acquirePreferDeviceLocal(desc.size);
+            *buf = pool_.acquirePreferDeviceLocal(desc.size);
             break;
         case BufferDesc::HostVisible:
         default:
-            buf = pool_.acquire(desc.size);
+            *buf = pool_.acquire(desc.size);
             break;
     }
 
@@ -59,32 +67,39 @@ void VulkanBackend::destroyBuffer(uint64_t handle) {
     if (it == handles_.end()) return;
 
     auto alloc = pool_.allocator();
-    if (it->second.handle != VK_NULL_HANDLE)
-        vmaDestroyBuffer(alloc, it->second.handle, it->second.allocation);
+    auto& bufPtr = it->second;
+    if (bufPtr && bufPtr->handle != VK_NULL_HANDLE) {
+        try {
+            vmaDestroyBuffer(alloc, bufPtr->handle, bufPtr->allocation);
+        } catch (...) {
+            std::cerr << "[WARN] vmaDestroyBuffer failed for handle " 
+                      << handle << std::endl;
+        }
+    }
     handles_.erase(it);
 }
 
 void VulkanBackend::upload(uint64_t handle, const void* data, size_t bytes) {
-    auto& buf = resolveBuffer(handle);
-    if (buf.mappedPtr) {
+    auto buf = resolveBuffer(handle);
+    if (buf->mappedPtr) {
         // Host-visible: direct memcpy
-        pool_.upload(buf, static_cast<const float*>(data), bytes);
+        pool_.upload(*buf, static_cast<const float*>(data), bytes);
     } else {
         // Device-local: staged upload
-        pool_.uploadStaged(buf, data, bytes);
+        pool_.uploadStaged(*buf, data, bytes);
     }
 }
 
 void VulkanBackend::download(uint64_t handle, void* out, size_t bytes) {
-    auto& buf = resolveBuffer(handle);
-    if (buf.mappedPtr) {
-        pool_.download(buf, static_cast<float*>(out), bytes);
+    auto buf = resolveBuffer(handle);
+    if (buf->mappedPtr) {
+        pool_.download(*buf, static_cast<float*>(out), bytes);
     } else {
-        pool_.downloadStaged(buf, out, bytes);
+        pool_.downloadStaged(*buf, out, bytes);
     }
 }
 
-GrillyBuffer& VulkanBackend::resolveBuffer(uint64_t handle) {
+std::shared_ptr<GrillyBuffer> VulkanBackend::resolveBuffer(uint64_t handle) {
     std::lock_guard<std::mutex> lock(handleMutex_);
     auto it = handles_.find(handle);
     if (it == handles_.end())
@@ -93,7 +108,7 @@ GrillyBuffer& VulkanBackend::resolveBuffer(uint64_t handle) {
     return it->second;
 }
 
-const GrillyBuffer& VulkanBackend::resolveBuffer(uint64_t handle) const {
+std::shared_ptr<const GrillyBuffer> VulkanBackend::resolveBuffer(uint64_t handle) const {
     std::lock_guard<std::mutex> lock(handleMutex_);
     auto it = handles_.find(handle);
     if (it == handles_.end())
@@ -149,8 +164,8 @@ void VulkanBackend::dispatch(const std::string& shader,
     std::vector<VkDescriptorBufferInfo> bufInfos;
     bufInfos.reserve(buffers.size());
     for (uint64_t h : buffers) {
-        auto& buf = resolveBuffer(h);
-        bufInfos.push_back({buf.handle, 0, buf.size});
+        auto buf = resolveBuffer(h);
+        bufInfos.push_back({buf->handle, 0, buf->size});
     }
 
     if (graphMode_) {

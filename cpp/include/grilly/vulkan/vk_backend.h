@@ -12,6 +12,7 @@
 #include "grilly/vulkan/vk_device.h"
 #include "grilly/vulkan/vk_pipeline_cache.h"
 
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 
@@ -57,8 +58,10 @@ public:
     CommandBatch& batch() { return batch_; }
 
     /// Resolve an opaque handle to its GrillyBuffer.
-    GrillyBuffer& resolveBuffer(uint64_t handle);
-    const GrillyBuffer& resolveBuffer(uint64_t handle) const;
+    /// Returns shared_ptr for thread-safe access - the buffer remains valid
+    /// even if the map is modified concurrently.
+    std::shared_ptr<GrillyBuffer> resolveBuffer(uint64_t handle);
+    std::shared_ptr<const GrillyBuffer> resolveBuffer(uint64_t handle) const;
 
     // ── Graph recording mode ──
     // When enabled, dispatch() records ops into an OpGraph instead of
@@ -79,9 +82,11 @@ private:
     OpGraph graph_;
 
     // Handle -> GrillyBuffer mapping
+    // Using shared_ptr ensures thread safety: returned pointers remain valid
+    // even after mutex is released or map is modified
     mutable std::mutex handleMutex_;
     uint64_t nextHandle_ = 1;
-    std::unordered_map<uint64_t, GrillyBuffer> handles_;
+    std::unordered_map<uint64_t, std::shared_ptr<GrillyBuffer>> handles_;
 };
 
 }  // namespace grilly

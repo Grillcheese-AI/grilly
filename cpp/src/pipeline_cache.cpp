@@ -99,6 +99,41 @@ void PipelineCache::loadSPIRVFile(const std::string& name,
     loadSPIRV(name, code);
 }
 
+void PipelineCache::registerSPIRVFile(const std::string& name,
+                                       const std::string& path) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Only register if not already loaded or pending
+    if (spirvCode_.find(name) == spirvCode_.end() &&
+        pendingFiles_.find(name) == pendingFiles_.end()) {
+        pendingFiles_[name] = path;
+    }
+}
+
+// ── Internal: lazy load shader if needed ────────────────────────────────────
+
+void PipelineCache::ensureShaderLoaded(const std::string& name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    auto it = pendingFiles_.find(name);
+    if (it != pendingFiles_.end()) {
+        // Load the shader from file on-demand
+        const std::string& path = it->second;
+        std::ifstream file(path, std::ios::ate | std::ios::binary);
+        if (!file.is_open()) {
+            throw std::runtime_error("Failed to open lazy-loaded shader: " + path);
+        }
+
+        size_t fileSize = static_cast<size_t>(file.tellg());
+        std::vector<uint8_t> code(fileSize);
+        file.seekg(0);
+        file.read(reinterpret_cast<char*>(code.data()), fileSize);
+        
+        spirvCode_[name] = code;
+        pendingFiles_.erase(it);
+        lazyLoadCount_++;
+    }
+}
+
 // ── Internal: create Vulkan objects ─────────────────────────────────────────
 
 VkDescriptorSetLayout PipelineCache::createDescLayout(uint32_t numBuffers) {
@@ -187,6 +222,9 @@ VkPipeline PipelineCache::createPipeline(const std::vector<uint8_t>& spirv,
 PipelineEntry PipelineCache::getOrCreate(const std::string& name,
                                           uint32_t numBuffers,
                                           uint32_t pushConstSize) {
+    // Lazy-load shader if it was registered but not yet loaded
+    ensureShaderLoaded(name);
+    
     std::lock_guard<std::mutex> lock(mutex_);
 
     // Check flat_map cache
@@ -317,6 +355,16 @@ PipelineCache::CacheStats PipelineCache::cacheStats() const {
     std::lock_guard<std::mutex> lock(mutex_);
     CacheStats s = stats_;
     s.cachedSets = descCache_.size();
+    return s;
+}
+
+PipelineCache::ExtendedStats PipelineCache::extendedStats() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ExtendedStats s;
+    static_cast<CacheStats&>(s) = stats_;
+    s.cachedSets = descCache_.size();
+    s.pendingShaders = pendingFiles_.size();
+    s.lazyLoads = lazyLoadCount_.load();
     return s;
 }
 

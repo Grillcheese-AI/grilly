@@ -30,13 +30,16 @@ public:
 
     VkDevice device() const { return device_; }
     VkPhysicalDevice physicalDevice() const { return physicalDevice_; }
-    VkQueue computeQueue() const { return queue_; }
-    uint32_t queueFamily() const { return queueFamily_; }
+    VkQueue computeQueue() const { return computeQueue_; }
+    uint32_t computeQueueFamily() const { return computeQueueFamily_; }
+    VkQueue transferQueue() const { return transferQueue_; }
+    uint32_t transferQueueFamily() const { return transferQueueFamily_; }
     VkInstance instance() const { return instance_; }
 
     bool hasExtension(const std::string& name) const;
     bool hasCooperativeMatrix() const;
     bool hasFloat16() const;
+    bool hasSeparateTransferQueue() const { return transferQueue_ != VK_NULL_HANDLE; }
 
     /// Enumerate the device's supported cooperative-matrix configurations via
     /// vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR. One human-readable
@@ -54,8 +57,10 @@ private:
     VkInstance instance_ = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice_ = VK_NULL_HANDLE;
     VkDevice device_ = VK_NULL_HANDLE;
-    VkQueue queue_ = VK_NULL_HANDLE;
-    uint32_t queueFamily_ = 0;
+    VkQueue computeQueue_ = VK_NULL_HANDLE;
+    uint32_t computeQueueFamily_ = 0;
+    VkQueue transferQueue_ = VK_NULL_HANDLE;
+    uint32_t transferQueueFamily_ = UINT32_MAX;
 
     std::set<std::string> enabledExtensions_;
     std::string deviceName_;

@@ -1,25 +1,34 @@
-# Examples 1:
-
-# Example 2 (Project with artifacts):
-#Compiled and build artifacts
-*.pyc
-pycache/
+```
+# Build artifacts
 *.o
 *.obj
-dist/
-build/
-#Dependencies
-.venv/
-venv/
-node_modules/
-#Logs and temp files
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+*.out
+
+# C++ specific
+*.ilk
+*.ipdb
+*.iobj
+*.pdb
+*.exp
+
+# Dependencies
+vendor/
+
+# Logs
 *.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Temporary files
 *.tmp
-*.swp
-#Environment
-.env
-.env.local
-.env.*
-#Editors
-.vscode/
-.idea/
+*.temp
+*~
+```
