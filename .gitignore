@@ -65,3 +65,14 @@ htmlcov/
 *.tar.xz
 *.tar.zst
 ```
+/build2
+/build_verify_pybind2/CMakeFiles/7d03cb867a8e6a035aea0b4ca8f520a6
+/build_verify_pybind2
+/site
+/private
+grilly_core.cp312-win_amd64.pyd
+/grilly.egg-info
+/external
+/build_verify_pybind
+/.claude
+/experimental_datasets

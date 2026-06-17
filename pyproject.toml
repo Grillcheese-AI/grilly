@@ -33,6 +33,7 @@ keywords = ["vulkan", "gpu", "neural-network", "snn", "compute-shaders", "gpu-ac
 
 dependencies = [
     "numpy",
+    "pytest-asyncio>=1.3.0",
 ]
 
 [project.optional-dependencies]

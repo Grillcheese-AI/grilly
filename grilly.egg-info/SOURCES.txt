@@ -1,14 +1,22 @@
+.coverage
 .readthedocs.yaml
 AUTOGRAD_STATE.md
 CHANGELOG.md
 CLAUDE.md
 CMakeLists.txt
+CODEBASE_ANALYSIS.md
+FP16_BACKWARD_SPEC.md
+GEMM_AUTOTUNE.md
 INSTALL.md
 LICENSE
 MANIFEST.in
+Makefile
 README.md
 SUPPORTED_DEVICES.md
+TODO.md
 __init__.py
+_version.py
+codegraph.html
 grilly_core.exp
 grilly_core.lib
 grilly_core.pdb
@@ -28,7 +36,6 @@ test_backward_mingru.py
 test_backward_rmsnorm.py
 test_backward_silu.py
 test_backward_swiglu.py
-todo.md
 torch_api_example.py
 uv.lock
 ./__init__.py
@@ -93,6 +100,7 @@ uv.lock
 ./shaders/bridge-spike-to-continuous.glsl
 ./shaders/bridge-temporal-weights.glsl
 ./shaders/capsule-project.glsl
+./shaders/cast-f32-f16.glsl
 ./shaders/circular-shift.glsl
 ./shaders/contrastive-gradient.glsl
 ./shaders/contrastive-loss.glsl
@@ -113,6 +121,7 @@ uv.lock
 ./shaders/densenet-conv2d.glsl
 ./shaders/dequant-4bit.glsl
 ./shaders/dg-sparse-expand.glsl
+./shaders/distillation-loss.glsl
 ./shaders/domain-classifier.glsl
 ./shaders/domain-combine-experts.glsl
 ./shaders/domain-predict.glsl
@@ -199,6 +208,7 @@ uv.lock
 ./shaders/lif-neuron.glsl
 ./shaders/lora-backward.glsl
 ./shaders/lora-forward.glsl
+./shaders/loss-ce-fused.glsl
 ./shaders/loss-cosine.glsl
 ./shaders/loss-cross-entropy.glsl
 ./shaders/loss-fn-bce.glsl
@@ -282,6 +292,7 @@ uv.lock
 ./shaders/tensor-where.glsl
 ./shaders/theta-gamma-encoding.glsl
 ./shaders/time-cell.glsl
+./shaders/transpose-f32-f16.glsl
 ./shaders/vsa-argmax.glsl
 ./shaders/vsa-binarize-pack.glsl
 ./shaders/vsa-explore.glsl
@@ -364,6 +375,7 @@ uv.lock
 ./shaders/spv/bridge-spike-to-continuous.spv
 ./shaders/spv/bridge-temporal-weights.spv
 ./shaders/spv/capsule-project.spv
+./shaders/spv/cast-f32-f16.spv
 ./shaders/spv/circular-shift.spv
 ./shaders/spv/contrastive-gradient.spv
 ./shaders/spv/contrastive-loss.spv
@@ -384,6 +396,7 @@ uv.lock
 ./shaders/spv/densenet-conv2d.spv
 ./shaders/spv/dequant-4bit.spv
 ./shaders/spv/dg-sparse-expand.spv
+./shaders/spv/distillation-loss.spv
 ./shaders/spv/domain-classifier.spv
 ./shaders/spv/domain-combine-experts.spv
 ./shaders/spv/domain-predict.spv
@@ -470,6 +483,7 @@ uv.lock
 ./shaders/spv/lif-neuron.spv
 ./shaders/spv/lora-backward.spv
 ./shaders/spv/lora-forward.spv
+./shaders/spv/loss-ce-fused.spv
 ./shaders/spv/loss-cosine.spv
 ./shaders/spv/loss-cross-entropy.spv
 ./shaders/spv/loss-fn-bce.spv
@@ -558,6 +572,7 @@ uv.lock
 ./shaders/spv/tensor-where.spv
 ./shaders/spv/theta-gamma-encoding.spv
 ./shaders/spv/time-cell.spv
+./shaders/spv/transpose-f32-f16.spv
 ./shaders/spv/vsa-argmax.spv
 ./shaders/spv/vsa-binarize-pack.spv
 ./shaders/spv/vsa-explore.spv
@@ -596,7 +611,6 @@ assets/SVG/dark-logo-text.svg
 assets/SVG/grilly_mascott.svg
 backend/__init__.py
 backend/_bridge.py
-backend/_glu_append.py
 backend/adaptive_kv.py
 backend/affect.py
 backend/amp.py
@@ -615,6 +629,7 @@ backend/faiss.py
 backend/fft.py
 backend/fnn.py
 backend/fnn_chain.py
+backend/gemm_autotune.py
 backend/hilbert.py
 backend/jit.py
 backend/learning.py
@@ -721,7 +736,6 @@ cpp/include/grilly/vulkan/vk_command_batch.h
 cpp/include/grilly/vulkan/vk_device.h
 cpp/include/grilly/vulkan/vk_pipeline_cache.h
 cpp/proto/grilly_channels.proto
-cpp/python/bindings.cpp
 cpp/python/bindings_activations.cpp
 cpp/python/bindings_attention.cpp
 cpp/python/bindings_autograd.cpp
@@ -730,6 +744,7 @@ cpp/python/bindings_channels.cpp
 cpp/python/bindings_conv.cpp
 cpp/python/bindings_core.cpp
 cpp/python/bindings_core.h
+cpp/python/bindings_distillation.cpp
 cpp/python/bindings_eggroll.cpp
 cpp/python/bindings_fusion.cpp
 cpp/python/bindings_grl.cpp
@@ -813,7 +828,12 @@ cpp/src/ops/vsa_lm_forward.cpp
 cpp/src/temporal/vulkan_temporal.cpp
 cpp/src/training/pipeline.cpp
 cpp/src/vulkan/vk_backend.cpp
+docs/BRIDGE_MIGRATION_CHECKLIST.md
+docs/GPU_OPTIMIZATION_REVIEW.md
+docs/MIGRATION_PYTORCH.md
 docs/PERF_DISPATCH.md
+docs/PYTORCH_PARITY_STATUS.md
+docs/PYTORCH_PARITY_TASKLIST.md
 docs/contributing.md
 docs/grl_v1_format.md
 docs/index.md
@@ -965,6 +985,8 @@ howtos/05-cnns.html
 howtos/06-spiking-neural-networks.html
 howtos/07-advanced-features.html
 howtos/index.html
+legacy_archive/backend/_glu_append.py
+legacy_archive/cpp/python/bindings.cpp
 nn/__init__.py
 nn/_helpers.py
 nn/_perf_policy.py
@@ -1087,6 +1109,7 @@ shaders/bridge-continuous-to-spike.glsl
 shaders/bridge-spike-to-continuous.glsl
 shaders/bridge-temporal-weights.glsl
 shaders/capsule-project.glsl
+shaders/cast-f32-f16.glsl
 shaders/circular-shift.glsl
 shaders/contrastive-gradient.glsl
 shaders/contrastive-loss.glsl
@@ -1107,6 +1130,7 @@ shaders/decode-sample.glsl
 shaders/densenet-conv2d.glsl
 shaders/dequant-4bit.glsl
 shaders/dg-sparse-expand.glsl
+shaders/distillation-loss.glsl
 shaders/domain-classifier.glsl
 shaders/domain-combine-experts.glsl
 shaders/domain-predict.glsl
@@ -1193,6 +1217,7 @@ shaders/int8-gemm.glsl
 shaders/lif-neuron.glsl
 shaders/lora-backward.glsl
 shaders/lora-forward.glsl
+shaders/loss-ce-fused.glsl
 shaders/loss-cosine.glsl
 shaders/loss-cross-entropy.glsl
 shaders/loss-fn-bce.glsl
@@ -1276,6 +1301,7 @@ shaders/tensor-transpose.glsl
 shaders/tensor-where.glsl
 shaders/theta-gamma-encoding.glsl
 shaders/time-cell.glsl
+shaders/transpose-f32-f16.glsl
 shaders/vsa-argmax.glsl
 shaders/vsa-binarize-pack.glsl
 shaders/vsa-explore.glsl
@@ -1360,6 +1386,7 @@ shaders/spv/bridge-continuous-to-spike.spv
 shaders/spv/bridge-spike-to-continuous.spv
 shaders/spv/bridge-temporal-weights.spv
 shaders/spv/capsule-project.spv
+shaders/spv/cast-f32-f16.spv
 shaders/spv/circular-shift.spv
 shaders/spv/contrastive-gradient.spv
 shaders/spv/contrastive-loss.spv
@@ -1380,6 +1407,7 @@ shaders/spv/decode-sample.spv
 shaders/spv/densenet-conv2d.spv
 shaders/spv/dequant-4bit.spv
 shaders/spv/dg-sparse-expand.spv
+shaders/spv/distillation-loss.spv
 shaders/spv/domain-classifier.spv
 shaders/spv/domain-combine-experts.spv
 shaders/spv/domain-predict.spv
@@ -1466,6 +1494,7 @@ shaders/spv/l2-normalize.spv
 shaders/spv/lif-neuron.spv
 shaders/spv/lora-backward.spv
 shaders/spv/lora-forward.spv
+shaders/spv/loss-ce-fused.spv
 shaders/spv/loss-cosine.spv
 shaders/spv/loss-cross-entropy.spv
 shaders/spv/loss-fn-bce.spv
@@ -1554,6 +1583,7 @@ shaders/spv/tensor-transpose.spv
 shaders/spv/tensor-where.spv
 shaders/spv/theta-gamma-encoding.spv
 shaders/spv/time-cell.spv
+shaders/spv/transpose-f32-f16.spv
 shaders/spv/vsa-argmax.spv
 shaders/spv/vsa-binarize-pack.spv
 shaders/spv/vsa-explore.spv
@@ -1581,6 +1611,7 @@ tests/test_blockcode.py
 tests/test_bridge_moe.py
 tests/test_bridge_strict_mode.py
 tests/test_bridge_vsa_lm.py
+tests/test_ce_fused_parity.py
 tests/test_checkpoint.py
 tests/test_conv2d.py
 tests/test_conv_backward_weight_gemm.py
@@ -1625,6 +1656,7 @@ tests/test_natural_gradient.py
 tests/test_normalization_cpu.py
 tests/test_onnx.py
 tests/test_optim_sgd_nlms.py
+tests/test_p0_resident.py
 tests/test_pooling.py
 tests/test_projection_heads.py
 tests/test_q_similarity.py
