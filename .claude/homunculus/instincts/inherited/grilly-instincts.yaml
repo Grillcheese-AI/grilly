@@ -1,0 +1,648 @@
+# Instincts generated from https://github.com/Grillcheese-AI/grilly
+# Generated: 2026-06-17T22:02:17.009Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: grilly-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Commit Length
+
+## Action
+
+Write moderate-length commit messages (~69 characters)
+
+## Evidence
+
+- Average commit message length: 69 chars
+- Based on 56 commits
+
+---
+id: grilly-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Naming Files
+
+## Action
+
+Use snake_case naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: snake_case
+
+---
+id: grilly-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: grilly-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: grilly-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: grilly-test-naming
+trigger: "when creating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Test Naming
+
+## Action
+
+Name test files using the pattern: *.test.ts
+
+## Evidence
+
+- File pattern: *.test.ts
+- Consistent across test files
+
+---
+id: grilly-workflow-feature-development
+trigger: "when implementing a new feature"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Feature Development
+
+## Action
+
+Follow the feature-development workflow:
+1. Add feature implementation
+2. Add tests for feature
+3. Update documentation
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~10x per month
+- Files: **/*.test.*
+
+---
+id: grilly-workflow-test-driven-development
+trigger: "when adding new functionality"
+confidence: 0.75
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Test Driven Development
+
+## Action
+
+Follow the test-driven-development workflow:
+1. Write failing test
+2. Implement code to pass test
+3. Refactor if needed
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~5x per month
+- Files: **/*.test.*, **/*.spec.*, src/**/*
+
+---
+id: grilly-workflow-add-new-autograd-op
+trigger: "when doing add new autograd op"
+confidence: 0.75
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Add New Autograd Op
+
+## Action
+
+Follow the add-new-autograd-op workflow:
+1. Implement or add new GLSL shader(s) for the operation if needed (e.g., shaders/rms-norm-backward.glsl, shaders/spv/rms-norm-backward.spv)
+2. Update C++ autograd headers and source to add the handler (cpp/include/grilly/autograd/autograd.h, cpp/src/autograd.cpp)
+3. Wire the operation into Python bindings (cpp/python/bindings_autograd.cpp)
+4. Add or update a test for the new op (e.g., test_backward_rmsnorm.py, test_backward_swiglu.py, etc.)
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~5x per month
+- Files: cpp/include/grilly/autograd/autograd.h, cpp/src/autograd.cpp, cpp/python/bindings_autograd.cpp
+
+---
+id: grilly-workflow-document-autograd-state-or-milestone
+trigger: "when doing document autograd state or milestone"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Document Autograd State Or Milestone
+
+## Action
+
+Follow the document-autograd-state-or-milestone workflow:
+1. Edit AUTOGRAD_STATE.md to describe new features, bugfixes, or integration steps.
+2. Commit AUTOGRAD_STATE.md (sometimes with TODO.md or related docs).
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~8x per month
+- Files: AUTOGRAD_STATE.md, TODO.md
+
+---
+id: grilly-workflow-integration-test-or-training-script-addition
+trigger: "when doing integration test or training script addition"
+confidence: 0.75
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Integration Test Or Training Script Addition
+
+## Action
+
+Follow the integration-test-or-training-script-addition workflow:
+1. Add or update a script in experimental/resident_train/ (e.g., train_linear_ce.py, train_mingru_ce.py, train_full.py, train_trunk_lm.py, bisect_block.py, etc.)
+2. Run the script to verify integration.
+3. Optionally update documentation with results.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~5x per month
+- Files: experimental/resident_train/*.py
+
+---
+id: grilly-workflow-add-or-update-python-cpp-binding
+trigger: "when doing add or update python cpp binding"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Add Or Update Python Cpp Binding
+
+## Action
+
+Follow the add-or-update-python-cpp-binding workflow:
+1. Implement or update binding in cpp/python/ (e.g., bindings_autograd.cpp, bindings_core.cpp, bindings_core.h)
+2. Update CMakeLists.txt if new binding files are added.
+3. Optionally add a Python test or usage example.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: cpp/python/*.cpp, cpp/python/*.h, CMakeLists.txt
+
+---
+id: grilly-workflow-add-or-update-shader-and-spirv
+trigger: "when doing add or update shader and spirv"
+confidence: 0.65
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Add Or Update Shader And Spirv
+
+## Action
+
+Follow the add-or-update-shader-and-spirv workflow:
+1. Write or modify a GLSL shader in shaders/*.glsl.
+2. Compile to SPIR-V and add/update shaders/spv/*.spv.
+3. Wire up usage in C++ and/or Python if needed.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~3x per month
+- Files: shaders/*.glsl, shaders/spv/*.spv
+
+---
+id: grilly-workflow-add-or-update-todo-or-workboard
+trigger: "when doing add or update todo or workboard"
+confidence: 0.7
+domain: workflow
+source: repo-analysis
+source_repo: https://github.com/Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Add Or Update Todo Or Workboard
+
+## Action
+
+Follow the add-or-update-todo-or-workboard workflow:
+1. Edit TODO.md to add, update, or mark tasks as done.
+2. Commit TODO.md.
+
+## Evidence
+
+- Workflow detected from commit patterns
+- Frequency: ~4x per month
+- Files: TODO.md
+
+---
+id: grilly-coding-file-naming-snake-case
+trigger: "When creating a new file"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Coding File Naming Snake Case
+
+## Action
+
+Name the file using snake_case
+
+## Evidence
+
+- Pattern: files use snake_case naming convention
+
+---
+id: grilly-coding-function-naming-camelCase
+trigger: "When defining a new function"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Coding Function Naming CamelCase
+
+## Action
+
+Name the function using camelCase
+
+## Evidence
+
+- Pattern: functions use camelCase naming convention
+
+---
+id: grilly-coding-class-naming-pascal-case
+trigger: "When defining a new class"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Coding Class Naming Pascal Case
+
+## Action
+
+Name the class using PascalCase
+
+## Evidence
+
+- Pattern: classes use PascalCase naming convention
+
+---
+id: grilly-coding-constant-naming-screaming-snake-case
+trigger: "When defining a constant"
+confidence: 0.9
+domain: code-style
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Coding Constant Naming Screaming Snake Case
+
+## Action
+
+Name the constant using SCREAMING_SNAKE_CASE
+
+## Evidence
+
+- Pattern: constants use SCREAMING_SNAKE_CASE naming convention
+
+---
+id: grilly-coding-import-relative
+trigger: "When importing modules in Python"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Coding Import Relative
+
+## Action
+
+Use relative imports
+
+## Evidence
+
+- Pattern: importStyle is relative
+
+---
+id: grilly-coding-export-named
+trigger: "When exporting modules or functions"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Coding Export Named
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern: exportStyle is named
+
+---
+id: grilly-testing-file-pattern
+trigger: "When creating a new test file"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Testing File Pattern
+
+## Action
+
+Name the test file with the pattern *.test.ts
+
+## Evidence
+
+- Pattern: test files named *.test.ts
+
+---
+id: grilly-testing-unit-tests
+trigger: "When adding tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Testing Unit Tests
+
+## Action
+
+Write unit tests for new features
+
+## Evidence
+
+- Pattern: testTypes includes unit
+
+---
+id: grilly-testing-tdd-workflow
+trigger: "When developing a new feature using TDD"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Testing Tdd Workflow
+
+## Action
+
+First write a failing test, then implement code to pass the test, then refactor if needed
+
+## Evidence
+
+- Workflow: test-driven-development
+- Example commits: 'test: add tests for user validation', 'feat: implement user validation'
+
+---
+id: grilly-git-commit-prefixes
+trigger: "When writing a commit message"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Git Commit Prefixes
+
+## Action
+
+Prefix the commit with a category such as autograd, docs, integration, or todo
+
+## Evidence
+
+- Pattern: commit prefixes
+- Examples: 'autograd: ...', 'docs: ...', 'integration: ...', 'TODO: ...'
+
+---
+id: grilly-git-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Git Commit Length
+
+## Action
+
+Keep the commit message concise, around 69 characters on average
+
+## Evidence
+
+- Pattern: average commit length is 69
+
+---
+id: grilly-workflow-add-new-autograd-op
+trigger: "When adding support for a new operation to the autograd engine"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Add New Autograd Op
+
+## Action
+
+Implement GLSL shader(s) if needed, update C++ autograd headers and source, wire into Python bindings, and add/update a test for the new op
+
+## Evidence
+
+- Workflow: add-new-autograd-op
+- Example files: shaders/*.glsl, cpp/include/grilly/autograd/autograd.h, cpp/python/bindings_autograd.cpp, test_*.py
+
+---
+id: grilly-workflow-document-autograd-state-or-milestone
+trigger: "When completing a significant feature, bugfix, or integration step"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Document Autograd State Or Milestone
+
+## Action
+
+Edit AUTOGRAD_STATE.md to describe the change and commit it (optionally with TODO.md)
+
+## Evidence
+
+- Workflow: document-autograd-state-or-milestone
+- Example files: AUTOGRAD_STATE.md, TODO.md
+
+---
+id: grilly-workflow-integration-test-or-training-script-addition
+trigger: "When verifying a new feature or workflow in a real training or integration scenario"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Integration Test Or Training Script Addition
+
+## Action
+
+Add or update a script in experimental/resident_train/, run it to verify integration, and optionally update documentation with results
+
+## Evidence
+
+- Workflow: integration-test-or-training-script-addition
+- Example files: experimental/resident_train/*.py
+
+---
+id: grilly-workflow-add-or-update-python-cpp-binding
+trigger: "When adding a new C++ feature that needs to be exposed to Python"
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Add Or Update Python Cpp Binding
+
+## Action
+
+Implement or update binding in cpp/python/, update CMakeLists.txt if new files are added, and optionally add a Python test or usage example
+
+## Evidence
+
+- Workflow: add-or-update-python-cpp-binding
+- Example files: cpp/python/*.cpp, cpp/python/*.h, CMakeLists.txt
+
+---
+id: grilly-workflow-add-or-update-shader-and-spirv
+trigger: "When implementing or updating a GPU operation"
+confidence: 0.9
+domain: workflow
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Add Or Update Shader And Spirv
+
+## Action
+
+Write or modify a GLSL shader in shaders/*.glsl, compile to SPIR-V and add/update shaders/spv/*.spv, and wire up usage in C++/Python if needed
+
+## Evidence
+
+- Workflow: add-or-update-shader-and-spirv
+- Example files: shaders/*.glsl, shaders/spv/*.spv
+
+---
+id: grilly-workflow-add-or-update-todo-or-workboard
+trigger: "When recording new tasks, marking tasks as done, or updating project planning"
+confidence: 0.85
+domain: workflow
+source: repo-analysis
+source_repo: Grillcheese-AI/grilly
+---
+
+# Grilly Workflow Add Or Update Todo Or Workboard
+
+## Action
+
+Edit TODO.md to add, update, or mark tasks as done, then commit TODO.md
+
+## Evidence
+
+- Workflow: add-or-update-todo-or-workboard
+- Example files: TODO.md
+
