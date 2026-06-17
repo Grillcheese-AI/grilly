@@ -35,3 +35,4 @@ node_modules/
 grilly_core.cp312-win_amd64.pyd
 /third_party
 /.claude
+/external
