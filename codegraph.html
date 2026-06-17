@@ -1,0 +1,4470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeGraph - Interactive Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #1a1a2e;
+    overflow: hidden;
+}
+#graph {
+    width: 100vw;
+    height: 100vh;
+}
+.node {
+    cursor: pointer;
+}
+.node-module {
+    fill: #009c2c;
+    stroke: #00ff44;
+    stroke-width: 2px;
+}
+.node-module.collapsed {
+    fill: #006618;
+    stroke: #00ff44;
+    stroke-width: 3px;
+    stroke-dasharray: 4, 2;
+}
+.node-entity {
+    fill: #4a90d9;
+    stroke: #70b8ff;
+    stroke-width: 1.5px;
+}
+.node-entity.collapsed {
+    fill: #2a5080;
+    stroke: #70b8ff;
+    stroke-width: 2px;
+    stroke-dasharray: 3, 2;
+}
+.node-external {
+    fill: #808080;
+    stroke: #aaaaaa;
+    stroke-width: 1px;
+}
+.node:hover {
+    filter: brightness(1.3);
+}
+.node-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+.link {
+    fill: none;
+    stroke-opacity: 0.6;
+}
+.link-module-module {
+    stroke: #ff9800;
+    stroke-width: 3px;
+    stroke-opacity: 0.8;
+}
+.link-module-entity {
+    stroke: #009c2c;
+    stroke-width: 1.5px;
+    stroke-dasharray: 5, 3;
+}
+.link-dependency {
+    stroke: #d94a4a;
+    stroke-width: 1.5px;
+}
+.link-hidden {
+    opacity: 0;
+}
+.label {
+    font-size: 11px;
+    fill: #ffffff;
+    pointer-events: none;
+    text-shadow: 0 0 3px #000, 0 0 6px #000;
+}
+.label-module {
+    font-size: 13px;
+    font-weight: bold;
+}
+.label-hidden {
+    opacity: 0;
+}
+.tooltip {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.9);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    border: 1px solid #555;
+    max-width: 300px;
+}
+.tooltip .links-info {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #444;
+}
+.tooltip .links-info span {
+    display: inline-block;
+    margin-right: 12px;
+}
+.tooltip .links-in {
+    color: #4CAF50;
+}
+.tooltip .links-out {
+    color: #ff9800;
+}
+.controls {
+    top: 10px;
+    left: 10px;
+}
+.controls .panel-header h4 {
+    color: #70b8ff;
+}
+.controls p {
+    margin: 5px 0;
+    color: #ccc;
+}
+.controls kbd {
+    background: #333;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: monospace;
+}
+.legend {
+    inset: 10px auto auto 290px;
+}
+.legend .panel-header h4 {
+    color: #70b8ff;
+}
+.legend .panel-content h4 {
+    margin-bottom: 8px;
+    color: #70b8ff;
+    margin-top: 0;
+}
+.legend-section {
+    margin-bottom: 10px;
+}
+.legend-item {
+    display: flex;
+    align-items: center;
+    margin: 4px 0;
+}
+.legend-color {
+    width: 20px;
+    height: 20px;
+    margin-right: 10px;
+    border-radius: 3px;
+}
+.legend-line {
+    width: 30px;
+    height: 3px;
+    margin-right: 10px;
+}
+.legend-module { background: #009c2c; }
+.legend-entity { background: #4a90d9; border-radius: 50%; }
+.legend-external { background: #808080; border-radius: 50%; }
+.legend-link-module { background: #ff9800; }
+.legend-link-entity { background: #009c2c; }
+.legend-link-dep { background: #d94a4a; }
+.stats {
+    top: 10px;
+    right: 10px;
+}
+.stats .panel-header h4 {
+    color: #70b8ff;
+}
+.unlinked-modules {
+    top: 10px;
+    right: 220px;
+    max-height: 400px;
+    max-width: 300px;
+}
+.unlinked-modules .panel-header h4 {
+    color: #ff9800;
+}
+.unlinked-modules .count {
+    color: #888;
+    font-size: 11px;
+    margin-left: 5px;
+}
+/* Tabs inside unlinked panel */
+.unlinked-tabs {
+    display: flex;
+    border-bottom: 1px solid #333;
+    margin-bottom: 10px;
+}
+.unlinked-tab {
+    flex: 1;
+    padding: 8px 4px;
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 11px;
+    transition: color 0.2s, background 0.2s;
+    text-align: center;
+}
+.unlinked-tab:hover {
+    color: #ccc;
+}
+.unlinked-tab.active {
+    color: #ff9800;
+    background: rgba(255, 152, 0, 0.1);
+    border-bottom: 2px solid #ff9800;
+}
+.unlinked-tab-content {
+    display: none;
+}
+.unlinked-tab-content.active {
+    display: block;
+}
+/* Links filter in Links count tab */
+.links-filter {
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #333;
+}
+.links-filter .filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.links-filter label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    font-size: 11px;
+}
+.links-filter input[type="checkbox"] {
+    cursor: pointer;
+}
+.links-filter input[type="number"] {
+    width: 50px;
+    padding: 4px 6px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #333;
+    color: #fff;
+    font-size: 11px;
+}
+.unlinked-modules ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.unlinked-modules li {
+    padding: 4px 8px;
+    margin: 2px 0;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.unlinked-modules li:hover {
+    background: rgba(255, 152, 0, 0.3);
+}
+.unlinked-modules li .path {
+    color: #888;
+    font-size: 10px;
+    display: block;
+    margin-top: 2px;
+}
+.unlinked-modules li .links-count {
+    color: #ff9800;
+    font-weight: bold;
+}
+.unlinked-modules li .entity-type {
+    color: #888;
+    font-size: 10px;
+}
+.unlinked-modules::-webkit-scrollbar {
+    width: 6px;
+}
+.unlinked-modules::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 3px;
+}
+/* Draggable panel styles */
+.panel {
+    position: fixed;
+    background: rgba(0, 0, 0, 0.85);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 12px;
+    z-index: 100;
+    min-width: 150px;
+}
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    cursor: move;
+    border-bottom: 1px solid #333;
+    user-select: none;
+}
+.panel-header h4 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.panel-toggle {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 0 4px;
+    transition: color 0.2s;
+}
+.panel-toggle:hover {
+    color: #fff;
+}
+.panel-content {
+    padding: 15px;
+    overflow-y: auto;
+}
+.panel.collapsed .panel-content {
+    display: none;
+}
+.panel.collapsed {
+    min-width: auto;
+}
+/* Massive objects panel */
+.massive-objects {
+    bottom: 10px;
+    right: 10px;
+    max-height: 400px;
+    max-width: 300px;
+}
+.massive-objects .panel-header h4 {
+    color: #e91e63;
+}
+.massive-objects .filters {
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.massive-objects .filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.massive-objects label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+.massive-objects input[type="checkbox"] {
+    cursor: pointer;
+}
+.massive-objects input[type="number"] {
+    width: 60px;
+    padding: 4px 8px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #333;
+    color: #fff;
+    font-size: 12px;
+}
+.massive-objects .count {
+    color: #888;
+    font-size: 11px;
+    margin-left: 5px;
+}
+.massive-objects ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 250px;
+    overflow-y: auto;
+}
+.massive-objects li {
+    padding: 4px 8px;
+    margin: 2px 0;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+.massive-objects li:hover {
+    background: rgba(233, 30, 99, 0.3);
+}
+.massive-objects li .lines {
+    color: #e91e63;
+    font-weight: bold;
+}
+.massive-objects li .entity-type {
+    color: #888;
+    font-size: 10px;
+}
+.massive-objects::-webkit-scrollbar {
+    width: 6px;
+}
+.massive-objects::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 3px;
+}
+/* Size toggle / Display panel */
+.size-toggle {
+    bottom: 10px;
+    left: 10px;
+    min-width: 180px;
+}
+.size-toggle .panel-header h4 {
+    color: #9c27b0;
+}
+.size-toggle label {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 3px 0;
+}
+.size-toggle input[type="checkbox"] {
+    cursor: pointer;
+    width: 14px;
+    height: 14px;
+}
+.size-toggle .display-section {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid #333;
+}
+.size-toggle .display-section h5 {
+    margin: 0 0 8px 0;
+    color: #888;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+/* Search box styles */
+.search-container {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1001;
+    width: 350px;
+}
+.search-box {
+    position: relative;
+    width: 100%;
+}
+.search-input {
+    width: 100%;
+    padding: 12px 40px 12px 16px;
+    font-size: 14px;
+    border: 2px solid #444;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.9);
+    color: #fff;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.search-input:focus {
+    border-color: #70b8ff;
+    box-shadow: 0 0 10px rgba(112, 184, 255, 0.3);
+}
+.search-input::placeholder {
+    color: #888;
+}
+.search-clear {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 4px;
+    display: none;
+}
+.search-clear:hover {
+    color: #fff;
+}
+.search-clear.visible {
+    display: block;
+}
+.autocomplete-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 300px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid #444;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    display: none;
+}
+.autocomplete-list.visible {
+    display: block;
+}
+.autocomplete-item {
+    padding: 10px 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid #333;
+}
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+.autocomplete-item:hover,
+.autocomplete-item.selected {
+    background: rgba(112, 184, 255, 0.2);
+}
+.autocomplete-item .node-type {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    font-weight: bold;
+}
+.autocomplete-item .node-type.module {
+    background: #009c2c;
+    color: #fff;
+}
+.autocomplete-item .node-type.entity {
+    background: #4a90d9;
+    color: #fff;
+}
+.autocomplete-item .node-type.external {
+    background: #808080;
+    color: #fff;
+}
+.autocomplete-item .node-name {
+    color: #fff;
+    flex: 1;
+}
+.autocomplete-item .node-parent {
+    color: #888;
+    font-size: 12px;
+}
+.highlight-info {
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    background: rgba(112, 184, 255, 0.9);
+    color: #000;
+    padding: 10px 15px;
+    border-radius: 8px;
+    font-size: 12px;
+    display: none;
+    align-items: center;
+    gap: 10px;
+}
+.highlight-info.visible {
+    display: flex;
+}
+.highlight-info button {
+    background: #333;
+    color: #fff;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.highlight-info button:hover {
+    background: #555;
+}
+/* Dimmed state for non-highlighted nodes/links */
+.node.dimmed {
+    opacity: 0.15;
+}
+.link.dimmed {
+    opacity: 0.05;
+}
+.label.dimmed {
+    opacity: 0.1;
+}
+/* Highlighted state */
+.node.highlighted {
+    filter: brightness(1.3) drop-shadow(0 0 8px rgba(255, 255, 255, 0.5));
+}
+.node.highlighted-main {
+    filter: brightness(1.5) drop-shadow(0 0 15px rgba(112, 184, 255, 0.8));
+}
+.link.highlighted {
+    stroke-opacity: 1;
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.5));
+}
+
+    </style>
+</head>
+<body>
+    <div id="graph"></div>
+    <div class="tooltip" id="tooltip"></div>
+
+    <!-- Search box -->
+    <div class="search-container">
+        <div class="search-box">
+            <input type="text" class="search-input" id="searchInput" placeholder="Search nodes... (Ctrl+F)" autocomplete="off">
+            <button class="search-clear" id="searchClear">&times;</button>
+            <div class="autocomplete-list" id="autocompleteList"></div>
+        </div>
+    </div>
+
+    <!-- Highlight info banner -->
+    <div class="highlight-info" id="highlightInfo">
+        <span id="highlightText">Highlighting: </span>
+        <button id="clearHighlight">Clear (Esc)</button>
+    </div>
+
+    <div class="panel controls" id="controls-panel">
+        <div class="panel-header">
+            <h4>Controls</h4>
+            <button class="panel-toggle" title="Collapse">−</button>
+        </div>
+        <div class="panel-content">
+            <p><kbd>Ctrl+F</kbd> Search nodes</p>
+            <p><kbd>Scroll</kbd> Zoom in/out</p>
+            <p><kbd>Drag</kbd> on background - Pan</p>
+            <p><kbd>Drag</kbd> on node - Pin node position</p>
+            <p><kbd>Click</kbd> module/entity - Collapse/Expand</p>
+            <p><kbd>Double-click</kbd> - Unpin / Focus on node</p>
+            <p><kbd>Esc</kbd> Clear search highlight</p>
+        </div>
+    </div>
+    <div class="panel legend" id="legend-panel">
+        <div class="panel-header">
+            <h4>Legend</h4>
+            <button class="panel-toggle" title="Collapse">−</button>
+        </div>
+        <div class="panel-content">
+            <div class="legend-section">
+                <h4>Nodes</h4>
+                <div class="legend-item">
+                    <div class="legend-color legend-module"></div>
+                    <span>Module (.py file)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color legend-entity"></div>
+                    <span>Entity (function/class)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color legend-external"></div>
+                    <span>External dependency</span>
+                </div>
+            </div>
+            <div class="legend-section">
+                <h4>Links</h4>
+                <div class="legend-item">
+                    <div class="legend-line legend-link-module"></div>
+                    <span>Module → Module</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-line legend-link-entity" style="border-top: 2px dashed #009c2c; background: none; height: 0;"></div>
+                    <span>Module → Entity</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-line legend-link-dep"></div>
+                    <span>Entity → Dependency</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="panel stats" id="stats">
+        <div class="panel-header">
+            <h4>Statistics</h4>
+            <button class="panel-toggle" title="Collapse">−</button>
+        </div>
+        <div class="panel-content" id="stats-content"></div>
+    </div>
+    <div class="panel unlinked-modules" id="unlinked-modules">
+        <div class="panel-header">
+            <h4>Connections</h4>
+            <button class="panel-toggle" title="Collapse">−</button>
+        </div>
+        <div class="panel-content">
+            <div class="unlinked-tabs">
+                <button class="unlinked-tab active" data-tab="unlinked-list">Unlinked <span class="count" id="unlinked-count"></span></button>
+                <button class="unlinked-tab" data-tab="links-count-list">Links count <span class="count" id="links-count"></span></button>
+            </div>
+            <div id="unlinked-list" class="unlinked-tab-content active"></div>
+            <div id="links-count-list" class="unlinked-tab-content">
+                <div class="links-filter">
+                    <div class="filter-row">
+                        <label><input type="checkbox" id="links-in-check" checked> Links in</label>
+                        <label><input type="checkbox" id="links-out-check" checked> Links out</label>
+                    </div>
+                    <div class="filter-row">
+                        <span>More than:</span>
+                        <input type="number" id="links-threshold" value="5" min="0">
+                    </div>
+                </div>
+                <div id="links-count-content"></div>
+            </div>
+        </div>
+    </div>
+    <div class="panel massive-objects" id="massive-objects">
+        <div class="panel-header">
+            <h4>Massive Objects <span class="count" id="massive-count"></span></h4>
+            <button class="panel-toggle" title="Collapse">−</button>
+        </div>
+        <div class="panel-content">
+            <div class="filters">
+                <div class="filter-row">
+                    <label><input type="checkbox" id="filter-modules" checked> Modules</label>
+                    <label><input type="checkbox" id="filter-classes" checked> Classes</label>
+                    <label><input type="checkbox" id="filter-functions" checked> Functions</label>
+                </div>
+                <div class="filter-row">
+                    <span>Min lines:</span>
+                    <input type="number" id="massive-threshold" value="50" min="1">
+                </div>
+            </div>
+            <ul id="massive-list"></ul>
+        </div>
+    </div>
+    <div class="panel size-toggle" id="size-toggle-panel">
+        <div class="panel-header">
+            <h4>Display</h4>
+            <button class="panel-toggle" title="Collapse">−</button>
+        </div>
+        <div class="panel-content">
+            <label>
+                <input type="checkbox" id="size-by-code" checked>
+                Size by lines of code
+            </label>
+            <div class="display-section">
+                <h5>Show nodes</h5>
+                <label><input type="checkbox" id="show-modules" checked> Modules</label>
+                <label><input type="checkbox" id="show-classes" checked> Classes</label>
+                <label><input type="checkbox" id="show-functions" checked> Functions</label>
+                <label><input type="checkbox" id="show-external" checked> External</label>
+            </div>
+            <div class="display-section">
+                <h5>Show links</h5>
+                <label><input type="checkbox" id="show-link-module" checked> Module → Module</label>
+                <label><input type="checkbox" id="show-link-entity" checked> Module → Entity</label>
+                <label><input type="checkbox" id="show-link-dependency" checked> Dependencies</label>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const graphData = {
+  "nodes": [
+    {
+      "id": "affect.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\affect.py",
+      "lines": 247
+    },
+    {
+      "id": "affect.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "affect.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "affect.py:VulkanAffect",
+      "label": "VulkanAffect",
+      "type": "entity",
+      "parent": "affect.py",
+      "lines": 247,
+      "entityType": "class"
+    },
+    {
+      "id": "attention.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\attention.py",
+      "lines": 774
+    },
+    {
+      "id": "attention.py:VulkanAttention",
+      "label": "VulkanAttention",
+      "type": "entity",
+      "parent": "attention.py",
+      "lines": 774,
+      "entityType": "class"
+    },
+    {
+      "id": "attention.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "attention.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "autograd_core.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\autograd_core.py",
+      "lines": 673
+    },
+    {
+      "id": "autograd_core.py:GradientTape",
+      "label": "GradientTape",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 133,
+      "entityType": "class"
+    },
+    {
+      "id": "autograd_core.py:ComputationNode",
+      "label": "ComputationNode",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 96,
+      "entityType": "class"
+    },
+    {
+      "id": "autograd_core.py:ModuleTracer",
+      "label": "ModuleTracer",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 81,
+      "entityType": "class"
+    },
+    {
+      "id": "autograd_core.py:AutogradEngine",
+      "label": "AutogradEngine",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 95,
+      "entityType": "class"
+    },
+    {
+      "id": "autograd_core.py:backward",
+      "label": "backward",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 3,
+      "entityType": "function"
+    },
+    {
+      "id": "autograd_core.py:VulkanBackwardOps",
+      "label": "VulkanBackwardOps",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 194,
+      "entityType": "class"
+    },
+    {
+      "id": "autograd_core.py:TrainingContext",
+      "label": "TrainingContext",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 56,
+      "entityType": "class"
+    },
+    {
+      "id": "autograd_core.py:no_grad",
+      "label": "no_grad",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 3,
+      "entityType": "function"
+    },
+    {
+      "id": "autograd_core.py:enable_grad",
+      "label": "enable_grad",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 3,
+      "entityType": "function"
+    },
+    {
+      "id": "autograd_core.py:is_grad_enabled",
+      "label": "is_grad_enabled",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 3,
+      "entityType": "function"
+    },
+    {
+      "id": "autograd_core.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "autograd_core.py:_get_tape",
+      "label": "_get_tape",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 3,
+      "entityType": "function"
+    },
+    {
+      "id": "autograd_core.py:_set_tape",
+      "label": "_set_tape",
+      "type": "entity",
+      "parent": "autograd_core.py",
+      "lines": 3,
+      "entityType": "function"
+    },
+    {
+      "id": "base.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\base.py",
+      "lines": 194
+    },
+    {
+      "id": "base.py:BufferMixin",
+      "label": "BufferMixin",
+      "type": "entity",
+      "parent": "base.py",
+      "lines": 173,
+      "entityType": "class"
+    },
+    {
+      "id": "base.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "base.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "base.py:_DirectBuffer",
+      "label": "_DirectBuffer",
+      "type": "entity",
+      "parent": "base.py",
+      "lines": 21,
+      "entityType": "class"
+    },
+    {
+      "id": "buffer_pool.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\buffer_pool.py",
+      "lines": 736
+    },
+    {
+      "id": "buffer_pool.py:VMABufferPool",
+      "label": "VMABufferPool",
+      "type": "entity",
+      "parent": "buffer_pool.py",
+      "lines": 369,
+      "entityType": "class"
+    },
+    {
+      "id": "buffer_pool.py:get_buffer_pool",
+      "label": "get_buffer_pool",
+      "type": "entity",
+      "parent": "buffer_pool.py",
+      "lines": 41,
+      "entityType": "function"
+    },
+    {
+      "id": "buffer_pool.py:BufferPool",
+      "label": "BufferPool",
+      "type": "entity",
+      "parent": "buffer_pool.py",
+      "lines": 185,
+      "entityType": "class"
+    },
+    {
+      "id": "buffer_pool.py:acquire_buffer",
+      "label": "acquire_buffer",
+      "type": "entity",
+      "parent": "buffer_pool.py",
+      "lines": 14,
+      "entityType": "function"
+    },
+    {
+      "id": "buffer_pool.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "buffer_pool.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "buffer_pool.py:VMABuffer",
+      "label": "VMABuffer",
+      "type": "entity",
+      "parent": "buffer_pool.py",
+      "lines": 62,
+      "entityType": "class"
+    },
+    {
+      "id": "buffer_pool.py:PooledBuffer",
+      "label": "PooledBuffer",
+      "type": "entity",
+      "parent": "buffer_pool.py",
+      "lines": 43,
+      "entityType": "class"
+    },
+    {
+      "id": "buffer_pool.py:_cleanup_global_pool",
+      "label": "_cleanup_global_pool",
+      "type": "entity",
+      "parent": "buffer_pool.py",
+      "lines": 11,
+      "entityType": "function"
+    },
+    {
+      "id": "buffer_pool.py:release_buffer",
+      "label": "release_buffer",
+      "type": "entity",
+      "parent": "buffer_pool.py",
+      "lines": 8,
+      "entityType": "function"
+    },
+    {
+      "id": "buffer_pool.py:is_vma_available",
+      "label": "is_vma_available",
+      "type": "entity",
+      "parent": "buffer_pool.py",
+      "lines": 3,
+      "entityType": "function"
+    },
+    {
+      "id": "capsule_transformer.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\capsule_transformer.py",
+      "lines": 1853
+    },
+    {
+      "id": "capsule_transformer.py:CapsuleMemory",
+      "label": "CapsuleMemory",
+      "type": "entity",
+      "parent": "capsule_transformer.py",
+      "lines": 70,
+      "entityType": "class"
+    },
+    {
+      "id": "capsule_transformer.py:VulkanCapsuleTransformer",
+      "label": "VulkanCapsuleTransformer",
+      "type": "entity",
+      "parent": "capsule_transformer.py",
+      "lines": 1116,
+      "entityType": "class"
+    },
+    {
+      "id": "capsule_transformer.py:benchmark_capsule_transformer",
+      "label": "benchmark_capsule_transformer",
+      "type": "entity",
+      "parent": "capsule_transformer.py",
+      "lines": 145,
+      "entityType": "function"
+    },
+    {
+      "id": "capsule_transformer.py:test_capsule_integration",
+      "label": "test_capsule_integration",
+      "type": "entity",
+      "parent": "capsule_transformer.py",
+      "lines": 65,
+      "entityType": "function"
+    },
+    {
+      "id": "capsule_transformer.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "capsule_transformer.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "capsule_transformer.py:MemoryType",
+      "label": "MemoryType",
+      "type": "entity",
+      "parent": "capsule_transformer.py",
+      "lines": 7,
+      "entityType": "class"
+    },
+    {
+      "id": "capsule_transformer.py:CognitiveFeatures",
+      "label": "CognitiveFeatures",
+      "type": "entity",
+      "parent": "capsule_transformer.py",
+      "lines": 18,
+      "entityType": "class"
+    },
+    {
+      "id": "capsule_transformer.py:CapsuleTransformerConfig",
+      "label": "CapsuleTransformerConfig",
+      "type": "entity",
+      "parent": "capsule_transformer.py",
+      "lines": 51,
+      "entityType": "class"
+    },
+    {
+      "id": "capsule_transformer.py:PersistentBufferManager",
+      "label": "PersistentBufferManager",
+      "type": "entity",
+      "parent": "capsule_transformer.py",
+      "lines": 133,
+      "entityType": "class"
+    },
+    {
+      "id": "capsule_transformer.py:DentateGyrus",
+      "label": "DentateGyrus",
+      "type": "entity",
+      "parent": "capsule_transformer.py",
+      "lines": 248,
+      "entityType": "class"
+    },
+    {
+      "id": "cells.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\cells.py",
+      "lines": 117
+    },
+    {
+      "id": "cells.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "cells.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "cells.py:VulkanCells",
+      "label": "VulkanCells",
+      "type": "entity",
+      "parent": "cells.py",
+      "lines": 117,
+      "entityType": "class"
+    },
+    {
+      "id": "compute.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\compute.py",
+      "lines": 356
+    },
+    {
+      "id": "compute.py:VulkanCompute",
+      "label": "VulkanCompute",
+      "type": "entity",
+      "parent": "compute.py",
+      "lines": 356,
+      "entityType": "class"
+    },
+    {
+      "id": "compute.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "compute.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "contrastive.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\contrastive.py",
+      "lines": 152
+    },
+    {
+      "id": "contrastive.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "contrastive.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "contrastive.py:VulkanContrastive",
+      "label": "VulkanContrastive",
+      "type": "entity",
+      "parent": "contrastive.py",
+      "lines": 152,
+      "entityType": "class"
+    },
+    {
+      "id": "conv.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\conv.py",
+      "lines": 834
+    },
+    {
+      "id": "conv.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "conv.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "conv.py:VulkanConv",
+      "label": "VulkanConv",
+      "type": "entity",
+      "parent": "conv.py",
+      "lines": 834,
+      "entityType": "class"
+    },
+    {
+      "id": "core.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\core.py",
+      "lines": 453
+    },
+    {
+      "id": "core.py:VulkanCore",
+      "label": "VulkanCore",
+      "type": "entity",
+      "parent": "core.py",
+      "lines": 453,
+      "entityType": "class"
+    },
+    {
+      "id": "core.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "core.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "faiss.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\faiss.py",
+      "lines": 180
+    },
+    {
+      "id": "faiss.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "faiss.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "faiss.py:VulkanFAISS",
+      "label": "VulkanFAISS",
+      "type": "entity",
+      "parent": "faiss.py",
+      "lines": 180,
+      "entityType": "class"
+    },
+    {
+      "id": "fft.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\fft.py",
+      "lines": 284
+    },
+    {
+      "id": "fft.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "fft.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "fft.py:VulkanFFT",
+      "label": "VulkanFFT",
+      "type": "entity",
+      "parent": "fft.py",
+      "lines": 284,
+      "entityType": "class"
+    },
+    {
+      "id": "fnn.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\fnn.py",
+      "lines": 2444
+    },
+    {
+      "id": "fnn.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "fnn.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "fnn.py:VulkanFNN",
+      "label": "VulkanFNN",
+      "type": "entity",
+      "parent": "fnn.py",
+      "lines": 2444,
+      "entityType": "class"
+    },
+    {
+      "id": "hilbert.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\hilbert.py",
+      "lines": 451
+    },
+    {
+      "id": "hilbert.py:VulkanHilbert",
+      "label": "VulkanHilbert",
+      "type": "entity",
+      "parent": "hilbert.py",
+      "lines": 323,
+      "entityType": "class"
+    },
+    {
+      "id": "hilbert.py:patch_vulkan_faiss",
+      "label": "patch_vulkan_faiss",
+      "type": "entity",
+      "parent": "hilbert.py",
+      "lines": 37,
+      "entityType": "function"
+    },
+    {
+      "id": "hilbert.py:benchmark",
+      "label": "benchmark",
+      "type": "entity",
+      "parent": "hilbert.py",
+      "lines": 48,
+      "entityType": "function"
+    },
+    {
+      "id": "hilbert.py:test_correctness",
+      "label": "test_correctness",
+      "type": "entity",
+      "parent": "hilbert.py",
+      "lines": 43,
+      "entityType": "function"
+    },
+    {
+      "id": "hilbert.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "hilbert.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "learning.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\learning.py",
+      "lines": 1026
+    },
+    {
+      "id": "learning.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "learning.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "learning.py:VulkanLearning",
+      "label": "VulkanLearning",
+      "type": "entity",
+      "parent": "learning.py",
+      "lines": 1026,
+      "entityType": "class"
+    },
+    {
+      "id": "lora.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\lora.py",
+      "lines": 443
+    },
+    {
+      "id": "lora.py:create_lora_backend",
+      "label": "create_lora_backend",
+      "type": "entity",
+      "parent": "lora.py",
+      "lines": 13,
+      "entityType": "function"
+    },
+    {
+      "id": "lora.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "lora.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "lora.py:VulkanLoRA",
+      "label": "VulkanLoRA",
+      "type": "entity",
+      "parent": "lora.py",
+      "lines": 430,
+      "entityType": "class"
+    },
+    {
+      "id": "memory.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\memory.py",
+      "lines": 217
+    },
+    {
+      "id": "memory.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "memory.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "memory.py:VulkanMemory",
+      "label": "VulkanMemory",
+      "type": "entity",
+      "parent": "memory.py",
+      "lines": 217,
+      "entityType": "class"
+    },
+    {
+      "id": "normalization.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\normalization.py",
+      "lines": 207
+    },
+    {
+      "id": "normalization.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "normalization.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "normalization.py:VulkanNormalization",
+      "label": "VulkanNormalization",
+      "type": "entity",
+      "parent": "normalization.py",
+      "lines": 207,
+      "entityType": "class"
+    },
+    {
+      "id": "pipelines.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\pipelines.py",
+      "lines": 287
+    },
+    {
+      "id": "pipelines.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "pipelines.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "pipelines.py:VulkanPipelines",
+      "label": "VulkanPipelines",
+      "type": "entity",
+      "parent": "pipelines.py",
+      "lines": 287,
+      "entityType": "class"
+    },
+    {
+      "id": "pooling.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\pooling.py",
+      "lines": 366
+    },
+    {
+      "id": "pooling.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "pooling.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "pooling.py:VulkanPooling",
+      "label": "VulkanPooling",
+      "type": "entity",
+      "parent": "pooling.py",
+      "lines": 366,
+      "entityType": "class"
+    },
+    {
+      "id": "shader_registry.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\shader_registry.py",
+      "lines": 120
+    },
+    {
+      "id": "shader_registry.py:ShaderRegistry",
+      "label": "ShaderRegistry",
+      "type": "entity",
+      "parent": "shader_registry.py",
+      "lines": 79,
+      "entityType": "class"
+    },
+    {
+      "id": "shader_registry.py:get_shader",
+      "label": "get_shader",
+      "type": "entity",
+      "parent": "shader_registry.py",
+      "lines": 3,
+      "entityType": "function"
+    },
+    {
+      "id": "shader_registry.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "shader_registry.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "shader_registry.py:get_registry",
+      "label": "get_registry",
+      "type": "entity",
+      "parent": "shader_registry.py",
+      "lines": 3,
+      "entityType": "function"
+    },
+    {
+      "id": "shader_registry.py:register_generic_shader",
+      "label": "register_generic_shader",
+      "type": "entity",
+      "parent": "shader_registry.py",
+      "lines": 3,
+      "entityType": "function"
+    },
+    {
+      "id": "shader_registry.py:register_architecture_shader",
+      "label": "register_architecture_shader",
+      "type": "entity",
+      "parent": "shader_registry.py",
+      "lines": 3,
+      "entityType": "function"
+    },
+    {
+      "id": "shader_registry.py:_initialize_registry",
+      "label": "_initialize_registry",
+      "type": "entity",
+      "parent": "shader_registry.py",
+      "lines": 29,
+      "entityType": "function"
+    },
+    {
+      "id": "snn.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\snn.py",
+      "lines": 343
+    },
+    {
+      "id": "snn.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "snn.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "snn.py:VulkanSNN",
+      "label": "VulkanSNN",
+      "type": "entity",
+      "parent": "snn.py",
+      "lines": 343,
+      "entityType": "class"
+    },
+    {
+      "id": "snn_compute.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\snn_compute.py",
+      "lines": 161
+    },
+    {
+      "id": "snn_compute.py:SNNCompute",
+      "label": "SNNCompute",
+      "type": "entity",
+      "parent": "snn_compute.py",
+      "lines": 161,
+      "entityType": "class"
+    },
+    {
+      "id": "snn_compute.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "snn_compute.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "snn_visualizer.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\snn_visualizer.py",
+      "lines": 170
+    },
+    {
+      "id": "snn_visualizer.py:SNNVisualizer",
+      "label": "SNNVisualizer",
+      "type": "entity",
+      "parent": "snn_visualizer.py",
+      "lines": 143,
+      "entityType": "class"
+    },
+    {
+      "id": "snn_visualizer.py:get_visualizer",
+      "label": "get_visualizer",
+      "type": "entity",
+      "parent": "snn_visualizer.py",
+      "lines": 6,
+      "entityType": "function"
+    },
+    {
+      "id": "snn_visualizer.py:SNNState",
+      "label": "SNNState",
+      "type": "entity",
+      "parent": "snn_visualizer.py",
+      "lines": 21,
+      "entityType": "class"
+    },
+    {
+      "id": "vma_wrapper.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\vma_wrapper.py",
+      "lines": 531
+    },
+    {
+      "id": "vma_wrapper.py:_load_vma_library",
+      "label": "_load_vma_library",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 23,
+      "entityType": "function"
+    },
+    {
+      "id": "vma_wrapper.py:is_vma_available",
+      "label": "is_vma_available",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 9,
+      "entityType": "function"
+    },
+    {
+      "id": "vma_wrapper.py:VMAAllocator",
+      "label": "VMAAllocator",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 172,
+      "entityType": "class"
+    },
+    {
+      "id": "vma_wrapper.py:build_vma_library",
+      "label": "build_vma_library",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 186,
+      "entityType": "function"
+    },
+    {
+      "id": "vma_wrapper.py:VmaVulkanFunctions",
+      "label": "VmaVulkanFunctions",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 8,
+      "entityType": "class"
+    },
+    {
+      "id": "vma_wrapper.py:VmaAllocatorCreateInfo",
+      "label": "VmaAllocatorCreateInfo",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 3,
+      "entityType": "class"
+    },
+    {
+      "id": "vma_wrapper.py:VmaAllocationCreateInfo",
+      "label": "VmaAllocationCreateInfo",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 3,
+      "entityType": "class"
+    },
+    {
+      "id": "vma_wrapper.py:VmaAllocationInfo",
+      "label": "VmaAllocationInfo",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 3,
+      "entityType": "class"
+    },
+    {
+      "id": "vma_wrapper.py:VkBufferCreateInfo",
+      "label": "VkBufferCreateInfo",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 3,
+      "entityType": "class"
+    },
+    {
+      "id": "vma_wrapper.py:_get_vma_lib_path",
+      "label": "_get_vma_lib_path",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 25,
+      "entityType": "function"
+    },
+    {
+      "id": "vma_wrapper.py:_setup_vma_functions",
+      "label": "_setup_vma_functions",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 18,
+      "entityType": "function"
+    },
+    {
+      "id": "vma_wrapper.py:VMABuffer",
+      "label": "VMABuffer",
+      "type": "entity",
+      "parent": "vma_wrapper.py",
+      "lines": 78,
+      "entityType": "class"
+    },
+    {
+      "id": "_glu_append.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\_glu_append.py",
+      "lines": 313
+    },
+    {
+      "id": "_glu_append.py:fused_swiglu",
+      "label": "fused_swiglu",
+      "type": "entity",
+      "parent": "_glu_append.py",
+      "lines": 122,
+      "entityType": "function"
+    },
+    {
+      "id": "_glu_append.py:fused_reglu",
+      "label": "fused_reglu",
+      "type": "entity",
+      "parent": "_glu_append.py",
+      "lines": 92,
+      "entityType": "function"
+    },
+    {
+      "id": "_glu_append.py:fused_geglu",
+      "label": "fused_geglu",
+      "type": "entity",
+      "parent": "_glu_append.py",
+      "lines": 99,
+      "entityType": "function"
+    },
+    {
+      "id": "__init__.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\__init__.py",
+      "lines": 0
+    },
+    {
+      "id": "__init__.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "__init__.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "vsa.py",
+      "type": "module",
+      "collapsed": false,
+      "fullPath": "backend\\experimental\\vsa.py",
+      "lines": 668
+    },
+    {
+      "id": "vsa.py:VulkanVSA",
+      "label": "VulkanVSA",
+      "type": "entity",
+      "parent": "vsa.py",
+      "lines": 668,
+      "entityType": "class"
+    },
+    {
+      "id": "vsa.py:_",
+      "label": "_",
+      "type": "entity",
+      "parent": "vsa.py",
+      "lines": 0,
+      "entityType": "function"
+    },
+    {
+      "id": "Enum",
+      "type": "external",
+      "label": "Enum"
+    },
+    {
+      "id": "Structure",
+      "type": "external",
+      "label": "Structure"
+    }
+  ],
+  "links": [
+    {
+      "source": "affect.py",
+      "target": "affect.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "affect.py",
+      "target": "affect.py:VulkanAffect",
+      "type": "module-entity"
+    },
+    {
+      "source": "affect.py:VulkanAffect",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "attention.py",
+      "target": "attention.py:VulkanAttention",
+      "type": "module-entity"
+    },
+    {
+      "source": "attention.py:VulkanAttention",
+      "target": "shader_registry.py:get_shader",
+      "type": "dependency"
+    },
+    {
+      "source": "attention.py:VulkanAttention",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "attention.py",
+      "target": "attention.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:GradientTape",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py:GradientTape",
+      "target": "autograd_core.py:GradientTape",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:GradientTape",
+      "target": "autograd_core.py:_set_tape",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:GradientTape",
+      "target": "autograd_core.py:_set_tape",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:ComputationNode",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py:ComputationNode",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:ComputationNode",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:ComputationNode",
+      "target": "autograd_core.py:ComputationNode",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:ComputationNode",
+      "target": "autograd_core.py:ComputationNode",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:ModuleTracer",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py:ModuleTracer",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:ModuleTracer",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:ModuleTracer",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:ModuleTracer",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:AutogradEngine",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py:AutogradEngine",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:AutogradEngine",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:AutogradEngine",
+      "target": "autograd_core.py:no_grad",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:AutogradEngine",
+      "target": "autograd_core.py:enable_grad",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:AutogradEngine",
+      "target": "autograd_core.py:is_grad_enabled",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:backward",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py:backward",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:VulkanBackwardOps",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py:VulkanBackwardOps",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:VulkanBackwardOps",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:VulkanBackwardOps",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:VulkanBackwardOps",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:VulkanBackwardOps",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:VulkanBackwardOps",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:VulkanBackwardOps",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:VulkanBackwardOps",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:VulkanBackwardOps",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:VulkanBackwardOps",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:TrainingContext",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py:TrainingContext",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:TrainingContext",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:TrainingContext",
+      "target": "autograd_core.py:backward",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:TrainingContext",
+      "target": "autograd_core.py:TrainingContext",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:TrainingContext",
+      "target": "autograd_core.py:ModuleTracer",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:no_grad",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py:no_grad",
+      "target": "autograd_core.py:no_grad",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:enable_grad",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py:enable_grad",
+      "target": "autograd_core.py:enable_grad",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:is_grad_enabled",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py:is_grad_enabled",
+      "target": "autograd_core.py:is_grad_enabled",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py:_",
+      "target": "autograd_core.py:AutogradEngine",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py:_",
+      "target": "autograd_core.py:VulkanBackwardOps",
+      "type": "dependency"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:_get_tape",
+      "type": "module-entity"
+    },
+    {
+      "source": "autograd_core.py",
+      "target": "autograd_core.py:_set_tape",
+      "type": "module-entity"
+    },
+    {
+      "source": "base.py",
+      "target": "base.py:BufferMixin",
+      "type": "module-entity"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:BufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:BufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:BufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:BufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:VMABufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:acquire_buffer",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:acquire_buffer",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:acquire_buffer",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:acquire_buffer",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:release_buffer",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:release_buffer",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "buffer_pool.py:release_buffer",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "base.py:_DirectBuffer",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py:BufferMixin",
+      "target": "base.py:_DirectBuffer",
+      "type": "dependency"
+    },
+    {
+      "source": "base.py",
+      "target": "base.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "base.py",
+      "target": "base.py:_DirectBuffer",
+      "type": "module-entity"
+    },
+    {
+      "source": "buffer_pool.py",
+      "target": "buffer_pool.py:VMABufferPool",
+      "type": "module-entity"
+    },
+    {
+      "source": "buffer_pool.py:VMABufferPool",
+      "target": "buffer_pool.py:VMABufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "buffer_pool.py:VMABufferPool",
+      "target": "buffer_pool.py:VMABufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "buffer_pool.py:VMABufferPool",
+      "target": "buffer_pool.py:BufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "buffer_pool.py:VMABufferPool",
+      "target": "buffer_pool.py:BufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "buffer_pool.py:VMABufferPool",
+      "target": "buffer_pool.py:VMABuffer",
+      "type": "dependency"
+    },
+    {
+      "source": "buffer_pool.py",
+      "target": "buffer_pool.py:get_buffer_pool",
+      "type": "module-entity"
+    },
+    {
+      "source": "buffer_pool.py:get_buffer_pool",
+      "target": "buffer_pool.py:VMABufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "buffer_pool.py:get_buffer_pool",
+      "target": "buffer_pool.py:BufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "buffer_pool.py:get_buffer_pool",
+      "target": "buffer_pool.py:BufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "buffer_pool.py",
+      "target": "buffer_pool.py:BufferPool",
+      "type": "module-entity"
+    },
+    {
+      "source": "buffer_pool.py:BufferPool",
+      "target": "buffer_pool.py:BufferPool",
+      "type": "dependency"
+    },
+    {
+      "source": "buffer_pool.py:BufferPool",
+      "target": "buffer_pool.py:PooledBuffer",
+      "type": "dependency"
+    },
+    {
+      "source": "buffer_pool.py",
+      "target": "buffer_pool.py:acquire_buffer",
+      "type": "module-entity"
+    },
+    {
+      "source": "buffer_pool.py:acquire_buffer",
+      "target": "buffer_pool.py:get_buffer_pool",
+      "type": "dependency"
+    },
+    {
+      "source": "buffer_pool.py",
+      "target": "buffer_pool.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "buffer_pool.py",
+      "target": "buffer_pool.py:VMABuffer",
+      "type": "module-entity"
+    },
+    {
+      "source": "buffer_pool.py",
+      "target": "buffer_pool.py:PooledBuffer",
+      "type": "module-entity"
+    },
+    {
+      "source": "buffer_pool.py",
+      "target": "buffer_pool.py:_cleanup_global_pool",
+      "type": "module-entity"
+    },
+    {
+      "source": "buffer_pool.py",
+      "target": "buffer_pool.py:release_buffer",
+      "type": "module-entity"
+    },
+    {
+      "source": "buffer_pool.py",
+      "target": "buffer_pool.py:is_vma_available",
+      "type": "module-entity"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "capsule_transformer.py:CapsuleMemory",
+      "type": "module-entity"
+    },
+    {
+      "source": "capsule_transformer.py:CapsuleMemory",
+      "target": "capsule_transformer.py:CognitiveFeatures",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "capsule_transformer.py:VulkanCapsuleTransformer",
+      "type": "module-entity"
+    },
+    {
+      "source": "capsule_transformer.py:VulkanCapsuleTransformer",
+      "target": "capsule_transformer.py:CognitiveFeatures",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:VulkanCapsuleTransformer",
+      "target": "capsule_transformer.py:CognitiveFeatures",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:VulkanCapsuleTransformer",
+      "target": "capsule_transformer.py:CapsuleTransformerConfig",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:VulkanCapsuleTransformer",
+      "target": "capsule_transformer.py:PersistentBufferManager",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:VulkanCapsuleTransformer",
+      "target": "capsule_transformer.py:DentateGyrus",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:VulkanCapsuleTransformer",
+      "target": "capsule_transformer.py:MemoryType",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:VulkanCapsuleTransformer",
+      "target": "capsule_transformer.py:CapsuleMemory",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "capsule_transformer.py:benchmark_capsule_transformer",
+      "type": "module-entity"
+    },
+    {
+      "source": "capsule_transformer.py:benchmark_capsule_transformer",
+      "target": "capsule_transformer.py:CognitiveFeatures",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:benchmark_capsule_transformer",
+      "target": "capsule_transformer.py:CognitiveFeatures",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:benchmark_capsule_transformer",
+      "target": "capsule_transformer.py:CapsuleTransformerConfig",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:benchmark_capsule_transformer",
+      "target": "capsule_transformer.py:CapsuleMemory",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:benchmark_capsule_transformer",
+      "target": "capsule_transformer.py:VulkanCapsuleTransformer",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "capsule_transformer.py:test_capsule_integration",
+      "type": "module-entity"
+    },
+    {
+      "source": "capsule_transformer.py:test_capsule_integration",
+      "target": "capsule_transformer.py:CognitiveFeatures",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:test_capsule_integration",
+      "target": "capsule_transformer.py:CapsuleTransformerConfig",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:test_capsule_integration",
+      "target": "capsule_transformer.py:MemoryType",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:test_capsule_integration",
+      "target": "capsule_transformer.py:VulkanCapsuleTransformer",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "capsule_transformer.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "capsule_transformer.py:_",
+      "target": "capsule_transformer.py:test_capsule_integration",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py:_",
+      "target": "capsule_transformer.py:benchmark_capsule_transformer",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "capsule_transformer.py:MemoryType",
+      "type": "module-entity"
+    },
+    {
+      "source": "capsule_transformer.py:MemoryType",
+      "target": "Enum",
+      "type": "dependency"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "capsule_transformer.py:CognitiveFeatures",
+      "type": "module-entity"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "capsule_transformer.py:CapsuleTransformerConfig",
+      "type": "module-entity"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "capsule_transformer.py:PersistentBufferManager",
+      "type": "module-entity"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "capsule_transformer.py:DentateGyrus",
+      "type": "module-entity"
+    },
+    {
+      "source": "cells.py",
+      "target": "cells.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "cells.py",
+      "target": "cells.py:VulkanCells",
+      "type": "module-entity"
+    },
+    {
+      "source": "cells.py:VulkanCells",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py",
+      "target": "compute.py:VulkanCompute",
+      "type": "module-entity"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "pipelines.py:VulkanPipelines",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "memory.py:VulkanMemory",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "conv.py:VulkanConv",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "affect.py:VulkanAffect",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "cells.py:VulkanCells",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "lora.py:VulkanLoRA",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "snn.py:VulkanSNN",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "attention.py:VulkanAttention",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "normalization.py:VulkanNormalization",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "pooling.py:VulkanPooling",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "fnn.py:VulkanFNN",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "learning.py:VulkanLearning",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "core.py:VulkanCore",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "faiss.py:VulkanFAISS",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "contrastive.py:VulkanContrastive",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py:VulkanCompute",
+      "target": "fft.py:VulkanFFT",
+      "type": "dependency"
+    },
+    {
+      "source": "compute.py",
+      "target": "compute.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "contrastive.py",
+      "target": "contrastive.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "contrastive.py",
+      "target": "contrastive.py:VulkanContrastive",
+      "type": "module-entity"
+    },
+    {
+      "source": "contrastive.py:VulkanContrastive",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "conv.py",
+      "target": "conv.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "conv.py",
+      "target": "conv.py:VulkanConv",
+      "type": "module-entity"
+    },
+    {
+      "source": "conv.py:VulkanConv",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "core.py",
+      "target": "core.py:VulkanCore",
+      "type": "module-entity"
+    },
+    {
+      "source": "core.py:VulkanCore",
+      "target": "core.py:VulkanCore",
+      "type": "dependency"
+    },
+    {
+      "source": "core.py:VulkanCore",
+      "target": "core.py:VulkanCore",
+      "type": "dependency"
+    },
+    {
+      "source": "core.py:VulkanCore",
+      "target": "core.py:VulkanCore",
+      "type": "dependency"
+    },
+    {
+      "source": "core.py:VulkanCore",
+      "target": "core.py:VulkanCore",
+      "type": "dependency"
+    },
+    {
+      "source": "core.py",
+      "target": "core.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "faiss.py",
+      "target": "faiss.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "faiss.py",
+      "target": "faiss.py:VulkanFAISS",
+      "type": "module-entity"
+    },
+    {
+      "source": "faiss.py:VulkanFAISS",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "fft.py",
+      "target": "fft.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "fft.py",
+      "target": "fft.py:VulkanFFT",
+      "type": "module-entity"
+    },
+    {
+      "source": "fft.py:VulkanFFT",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "fnn.py",
+      "target": "fnn.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "fnn.py",
+      "target": "fnn.py:VulkanFNN",
+      "type": "module-entity"
+    },
+    {
+      "source": "fnn.py:VulkanFNN",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py",
+      "target": "hilbert.py:VulkanHilbert",
+      "type": "module-entity"
+    },
+    {
+      "source": "hilbert.py:VulkanHilbert",
+      "target": "pipelines.py:VulkanPipelines",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:VulkanHilbert",
+      "target": "core.py:VulkanCore",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:VulkanHilbert",
+      "target": "hilbert.py:VulkanHilbert",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:VulkanHilbert",
+      "target": "hilbert.py:VulkanHilbert",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py",
+      "target": "hilbert.py:patch_vulkan_faiss",
+      "type": "module-entity"
+    },
+    {
+      "source": "hilbert.py:patch_vulkan_faiss",
+      "target": "hilbert.py:VulkanHilbert",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:patch_vulkan_faiss",
+      "target": "hilbert.py:patch_vulkan_faiss",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:patch_vulkan_faiss",
+      "target": "hilbert.py:VulkanHilbert",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:patch_vulkan_faiss",
+      "target": "hilbert.py:patch_vulkan_faiss",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py",
+      "target": "hilbert.py:benchmark",
+      "type": "module-entity"
+    },
+    {
+      "source": "hilbert.py:benchmark",
+      "target": "hilbert.py:VulkanHilbert",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:benchmark",
+      "target": "hilbert.py:VulkanHilbert",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py",
+      "target": "hilbert.py:test_correctness",
+      "type": "module-entity"
+    },
+    {
+      "source": "hilbert.py:test_correctness",
+      "target": "hilbert.py:VulkanHilbert",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:test_correctness",
+      "target": "hilbert.py:test_correctness",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:test_correctness",
+      "target": "hilbert.py:benchmark",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:test_correctness",
+      "target": "hilbert.py:VulkanHilbert",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:test_correctness",
+      "target": "hilbert.py:test_correctness",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py:test_correctness",
+      "target": "hilbert.py:benchmark",
+      "type": "dependency"
+    },
+    {
+      "source": "hilbert.py",
+      "target": "hilbert.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "learning.py",
+      "target": "learning.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "learning.py",
+      "target": "learning.py:VulkanLearning",
+      "type": "module-entity"
+    },
+    {
+      "source": "learning.py:VulkanLearning",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "lora.py",
+      "target": "lora.py:create_lora_backend",
+      "type": "module-entity"
+    },
+    {
+      "source": "lora.py:create_lora_backend",
+      "target": "lora.py:VulkanLoRA",
+      "type": "dependency"
+    },
+    {
+      "source": "lora.py",
+      "target": "lora.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "lora.py",
+      "target": "lora.py:VulkanLoRA",
+      "type": "module-entity"
+    },
+    {
+      "source": "lora.py:VulkanLoRA",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "memory.py",
+      "target": "memory.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "memory.py",
+      "target": "memory.py:VulkanMemory",
+      "type": "module-entity"
+    },
+    {
+      "source": "memory.py:VulkanMemory",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "normalization.py",
+      "target": "normalization.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "normalization.py",
+      "target": "normalization.py:VulkanNormalization",
+      "type": "module-entity"
+    },
+    {
+      "source": "normalization.py:VulkanNormalization",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "pipelines.py",
+      "target": "pipelines.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "pipelines.py",
+      "target": "pipelines.py:VulkanPipelines",
+      "type": "module-entity"
+    },
+    {
+      "source": "pooling.py",
+      "target": "pooling.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "pooling.py",
+      "target": "pooling.py:VulkanPooling",
+      "type": "module-entity"
+    },
+    {
+      "source": "pooling.py:VulkanPooling",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "shader_registry.py",
+      "target": "shader_registry.py:ShaderRegistry",
+      "type": "module-entity"
+    },
+    {
+      "source": "shader_registry.py:ShaderRegistry",
+      "target": "shader_registry.py:get_shader",
+      "type": "dependency"
+    },
+    {
+      "source": "shader_registry.py",
+      "target": "shader_registry.py:get_shader",
+      "type": "module-entity"
+    },
+    {
+      "source": "shader_registry.py:get_shader",
+      "target": "shader_registry.py:get_shader",
+      "type": "dependency"
+    },
+    {
+      "source": "shader_registry.py",
+      "target": "shader_registry.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "shader_registry.py:_",
+      "target": "shader_registry.py:ShaderRegistry",
+      "type": "dependency"
+    },
+    {
+      "source": "shader_registry.py:_",
+      "target": "shader_registry.py:_initialize_registry",
+      "type": "dependency"
+    },
+    {
+      "source": "shader_registry.py",
+      "target": "shader_registry.py:get_registry",
+      "type": "module-entity"
+    },
+    {
+      "source": "shader_registry.py",
+      "target": "shader_registry.py:register_generic_shader",
+      "type": "module-entity"
+    },
+    {
+      "source": "shader_registry.py",
+      "target": "shader_registry.py:register_architecture_shader",
+      "type": "module-entity"
+    },
+    {
+      "source": "shader_registry.py",
+      "target": "shader_registry.py:_initialize_registry",
+      "type": "module-entity"
+    },
+    {
+      "source": "snn.py",
+      "target": "snn.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "snn.py",
+      "target": "snn.py:VulkanSNN",
+      "type": "module-entity"
+    },
+    {
+      "source": "snn.py:VulkanSNN",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "snn_compute.py",
+      "target": "snn_compute.py:SNNCompute",
+      "type": "module-entity"
+    },
+    {
+      "source": "snn_compute.py:SNNCompute",
+      "target": "compute.py:VulkanCompute",
+      "type": "dependency"
+    },
+    {
+      "source": "snn_compute.py",
+      "target": "snn_compute.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "snn_visualizer.py",
+      "target": "snn_visualizer.py:SNNVisualizer",
+      "type": "module-entity"
+    },
+    {
+      "source": "snn_visualizer.py:SNNVisualizer",
+      "target": "snn_visualizer.py:SNNState",
+      "type": "dependency"
+    },
+    {
+      "source": "snn_visualizer.py",
+      "target": "snn_visualizer.py:get_visualizer",
+      "type": "module-entity"
+    },
+    {
+      "source": "snn_visualizer.py:get_visualizer",
+      "target": "snn_visualizer.py:SNNVisualizer",
+      "type": "dependency"
+    },
+    {
+      "source": "snn_visualizer.py",
+      "target": "snn_visualizer.py:SNNState",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:_load_vma_library",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py:_load_vma_library",
+      "target": "vma_wrapper.py:_get_vma_lib_path",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py:_load_vma_library",
+      "target": "vma_wrapper.py:_setup_vma_functions",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:is_vma_available",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py:is_vma_available",
+      "target": "vma_wrapper.py:_load_vma_library",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:VMAAllocator",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py:VMAAllocator",
+      "target": "vma_wrapper.py:_load_vma_library",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py:VMAAllocator",
+      "target": "vma_wrapper.py:VMAAllocator",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py:VMAAllocator",
+      "target": "vma_wrapper.py:VmaVulkanFunctions",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py:VMAAllocator",
+      "target": "vma_wrapper.py:VmaAllocatorCreateInfo",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py:VMAAllocator",
+      "target": "vma_wrapper.py:VkBufferCreateInfo",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py:VMAAllocator",
+      "target": "vma_wrapper.py:VmaAllocationCreateInfo",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py:VMAAllocator",
+      "target": "vma_wrapper.py:VmaAllocationInfo",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py:VMAAllocator",
+      "target": "buffer_pool.py:VMABuffer",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:build_vma_library",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py:build_vma_library",
+      "target": "vma_wrapper.py:build_vma_library",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py:build_vma_library",
+      "target": "buffer_pool.py:is_vma_available",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:VmaVulkanFunctions",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py:VmaVulkanFunctions",
+      "target": "Structure",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:VmaAllocatorCreateInfo",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py:VmaAllocatorCreateInfo",
+      "target": "Structure",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:VmaAllocationCreateInfo",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py:VmaAllocationCreateInfo",
+      "target": "Structure",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:VmaAllocationInfo",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py:VmaAllocationInfo",
+      "target": "Structure",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:VkBufferCreateInfo",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py:VkBufferCreateInfo",
+      "target": "Structure",
+      "type": "dependency"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:_get_vma_lib_path",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:_setup_vma_functions",
+      "type": "module-entity"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "vma_wrapper.py:VMABuffer",
+      "type": "module-entity"
+    },
+    {
+      "source": "_glu_append.py",
+      "target": "_glu_append.py:fused_swiglu",
+      "type": "module-entity"
+    },
+    {
+      "source": "_glu_append.py",
+      "target": "_glu_append.py:fused_reglu",
+      "type": "module-entity"
+    },
+    {
+      "source": "_glu_append.py",
+      "target": "_glu_append.py:fused_geglu",
+      "type": "module-entity"
+    },
+    {
+      "source": "__init__.py",
+      "target": "__init__.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "vsa.py",
+      "target": "vsa.py:VulkanVSA",
+      "type": "module-entity"
+    },
+    {
+      "source": "vsa.py:VulkanVSA",
+      "target": "vsa.py:VulkanVSA",
+      "type": "dependency"
+    },
+    {
+      "source": "vsa.py:VulkanVSA",
+      "target": "pipelines.py:VulkanPipelines",
+      "type": "dependency"
+    },
+    {
+      "source": "vsa.py:VulkanVSA",
+      "target": "vsa.py:VulkanVSA",
+      "type": "dependency"
+    },
+    {
+      "source": "vsa.py:VulkanVSA",
+      "target": "base.py:BufferMixin",
+      "type": "dependency"
+    },
+    {
+      "source": "vsa.py",
+      "target": "vsa.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "__init__.py",
+      "target": "__init__.py:_",
+      "type": "module-entity"
+    },
+    {
+      "source": "affect.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "learning.py",
+      "type": "module-module"
+    },
+    {
+      "source": "snn_compute.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "cells.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "snn.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "learning.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "lora.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "normalization.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "affect.py",
+      "type": "module-module"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "__init__.py",
+      "target": "snn_compute.py",
+      "type": "module-module"
+    },
+    {
+      "source": "vsa.py",
+      "target": "core.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "__init__.py",
+      "target": "capsule_transformer.py",
+      "type": "module-module"
+    },
+    {
+      "source": "normalization.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "vsa.py",
+      "target": "pipelines.py",
+      "type": "module-module"
+    },
+    {
+      "source": "base.py",
+      "target": "buffer_pool.py",
+      "type": "module-module"
+    },
+    {
+      "source": "lora.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "conv.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "conv.py",
+      "type": "module-module"
+    },
+    {
+      "source": "pooling.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "vma_wrapper.py",
+      "target": "buffer_pool.py",
+      "type": "module-module"
+    },
+    {
+      "source": "vsa.py",
+      "target": "vsa.py",
+      "type": "module-module"
+    },
+    {
+      "source": "fnn.py",
+      "target": "__init__.py",
+      "type": "module-module"
+    },
+    {
+      "source": "snn_compute.py",
+      "target": "core.py",
+      "type": "module-module"
+    },
+    {
+      "source": "hilbert.py",
+      "target": "core.py",
+      "type": "module-module"
+    },
+    {
+      "source": "contrastive.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "__init__.py",
+      "target": "vsa.py",
+      "type": "module-module"
+    },
+    {
+      "source": "base.py",
+      "target": "__init__.py",
+      "type": "module-module"
+    },
+    {
+      "source": "attention.py",
+      "target": "__init__.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "memory.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "contrastive.py",
+      "type": "module-module"
+    },
+    {
+      "source": "fft.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "capsule_transformer.py",
+      "target": "core.py",
+      "type": "module-module"
+    },
+    {
+      "source": "hilbert.py",
+      "target": "hilbert.py",
+      "type": "module-module"
+    },
+    {
+      "source": "memory.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "hilbert.py",
+      "target": "pipelines.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "core.py",
+      "type": "module-module"
+    },
+    {
+      "source": "core.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "faiss.py",
+      "type": "module-module"
+    },
+    {
+      "source": "learning.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "buffer_pool.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "faiss.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "__init__.py",
+      "target": "compute.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "pipelines.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "pooling.py",
+      "type": "module-module"
+    },
+    {
+      "source": "attention.py",
+      "target": "shader_registry.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "attention.py",
+      "type": "module-module"
+    },
+    {
+      "source": "__init__.py",
+      "target": "learning.py",
+      "type": "module-module"
+    },
+    {
+      "source": "fnn.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "vsa.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "attention.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "pipelines.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "snn_compute.py",
+      "target": "compute.py",
+      "type": "module-module"
+    },
+    {
+      "source": "__init__.py",
+      "target": "lora.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "fnn.py",
+      "type": "module-module"
+    },
+    {
+      "source": "snn.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "__init__.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "cells.py",
+      "target": "base.py",
+      "type": "module-module"
+    },
+    {
+      "source": "compute.py",
+      "target": "fft.py",
+      "type": "module-module"
+    }
+  ],
+  "unlinkedModules": [
+    {
+      "id": "_glu_append.py",
+      "fullPath": "backend\\_glu_append.py"
+    },
+    {
+      "id": "autograd_core.py",
+      "fullPath": "backend\\autograd_core.py"
+    },
+    {
+      "id": "snn_visualizer.py",
+      "fullPath": "backend\\snn_visualizer.py"
+    }
+  ]
+};
+
+// Panel drag and collapse functionality
+document.querySelectorAll('.panel').forEach(panel => {
+    const header = panel.querySelector('.panel-header');
+    const toggleBtn = panel.querySelector('.panel-toggle');
+    let isDragging = false;
+    let startX, startY, startLeft, startTop;
+
+    // Collapse/expand
+    toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        panel.classList.toggle('collapsed');
+        toggleBtn.textContent = panel.classList.contains('collapsed') ? '+' : '−';
+        toggleBtn.title = panel.classList.contains('collapsed') ? 'Expand' : 'Collapse';
+    });
+
+    // Drag functionality
+    header.addEventListener('mousedown', (e) => {
+        if (e.target === toggleBtn) return;
+        isDragging = true;
+        const rect = panel.getBoundingClientRect();
+        startX = e.clientX;
+        startY = e.clientY;
+        startLeft = rect.left;
+        startTop = rect.top;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        panel.style.left = startLeft + 'px';
+        panel.style.top = startTop + 'px';
+        document.body.style.cursor = 'move';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        panel.style.left = (startLeft + dx) + 'px';
+        panel.style.top = (startTop + dy) + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+        document.body.style.cursor = '';
+    });
+});
+
+// Calculate stats
+const moduleCount = graphData.nodes.filter(n => n.type === 'module').length;
+const entityCount = graphData.nodes.filter(n => n.type === 'entity').length;
+const moduleLinks = graphData.links.filter(l => l.type === 'module-module').length;
+document.getElementById('stats-content').innerHTML = `
+    <p>Modules: ${moduleCount}</p>
+    <p>Entities: ${entityCount}</p>
+    <p>Module connections: ${moduleLinks}</p>
+`;
+
+// Calculate links count for each node
+const nodeLinksMap = {};
+graphData.nodes.forEach(n => {
+    nodeLinksMap[n.id] = { linksIn: 0, linksOut: 0 };
+});
+graphData.links.forEach(l => {
+    const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+    const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+    if (nodeLinksMap[sourceId]) nodeLinksMap[sourceId].linksOut++;
+    if (nodeLinksMap[targetId]) nodeLinksMap[targetId].linksIn++;
+});
+
+// Populate unlinked modules panel
+const unlinkedModules = graphData.unlinkedModules || [];
+document.getElementById('unlinked-count').textContent = `(${unlinkedModules.length})`;
+if (unlinkedModules.length > 0) {
+    document.getElementById('unlinked-list').innerHTML = `
+        <ul>
+            ${unlinkedModules.map(m => `
+                <li data-module-id="${m.id}" title="${m.fullPath}">
+                    ${m.id}
+                    <span class="path">${m.fullPath}</span>
+                </li>
+            `).join('')}
+        </ul>
+    `;
+} else {
+    document.getElementById('unlinked-list').innerHTML = '<p style="color: #888; padding: 5px;">No unlinked modules</p>';
+}
+
+// Tab switching for unlinked panel
+document.querySelectorAll('.unlinked-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.unlinked-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.unlinked-tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(tab.dataset.tab).classList.add('active');
+    });
+});
+
+// Links count filter function
+function updateLinksCount() {
+    const threshold = parseInt(document.getElementById('links-threshold').value) || 0;
+    const countIn = document.getElementById('links-in-check').checked;
+    const countOut = document.getElementById('links-out-check').checked;
+
+    const nodesWithLinks = graphData.nodes
+        .filter(n => n.type === 'module' || n.type === 'entity')
+        .map(n => {
+            const links = nodeLinksMap[n.id] || { linksIn: 0, linksOut: 0 };
+            let total = 0;
+            if (countIn && countOut) total = links.linksIn + links.linksOut;
+            else if (countIn) total = links.linksIn;
+            else if (countOut) total = links.linksOut;
+            return { ...n, linksIn: links.linksIn, linksOut: links.linksOut, totalLinks: total };
+        })
+        .filter(n => n.totalLinks > threshold)
+        .sort((a, b) => b.totalLinks - a.totalLinks);
+
+    document.getElementById('links-count').textContent = `(${nodesWithLinks.length})`;
+
+    if (nodesWithLinks.length > 0) {
+        document.getElementById('links-count-content').innerHTML = `
+            <ul>
+                ${nodesWithLinks.map(n => `
+                    <li data-node-id="${n.id}" title="${n.type === 'module' ? n.fullPath : n.parent}">
+                        <span class="links-count">${n.totalLinks}</span> ${n.label || n.id}
+                        <span class="entity-type">${n.type === 'module' ? 'module' : n.entityType}</span>
+                    </li>
+                `).join('')}
+            </ul>
+        `;
+
+        // Add click handlers for links count items
+        document.querySelectorAll('#links-count-content li').forEach(li => {
+            li.addEventListener('click', () => {
+                const nodeId = li.dataset.nodeId;
+                highlightNode(nodeId);
+            });
+        });
+    } else {
+        document.getElementById('links-count-content').innerHTML = '<p style="color: #888;">No matching nodes</p>';
+    }
+}
+
+// Initialize links count and add event listeners
+document.getElementById('links-in-check').addEventListener('change', updateLinksCount);
+document.getElementById('links-out-check').addEventListener('change', updateLinksCount);
+document.getElementById('links-threshold').addEventListener('input', updateLinksCount);
+updateLinksCount();
+
+// Size scaling state
+let sizeByCode = true;
+
+// Calculate max lines for scaling
+const maxLines = Math.max(...graphData.nodes.map(n => n.lines || 0), 1);
+
+// Function to get node size based on lines of code
+function getNodeSize(d, baseSize) {
+    if (!sizeByCode || !d.lines) return baseSize;
+    // Scale between baseSize and baseSize * 3 based on lines
+    const scale = 1 + (d.lines / maxLines) * 2;
+    return baseSize * scale;
+}
+
+// Function to update massive objects list
+function updateMassiveObjects() {
+    const threshold = parseInt(document.getElementById('massive-threshold').value) || 50;
+    const showModules = document.getElementById('filter-modules').checked;
+    const showClasses = document.getElementById('filter-classes').checked;
+    const showFunctions = document.getElementById('filter-functions').checked;
+
+    const massiveNodes = graphData.nodes
+        .filter(n => (n.type === 'entity' || n.type === 'module') && n.lines >= threshold)
+        .filter(n => {
+            if (n.type === 'module') return showModules;
+            if (n.entityType === 'class') return showClasses;
+            if (n.entityType === 'function') return showFunctions;
+            return true;
+        })
+        .sort((a, b) => b.lines - a.lines);
+
+    document.getElementById('massive-count').textContent = `(${massiveNodes.length})`;
+    document.getElementById('massive-list').innerHTML = massiveNodes.map(n => `
+        <li data-node-id="${n.id}" title="${n.type === 'module' ? n.fullPath : n.parent}">
+            <span class="lines">${n.lines}</span> ${n.label || n.id}
+            <span class="entity-type">${n.type === 'module' ? 'module' : n.entityType}</span>
+        </li>
+    `).join('');
+
+    // Add click handlers
+    document.querySelectorAll('#massive-list li').forEach(li => {
+        li.addEventListener('click', () => {
+            const nodeId = li.dataset.nodeId;
+            highlightNode(nodeId);
+        });
+    });
+}
+
+// Add event listeners for massive objects filters
+document.getElementById('filter-modules').addEventListener('change', updateMassiveObjects);
+document.getElementById('filter-classes').addEventListener('change', updateMassiveObjects);
+document.getElementById('filter-functions').addEventListener('change', updateMassiveObjects);
+document.getElementById('massive-threshold').addEventListener('input', updateMassiveObjects);
+
+// Initial population
+updateMassiveObjects();
+
+const width = window.innerWidth;
+const height = window.innerHeight;
+
+// Create SVG
+const svg = d3.select("#graph")
+    .append("svg")
+    .attr("width", width)
+    .attr("height", height);
+
+// Add zoom behavior
+const g = svg.append("g");
+
+const zoom = d3.zoom()
+    .scaleExtent([0.05, 4])
+    .on("zoom", (event) => {
+        g.attr("transform", event.transform);
+    });
+
+svg.call(zoom);
+
+// Tooltip
+const tooltip = d3.select("#tooltip");
+
+// Track collapsed nodes (modules and entities)
+const collapsedNodes = new Set();
+
+// Create arrow markers for different link types
+const defs = svg.append("defs");
+
+// Module-module arrow (orange)
+defs.append("marker")
+    .attr("id", "arrow-module-module")
+    .attr("viewBox", "0 -5 10 10")
+    .attr("refX", 25)
+    .attr("refY", 0)
+    .attr("markerWidth", 8)
+    .attr("markerHeight", 8)
+    .attr("orient", "auto")
+    .append("path")
+    .attr("fill", "#ff9800")
+    .attr("d", "M0,-5L10,0L0,5");
+
+// Module-entity arrow (green)
+defs.append("marker")
+    .attr("id", "arrow-module-entity")
+    .attr("viewBox", "0 -5 10 10")
+    .attr("refX", 18)
+    .attr("refY", 0)
+    .attr("markerWidth", 6)
+    .attr("markerHeight", 6)
+    .attr("orient", "auto")
+    .append("path")
+    .attr("fill", "#009c2c")
+    .attr("d", "M0,-5L10,0L0,5");
+
+// Dependency arrow (red)
+defs.append("marker")
+    .attr("id", "arrow-dependency")
+    .attr("viewBox", "0 -5 10 10")
+    .attr("refX", 18)
+    .attr("refY", 0)
+    .attr("markerWidth", 6)
+    .attr("markerHeight", 6)
+    .attr("orient", "auto")
+    .append("path")
+    .attr("fill", "#d94a4a")
+    .attr("d", "M0,-5L10,0L0,5");
+
+// Scale spacing based on number of nodes
+const nodeCount = graphData.nodes.length;
+const scaleFactor = nodeCount > 40 ? 1 + (nodeCount - 40) / 50 : 1;
+
+// Create force simulation with adjusted parameters for better spacing
+const simulation = d3.forceSimulation(graphData.nodes)
+    .force("link", d3.forceLink(graphData.links).id(d => d.id).distance(d => {
+        const base = d.type === 'module-module' ? 300 : d.type === 'module-entity' ? 100 : 120;
+        return base * scaleFactor;
+    }).strength(0.3 / scaleFactor))
+    .force("charge", d3.forceManyBody().strength(d => {
+        const base = d.type === 'module' ? -800 : -300;
+        return base * scaleFactor;
+    }))
+    .force("center", d3.forceCenter(width / 2, height / 2).strength(0.05 / scaleFactor))
+    .force("collision", d3.forceCollide().radius(d => {
+        const base = d.type === 'module' ? 80 : 40;
+        return base * scaleFactor;
+    }).strength(1));
+
+// Create links (module-module first so they appear behind)
+const link = g.append("g")
+    .selectAll("line")
+    .data(graphData.links.sort((a, b) => {
+        const order = {'module-module': 0, 'module-entity': 1, 'dependency': 2};
+        return (order[a.type] || 2) - (order[b.type] || 2);
+    }))
+    .join("line")
+    .attr("class", d => `link link-${d.type}`)
+    .attr("marker-end", d => `url(#arrow-${d.type})`);
+
+// Create nodes
+const node = g.append("g")
+    .selectAll("g")
+    .data(graphData.nodes)
+    .join("g")
+    .attr("class", "node")
+    .call(d3.drag()
+        .on("start", dragstarted)
+        .on("drag", dragged)
+        .on("end", dragended));
+
+// Add shapes based on node type with size based on lines of code
+node.each(function(d) {
+    const el = d3.select(this);
+    if (d.type === "module") {
+        const size = getNodeSize(d, 30);
+        el.append("rect")
+            .attr("class", "node-module")
+            .attr("width", size)
+            .attr("height", size)
+            .attr("x", -size / 2)
+            .attr("y", -size / 2)
+            .attr("rx", 4);
+    } else if (d.type === "entity") {
+        const r = getNodeSize(d, 10);
+        el.append("circle")
+            .attr("class", "node-entity")
+            .attr("r", r);
+    } else {
+        el.append("circle")
+            .attr("class", "node-external")
+            .attr("r", 7);
+    }
+});
+
+// Function to update node sizes
+function updateNodeSizes() {
+    node.each(function(d) {
+        const el = d3.select(this);
+        if (d.type === "module") {
+            const size = getNodeSize(d, 30);
+            el.select("rect")
+                .attr("width", size)
+                .attr("height", size)
+                .attr("x", -size / 2)
+                .attr("y", -size / 2);
+        } else if (d.type === "entity") {
+            const r = getNodeSize(d, 10);
+            el.select("circle").attr("r", r);
+        }
+    });
+    // Update labels position
+    labels.attr("dy", d => {
+        if (d.type === "module") {
+            return getNodeSize(d, 30) / 2 + 15;
+        }
+        return getNodeSize(d, 10) + 10;
+    });
+}
+
+// Size toggle event listener
+document.getElementById('size-by-code').addEventListener('change', function() {
+    sizeByCode = this.checked;
+    updateNodeSizes();
+});
+
+// Display filter state
+const displayFilters = {
+    showModules: true,
+    showClasses: true,
+    showFunctions: true,
+    showExternal: true,
+    showLinkModule: true,
+    showLinkEntity: true,
+    showLinkDependency: true
+};
+
+// Display filter event listeners
+document.getElementById('show-modules').addEventListener('change', function() {
+    displayFilters.showModules = this.checked;
+    updateDisplayFilters();
+});
+document.getElementById('show-classes').addEventListener('change', function() {
+    displayFilters.showClasses = this.checked;
+    updateDisplayFilters();
+});
+document.getElementById('show-functions').addEventListener('change', function() {
+    displayFilters.showFunctions = this.checked;
+    updateDisplayFilters();
+});
+document.getElementById('show-external').addEventListener('change', function() {
+    displayFilters.showExternal = this.checked;
+    updateDisplayFilters();
+});
+document.getElementById('show-link-module').addEventListener('change', function() {
+    displayFilters.showLinkModule = this.checked;
+    updateDisplayFilters();
+});
+document.getElementById('show-link-entity').addEventListener('change', function() {
+    displayFilters.showLinkEntity = this.checked;
+    updateDisplayFilters();
+});
+document.getElementById('show-link-dependency').addEventListener('change', function() {
+    displayFilters.showLinkDependency = this.checked;
+    updateDisplayFilters();
+});
+
+// Check if node should be hidden by display filter
+function isNodeFilteredOut(nodeData) {
+    if (nodeData.type === 'module') return !displayFilters.showModules;
+    if (nodeData.type === 'external') return !displayFilters.showExternal;
+    if (nodeData.type === 'entity') {
+        if (nodeData.entityType === 'class') return !displayFilters.showClasses;
+        if (nodeData.entityType === 'function') return !displayFilters.showFunctions;
+    }
+    return false;
+}
+
+// Check if link should be hidden by display filter
+function isLinkFilteredOut(linkData) {
+    if (linkData.type === 'module-module') return !displayFilters.showLinkModule;
+    if (linkData.type === 'module-entity') return !displayFilters.showLinkEntity;
+    if (linkData.type === 'dependency') return !displayFilters.showLinkDependency;
+    return false;
+}
+
+// Update display based on filters
+function updateDisplayFilters() {
+    // Update node visibility
+    node.classed("node-hidden", d => isNodeFilteredOut(d) || isNodeHidden(d));
+
+    // Update label visibility
+    labels.classed("label-hidden", d => isNodeFilteredOut(d) || isNodeHidden(d));
+
+    // Update link visibility
+    link.classed("link-hidden", d => {
+        // First check display filter
+        if (isLinkFilteredOut(d)) return true;
+
+        // Check if connected nodes are filtered out
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        const sourceNode = graphData.nodes.find(n => n.id === sourceId);
+        const targetNode = graphData.nodes.find(n => n.id === targetId);
+
+        if (sourceNode && isNodeFilteredOut(sourceNode)) return true;
+        if (targetNode && isNodeFilteredOut(targetNode)) return true;
+
+        // Then check collapse state
+        if (d.type === 'module-module') return false;
+        if (sourceNode && isNodeHidden(sourceNode)) return true;
+        if (targetNode && isNodeHidden(targetNode)) return true;
+        if (d.type === 'module-entity' && collapsedNodes.has(sourceId)) return true;
+        if (d.type === 'dependency' && collapsedNodes.has(sourceId)) return true;
+
+        return false;
+    });
+}
+
+// Add labels with dynamic positioning based on node size
+const labels = g.append("g")
+    .selectAll("text")
+    .data(graphData.nodes)
+    .join("text")
+    .attr("class", d => `label ${d.type === 'module' ? 'label-module' : ''}`)
+    .attr("dy", d => {
+        if (d.type === "module") {
+            return getNodeSize(d, 30) / 2 + 15;
+        }
+        return getNodeSize(d, 10) + 10;
+    })
+    .attr("text-anchor", "middle")
+    .text(d => d.label || d.id);
+
+// Node interactions
+node.on("mouseover", function(event, d) {
+    // Highlight connected links
+    link.style("stroke-opacity", l => {
+        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+        return (sourceId === d.id || targetId === d.id) ? 1 : 0.2;
+    });
+
+    // Count connections
+    const outgoing = graphData.links.filter(l => {
+        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+        return sourceId === d.id;
+    }).length;
+    const incoming = graphData.links.filter(l => {
+        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+        return targetId === d.id;
+    }).length;
+
+    tooltip
+        .style("opacity", 1)
+        .style("left", (event.pageX + 15) + "px")
+        .style("top", (event.pageY - 15) + "px")
+        .html(`
+            <strong>${d.label || d.id}</strong><br>
+            Type: ${d.entityType || d.type}<br>
+            ${d.lines ? 'Lines of code: ' + d.lines + '<br>' : ''}
+            ${d.fullPath ? 'Full Path: ' + d.fullPath + '<br>' : ''}
+            ${d.parent ? 'Module: ' + d.parent + '<br>' : ''}
+            <div class="links-info">
+                <span class="links-out">Links out: ${outgoing}</span>
+                <span class="links-in">Links in: ${incoming}</span>
+            </div>
+            ${collapsedNodes.has(d.id) ? '<em>(collapsed)</em>' : ''}
+        `);
+})
+.on("mouseout", function() {
+    link.style("stroke-opacity", 0.6);
+    tooltip.style("opacity", 0);
+})
+.on("click", function(event, d) {
+    if (d.type === "module" || d.type === "entity") {
+        toggleCollapse(d);
+    }
+})
+.on("dblclick", function(event, d) {
+    event.stopPropagation();
+    // If node is pinned (was dragged), release it
+    if (d.fx !== null || d.fy !== null) {
+        d.fx = null;
+        d.fy = null;
+        simulation.alpha(0.3).restart();
+    } else {
+        // Focus on this node (zoom to it)
+        const scale = 1.5;
+        svg.transition()
+            .duration(500)
+            .call(zoom.transform, d3.zoomIdentity
+                .translate(width / 2, height / 2)
+                .scale(scale)
+                .translate(-d.x, -d.y));
+    }
+});
+
+function toggleCollapse(targetNode) {
+    const nodeId = targetNode.id;
+
+    if (collapsedNodes.has(nodeId)) {
+        collapsedNodes.delete(nodeId);
+    } else {
+        collapsedNodes.add(nodeId);
+    }
+
+    // Update node visual to show collapsed state
+    node.select("rect, circle")
+        .classed("collapsed", d => collapsedNodes.has(d.id));
+
+    updateVisibility();
+}
+
+function getChildNodes(nodeId, nodeType) {
+    // Get all nodes that are direct children of this node
+    const children = new Set();
+
+    if (nodeType === 'module') {
+        // Module's children are entities with this module as parent
+        graphData.nodes.forEach(n => {
+            if (n.parent === nodeId) {
+                children.add(n.id);
+            }
+        });
+    } else if (nodeType === 'entity') {
+        // Entity's children are nodes it links to via dependency
+        graphData.links.forEach(l => {
+            const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+            const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+            if (sourceId === nodeId && l.type === 'dependency') {
+                children.add(targetId);
+            }
+        });
+    }
+
+    return children;
+}
+
+function isNodeHidden(nodeData) {
+    // Module nodes are never hidden
+    if (nodeData.type === 'module') return false;
+
+    // Check if parent module is collapsed
+    if (nodeData.parent && collapsedNodes.has(nodeData.parent)) {
+        return true;
+    }
+
+    // Check if this is a dependency of a collapsed entity
+    for (const link of graphData.links) {
+        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+
+        if (targetId === nodeData.id && link.type === 'dependency') {
+            // Check if source entity is collapsed or hidden
+            const sourceNode = graphData.nodes.find(n => n.id === sourceId);
+            if (sourceNode) {
+                if (collapsedNodes.has(sourceId)) return true;
+                if (sourceNode.parent && collapsedNodes.has(sourceNode.parent)) return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function updateVisibility() {
+    // Use updateDisplayFilters which handles both collapse state and display filters
+    updateDisplayFilters();
+}
+
+// Simulation tick
+simulation.on("tick", () => {
+    link
+        .attr("x1", d => d.source.x)
+        .attr("y1", d => d.source.y)
+        .attr("x2", d => d.target.x)
+        .attr("y2", d => d.target.y);
+
+    node.attr("transform", d => `translate(${d.x},${d.y})`);
+
+    labels
+        .attr("x", d => d.x)
+        .attr("y", d => d.y);
+});
+
+// Drag functions - nodes stay where you drag them
+function dragstarted(event, d) {
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+}
+
+function dragged(event, d) {
+    d.fx = event.x;
+    d.fy = event.y;
+}
+
+function dragended(event, d) {
+    if (!event.active) simulation.alphaTarget(0);
+    // Keep node at dragged position (don't reset fx/fy to null)
+    // Double-click to release node back to simulation
+}
+
+// Initial zoom to fit content
+simulation.on("end", () => {
+    // Calculate bounds for ALL nodes
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    graphData.nodes.forEach(n => {
+        minX = Math.min(minX, n.x);
+        maxX = Math.max(maxX, n.x);
+        minY = Math.min(minY, n.y);
+        maxY = Math.max(maxY, n.y);
+    });
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    const padding = 100;
+    const graphWidth = maxX - minX + padding * 2;
+    const graphHeight = maxY - minY + padding * 2;
+
+    // Calculate scale to fit all nodes
+    const fitScale = Math.min(width / graphWidth, height / graphHeight);
+
+    // For larger graphs (>20 nodes), zoom out more aggressively
+    const nodeCount = graphData.nodes.length;
+    let maxZoom = 0.7;
+    if (nodeCount > 20) {
+        // Reduce max zoom based on node count: 0.7 -> down to 0.4 for 120+ nodes
+        maxZoom = Math.max(0.4, 0.7 - (nodeCount - 20) * 0.003);
+    }
+
+    const scale = Math.min(fitScale * 0.85, maxZoom);
+
+    svg.transition()
+        .duration(500)
+        .call(zoom.transform, d3.zoomIdentity
+            .translate(width / 2, height / 2)
+            .scale(scale)
+            .translate(-centerX, -centerY));
+});
+
+// ==================== SEARCH FUNCTIONALITY ====================
+
+const searchInput = document.getElementById('searchInput');
+const searchClear = document.getElementById('searchClear');
+const autocompleteList = document.getElementById('autocompleteList');
+const highlightInfo = document.getElementById('highlightInfo');
+const highlightText = document.getElementById('highlightText');
+const clearHighlightBtn = document.getElementById('clearHighlight');
+
+let selectedAutocompleteIndex = -1;
+let currentHighlightedNode = null;
+let filteredNodes = [];
+
+// Build searchable index
+const searchIndex = graphData.nodes.map(n => ({
+    id: n.id,
+    label: n.label || n.id,
+    type: n.type,
+    parent: n.parent || null,
+    searchText: ((n.label || n.id) + ' ' + (n.parent || '')).toLowerCase()
+}));
+
+// Get connected nodes for a given node
+function getConnectedNodes(nodeId) {
+    const connected = new Set();
+    connected.add(nodeId);
+
+    graphData.links.forEach(l => {
+        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+
+        if (sourceId === nodeId) {
+            connected.add(targetId);
+        }
+        if (targetId === nodeId) {
+            connected.add(sourceId);
+        }
+    });
+
+    return connected;
+}
+
+// Get connected links for a given node
+function getConnectedLinks(nodeId) {
+    return graphData.links.filter(l => {
+        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+        return sourceId === nodeId || targetId === nodeId;
+    });
+}
+
+// Highlight a node and its connections
+function highlightNode(nodeId) {
+    const connectedNodes = getConnectedNodes(nodeId);
+    currentHighlightedNode = nodeId;
+
+    // Update nodes
+    node.classed('dimmed', d => !connectedNodes.has(d.id))
+        .classed('highlighted', d => connectedNodes.has(d.id) && d.id !== nodeId)
+        .classed('highlighted-main', d => d.id === nodeId);
+
+    // Update links
+    link.classed('dimmed', d => {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        return sourceId !== nodeId && targetId !== nodeId;
+    })
+    .classed('highlighted', d => {
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        return sourceId === nodeId || targetId === nodeId;
+    });
+
+    // Update labels
+    labels.classed('dimmed', d => !connectedNodes.has(d.id));
+
+    // Show highlight info
+    const nodeData = graphData.nodes.find(n => n.id === nodeId);
+    highlightText.textContent = `Highlighting: ${nodeData.label || nodeData.id} (${connectedNodes.size} connected)`;
+    highlightInfo.classList.add('visible');
+
+    // Zoom to the node
+    const targetNode = graphData.nodes.find(n => n.id === nodeId);
+    if (targetNode) {
+        const scale = 1.2;
+        svg.transition()
+            .duration(500)
+            .call(zoom.transform, d3.zoomIdentity
+                .translate(width / 2, height / 2)
+                .scale(scale)
+                .translate(-targetNode.x, -targetNode.y));
+    }
+}
+
+// Clear all highlighting
+function clearHighlight() {
+    currentHighlightedNode = null;
+
+    node.classed('dimmed', false)
+        .classed('highlighted', false)
+        .classed('highlighted-main', false);
+
+    link.classed('dimmed', false)
+        .classed('highlighted', false);
+
+    labels.classed('dimmed', false);
+
+    highlightInfo.classList.remove('visible');
+    searchInput.value = '';
+    searchClear.classList.remove('visible');
+    hideAutocomplete();
+}
+
+// Filter nodes based on search query
+function filterNodes(query) {
+    if (!query) return [];
+    const lowerQuery = query.toLowerCase();
+    return searchIndex
+        .filter(n => n.searchText.includes(lowerQuery))
+        .slice(0, 10); // Limit to 10 results
+}
+
+// Render autocomplete list
+function renderAutocomplete(results) {
+    if (results.length === 0) {
+        hideAutocomplete();
+        return;
+    }
+
+    filteredNodes = results;
+    selectedAutocompleteIndex = -1;
+
+    autocompleteList.innerHTML = results.map((n, i) => `
+        <div class="autocomplete-item" data-index="${i}" data-id="${n.id}">
+            <span class="node-type ${n.type}">${n.type}</span>
+            <span class="node-name">${n.label}</span>
+            ${n.parent ? `<span class="node-parent">${n.parent}</span>` : ''}
+        </div>
+    `).join('');
+
+    autocompleteList.classList.add('visible');
+
+    // Add click handlers
+    autocompleteList.querySelectorAll('.autocomplete-item').forEach(item => {
+        item.addEventListener('click', () => {
+            selectNode(item.dataset.id);
+        });
+    });
+}
+
+// Hide autocomplete
+function hideAutocomplete() {
+    autocompleteList.classList.remove('visible');
+    filteredNodes = [];
+    selectedAutocompleteIndex = -1;
+}
+
+// Select a node from autocomplete
+function selectNode(nodeId) {
+    const nodeData = searchIndex.find(n => n.id === nodeId);
+    if (nodeData) {
+        searchInput.value = nodeData.label;
+        hideAutocomplete();
+        highlightNode(nodeId);
+    }
+}
+
+// Update selected item in autocomplete
+function updateSelectedItem() {
+    const items = autocompleteList.querySelectorAll('.autocomplete-item');
+    items.forEach((item, i) => {
+        item.classList.toggle('selected', i === selectedAutocompleteIndex);
+    });
+
+    // Scroll into view
+    if (selectedAutocompleteIndex >= 0 && items[selectedAutocompleteIndex]) {
+        items[selectedAutocompleteIndex].scrollIntoView({ block: 'nearest' });
+    }
+}
+
+// Search input event handlers
+searchInput.addEventListener('input', (e) => {
+    const query = e.target.value.trim();
+    searchClear.classList.toggle('visible', query.length > 0);
+
+    if (query.length > 0) {
+        const results = filterNodes(query);
+        renderAutocomplete(results);
+    } else {
+        hideAutocomplete();
+    }
+});
+
+searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (filteredNodes.length > 0) {
+            selectedAutocompleteIndex = Math.min(selectedAutocompleteIndex + 1, filteredNodes.length - 1);
+            updateSelectedItem();
+        }
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (filteredNodes.length > 0) {
+            selectedAutocompleteIndex = Math.max(selectedAutocompleteIndex - 1, 0);
+            updateSelectedItem();
+        }
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (selectedAutocompleteIndex >= 0 && filteredNodes[selectedAutocompleteIndex]) {
+            selectNode(filteredNodes[selectedAutocompleteIndex].id);
+        } else if (filteredNodes.length > 0) {
+            selectNode(filteredNodes[0].id);
+        }
+    } else if (e.key === 'Escape') {
+        if (autocompleteList.classList.contains('visible')) {
+            hideAutocomplete();
+        } else {
+            clearHighlight();
+        }
+        searchInput.blur();
+    }
+});
+
+searchInput.addEventListener('focus', () => {
+    const query = searchInput.value.trim();
+    if (query.length > 0) {
+        const results = filterNodes(query);
+        renderAutocomplete(results);
+    }
+});
+
+// Clear button
+searchClear.addEventListener('click', () => {
+    clearHighlight();
+});
+
+// Clear highlight button
+clearHighlightBtn.addEventListener('click', () => {
+    clearHighlight();
+});
+
+// Close autocomplete when clicking outside
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.search-container')) {
+        hideAutocomplete();
+    }
+});
+
+// Keyboard shortcut to focus search (Ctrl+F or Cmd+F)
+document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        searchInput.focus();
+        searchInput.select();
+    }
+    if (e.key === 'Escape' && currentHighlightedNode) {
+        clearHighlight();
+    }
+});
+
+// Orphan modules click handler - navigate to module node
+document.querySelectorAll('#unlinked-list li').forEach(li => {
+    li.addEventListener('click', () => {
+        const moduleId = li.dataset.moduleId;
+        const targetNode = graphData.nodes.find(n => n.id === moduleId);
+        if (targetNode) {
+            // Zoom and pan to the node
+            const scale = 1.5;
+            svg.transition()
+                .duration(750)
+                .call(zoom.transform, d3.zoomIdentity
+                    .translate(width / 2 - targetNode.x * scale, height / 2 - targetNode.y * scale)
+                    .scale(scale));
+
+            // Highlight the node temporarily
+            node.selectAll("rect, circle")
+                .style("filter", n => n.id === moduleId ? "brightness(2) drop-shadow(0 0 10px #ff9800)" : "none");
+
+            // Reset highlight after 2 seconds
+            setTimeout(() => {
+                node.selectAll("rect, circle").style("filter", "none");
+            }, 2000);
+        }
+    });
+});
+
+    </script>
+</body>
+</html>

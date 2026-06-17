@@ -1,2 +1,38 @@
-# Implementation status markdown file
-IMPLEMENTATION_STATUS.md
+# Examples 1:
+
+# Example 2 (Project with artifacts):
+#Compiled and build artifacts
+*.pyc
+pycache/
+*.o
+*.obj
+dist/
+build/
+#Dependencies
+.venv/
+venv/
+node_modules/
+#Logs and temp files
+*.log
+*.tmp
+*.swp
+#Environment
+.env
+.env.local
+.env.*
+#Editors
+.vscode/
+.idea/
+/build2
+/build_verify_pybind
+7492_Towards_Lossless_Memory_e.pdf
+/build_verify_pybind2
+/experimental_datasets
+/osgm-best-hypergrad
+/personas_prompts/mindmark
+/private/models
+/site
+grilly_core.cp312-win_amd64.pyd
+/third_party
+/.claude
+/external
