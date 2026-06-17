@@ -76,3 +76,6 @@ grilly_core.cp312-win_amd64.pyd
 /build_verify_pybind
 /.claude
 /experimental_datasets
+/osgm-best-hypergrad
+/personas_prompts
+/third_party
