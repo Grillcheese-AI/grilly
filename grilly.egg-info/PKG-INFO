@@ -1,0 +1,683 @@
+Metadata-Version: 2.4
+Name: grilly
+Version: 1.0.0
+Summary: GPU-accelerated neural network operations using Vulkan compute shaders
+Author-email: Nicolas Cloutier <ncloutier@grillcheeseai.com>
+License: MIT
+Project-URL: Homepage, https://grilly.org
+Project-URL: Repository, https://github.com/grillcheese-ai/grilly
+Project-URL: Documentation, https://grilly.org/docs
+Keywords: vulkan,gpu,neural-network,snn,compute-shaders,gpu-acceleration,lora-bridge,huggingface-bridge,machine-learning,torch-alternative,synapse,neuron network,hebbian-learning
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Classifier: Topic :: Scientific/Engineering :: Mathematics
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy
+Provides-Extra: full
+Requires-Dist: blake3>=1.0.8; extra == "full"
+Requires-Dist: numba>=0.63.1; extra == "full"
+Requires-Dist: torch>=2.10.0; extra == "full"
+Requires-Dist: transformers>=4.57.6; extra == "full"
+Requires-Dist: sentence-transformers>=5.2.0; extra == "full"
+Requires-Dist: spacy>=3.8.11; extra == "full"
+Requires-Dist: onnx>=1.15.0; extra == "full"
+Requires-Dist: vulkan>=1.3.0; extra == "full"
+Provides-Extra: torch
+Requires-Dist: torch>=2.10.0; extra == "torch"
+Provides-Extra: huggingface
+Requires-Dist: transformers>=4.57.6; extra == "huggingface"
+Requires-Dist: sentence-transformers>=5.2.0; extra == "huggingface"
+Provides-Extra: onnx
+Requires-Dist: onnx>=1.15.0; extra == "onnx"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: pytest-benchmark>=5.2.3; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Requires-Dist: black>=23.7.0; extra == "dev"
+Requires-Dist: isort>=5.12.0; extra == "dev"
+Requires-Dist: mypy>=1.5.0; extra == "dev"
+Requires-Dist: mkdocs-material>=9.0; extra == "dev"
+Requires-Dist: tokenizers>=0.15.0; extra == "dev"
+Requires-Dist: huggingface_hub>=0.20.0; extra == "dev"
+Requires-Dist: sentencepiece>=0.2.0; extra == "dev"
+Requires-Dist: transformers>=4.57.6; extra == "dev"
+Requires-Dist: protobuf>=4.0.0; extra == "dev"
+Provides-Extra: accel
+Requires-Dist: numba>=0.59.0; extra == "accel"
+Provides-Extra: tokenizer
+Requires-Dist: tokenizers>=0.15.0; extra == "tokenizer"
+Requires-Dist: huggingface_hub>=0.20.0; extra == "tokenizer"
+Provides-Extra: all
+Requires-Dist: grilly[accel,dev]; extra == "all"
+Dynamic: license-file
+
+# Grilly
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/grillcheese-ai/grilly/main/assets/grilly_mascott_github.png" alt="Grilly" width="400">
+</p>
+
+*Deep learning, well done.*
+
+[![CI](https://github.com/grillcheese-ai/grilly/actions/workflows/ci.yml/badge.svg)](https://github.com/grillcheese-ai/grilly/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/grilly)](https://pypi.org/project/grilly/)
+[![Tests](https://img.shields.io/badge/tests-1820%20passing-brightgreen)](https://github.com/grillcheese-ai/grilly/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docs](https://img.shields.io/badge/docs-grilly.org-blue)](https://grillcheese-ai.github.io/grilly/getting-started/installation/)
+
+GPU-accelerated neural network framework using **Vulkan compute shaders**. PyTorch-like API that runs on **any GPU** -- AMD, NVIDIA, Intel -- no CUDA dependency. 231 GLSL compute shaders compiled to SPIR-V, dispatched through a native C++ layer with automatic CPU fallback.
+
+> ## ⚠️ Pre-v1.0 release — massive changes ahead
+>
+> The current `main` branch is **substantially rewritten** since the last
+> tagged release (`v0.6.1`). The changes touch the C++ Vulkan dispatch
+> layer, the VMA buffer allocation strategy, the autograd graph, the
+> `nn` module forward signatures, the `torch_api` facade, and several
+> shaders. Existing user code that depends on `v0.6.1` semantics may
+> need updates.
+>
+> **Highlights of what changed:**
+>
+> - **40x faster `nn.Linear`** on AMD/Windows via a new staging-buffer
+>   pattern (DEVICE_LOCAL VRAM compute + WC stage-in + HOST_CACHED
+>   readback). The same pattern was applied across `linear` /
+>   `linear_backward` / `layernorm` / `embedding` / `activations` /
+>   `optimizer` / `loss` / `dropout`.
+> - **Cooperative-matrix GEMM** (`gemm-coopmat-shared.glsl`) — fp16
+>   GEMM via `VK_KHR_cooperative_matrix`. Hits hardware tensor cores on
+>   RDNA3 / NVIDIA RTX, runs through the driver emulation path on
+>   RDNA2. New `LinearParams.elemSize` field + generic `py::array`
+>   bindings let `nn.Linear` accept fp32 OR fp16 input transparently.
+> - **Causal Linear-RNN prefix scan** — new `prefix-scan-causal` /
+>   `prefix-scan-causal-backward` shaders + C++ dispatcher + Python
+>   autograd wrapper. `grilly.nn.prefix_scan.CausalSequenceMixer` is a
+>   drop-in subgroup-parallel replacement for sequence pooling that
+>   strictly respects autoregressive causality.
+> - **Real autograd through `nn.Linear`, `nn.LayerNorm`, `nn.Embedding`** —
+>   their `forward` methods now wrap numpy outputs in `Variable` with a
+>   `GradFn` that calls the existing `backward()` so `loss.backward()`
+>   actually updates layer parameters. Before this fix, optimizer steps
+>   silently no-op'd on every Module subclass that used the standard
+>   `self.weight = nn.Parameter(...)` idiom.
+> - **`Module.__setattr__` auto-registration** — `Parameter` and child
+>   `Module` attribute assignments now populate `_parameters` /
+>   `_modules` automatically. Standard PyTorch idiom; was previously
+>   silently broken (every subclass returned 0 parameters).
+> - **`.grl` checkpoint roundtrip** — `torch.save({'model': sd, 'step':
+>   N}, path); ck = torch.load(path)` now returns exactly what was
+>   saved (matches PyTorch semantics). Previously the loader
+>   force-wrapped content under a fixed `'model'` key.
+> - **VMA fix** — `BufferPool::allocateBuffer` now uses
+>   `requiredFlags = DEVICE_LOCAL_BIT` instead of `preferredFlags`, so
+>   the allocator actually selects VRAM instead of silently falling
+>   back to slow host memory.
+> - **`Variable.__array__`** — numpy interop. `np.matmul(tensor, w)` /
+>   `np.dot(tensor, w)` / `np.asarray(tensor)` now work transparently.
+> - **PEP 660 editable install fix** — `import grilly_core` now works
+>   under modern editable installs (path hook didn't add the package
+>   dir to `sys.path`, so the Vulkan probe silently reported
+>   `VULKAN_AVAILABLE = False` even on machines with working Vulkan).
+>
+> See [the "What's new since 0.6.1" section below](#whats-new-since-061)
+> for the full list. Tag will land as a `v1.0.0-rc.1` once the
+> remaining causal-RNN training validation lands.
+
+---
+
+## Why Grilly?
+
+- **Any GPU**: Vulkan runs on AMD, NVIDIA, Intel, and Apple (via MoltenVK). No CUDA lock-in.
+- **PyTorch-like API**: `nn.Module`, `F.relu`, `AdamW` -- familiar patterns, new backend.
+- **Always works**: Pure-Python numpy fallback if no GPU is available. Same code, same results.
+- **Research-ready**: Spiking neural networks, Vector Symbolic Architectures, Mixture of Experts, cognitive controllers, temporal reasoning -- all GPU-accelerated.
+- **Lightweight**: Core dependency is numpy only. Optional extras for torch, HuggingFace, ONNX.
+
+---
+
+## Installation
+
+### Option 1: Python-only (no GPU acceleration)
+
+```bash
+pip install grilly
+```
+
+Works immediately with numpy. No GPU, no Vulkan SDK, no C++ compiler needed.
+
+### Option 2: With Vulkan GPU acceleration
+
+#### Linux / Google Colab (one-liner)
+
+```bash
+# Full build (~30 min — includes validation layers, all SDK tools)
+curl -sSL https://raw.githubusercontent.com/Grillcheese-AI/grilly/main/scripts/install.sh | bash
+
+# Fast build (~5 min — shaderc + loader only, recommended for Colab/CI)
+curl -sSL https://raw.githubusercontent.com/Grillcheese-AI/grilly/main/scripts/install.sh | bash -s -- --fast
+```
+
+On Colab:
+
+```python
+# Recommended: Colab mode (Vulkan 1.3 + fast build + NVIDIA ICD, ~5 min)
+!wget -qO- https://raw.githubusercontent.com/Grillcheese-AI/grilly/main/scripts/install.sh | bash -s -- --colab
+```
+
+This installs system deps, downloads and builds Vulkan SDK 1.4, compiles the grilly C++ extension, and installs the Python package. The `--fast` flag builds only the components grilly needs (shaderc, loader, headers) and skips validation layers.
+
+#### Linux (manual step-by-step)
+
+```bash
+# 1. System dependencies (Ubuntu/Debian)
+sudo apt-get install -y cmake g++ ninja-build pkg-config \
+    libxcb-dri3-0 libxcb-present0 libpciaccess0 libpng-dev \
+    libxcb-keysyms1-dev libxcb-dri3-dev libx11-dev libwayland-dev \
+    libxrandr-dev libxcb-randr0-dev libx11-xcb-dev wayland-protocols
+
+# 2. Vulkan SDK (download from https://vulkan.lunarg.com/sdk/home)
+wget https://sdk.lunarg.com/sdk/download/1.4.341.1/linux/vulkansdk-linux-x86_64-1.4.341.1.tar.xz
+tar xf vulkansdk-linux-x86_64-1.4.341.1.tar.xz
+cd 1.4.341.1 && ./vulkansdk all -j $(nproc)
+export VULKAN_SDK=$(pwd)/x86_64
+export PATH=$VULKAN_SDK/bin:$PATH
+export LD_LIBRARY_PATH=$VULKAN_SDK/lib:$LD_LIBRARY_PATH
+
+# 3. Build grilly
+git clone --recurse-submodules https://github.com/grillcheese-ai/grilly.git
+cd grilly
+pip install -e ".[dev]"
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel $(nproc)
+
+# 4. Install the compiled extension
+cp build/grilly_core.*.so $(python -c "import grilly; print(grilly.__path__[0])")/
+```
+
+#### Windows
+
+```powershell
+# 1. Install Vulkan SDK from https://vulkan.lunarg.com/sdk/home (Windows installer)
+# 2. Install Visual Studio 2022 with C++ workload
+
+git clone --recurse-submodules https://github.com/grillcheese-ai/grilly.git
+cd grilly
+pip install -e ".[dev]"
+cmake -B build -DPYBIND11_FINDPYTHON=ON
+cmake --build build --config Release
+cp build\Release\grilly_core.*.pyd .
+```
+
+**Pre-built binary (Windows x64, Python 3.12):** Download `grilly_core.cp312-win_amd64.pyd` from the [latest release](https://github.com/grillcheese-ai/grilly/releases) and copy it into your grilly install directory.
+
+#### macOS
+
+```bash
+# 1. Install Vulkan SDK from https://vulkan.lunarg.com/sdk/home#mac
+brew install cmake ninja
+# 2. Follow the Linux build steps above (uses MoltenVK)
+```
+
+### Verify installation
+
+```python
+import grilly
+print(f"grilly {grilly.__version__}")
+
+# Check GPU backend
+try:
+    from grilly.backend import _bridge
+    print(f"Vulkan: {'enabled' if _bridge.is_available() else 'not available'}")
+except ImportError:
+    print("Vulkan: not installed (numpy fallback active)")
+```
+
+### Requirements
+
+| | Minimum | Recommended |
+|---|---|---|
+| Python | 3.12+ | 3.12 |
+| GPU VRAM | 8 GB | 12 GB+ |
+| System RAM | 32 GB | 64 GB |
+| Vulkan | 1.1+ | 1.4 (latest SDK) |
+
+Supported GPUs: AMD (RX 5000+), NVIDIA (GTX 1060+), Intel (Arc A-series), Apple (M1+ via MoltenVK).
+
+---
+
+## Quick Start
+
+```python
+import numpy as np
+from grilly import nn
+from grilly.optim import AdamW
+
+# Build a model
+model = nn.Sequential(
+    nn.Linear(784, 256),
+    nn.ReLU(),
+    nn.Linear(256, 10),
+)
+
+# Train
+optimizer = AdamW(model.parameters(), lr=1e-3)
+loss_fn = nn.CrossEntropyLoss()
+
+x = np.random.randn(32, 784).astype(np.float32)
+targets = np.random.randint(0, 10, (32,))
+
+logits = model(x)
+loss = loss_fn(logits, targets)
+grad = loss_fn.backward(np.ones_like(loss), logits, targets)
+
+model.zero_grad()
+model.backward(grad)
+optimizer.step()
+```
+
+### Autograd
+
+```python
+from grilly.nn import Variable, tensor
+
+x = Variable(tensor([1.0, 2.0, 3.0]), requires_grad=True)
+y = (x * x).sum()
+y.backward()
+print(x.grad)  # [2.0, 4.0, 6.0]
+```
+
+### Functional API
+
+```python
+import grilly.functional as F
+
+out = F.linear(x, weight, bias)
+out = F.relu(out)
+out = F.softmax(out, dim=-1)
+attn = F.flash_attention2(q, k, v)
+```
+
+See `notebooks/01_getting_started.ipynb` for a complete walkthrough.
+
+---
+
+## Features
+
+### Layers (100+)
+
+| Category | Modules |
+|----------|---------|
+| **Linear** | `Linear`, `Embedding`, `CapsuleEmbedding`, `Dropout` |
+| **Convolution** | `Conv1d`, `Conv2d` |
+| **Recurrent** | `LSTM`, `LSTMCell`, `GRU`, `GRUCell` |
+| **Normalization** | `LayerNorm`, `RMSNorm`, `BatchNorm1d/2d` |
+| **Activations** | `ReLU`, `GELU`, `SiLU`, `SwiGLU`, `GCU`, `RoSwish` |
+| **Attention** | `FlashAttention2/3`, `HYLAAttention`, `MultiheadAttention`, `RoPE` |
+| **LoRA** | `LoRALinear`, `LoRAAttention`, `LoRAModel` |
+| **Pooling** | `MaxPool2d`, `AvgPool2d`, `AdaptiveMaxPool2d/AvgPool2d` |
+| **Loss** | `MSELoss`, `CrossEntropyLoss`, `BCELoss` |
+| **Containers** | `Sequential`, `Residual` |
+| **Multimodal** | `PerceiverIO`, `ImageBindFusion`, `FlamingoFusion`, `VisionLanguageModel` |
+| **Memory** | `MemoryRead`, `MemoryWrite`, `MemoryContextAggregate` |
+| **Routing** | `DomainRouter`, `DomainPredictor`, `ExpertCombiner` |
+
+### Spiking Neural Networks
+
+Full SNN framework with GPU-accelerated spike dynamics:
+
+- **Neurons**: `IFNode`, `LIFNode`, `ParametricLIFNode`
+- **Surrogate gradients**: `ATan`, `Sigmoid`, `FastSigmoid`
+- **Synapses**: `STPSynapse`, `DualTimescaleSynapse`, `SynapseFilter`
+- **Temporal containers**: `SeqToANNContainer`, `MultiStepContainer`
+- **Spiking attention**: `SpikingSelfAttention`, `QKAttention`, `TemporalWiseAttention`
+- **ANN-to-SNN conversion**: `Converter`, `VoltageScaler`
+
+### Optimizers
+
+| Optimizer | Description |
+|-----------|-------------|
+| `Adam` | Classic Adam |
+| `AdamW` | Adam with decoupled weight decay |
+| `SGD` | Stochastic gradient descent |
+| `NLMS` | Normalized Least Mean Squares |
+| `NaturalGradient` | Fisher-preconditioned |
+| `HypergradientAdamW` | OSGM-style auto learning rate |
+| `AutoHypergradientAdamW` | Fully automatic hypergradient |
+| `AffectAdam` | Emotion-weighted updates |
+
+**Schedulers**: `StepLR`, `CosineAnnealingLR`, `ReduceLROnPlateau`, `OneCycleLR`.
+
+### Experimental Modules
+
+| Module | Description |
+|--------|-------------|
+| `experimental.vsa` | Vector Symbolic Architectures (binary, holographic, block-codes, resonator networks) |
+| `experimental.moe` | Mixture of Experts (relational encoder, resonator routing) |
+| `experimental.temporal` | Temporal reasoning (causal chains, counterfactuals, world models) |
+| `experimental.cognitive` | Cognitive controller (working memory, simulation, understand-think-speak) |
+| `experimental.language` | Language processing (encoding, generation, parsing) |
+
+---
+
+## Architecture
+
+```
+Python API                    C++ Bridge                  GPU Shaders
+─────────────                 ──────────                  ───────────
+nn.Module layers              pybind11 bindings           231 SPIR-V kernels
+F.* stateless ops      →      dual-validity tensors  →    AMD / NVIDIA / Intel
+optim.* optimizers            zero CPU↔GPU ping-pong      No CUDA dependency
+autograd engine               buffer pool management      Vulkan 1.1+ compute
+```
+
+### 3-Level GPU Fallback
+
+Every operation has automatic fallback:
+
+1. **grilly C++ / Vulkan** -- native compute shaders (fastest)
+2. **PyTorch CUDA** -- if torch is available (fast)
+3. **NumPy CPU** -- always available (correct)
+
+Same API, same results, different speed. Your code never changes.
+
+### GPU Kernels (231 operations)
+
+| Category | Count | Examples |
+|----------|-------|---------|
+| Linear algebra | 20+ | GEMM, FFT, SVD, matmul |
+| Attention | 15+ | flash attention, multi-head, spiking |
+| Convolution | 10+ | conv2d forward/backward, im2col |
+| Learning | 20+ | Adam, STDP, Hebbian, EWC, NLMS |
+| VSA | 10+ | bind, bundle, similarity, resonator |
+| SNN | 15+ | LIF/IF neuron, synapse, spike generation |
+| Normalization | 10+ | layer norm, batch norm, RMS norm |
+| Activation | 15+ | ReLU, GELU, SiLU, softmax (all with backward) |
+| Memory/FAISS | 10+ | similarity search, place/time cells |
+
+---
+
+## Ecosystem
+
+| Package | Description |
+|---------|-------------|
+| [optimum-grilly](https://github.com/grillcheese-ai/optimum-grilly) | HuggingFace Optimum backend -- `from_pretrained` on Vulkan |
+| [CubeMind](https://github.com/grillcheese-ai/cubemind) | Neuro-vector-symbolic cognitive architecture powered by grilly |
+
+---
+
+## Notebooks & Tutorials
+
+| Notebook | Description |
+|----------|-------------|
+| `notebooks/01_getting_started.ipynb` | Installation verification, first model, GPU check |
+| `notebooks/02_training_loop.ipynb` | Full training loop: data loading, loss, optimization, checkpointing |
+| `notebooks/03_spiking_neural_networks.ipynb` | SNN neurons, STDP learning, ANN-to-SNN conversion |
+| `notebooks/04_vector_symbolic_architectures.ipynb` | VSA ops: bind, bundle, similarity, resonator networks |
+| `notebooks/05_attention_and_transformers.ipynb` | Flash attention, RoPE, PerceiverIO, multi-head attention |
+
+See also `tutorials/` for standalone Python scripts covering every feature.
+
+---
+
+## Testing
+
+```bash
+# All tests
+uv run pytest tests/ -v
+
+# CPU-only (no GPU required)
+uv run pytest tests/ -m "not gpu" -v
+
+# With coverage
+uv run pytest tests/ --cov=. --cov-report=term
+
+# Single module
+uv run pytest tests/test_linear.py -v
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VK_GPU_INDEX` | Select GPU by index | `0` |
+| `GRILLY_DEBUG` | Enable debug logging (`1` = on) | off |
+| `ALLOW_CPU_VULKAN` | Allow Mesa llvmpipe software Vulkan | off |
+
+---
+
+## What's New
+
+### Pre-v1.0 (current `main`, since 0.6.1) {#whats-new-since-061}
+
+A long debug session against a real workload (`vsa_lm_v3c_grilly` —
+language modeling with multiplication-free FFN + causal Linear-RNN
+mixer) surfaced and fixed a stack of bugs and perf cliffs that the
+0.6.1 test suite never tripped. Each fix is small in isolation; the
+pile is large enough to warrant a major version bump.
+
+#### Performance — bridge dispatch overhauled
+
+- **`BufferPool::allocateBuffer` VMA fix.** Changed `preferredFlags`
+  → `requiredFlags = DEVICE_LOCAL_BIT`. The old code silently fell
+  back to slow host-visible BAR memory on AMD/Windows when the
+  allocator's auto-select picked the wrong heap; the fix forces
+  `memoryType[2]` (DEVICE_LOCAL+HOST_VISIBLE+HOST_COHERENT) under
+  Resizable BAR or fails loudly when ReBAR is unavailable.
+  ([cpp/src/buffer_pool.cpp](cpp/src/buffer_pool.cpp))
+- **3-way bucket pool routing.** `acquire` / `acquireDeviceLocal` /
+  `acquireReadback` now have separate per-size pools; `release`
+  routes by the buffer's `deviceLocal` / `readback` flag. Prevents a
+  DL buffer from being picked up by a host-visible `acquire` and
+  crashing on `mappedPtr=null`.
+- **Staging pattern across all hot ops** ("Thread A"). Each op
+  acquires DEVICE_LOCAL VRAM compute buffers + WC sequential-write
+  stage-in + HOST_CACHED random-read stage-out, batches a single
+  command buffer with `copyBuffer × N → barrier → dispatch →
+  barrier → copyBuffer × M → submit/wait`. Applied to:
+  - `cpp/src/ops/linear.cpp` — `linear`, `linearBackward`, `dropout`
+  - `cpp/src/ops/activations.cpp` — `activationForward` /
+    `activationBackward` helpers (covers ReLU/GELU/SiLU/Tanh)
+  - `cpp/src/ops/layernorm.cpp` — `layernorm`, `layernormBackward`
+  - `cpp/src/ops/embedding.cpp` — `embeddingLookup`
+  - `cpp/src/ops/optimizer.cpp` — `adamUpdate`, `adamwUpdate`
+  - `cpp/src/ops/loss.cpp` — `crossEntropyLoss`, `crossEntropyBackward`
+- **Measured impact**: forward `nn.Linear` on a 4096×384×1152 GEMM
+  went from **763 ms → 19 ms** on an AMD RX 6750 XT (~40x). The
+  download phase alone collapsed from **749 ms → 2.7 ms** once the
+  output stage moved to `HOST_CACHED` memory (random-read instead of
+  uncached WC reads).
+- **`transferComputeBarrier()`** added to `CommandBatch` — bidirectional
+  TRANSFER ↔ COMPUTE memory + execution barrier needed by the
+  staging pattern (the existing `barrier()` is COMPUTE→COMPUTE only,
+  kept unchanged for `linearBackward`'s 3-pass intra-shader barriers).
+
+#### fp16 + cooperative matrix GEMM
+
+- **`shaders/gemm-coopmat-shared.glsl`** — fp16 tiled GEMM via
+  `VK_KHR_cooperative_matrix` with shared-memory staging. Subgroup
+  scope, 16×64 (M×N) tile per workgroup, 256 threads (4×Wave64
+  subgroups), fp32 accumulator. Dispatches to native WMMA on RDNA3
+  and NVIDIA RTX, falls through the driver emulation path on
+  RDNA1/RDNA2.
+- **`shaders/gemm-bias-add.glsl`** — companion row-broadcast bias
+  add (the coopmat store can't interleave bias inline).
+- **`LinearParams.elemSize`** — new field (4 = fp32, 2 = fp16).
+  `linear()` selects `gemm-coopmat-shared` when `elemSize == 2`,
+  cooperative-matrix is supported, AND shape is aligned
+  (M%16, K%16, N%64); otherwise falls back to `fnn-linear.glsl`.
+- **Pybind: generic `py::array`** — `bindings_linear.cpp` now accepts
+  fp32 OR fp16 numpy input via `xBuf.itemsize`. Output is always
+  fp32 (coopmat accumulator). Bias must be fp32 regardless of input
+  dtype.
+- **`linearBackward` interface upgrade** — same `void*` + `elemSize`
+  signature so the fp16 path slots in cleanly when an fp16 backward
+  shader lands. For now `elemSize != 4` raises with a clear message.
+
+#### Causal Linear-RNN prefix scan (new feature)
+
+- **`shaders/prefix-scan-causal.glsl`** — `h_t = a_t * h_{t-1} + x_t`
+  in O(log S) parallel depth via `subgroupInclusiveAdd` on `log(a)`
+  and the rescaled input (Blelloch's two-scan trick). Strictly
+  causal; one workgroup per `(batch, hidden_dim)` pair.
+- **`shaders/prefix-scan-causal-backward.glsl`** — anti-causal scan
+  for `grad_x` and `grad_a` via the identity
+  `R[t] = total - F[t] + w[t]` (no `subgroupShuffle`, which is
+  undefined on partial Wave64 subgroups). Hits fp32 epsilon vs the
+  closed-form gradient (verified `max abs err ≈ 3.6e-6`).
+- **`grilly/cpp/src/ops/prefix_scan.cpp`** — C++ dispatcher with the
+  same staging pattern as the rest of Thread A.
+- **`grilly/cpp/python/bindings_prefix_scan.cpp`** — pybind exposing
+  `prefix_scan_causal` and `prefix_scan_causal_backward`.
+- **`grilly/nn/prefix_scan.py`** — Python autograd wrapper
+  (`prefix_scan_causal()`) wired into grilly's `Variable` /
+  `GradFn` system, plus a `CausalSequenceMixer` module that uses it
+  as a drop-in causal sequence-pooling replacement.
+- **Constraint**: `seq_len <= 32` (one thread per time step in a
+  single subgroup). A hierarchical multi-subgroup version is on the
+  roadmap.
+
+#### Autograd — actually working now
+
+- **`Module.__setattr__` auto-registration**. `self.weight =
+  nn.Parameter(...)` and `self.lin = nn.Linear(...)` now populate
+  `_parameters` / `_modules` automatically. Standard PyTorch idiom.
+  Was previously silently broken — every Module subclass returned 0
+  parameters from `parameters()`, AdamW silently no-op'd.
+- **`nn.Linear.forward` autograd wiring.** When the input is a
+  `Variable`, the output is wrapped in a `Variable` with a `GradFn`
+  whose backward closure calls the existing `Linear.backward()`
+  (which already populates `weight.grad`/`bias.grad` via the GPU
+  shader). Same template applied to `nn.LayerNorm.forward` and
+  `nn.Embedding.forward`.
+- **`Variable.__array__`** — numpy array protocol on
+  `nn.autograd.Variable`. `np.matmul(tensor, w)` /
+  `np.dot(tensor, w)` / `np.asarray(tensor)` now operate on the
+  backing ndarray transparently. Required to let grilly's existing
+  numpy-native layer code keep working when called from torch_api
+  Tensor inputs.
+- **`Module.__call__` Variable passthrough + output wrap.** Inputs
+  of type `Tensor` / `LongTensor` / `Variable` are passed through to
+  `forward()` unchanged; raw ndarray outputs are re-wrapped in
+  `Tensor` so chained calls preserve torch-style type all the way
+  through user-defined Module subclasses.
+- **`Parameter` shape methods** — `unsqueeze`, `view`,
+  `mean(dim=...)`, `detach` added to `nn.Parameter` so user
+  `forward` code can do `self.weight.unsqueeze(0)` /
+  `self.weight.view(...)` / `self.weight.mean(dim=-1)` without
+  knowing that `Parameter` is an `np.ndarray` subclass.
+- **`nn.init.normal_/uniform_`** — added a `_writable_array(tensor)`
+  helper that unwraps Tensor/Variable wrappers to their backing
+  ndarray for in-place init. Previously raised `TypeError: 'Tensor'
+  object does not support item assignment` for the standard
+  `nn.init.normal_(self.weight, 0, 0.02)` idiom.
+- **`F.gelu` re-export** in `grilly.nn.functional` (was importable
+  via `grilly.nn.autograd.gelu` but missing from the public
+  `functional` namespace).
+
+#### Checkpoint format
+
+- **`.grl` save/load roundtrip fixed.**
+  `torch.save({'model': sd, 'step': N}, path)` followed by
+  `ck = torch.load(path)` now returns exactly what was saved
+  (matches `torch.save`/`torch.load` semantics). The previous
+  `load_grl` force-wrapped content under a fixed `'model'` key,
+  producing `ck['model']['model']['weight']` instead of
+  `ck['model']['weight']` for any payload that already contained a
+  `model` key.
+
+#### Editable install / Vulkan probe
+
+- **`grilly/__init__.py` sys.path fix.** Added an `os.path.dirname`
+  insert at the very top of the package init so `import grilly_core`
+  works under PEP 660 editable installs. The path hook used by
+  modern editable installs (`__editable__.grilly-X.Y.finder.__path_hook__`)
+  doesn't add the package directory to `sys.path`, so the sibling
+  `grilly_core.<plat>.pyd` was invisible to `import grilly_core`.
+  The downstream effect: `backend/base.py:_probe_cpp_vulkan()`
+  silently caught the `ModuleNotFoundError`, set
+  `VULKAN_AVAILABLE = False`, and the entire `nn` stack thought it
+  had no GPU (despite a perfectly working Vulkan device).
+- **`Module._get_backend()` graceful None.** Catches the legacy
+  `VulkanCompute` init exception and returns `None` so layers that
+  only used `_get_backend()` for one-time GPU Xavier init at
+  construction time don't crash when the legacy Python `vulkan`
+  ctypes package isn't installed (the new C++ `_bridge` path doesn't
+  need it).
+
+#### Pre-existing shader bugs surfaced by recompile
+
+Three shaders that had stale `.spv` files compiled against a more
+permissive glslang version. Recent glslang catches them:
+
+- **`fused-layernorm-linear.glsl`** — added missing
+  `#extension GL_EXT_shader_atomic_float : require` for the
+  `atomicAdd(shared_sum, sg_sum)` accumulator.
+- **`lstm-cell-forward.glsl`** — renamed buffer field `input` →
+  `input_data` (`input` is a reserved word in recent glslang).
+  Also removed an incorrect `writeonly` qualifier on the gates
+  buffer that the shader actually reads back.
+- **`vsa-explore.glsl`** — renamed buffer field `output` →
+  `output_data`. Same `writeonly` mismatch fix.
+
+#### Tooling
+
+- **`rebuild.ps1`** — one-command Windows rebuild. Compiles all
+  GLSL → SPIR-V (with `-S comp` to disambiguate the stage,
+  `--target-env vulkan1.3` for cooperative matrix + subgroup
+  extensions), runs `cmake --build build2 --config Release --target
+  grilly_core`, copies the freshly built `.pyd` to the package
+  root. Skips up-to-date shaders by mtime comparison.
+- **`PipelineCache::getDevice()`** accessor — needed by `linear.cpp`
+  to query `hasCooperativeMatrix()` before selecting the coopmat
+  shader path.
+
+#### Lint cleanup
+
+- 75 ruff errors fixed across the codebase. Mix of unsorted imports
+  (`I001`), unused imports (`F401`), missing f-string placeholders
+  (`F541`), deprecated typing imports (`UP035`), non-PEP 585
+  annotations (`UP006`), and a `yield from` modernization in
+  `nn.Module.named_buffers`.
+
+### 0.6.x
+
+- **MindForge** adapter hypernetwork integration (via CubeMind)
+- **Synaptic shaders**: `synapsis-stdp-update.glsl`, `bridge-spike-to-continuous.glsl`
+- **JIT shader fusion** with shaderc runtime compilation
+- **Perceiver IO** with IndexCache K/V pre-projection
+- **MoQE** Gumbel-Softmax router shader
+- 215 compute shaders (up from 190)
+
+### 0.5.x
+
+- C++ Tensor with dual-validity tracking -- GPU-resident data, no CPU ping-pong
+- Flash Attention 3 with subgroup acceleration
+- HYLAAttention (softmax-free), FNetMixing, SympFormerBlock
+- HDC packed ops -- 32x memory compression
+- Sanger GHA for neurogenesis
+- JIT compilation framework (`@grilly.jit`)
+- Automatic Mixed Precision (`autocast` + `GradScaler`)
+
+---
+
+## Contributing
+
+1. Fork the repo and create a feature branch
+2. Add tests for new features
+3. Run `ruff check .` and `uv run pytest tests/ -v`
+4. Submit a pull request
+
+---
+
+## License
+
+MIT License -- see [LICENSE](LICENSE) for details.

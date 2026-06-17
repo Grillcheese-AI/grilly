@@ -23,3 +23,15 @@ node_modules/
 #Editors
 .vscode/
 .idea/
+/build2
+/build_verify_pybind
+7492_Towards_Lossless_Memory_e.pdf
+/build_verify_pybind2
+/experimental_datasets
+/osgm-best-hypergrad
+/personas_prompts/mindmark
+/private/models
+/site
+grilly_core.cp312-win_amd64.pyd
+/third_party
+/.claude
