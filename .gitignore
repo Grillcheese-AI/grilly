@@ -1,1 +1,8 @@
-Nothing should be ignored based on the provided file changes. The only modified file is a C++ source file (`cpp/src/buffer_pool.cpp`), which is a source code file and should not be ignored. There are no build artifacts, dependencies, temporary files, or other items in the change list that warrant being added to `.gitignore`.
+```
+# Distribution / packaging
+*.whl
+*.egg
+*.egg-info/
+dist/
+build/
+```
