@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <tuple>
 #include <vector>
 
 #include "grilly/autograd/buffer_registry.h"
@@ -106,6 +107,7 @@ enum class OpType : uint8_t {
 
     // Attention
     FlashAttention2,
+    ChunkedAttention,  // 0.0.2: sliding-window causal attention (BHSD layout)
 
     // Convolution
     Conv2d,
@@ -302,6 +304,7 @@ private:
     void backward_mingru(Node* node);
     void backward_swiglu(Node* node);
     void backward_attention(Node* node);
+    void backward_chunked_attention(Node* node);  // 0.0.2 sliding window
     void backward_conv2d(Node* node);
     void backward_conv1d(Node* node);
     void backward_add(Node* node);
@@ -395,6 +398,28 @@ public:
     /// Returns the resident output buffer id.
     uint32_t forward_mingru(uint32_t g_id, uint32_t v_id, uint32_t d_id,
                             uint32_t batch, uint32_t seqLen, uint32_t hidden);
+
+    /// Forward ChunkedAttention: sliding-window causal attention.
+    /// Q/K/V/O are (batch, num_heads, seq_len, head_dim), BHSD layout.
+    /// Each query attends to keys in [max(0, q-W+1), q] (causal + window).
+    /// Returns the resident output buffer id.
+    uint32_t forward_chunked_attention(uint32_t q_id, uint32_t k_id, uint32_t v_id,
+                                       uint32_t batch, uint32_t num_heads,
+                                       uint32_t seq_len, uint32_t head_dim,
+                                       uint32_t window_size);
+
+    /// Forward QKV reshape: reshape fused (B*S, 3*H*Dh) QKV buffer into
+    /// three separate (B, H, S, Dh) buffers for chunked attention.
+    /// Returns (q_id, k_id, v_id) tuple.
+    std::tuple<uint32_t, uint32_t, uint32_t>
+    forward_qkv_split(uint32_t qkv_id, uint32_t batch, uint32_t seq_len,
+                      uint32_t num_heads, uint32_t head_dim);
+
+    /// Forward BHSD -> BSHD transpose: reshape (B, H, S, Dh) attention output
+    /// back to (B*S, d) for the output projection.
+    uint32_t forward_transpose_bhsd_bshd(uint32_t in_id, uint32_t batch,
+                                         uint32_t num_heads, uint32_t seq_len,
+                                         uint32_t head_dim);
 
     /// Forward embedding lookup: out[b,s,:] = table[ids[b,s]]. ids are uint32
     /// (batch*seq); table is (vocab, dim). Returns a resident output id of

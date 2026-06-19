@@ -1,3 +1,4 @@
+#define _CRT_SECURE_NO_WARNINGS
 // VMA implementation lives in exactly one translation unit.
 // Must come before any include of vk_mem_alloc.h.
 #define VMA_IMPLEMENTATION
@@ -216,10 +217,10 @@ void GrillyDevice::initVulkan() {
 
     // ── Create logical device with compute + transfer queues ──
     std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-    std::vector<float> queuePriorities;
+    float queuePriorities[2] = {1.0f, 1.0f}; 
     
     // Compute queue
-    queuePriorities.push_back(1.0f);
+    // queuePriorities.push_back(1.0f);
     VkDeviceQueueCreateInfo computeQueueInfo{};
     computeQueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     computeQueueInfo.queueFamilyIndex = computeQueueFamily_;
@@ -230,7 +231,7 @@ void GrillyDevice::initVulkan() {
     // Transfer queue (if separate from compute)
     if (transferQueueFamily_ != UINT32_MAX && 
         transferQueueFamily_ != computeQueueFamily_) {
-        queuePriorities.push_back(1.0f);
+        //queuePriorities.push_back(1.0f);
         VkDeviceQueueCreateInfo transferQueueInfo{};
         transferQueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
         transferQueueInfo.queueFamilyIndex = transferQueueFamily_;

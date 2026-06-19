@@ -38,6 +38,7 @@ public:
 
     PipelineCache(const PipelineCache&) = delete;
     PipelineCache& operator=(const PipelineCache&) = delete;
+    GrillyDevice& getDevice() { return device_; }
 
     void loadSPIRV(const std::string& name, const std::vector<uint8_t>& code);
     void loadSPIRVFile(const std::string& name, const std::string& path);

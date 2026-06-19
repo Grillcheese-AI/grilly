@@ -54,10 +54,15 @@ void linear(CommandBatch& batch, BufferPool& pool, PipelineCache& cache,
         (p.batchSeq  % 16u == 0u) &&
         (p.inputDim  % 16u == 0u) &&
         (p.outputDim % 64u == 0u);
+
+    GrillyDevice& device = cache.getDevice();  // hack to get device reference from cache
+    const bool hasCoopMatSupport = device.hasCooperativeMatrix();
+    const bool hasShader = cache.hasShader("gemm-coopmat-shared");
+
     const bool useCoopMat =
         inElem == 2u &&
-        cache.getDevice().hasCooperativeMatrix() &&
-        cache.hasShader("gemm-coopmat-shared") &&
+        hasCoopMatSupport &&
+        hasShader &&
         shapeAligned;
 
     // fp16 input without a coopmat path is not supported in this function —

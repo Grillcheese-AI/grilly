@@ -32,8 +32,11 @@ classifiers = [
 keywords = ["vulkan", "gpu", "neural-network", "snn", "compute-shaders", "gpu-acceleration", "lora-bridge", "huggingface-bridge", "machine-learning", "torch-alternative","synapse", "neuron network", "hebbian-learning"]
 
 dependencies = [
+    "blake3>=1.0.8",
     "numpy",
     "pytest-asyncio>=1.3.0",
+    "pytest-benchmark>=5.2.3",
+    "scikit-learn>=1.8.0",
 ]
 
 [project.optional-dependencies]

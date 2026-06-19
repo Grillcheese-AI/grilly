@@ -214,6 +214,7 @@ def train_epoch(model, dataloader, lr=0.01, optimizer=None, surprise_gain=0.0):
         correct += np.sum(preds == y_batch)
         total += N
         batch_count += 1
+        print(f"    Batch {batch_count}: loss={loss:.4f}, batch_acc={np.mean(preds == y_batch):.2%}", end="\r")
 
         if optimizer is not None:
             # Optimizer-based update
@@ -226,6 +227,7 @@ def train_epoch(model, dataloader, lr=0.01, optimizer=None, surprise_gain=0.0):
 
     avg_loss = total_loss / max(batch_count, 1)
     accuracy = correct / max(total, 1)
+    print(f"    Train loss: {avg_loss:.4f}, accuracy: {accuracy:.2%}")
     return avg_loss, accuracy
 
 
@@ -299,15 +301,16 @@ def benchmark_model(
             optimizer=optimizer,
             surprise_gain=surprise_gain,
         )
+        
         epoch_time = time.time() - t0
         lr_info = ""
         if optimizer is not None and hasattr(optimizer, "current_lr"):
             lr_info = f", lr={optimizer.current_lr:.6f}"
         print(
-            f"  Epoch {epoch + 1}/{epochs}: "
-            f"loss={train_loss:.4f}, train_acc={train_acc:.2%}, "
-            f"time={epoch_time:.1f}s{lr_info}"
-        )
+                f"  Epoch {epoch + 1}/{epochs}: "
+                f"loss={train_loss:.4f}, train_acc={train_acc:.2%}, "
+                f"time={epoch_time:.1f}s{lr_info}"
+            )
 
     # Evaluation
     print("  Evaluating...", end=" ", flush=True)
@@ -334,11 +337,11 @@ def main():
     # Configuration
     T = 4
     CHANNELS = 32
-    BATCH_SIZE = 64
+    BATCH_SIZE = 32
     EPOCHS = 5
-    LR = 0.005
-    TRAIN_SUBSET = 10000
-    TEST_SUBSET = 2000
+    LR = 3e-4
+    TRAIN_SUBSET = 1000
+    TEST_SUBSET = 200
 
     x_train, y_train, x_test, y_test = load_fashion_mnist()
 
@@ -357,44 +360,20 @@ def main():
 
     results = []
 
-    # --- 1. CSNN-IF with manual SGD (baseline) ---
-    np.random.seed(42)
-    model_if = CSNN_IF(T=T, channels=CHANNELS)
-    r = benchmark_model(
-        "CSNN-IF",
-        model_if,
-        train_loader,
-        test_loader,
-        epochs=EPOCHS,
-        lr=LR,
-    )
-    results.append(r)
-
-    # --- 2. CSNN-LIF with manual SGD (baseline) ---
-    np.random.seed(42)
-    model_lif = CSNN_LIF(T=T, channels=CHANNELS)
-    r = benchmark_model(
-        "CSNN-LIF",
-        model_lif,
-        train_loader,
-        test_loader,
-        epochs=EPOCHS,
-        lr=LR,
-    )
-    results.append(r)
+   
 
     # --- 3. CSNN-LIF with AutoHypergradientAdamW ---
     np.random.seed(42)
     model_lif_auto = CSNN_LIF(T=T, channels=CHANNELS)
     optimizer_auto = AutoHypergradientAdamW(
         model_lif_auto.parameters(),
-        lr=5e-4,
+        lr=3e-4,
         weight_decay=0.005,
         hyper_lr=0.001,
         warmup_steps=50,
         lr_min=1e-5,
-        lr_max=0.002,
-        use_gpu=False,
+        lr_max=3e-3,
+        use_gpu=False
     )
     r = benchmark_model(
         "CSNN-LIF+Auto",

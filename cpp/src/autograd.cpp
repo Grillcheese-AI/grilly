@@ -153,6 +153,7 @@ void BackwardEngine::dispatch_node_backward(Node* node) {
         case OpType::MinGRU:    backward_mingru(node); break;
         case OpType::SwiGLU:    backward_swiglu(node); break;
         case OpType::FlashAttention2: backward_attention(node); break;
+        case OpType::ChunkedAttention: backward_chunked_attention(node); break;
         case OpType::Conv2d:    backward_conv2d(node); break;
         case OpType::Conv1d:    backward_conv1d(node); break;
         case OpType::Add:       backward_add(node); break;
@@ -695,6 +696,114 @@ void BackwardEngine::backward_attention(Node* node) {
     // TODO: dispatch flash-attention2-backward.glsl (tiled)
 }
 
+void BackwardEngine::backward_chunked_attention(Node* node) {
+    // Sliding-window causal attention backward (0.0.2) — GPU-side.
+    //
+    // inputs[0] = qkv (BS, 3*d) — the fused QKV projection output.
+    // saved_buffer_ids = [q_id, k_id, v_id] — the split Q/K/V buffers (BHSD).
+    // grad_output_buffer = dO (B, H, S, Dh) — gradient w.r.t. attention output.
+    //
+    // GPU backward: dispatch chunked-sw-attention-backward.glsl (recomputes
+    // softmax on-the-fly, uses atomicAdd for dK/dV), then merge dQ/dK/dV
+    // back into d_qkv via attention-qkv-merge.glsl.
+
+    if (node->num_inputs < 1) return;
+    if (node->grad_output_buffer == 0) { stats_.cpu_fallbacks++; return; }
+    if (node->num_saved < 3) { stats_.cpu_fallbacks++; return; }
+    if (!node->inputs[0].requires_grad) return;
+
+    // Unpack params
+    struct { uint32_t B; uint32_t H; uint32_t S; uint32_t Dh; uint32_t W; float scale; } p;
+    std::memcpy(&p, node->params, std::min<size_t>(node->params_size, sizeof(p)));
+    const uint32_t B = p.B, H = p.H, S = p.S, Dh = p.Dh, W = p.W;
+    const float scale = p.scale;
+    const size_t elemBytes = size_t(B) * H * S * Dh * 4;
+    const uint32_t d = H * Dh;
+    const size_t qkvBytes = size_t(B) * S * 3 * d * 4;
+
+    uint32_t qId = node->saved_buffer_ids[0];
+    uint32_t kId = node->saved_buffer_ids[1];
+    uint32_t vId = node->saved_buffer_ids[2];
+    uint32_t dOId = node->grad_output_buffer;
+
+    // Allocate dQ, dK, dV (BHSD layout)
+    uint32_t dQId = registry_.alloc(elemBytes);
+    uint32_t dKId = registry_.alloc(elemBytes);
+    uint32_t dVId = registry_.alloc(elemBytes);
+
+    // Zero dK and dV (they use atomicAdd) — via batch_.fillZero, not registry_.upload
+    GrillyBuffer& dKBufZ = registry_.resolve(dKId);
+    GrillyBuffer& dVBufZ = registry_.resolve(dVId);
+    batch_.fillZero(dKBufZ, elemBytes);
+    batch_.fillZero(dVBufZ, elemBytes);
+    batch_.transferComputeBarrier();
+
+    // ── Dispatch backward shader ───────────────────────────────────────
+    GrillyBuffer& qBuf = registry_.resolve(qId);
+    GrillyBuffer& kBuf = registry_.resolve(kId);
+    GrillyBuffer& vBuf = registry_.resolve(vId);
+    GrillyBuffer& dOBuf = registry_.resolve(dOId);
+    GrillyBuffer& dQBuf = registry_.resolve(dQId);
+    GrillyBuffer& dKBuf = registry_.resolve(dKId);
+    GrillyBuffer& dVBuf = registry_.resolve(dVId);
+
+    constexpr uint32_t kNumBindingsBwd = 7;
+    constexpr uint32_t kPushConstBytes = 24;  // 6 * sizeof(uint32_t) — but scale is float
+    PipelineEntry pipeBwd = cache_.getOrCreate("chunked-sw-attention-backward",
+                                               kNumBindingsBwd, kPushConstBytes);
+    std::vector<VkDescriptorBufferInfo> bufInfosBwd = {
+        {qBuf.handle,  0, elemBytes},
+        {kBuf.handle,  0, elemBytes},
+        {vBuf.handle,  0, elemBytes},
+        {dOBuf.handle, 0, elemBytes},
+        {dQBuf.handle, 0, elemBytes},
+        {dKBuf.handle, 0, elemBytes},
+        {dVBuf.handle, 0, elemBytes},
+    };
+    VkDescriptorSet descSetBwd = cache_.allocDescriptorSet(
+        "chunked-sw-attention-backward", bufInfosBwd);
+
+    struct PushBwd {
+        uint32_t batch_size, num_heads, seq_len, head_dim, window_size;
+        float scale;
+    } pushBwd = {B, H, S, Dh, W, scale};
+
+    const uint32_t gxBwd = B * H * S;
+    batch_.dispatch(pipeBwd.pipeline, pipeBwd.layout, descSetBwd,
+                    gxBwd, 1, 1, &pushBwd, sizeof(pushBwd));
+    batch_.transferComputeBarrier();
+
+    // ── Merge dQ/dK/dV into d_qkv (BS, 3*d) BSHD layout ───────────────
+    uint32_t dQkvId = registry_.alloc(qkvBytes);
+    GrillyBuffer& dQkvBuf = registry_.resolve(dQkvId);
+
+    constexpr uint32_t kNumBindingsMerge = 4;
+    constexpr uint32_t kPushConstBytesMerge = 16;
+    PipelineEntry pipeMerge = cache_.getOrCreate("attention-qkv-merge",
+                                                  kNumBindingsMerge,
+                                                  kPushConstBytesMerge);
+    std::vector<VkDescriptorBufferInfo> bufInfosMerge = {
+        {dQBuf.handle,  0, elemBytes},
+        {dKBuf.handle,  0, elemBytes},
+        {dVBuf.handle,  0, elemBytes},
+        {dQkvBuf.handle, 0, qkvBytes},
+    };
+    VkDescriptorSet descSetMerge = cache_.allocDescriptorSet(
+        "attention-qkv-merge", bufInfosMerge);
+
+    struct PushMerge {
+        uint32_t batch_size, num_heads, seq_len, head_dim;
+    } pushMerge = {B, H, S, Dh};
+
+    const uint32_t totalMerge = B * H * S * Dh;
+    batch_.dispatch(pipeMerge.pipeline, pipeMerge.layout, descSetMerge,
+                    (totalMerge + 63) / 64, 1, 1, &pushMerge, sizeof(pushMerge));
+    batch_.transferComputeBarrier();
+
+    stats_.shaders_dispatched += 2;
+    node->grad_input_buffers[0] = dQkvId;
+}
+
 void BackwardEngine::backward_conv2d(Node* node) {
     stats_.shaders_dispatched++;
     // Conv2d backward: input grad via transposed conv, weight grad via correlation
@@ -915,13 +1024,45 @@ void BackwardEngine::backward_reshape(Node* node) {
 }
 
 void BackwardEngine::backward_transpose(Node* node) {
-    // Transpose backward: transpose the gradient back.
-    // For 2D: just swap dims. For ND: reverse the permutation.
-    stats_.shaders_dispatched++;
-    if (node->inputs[0].requires_grad) {
-        node->grad_input_buffers[0] = 1;  // placeholder: transpose shader
-        // TODO: dispatch transpose/permute shader
+    // BHSD <-> BSHD transpose backward. GPU dispatch: the transpose is its own
+    // inverse (swap dims 1 and 2). We reuse the attention-transpose-bhsd-bshd
+    // shader which does exactly this permutation.
+    if (node->grad_output_buffer == 0) { stats_.cpu_fallbacks++; return; }
+
+    const TensorRef& inRef = node->inputs[0];
+    if (inRef.ndim < 4) {
+        // Fallback: pass through for simple reshapes
+        if (inRef.requires_grad) node->grad_input_buffers[0] = node->grad_output_buffer;
+        return;
     }
+
+    const uint32_t B = inRef.shape[0];
+    const uint32_t H = inRef.shape[1];
+    const uint32_t S = inRef.shape[2];
+    const uint32_t Dh = inRef.shape[3];
+    const size_t elemBytes = size_t(B) * H * S * Dh * 4;
+
+    GrillyBuffer& gOBuf = registry_.resolve(node->grad_output_buffer);
+    uint32_t gradInId = registry_.alloc(elemBytes);
+    GrillyBuffer& gradInBuf = registry_.resolve(gradInId);
+
+    PipelineEntry pipe = cache_.getOrCreate("attention-transpose-bhsd-bshd",
+                                            2, 16);
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {gOBuf.handle,    0, elemBytes},
+        {gradInBuf.handle, 0, elemBytes},
+    };
+    VkDescriptorSet descSet = cache_.allocDescriptorSet(
+        "attention-transpose-bhsd-bshd", bufInfos);
+
+    struct { uint32_t batch, heads, seq, dh; } push = {B, H, S, Dh};
+    const uint32_t total = B * H * S * Dh;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (total + 63) / 64, 1, 1, &push, sizeof(push));
+    batch_.transferComputeBarrier();
+
+    stats_.shaders_dispatched++;
+    if (inRef.requires_grad) node->grad_input_buffers[0] = gradInId;
 }
 
 void BackwardEngine::backward_sum(Node* node) {
@@ -1098,6 +1239,117 @@ uint32_t TapeContext::forward_mingru(uint32_t g_id, uint32_t v_id, uint32_t d_id
     uint32_t gy = batch;
     batch_.dispatch(pipe.pipeline, pipe.layout, descSet, gx, gy, 1,
                     &push, sizeof(push));
+    batch_.transferComputeBarrier();
+    return outId;
+}
+
+uint32_t TapeContext::forward_chunked_attention(
+    uint32_t q_id, uint32_t k_id, uint32_t v_id,
+    uint32_t batch, uint32_t num_heads, uint32_t seq_len, uint32_t head_dim,
+    uint32_t window_size) {
+    // Sliding-window causal attention (0.0.2).
+    // Q/K/V/O all (batch, num_heads, seq_len, head_dim), BHSD layout.
+    // chunked-sw-attention.glsl: one workgroup per (batch, head, query_pos),
+    // iterates K in [max(0, q-W+1), q] with online softmax.
+    const size_t elemBytes = size_t(batch) * num_heads * seq_len * head_dim * 4;
+    uint32_t outId = registry_.alloc(elemBytes);
+    GrillyBuffer& qBuf = registry_.resolve(q_id);
+    GrillyBuffer& kBuf = registry_.resolve(k_id);
+    GrillyBuffer& vBuf = registry_.resolve(v_id);
+    GrillyBuffer& outBuf = registry_.resolve(outId);
+
+    constexpr uint32_t kNumBindings = 4;
+    constexpr uint32_t kPushConstBytes = 6 * sizeof(uint32_t);  // 24 bytes
+    PipelineEntry pipe = cache_.getOrCreate("chunked-sw-attention",
+                                            kNumBindings, kPushConstBytes);
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {qBuf.handle,   0, elemBytes},
+        {kBuf.handle,   0, elemBytes},
+        {vBuf.handle,   0, elemBytes},
+        {outBuf.handle, 0, elemBytes},
+    };
+    VkDescriptorSet descSet =
+        cache_.allocDescriptorSet("chunked-sw-attention", bufInfos);
+
+    const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+    struct {
+        uint32_t batch_size;
+        uint32_t num_heads;
+        uint32_t seq_len;
+        uint32_t head_dim;
+        uint32_t window_size;
+        float scale;
+    } push = {batch, num_heads, seq_len, head_dim, window_size, scale};
+    static_assert(sizeof(push) == 24, "push constants must be 24 bytes");
+
+    const uint32_t gx = batch * num_heads * seq_len;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet, gx, 1, 1,
+                    &push, sizeof(push));
+    batch_.transferComputeBarrier();
+    return outId;
+}
+
+std::tuple<uint32_t, uint32_t, uint32_t>
+TapeContext::forward_qkv_split(
+    uint32_t qkv_id, uint32_t batch, uint32_t seq_len,
+    uint32_t num_heads, uint32_t head_dim) {
+    // Reshape fused (B*S, 3*H*Dh) QKV buffer into 3 separate (B, H, S, Dh)
+    // buffers. attention-qkv-split.glsl: one thread per output element.
+    const size_t outBytes = size_t(batch) * num_heads * seq_len * head_dim * 4;
+    uint32_t qId = registry_.alloc(outBytes);
+    uint32_t kId = registry_.alloc(outBytes);
+    uint32_t vId = registry_.alloc(outBytes);
+    GrillyBuffer& qkvBuf = registry_.resolve(qkv_id);
+    GrillyBuffer& qBuf = registry_.resolve(qId);
+    GrillyBuffer& kBuf = registry_.resolve(kId);
+    GrillyBuffer& vBuf = registry_.resolve(vId);
+
+    constexpr uint32_t kNumBindings = 4;
+    constexpr uint32_t kPushConstBytes = 4 * sizeof(uint32_t);  // 16 bytes
+    PipelineEntry pipe = cache_.getOrCreate("attention-qkv-split",
+                                            kNumBindings, kPushConstBytes);
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {qkvBuf.handle, 0, outBytes * 3},  // 3x the per-head size
+        {qBuf.handle,   0, outBytes},
+        {kBuf.handle,   0, outBytes},
+        {vBuf.handle,   0, outBytes},
+    };
+    VkDescriptorSet descSet = cache_.allocDescriptorSet("attention-qkv-split", bufInfos);
+
+    struct { uint32_t batch; uint32_t heads; uint32_t seq; uint32_t dh; } push =
+        {batch, num_heads, seq_len, head_dim};
+    const uint32_t total = batch * num_heads * seq_len * head_dim;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (total + 63) / 64, 1, 1, &push, sizeof(push));
+    batch_.transferComputeBarrier();
+    return std::make_tuple(qId, kId, vId);
+}
+
+uint32_t TapeContext::forward_transpose_bhsd_bshd(
+    uint32_t in_id, uint32_t batch, uint32_t num_heads,
+    uint32_t seq_len, uint32_t head_dim) {
+    // Transpose (B, H, S, Dh) attention output to (B*S, D) for output projection.
+    // attention-transpose-bhsd-bshd.glsl: one thread per element.
+    const size_t bytes = size_t(batch) * num_heads * seq_len * head_dim * 4;
+    uint32_t outId = registry_.alloc(bytes);
+    GrillyBuffer& inBuf = registry_.resolve(in_id);
+    GrillyBuffer& outBuf = registry_.resolve(outId);
+
+    constexpr uint32_t kNumBindings = 2;
+    constexpr uint32_t kPushConstBytes = 4 * sizeof(uint32_t);
+    PipelineEntry pipe = cache_.getOrCreate("attention-transpose-bhsd-bshd",
+                                            kNumBindings, kPushConstBytes);
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {inBuf.handle,  0, bytes},
+        {outBuf.handle, 0, bytes},
+    };
+    VkDescriptorSet descSet = cache_.allocDescriptorSet("attention-transpose-bhsd-bshd", bufInfos);
+
+    struct { uint32_t batch; uint32_t heads; uint32_t seq; uint32_t dh; } push =
+        {batch, num_heads, seq_len, head_dim};
+    const uint32_t total = batch * num_heads * seq_len * head_dim;
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet,
+                    (total + 63) / 64, 1, 1, &push, sizeof(push));
     batch_.transferComputeBarrier();
     return outId;
 }

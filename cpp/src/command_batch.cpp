@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <iostream>
 
 namespace grilly {
 
@@ -52,9 +53,14 @@ CommandBatch::~CommandBatch() {
     if (dev == VK_NULL_HANDLE)
         return;
 
-    // Wait for any pending work
-    if (fence_ != VK_NULL_HANDLE)
-        vkWaitForFences(dev, 1, &fence_, VK_TRUE, kFenceTimeoutNs);
+     // CRITICAL: Wait for ALL pending work before destroying resources
+    if (fence_ != VK_NULL_HANDLE) {
+        VkResult result = vkWaitForFences(dev, 1, &fence_, VK_TRUE, UINT64_MAX);
+        if (result != VK_SUCCESS) {
+            // Log warning but continue
+            std::cerr << "[WARN] Fence wait returned " << result << std::endl;
+        }
+    }
 
     if (fence_ != VK_NULL_HANDLE)
         vkDestroyFence(dev, fence_, nullptr);

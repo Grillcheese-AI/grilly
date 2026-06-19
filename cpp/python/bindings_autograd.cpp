@@ -27,6 +27,7 @@ void register_autograd_ops(py::module_& m) {
         .value("LayerNorm", ag::OpType::LayerNorm)
         .value("RMSNorm", ag::OpType::RMSNorm)
         .value("FlashAttention2", ag::OpType::FlashAttention2)
+        .value("ChunkedAttention", ag::OpType::ChunkedAttention)
         .value("Conv2d", ag::OpType::Conv2d)
         .value("Conv1d", ag::OpType::Conv1d)
         .value("Sum", ag::OpType::Sum)
@@ -79,14 +80,24 @@ void register_autograd_ops(py::module_& m) {
         .def("record_op",
              [](ag::TapeContext& tape, ag::OpType op,
                 const std::vector<ag::TensorRef>& inputs,
-                const std::vector<ag::TensorRef>& outputs) -> ag::Node* {
-                 return tape.record_op(
-                     op, inputs.data(),
+                const std::vector<ag::TensorRef>& outputs,
+                const py::object& params) -> ag::Node* {
+                 if (params.is_none()) {
+                     return tape.record_op(op, inputs.data(),
+                         static_cast<uint32_t>(inputs.size()),
+                         outputs.data(),
+                         static_cast<uint32_t>(outputs.size()));
+                 }
+                 // params can be a bytes/bytearray object
+                 std::string pstr = py::cast<std::string>(params);
+                 return tape.record_op(op, inputs.data(),
                      static_cast<uint32_t>(inputs.size()),
                      outputs.data(),
-                     static_cast<uint32_t>(outputs.size()));
+                     static_cast<uint32_t>(outputs.size()),
+                     pstr.data(), static_cast<uint32_t>(pstr.size()));
              },
              py::arg("op"), py::arg("inputs"), py::arg("outputs"),
+             py::arg("params") = py::none(),
              py::return_value_policy::reference)
         .def("save_for_backward",
              [](ag::TapeContext& tape, ag::Node* node,
@@ -165,6 +176,22 @@ void register_autograd_ops(py::module_& m) {
              py::arg("g_id"), py::arg("v_id"), py::arg("d_id"),
              py::arg("batch"), py::arg("seqLen"), py::arg("hidden"),
              "Resident forward MinGRU: H=scan(G,V,D), all (batch,seqLen,hidden).")
+        .def("forward_chunked_attention", &ag::TapeContext::forward_chunked_attention,
+             py::arg("q_id"), py::arg("k_id"), py::arg("v_id"),
+             py::arg("batch"), py::arg("num_heads"), py::arg("seq_len"),
+             py::arg("head_dim"), py::arg("window_size"),
+             "Resident forward chunked sliding-window causal attention (0.0.2). "
+             "Q/K/V/O all (batch,num_heads,seq_len,head_dim) BHSD layout. Each "
+             "query attends to keys in [max(0,q-W+1), q]. Returns output buffer id.")
+        .def("forward_qkv_split", &ag::TapeContext::forward_qkv_split,
+             py::arg("qkv_id"), py::arg("batch"), py::arg("seq_len"),
+             py::arg("num_heads"), py::arg("head_dim"),
+             "Resident forward QKV reshape: split fused (B*S, 3*H*Dh) buffer "
+             "into 3 separate (B, H, S, Dh) buffers. Returns (q_id, k_id, v_id).")
+        .def("forward_transpose_bhsd_bshd", &ag::TapeContext::forward_transpose_bhsd_bshd,
+             py::arg("in_id"), py::arg("batch"), py::arg("num_heads"),
+             py::arg("seq_len"), py::arg("head_dim"),
+             "Resident forward BHSD->BSHD transpose for attention output.")
         .def("forward_embedding", &ag::TapeContext::forward_embedding,
              py::arg("ids_id"), py::arg("table_id"),
              py::arg("batch"), py::arg("seqLen"), py::arg("vocab"), py::arg("dim"),

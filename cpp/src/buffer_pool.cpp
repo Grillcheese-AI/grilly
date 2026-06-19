@@ -414,28 +414,37 @@ void BufferPool::uploadStaged(GrillyBuffer& deviceBuf, const void* data,
                                size_t bytes) {
     ensureTransferContext();
 
-    // 1. Create staging buffer (TODO: pool these too)
-    VkBufferCreateInfo stagingInfo{};
-    stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    stagingInfo.size = bytes;
-    stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    // 1. Reuse a pooled upload staging buffer of the same size
+    static thread_local VkBuffer poolBuf = VK_NULL_HANDLE;
+    static thread_local VmaAllocation poolMem = VK_NULL_HANDLE;
+    static thread_local VmaAllocationInfo poolInfo{};
+    static thread_local size_t poolSize = 0;
 
-    VmaAllocationCreateInfo stagingAlloc{};
-    stagingAlloc.usage = VMA_MEMORY_USAGE_AUTO;
-    stagingAlloc.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+    if (poolBuf == VK_NULL_HANDLE || poolSize < bytes) {
+        if (poolBuf != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator_, poolBuf, poolMem);
+            poolBuf = VK_NULL_HANDLE;
+        }
+        VkBufferCreateInfo stagingInfo{};
+        stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        stagingInfo.size = bytes;
+        stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkBuffer stagingBuf;
-    VmaAllocation stagingMem;
-    VmaAllocationInfo stagingMemInfo;
-    vkCheck(vmaCreateBuffer(allocator_, &stagingInfo, &stagingAlloc,
-                            &stagingBuf, &stagingMem, &stagingMemInfo),
-            "staging buffer alloc failed");
+        VmaAllocationCreateInfo stagingAlloc{};
+        stagingAlloc.usage = VMA_MEMORY_USAGE_AUTO;
+        stagingAlloc.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                             VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+        vkCheck(vmaCreateBuffer(allocator_, &stagingInfo, &stagingAlloc,
+                                &poolBuf, &poolMem, &poolInfo),
+                "staging buffer alloc failed");
+        poolSize = bytes;
+    }
 
     // 2. Copy data into staging
-    std::memcpy(stagingMemInfo.pMappedData, data, bytes);
-    vmaFlushAllocation(allocator_, stagingMem, 0, bytes);
+    std::memcpy(poolInfo.pMappedData, data, bytes);
+    vmaFlushAllocation(allocator_, poolMem, 0, bytes);
 
     // 3. Record transfer using persistent context
     vkResetCommandBuffer(transferCmd_, 0);
@@ -446,37 +455,46 @@ void BufferPool::uploadStaged(GrillyBuffer& deviceBuf, const void* data,
 
     VkBufferCopy copyRegion{};
     copyRegion.size = bytes;
-    vkCmdCopyBuffer(transferCmd_, stagingBuf, deviceBuf.handle, 1, &copyRegion);
+    vkCmdCopyBuffer(transferCmd_, poolBuf, deviceBuf.handle, 1, &copyRegion);
 
     // 4. Submit + wait (reuses persistent fence)
     transferSubmitAndWait();
-
-    // 5. Cleanup staging only
-    vmaDestroyBuffer(allocator_, stagingBuf, stagingMem);
 }
 
 void BufferPool::downloadStaged(const GrillyBuffer& deviceBuf, void* out,
                                   size_t bytes) {
     ensureTransferContext();
 
-    // 1. Create staging readback buffer (TODO: pool these)
-    VkBufferCreateInfo stagingInfo{};
-    stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    stagingInfo.size = bytes;
-    stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    // 1. Reuse a pooled staging readback buffer of the same size (avoids
+    //    exhausting the VMA pool with many short-lived allocations).
+    //    Fall back to creating a new one if the pool slot is empty or the
+    //    size doesn't match.
+    static thread_local VkBuffer poolBuf = VK_NULL_HANDLE;
+    static thread_local VmaAllocation poolMem = VK_NULL_HANDLE;
+    static thread_local VmaAllocationInfo poolInfo{};
+    static thread_local size_t poolSize = 0;
 
-    VmaAllocationCreateInfo stagingAlloc{};
-    stagingAlloc.usage = VMA_MEMORY_USAGE_AUTO;
-    stagingAlloc.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                         VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+    if (poolBuf == VK_NULL_HANDLE || poolSize < bytes) {
+        if (poolBuf != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator_, poolBuf, poolMem);
+            poolBuf = VK_NULL_HANDLE;
+        }
+        VkBufferCreateInfo stagingInfo{};
+        stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        stagingInfo.size = bytes;
+        stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkBuffer stagingBuf;
-    VmaAllocation stagingMem;
-    VmaAllocationInfo stagingMemInfo;
-    vkCheck(vmaCreateBuffer(allocator_, &stagingInfo, &stagingAlloc,
-                            &stagingBuf, &stagingMem, &stagingMemInfo),
-            "staging readback buffer alloc failed");
+        VmaAllocationCreateInfo stagingAlloc{};
+        stagingAlloc.usage = VMA_MEMORY_USAGE_AUTO;
+        stagingAlloc.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                             VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+
+        vkCheck(vmaCreateBuffer(allocator_, &stagingInfo, &stagingAlloc,
+                                &poolBuf, &poolMem, &poolInfo),
+                "staging readback buffer alloc failed");
+        poolSize = bytes;
+    }
 
     // 2. Record copy using persistent transfer context
     vkResetCommandBuffer(transferCmd_, 0);
@@ -487,17 +505,14 @@ void BufferPool::downloadStaged(const GrillyBuffer& deviceBuf, void* out,
 
     VkBufferCopy copyRegion{};
     copyRegion.size = bytes;
-    vkCmdCopyBuffer(transferCmd_, deviceBuf.handle, stagingBuf, 1, &copyRegion);
+    vkCmdCopyBuffer(transferCmd_, deviceBuf.handle, poolBuf, 1, &copyRegion);
 
     // 3. Submit + wait (reuses persistent fence)
     transferSubmitAndWait();
 
     // 4. Invalidate + copy to output
-    vmaInvalidateAllocation(allocator_, stagingMem, 0, bytes);
-    std::memcpy(out, stagingMemInfo.pMappedData, bytes);
-
-    // 5. Cleanup staging only
-    vmaDestroyBuffer(allocator_, stagingBuf, stagingMem);
+    vmaInvalidateAllocation(allocator_, poolMem, 0, bytes);
+    std::memcpy(out, poolInfo.pMappedData, bytes);
 }
 
 // ── Upload / Download ───────────────────────────────────────────────────────
