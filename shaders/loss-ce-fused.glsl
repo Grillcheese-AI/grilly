@@ -61,6 +61,19 @@ void main() {
     uint n_sgs  = gl_NumSubgroups;
 
     uint base = row * num_classes;
+    uint target = targets[row];
+
+    // ── Ignore-index: a masked row (target >= num_classes, the sentinel) gets NO
+    // loss/grad. Zero its grad slice + loss and skip — completion-only / prompt-
+    // masked SFT and RLVR pass masked positions this way, so the gradient is
+    // computed entirely on-GPU (no host readback). Uniform across the workgroup.
+    if (target >= num_classes) {
+        for (uint i = tid; i < num_classes; i += 256u) {
+            grad_logits[base + i] = 0.0;
+        }
+        if (tid == 0u) losses[row] = 0.0;
+        return;
+    }
 
     // ── Pass 1: per-thread partial max over a strided slice of the row ──
     float local_max = -1e30;
@@ -98,8 +111,6 @@ void main() {
     }
     sum_exp = max(sum_exp, 1e-12);
     float inv_sum = 1.0 / sum_exp;
-
-    uint target = targets[row];
 
     // ── Pass 3: write grad row (softmax - one_hot) ──
     for (uint i = tid; i < num_classes; i += 256u) {

@@ -1289,6 +1289,38 @@ uint32_t TapeContext::forward_chunked_attention(
     return outId;
 }
 
+std::pair<uint32_t, uint32_t> TapeContext::fused_ce(
+    uint32_t logits_id, uint32_t targets_id, uint32_t batch, uint32_t classes) {
+    // Fused per-row cross-entropy: ONE on-chip dispatch -> per-row losses[batch] +
+    // grad_logits[batch*classes] (softmax - one_hot), never materializing the full
+    // softmax to VRAM and WITHOUT a host readback. Ignore-index: targets[row] >=
+    // classes => that row's loss + grad are zero (prompt-masked / completion-only
+    // SFT and RLVR pass masked positions this way). targets are uint32.
+    const size_t lossBytes = size_t(batch) * 4;
+    const size_t gradBytes = size_t(batch) * classes * 4;
+    uint32_t lossesId = registry_.alloc(lossBytes);
+    uint32_t gradId   = registry_.alloc(gradBytes);
+    GrillyBuffer& logitsBuf  = registry_.resolve(logits_id);
+    GrillyBuffer& targetsBuf = registry_.resolve(targets_id);
+    GrillyBuffer& lossesBuf  = registry_.resolve(lossesId);
+    GrillyBuffer& gradBuf    = registry_.resolve(gradId);
+
+    constexpr uint32_t kNumBindings = 4;
+    constexpr uint32_t kPushConstBytes = 2 * sizeof(uint32_t);
+    PipelineEntry pipe = cache_.getOrCreate("loss-ce-fused", kNumBindings, kPushConstBytes);
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {logitsBuf.handle,  0, gradBytes},
+        {targetsBuf.handle, 0, lossBytes},
+        {lossesBuf.handle,  0, lossBytes},
+        {gradBuf.handle,    0, gradBytes},
+    };
+    VkDescriptorSet descSet = cache_.allocDescriptorSet("loss-ce-fused", bufInfos);
+    struct { uint32_t batch_size; uint32_t num_classes; } push = {batch, classes};
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet, batch, 1, 1, &push, sizeof(push));
+    batch_.transferComputeBarrier();
+    return {lossesId, gradId};
+}
+
 std::tuple<uint32_t, uint32_t, uint32_t>
 TapeContext::forward_qkv_split(
     uint32_t qkv_id, uint32_t batch, uint32_t seq_len,

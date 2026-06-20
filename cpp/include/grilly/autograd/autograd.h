@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "grilly/autograd/buffer_registry.h"
@@ -414,6 +415,13 @@ public:
     std::tuple<uint32_t, uint32_t, uint32_t>
     forward_qkv_split(uint32_t qkv_id, uint32_t batch, uint32_t seq_len,
                       uint32_t num_heads, uint32_t head_dim);
+
+    /// Fused per-row cross-entropy: ONE on-chip dispatch -> (losses_id[batch],
+    /// grad_logits_id[batch*classes]); softmax-onehot grad, no full-softmax in
+    /// VRAM, no host readback. Ignore-index: targets[row] >= classes => masked
+    /// row (zero loss + grad). targets are uint32. Seed grad at the head node.
+    std::pair<uint32_t, uint32_t>
+    fused_ce(uint32_t logits_id, uint32_t targets_id, uint32_t batch, uint32_t classes);
 
     /// Forward BHSD -> BSHD transpose: reshape (B, H, S, Dh) attention output
     /// back to (B*S, d) for the output projection.

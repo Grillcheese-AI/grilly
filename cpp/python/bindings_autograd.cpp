@@ -188,6 +188,13 @@ void register_autograd_ops(py::module_& m) {
              py::arg("num_heads"), py::arg("head_dim"),
              "Resident forward QKV reshape: split fused (B*S, 3*H*Dh) buffer "
              "into 3 separate (B, H, S, Dh) buffers. Returns (q_id, k_id, v_id).")
+        .def("fused_ce", &ag::TapeContext::fused_ce,
+             py::arg("logits_id"), py::arg("targets_id"), py::arg("batch"), py::arg("classes"),
+             "Fused per-row cross-entropy in ONE on-chip dispatch. Returns "
+             "(losses_id[batch], grad_logits_id[batch*classes]); softmax-onehot grad, "
+             "no full-softmax in VRAM, no host readback. Ignore-index: targets[row] "
+             ">= classes => masked row (zero loss+grad). targets uint32. Seed the head "
+             "node's gradient with grad_logits_id.")
         .def("forward_transpose_bhsd_bshd", &ag::TapeContext::forward_transpose_bhsd_bshd,
              py::arg("in_id"), py::arg("batch"), py::arg("num_heads"),
              py::arg("seq_len"), py::arg("head_dim"),
