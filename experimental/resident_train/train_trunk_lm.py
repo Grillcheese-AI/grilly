@@ -47,11 +47,8 @@ np.random.seed(11)
 _tok = None
 if TINY:
     # real next-token LM training on TinyStories with the BBPE-65k tokenizer.
-    # A moderate trunk (trains fast enough for a clear descending CE/perplexity
-    # curve), V from the tokenizer (~65k). This is the apples-to-oranges fix for
-    # the --big NaN: that diverged on a DEGENERATE random-65k-target memorization
-    # task; real LM data is a learnable objective.
-    sys.path.insert(0, r"C:\Users\grill\Documents\GitHub\cubby-lm")
+    # Requires a tokenizer package (e.g. cubby) on sys.path.
+    # Specify the data file with --data <path/to/stories.json>
     from cubby.tokenizer import make_tokenizer
     _tok = make_tokenizer("bbpe65k")
     V = _tok.vocab_size
@@ -103,7 +100,13 @@ if TINY:
     # windows with next-token targets (real online LM training, not memorization).
     import json as _json
     _MAXTOK = 400000
-    with open(r"C:\Users\grill\Documents\GitHub\cubby-lm\tinystory_50k.json", "r", encoding="utf-8") as _fjs:
+    _data_path = None
+    for _i, _arg in enumerate(sys.argv):
+        if _arg == '--data' and _i + 1 < len(sys.argv):
+            _data_path = sys.argv[_i + 1]
+    if _data_path is None:
+        print("[tinystories] ERROR: pass --data <path/to/stories.json>"); sys.exit(1)
+    with open(_data_path, "r", encoding="utf-8") as _fjs:
         _stories = _json.load(_fjs)
     _sb = []
     for _s in _stories:

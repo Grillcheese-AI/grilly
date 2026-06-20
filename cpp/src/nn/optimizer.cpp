@@ -267,6 +267,7 @@ void AdamW::step() {
             float beta1_t;      // beta1^t (raw power)
             float beta2_t;      // beta2^t (raw power)
             uint32_t clear_grad; // 1 = zero gradients after update
+            float grad_scale;   // gradient scale (1.0 for normal AdamW; used by resident path)
         };
 
         float beta1_t = std::pow(beta1_, static_cast<float>(global_step_));
@@ -302,6 +303,7 @@ void AdamW::step() {
                 push.beta1_t = beta1_t;
                 push.beta2_t = beta2_t;
                 push.clear_grad = 0;
+                push.grad_scale = 1.0f;  // no scaling for normal AdamW step
 
                 if (!p->backend()) p->set_backend(backend_);
                 p->ensure_gpu();

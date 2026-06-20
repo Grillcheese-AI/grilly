@@ -159,3 +159,4 @@ utils/__pycache__/tensor_conversion.cpython-312.pyc
 utils/__pycache__/visualization.cpython-312.pyc
 utils/__pycache__/visualizer.cpython-312.pyc
 utils/__pycache__/vulkan_sentence_transformer.cpython-312.pyc
+*.pyc
