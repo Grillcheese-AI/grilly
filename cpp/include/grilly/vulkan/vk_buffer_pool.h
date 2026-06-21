@@ -52,8 +52,8 @@ public:
 
     void upload(GrillyBuffer& buf, const float* data, size_t bytes);
     void uploadStaged(GrillyBuffer& deviceBuf, const void* data, size_t bytes);
-    void download(const GrillyBuffer& buf, float* out, size_t bytes);
-    void downloadStaged(const GrillyBuffer& deviceBuf, void* out, size_t bytes);
+    void download(const GrillyBuffer& buf, float* out, size_t bytes, size_t srcOffset = 0);
+    void downloadStaged(const GrillyBuffer& deviceBuf, void* out, size_t bytes, size_t srcOffset = 0);
 
     VmaAllocator allocator() const { return allocator_; }
 

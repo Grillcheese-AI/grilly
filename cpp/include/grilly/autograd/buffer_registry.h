@@ -141,13 +141,14 @@ public:
         }
     }
 
-    /// Download a registered buffer's contents into host memory.
-    void download(uint32_t id, void* out, size_t bytes) {
+    /// Download a registered buffer's contents into host memory, starting at
+    /// srcOffset bytes (default 0 = whole-buffer read, the legacy behavior).
+    void download(uint32_t id, void* out, size_t bytes, size_t srcOffset = 0) {
         GrillyBuffer& buf = resolve(id);
         if (buf.mappedPtr) {
-            pool_.download(buf, static_cast<float*>(out), bytes);
+            pool_.download(buf, static_cast<float*>(out), bytes, srcOffset);
         } else {
-            pool_.downloadStaged(buf, out, bytes);
+            pool_.downloadStaged(buf, out, bytes, srcOffset);
         }
     }
 

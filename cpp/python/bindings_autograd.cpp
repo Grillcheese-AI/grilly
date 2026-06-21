@@ -242,6 +242,22 @@ void register_autograd_ops(py::module_& m) {
              },
              py::arg("buffer_id"), py::arg("shape"),
              "Download a resident buffer by id into a numpy array.")
+        .def("read_buffer_tail",
+             [](ag::TapeContext& tape, uint32_t buffer_id,
+                const std::vector<uint32_t>& shape, size_t elem_offset) -> py::array_t<float> {
+                 size_t numel = 1;
+                 for (uint32_t s : shape) numel *= s;
+                 size_t bytes = numel * sizeof(float);
+                 py::array_t<float> out(static_cast<py::ssize_t>(numel));
+                 auto info = out.request();
+                 tape.registry().download(buffer_id, info.ptr, bytes, elem_offset * sizeof(float));
+                 out.resize(std::vector<py::ssize_t>(shape.begin(), shape.end()));
+                 return out;
+             },
+             py::arg("buffer_id"), py::arg("shape"), py::arg("elem_offset"),
+             "Download `shape` floats from a resident buffer starting at elem_offset "
+             "(in floats). Lets generation read only the last token's logits instead "
+             "of the whole (S,V) matrix.")
         .def("end", &ag::TapeContext::end)
         .def("is_recording", &ag::TapeContext::is_recording)
         .def("arena_bytes_used", &ag::TapeContext::arena_bytes_used)

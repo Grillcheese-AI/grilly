@@ -462,7 +462,7 @@ void BufferPool::uploadStaged(GrillyBuffer& deviceBuf, const void* data,
 }
 
 void BufferPool::downloadStaged(const GrillyBuffer& deviceBuf, void* out,
-                                  size_t bytes) {
+                                  size_t bytes, size_t srcOffset) {
     ensureTransferContext();
 
     // 1. Reuse a pooled staging readback buffer of the same size (avoids
@@ -504,6 +504,7 @@ void BufferPool::downloadStaged(const GrillyBuffer& deviceBuf, void* out,
     vkBeginCommandBuffer(transferCmd_, &beginInfo);
 
     VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = srcOffset;
     copyRegion.size = bytes;
     vkCmdCopyBuffer(transferCmd_, deviceBuf.handle, poolBuf, 1, &copyRegion);
 
@@ -530,12 +531,14 @@ void BufferPool::upload(GrillyBuffer& buf, const float* data, size_t bytes) {
     vmaFlushAllocation(allocator_, buf.allocation, 0, bytes);
 }
 
-void BufferPool::download(const GrillyBuffer& buf, float* out, size_t bytes) {
+void BufferPool::download(const GrillyBuffer& buf, float* out, size_t bytes, size_t srcOffset) {
     if (!buf.mappedPtr)
         throw std::runtime_error("Buffer has no persistent mapping");
-    // Invalidate to see GPU writes on the CPU side.
-    vmaInvalidateAllocation(allocator_, buf.allocation, 0, bytes);
-    std::memcpy(out, buf.mappedPtr, bytes);
+    // Invalidate the whole allocation to see GPU writes (whole-size avoids the
+    // nonCoherentAtomSize alignment constraints of a sub-range invalidate), then
+    // copy `bytes` starting at srcOffset (lets callers read e.g. only the last row).
+    vmaInvalidateAllocation(allocator_, buf.allocation, 0, VK_WHOLE_SIZE);
+    std::memcpy(out, static_cast<const char*>(buf.mappedPtr) + srcOffset, bytes);
 }
 
 // ── Stats ───────────────────────────────────────────────────────────────────
