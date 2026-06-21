@@ -195,6 +195,14 @@ void register_autograd_ops(py::module_& m) {
              "no full-softmax in VRAM, no host readback. Ignore-index: targets[row] "
              ">= classes => masked row (zero loss+grad). targets uint32. Seed the head "
              "node's gradient with grad_logits_id.")
+        .def("fused_policy_grad", &ag::TapeContext::fused_policy_grad,
+             py::arg("logits_id"), py::arg("targets_id"), py::arg("coef_id"),
+             py::arg("batch"), py::arg("classes"),
+             "Fused per-row policy gradient (GRPO/RLVR) in ONE on-chip dispatch. "
+             "Returns grad_logits_id[batch*classes] = coef[row]*(softmax - onehot(target)), "
+             "no full-softmax in VRAM, NO host readback. coef folds advantage*completion-mask "
+             "(coef 0 -> zero row); ignore-index target >= classes also zeros the row. "
+             "targets uint32, coef float. Seed the head node's gradient with grad_logits_id.")
         .def("forward_transpose_bhsd_bshd", &ag::TapeContext::forward_transpose_bhsd_bshd,
              py::arg("in_id"), py::arg("batch"), py::arg("num_heads"),
              py::arg("seq_len"), py::arg("head_dim"),

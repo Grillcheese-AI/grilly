@@ -1321,6 +1321,37 @@ std::pair<uint32_t, uint32_t> TapeContext::fused_ce(
     return {lossesId, gradId};
 }
 
+uint32_t TapeContext::fused_policy_grad(
+    uint32_t logits_id, uint32_t targets_id, uint32_t coef_id,
+    uint32_t batch, uint32_t classes) {
+    // Fused per-row policy gradient: grad = coef[row] * (softmax - one_hot), ONE
+    // on-chip dispatch, no full softmax in VRAM and NO host readback. coef folds
+    // advantage * completion-mask (coef 0 -> zero row); ignore-index
+    // target >= classes also zeros the row. targets are uint32, coef float.
+    const size_t coefBytes = size_t(batch) * 4;
+    const size_t gradBytes = size_t(batch) * classes * 4;
+    uint32_t gradId = registry_.alloc(gradBytes);
+    GrillyBuffer& logitsBuf  = registry_.resolve(logits_id);
+    GrillyBuffer& targetsBuf = registry_.resolve(targets_id);
+    GrillyBuffer& coefBuf    = registry_.resolve(coef_id);
+    GrillyBuffer& gradBuf    = registry_.resolve(gradId);
+
+    constexpr uint32_t kNumBindings = 4;
+    constexpr uint32_t kPushConstBytes = 2 * sizeof(uint32_t);
+    PipelineEntry pipe = cache_.getOrCreate("loss-policy-grad-fused", kNumBindings, kPushConstBytes);
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {logitsBuf.handle,  0, gradBytes},
+        {targetsBuf.handle, 0, coefBytes},
+        {coefBuf.handle,    0, coefBytes},
+        {gradBuf.handle,    0, gradBytes},
+    };
+    VkDescriptorSet descSet = cache_.allocDescriptorSet("loss-policy-grad-fused", bufInfos);
+    struct { uint32_t batch_size; uint32_t num_classes; } push = {batch, classes};
+    batch_.dispatch(pipe.pipeline, pipe.layout, descSet, batch, 1, 1, &push, sizeof(push));
+    batch_.transferComputeBarrier();
+    return gradId;
+}
+
 std::tuple<uint32_t, uint32_t, uint32_t>
 TapeContext::forward_qkv_split(
     uint32_t qkv_id, uint32_t batch, uint32_t seq_len,

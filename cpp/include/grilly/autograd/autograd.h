@@ -423,6 +423,14 @@ public:
     std::pair<uint32_t, uint32_t>
     fused_ce(uint32_t logits_id, uint32_t targets_id, uint32_t batch, uint32_t classes);
 
+    /// Fused policy-gradient head op (GRPO/RLVR): grad[row,i] = coef[row] *
+    /// (softmax(logits[row])[i] - one_hot(target[row])[i]), on-GPU with NO host
+    /// logits readback. coef folds advantage * completion-mask (coef==0 -> zero
+    /// row); ignore-index target >= classes also zeros the row. targets are uint32.
+    /// Returns the grad buffer id (batch*classes floats); seed it at the head node.
+    uint32_t fused_policy_grad(uint32_t logits_id, uint32_t targets_id,
+                               uint32_t coef_id, uint32_t batch, uint32_t classes);
+
     /// Forward BHSD -> BSHD transpose: reshape (B, H, S, Dh) attention output
     /// back to (B*S, d) for the output projection.
     uint32_t forward_transpose_bhsd_bshd(uint32_t in_id, uint32_t batch,
