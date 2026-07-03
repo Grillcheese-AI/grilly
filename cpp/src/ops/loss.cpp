@@ -218,6 +218,213 @@ void crossEntropyFused(CommandBatch& batch, BufferPool& pool,
     pool.release(bufLossStage);
     pool.release(bufGradStage);
 }
+// ── Sampled-BCE (NCE/SGNS) FUSED loss + dH + dW ──────────────────────────
+// The softmax-free vocab head. Two dispatches, ONE submit (the fixed cost is
+// per submit, not per dispatch): pass 0 is workgroup-per-token (subgroup/LDS
+// loss reduction, plain stores); pass 1 accumulates dH and scatters dW into
+// the (V, d) table via a CAS-loop float add on core uint atomics — NO
+// GL_EXT_shader_atomic_float (float buffer atomicAdd measured broken on this
+// stack; all accumulations landed at flat index 0). gradTable is fillZero'd
+// on-GPU before pass 1; losses is fully written by pass 0.
+
+void sampledBceFused(CommandBatch& batch, BufferPool& pool,
+                     PipelineCache& cache,
+                     const float* hidden, const float* table,
+                     const uint32_t* ids,
+                     float* losses, float* gradHidden, float* gradTable,
+                     uint32_t vocabSize, const SampledBceParams& p) {
+    const size_t hBytes  = size_t(p.nTokens) * p.dim * sizeof(float);
+    const size_t wBytes  = size_t(vocabSize) * p.dim * sizeof(float);
+    const size_t idBytes = size_t(p.nTokens) * p.nCand * sizeof(uint32_t);
+    const size_t dsBytes = size_t(p.nTokens) * p.nCand * sizeof(float);
+    const size_t lBytes  = size_t(p.nTokens) * sizeof(float);
+
+    // 3 stage-in (hidden, table, ids), 3 stage-out (losses, dH, dW).
+    // dscore is an intermediate DL-only buffer (CPU never sees it).
+    GrillyBuffer bufHDL   = pool.acquireDeviceLocal(hBytes);
+    GrillyBuffer bufWDL   = pool.acquireDeviceLocal(wBytes);
+    GrillyBuffer bufIdDL  = pool.acquireDeviceLocal(idBytes);
+    GrillyBuffer bufDsDL  = pool.acquireDeviceLocal(dsBytes);
+    GrillyBuffer bufLDL   = pool.acquireDeviceLocal(lBytes);
+    GrillyBuffer bufGHDL  = pool.acquireDeviceLocal(hBytes);
+    GrillyBuffer bufGWDL  = pool.acquireDeviceLocal(wBytes);
+
+    GrillyBuffer bufHStage  = pool.acquire(hBytes);
+    GrillyBuffer bufWStage  = pool.acquire(wBytes);
+    GrillyBuffer bufIdStage = pool.acquire(idBytes);
+    GrillyBuffer bufLStage  = pool.acquireReadback(lBytes);
+    GrillyBuffer bufGHStage = pool.acquireReadback(hBytes);
+    GrillyBuffer bufGWStage = pool.acquireReadback(wBytes);
+
+    pool.upload(bufHStage, hidden, hBytes);
+    pool.upload(bufWStage, table, wBytes);
+    pool.upload(bufIdStage, reinterpret_cast<const float*>(ids), idBytes);
+
+    PipelineEntry pipe = cache.getOrCreate("loss-sampled-bce-fused", 7,
+                                           sizeof(SampledBceParams));
+
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {bufHDL.handle,  0, hBytes},
+        {bufWDL.handle,  0, wBytes},
+        {bufIdDL.handle, 0, idBytes},
+        {bufDsDL.handle, 0, dsBytes},
+        {bufLDL.handle,  0, lBytes},
+        {bufGHDL.handle, 0, hBytes},
+        {bufGWDL.handle, 0, wBytes},
+    };
+    VkDescriptorSet descSet = cache.allocDescriptorSet("loss-sampled-bce-fused",
+                                                        bufInfos);
+
+    const uint32_t gx0 = p.nTokens;                       // workgroup per token
+    const uint32_t gx1 = (p.nTokens * p.dim + 255u) / 256u;
+
+    batch.begin();
+    batch.copyBuffer(bufHStage, bufHDL, hBytes);
+    batch.copyBuffer(bufWStage, bufWDL, wBytes);
+    batch.copyBuffer(bufIdStage, bufIdDL, idBytes);
+    batch.fillZero(bufGWDL, wBytes);   // CAS-add target: must start as 0 bits
+    batch.transferComputeBarrier();
+
+    // Pass 0: scores + per-token loss + dscore
+    SampledBceParams push0 = p;
+    push0.passType = 0;
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx0, 1, 1,
+                   &push0, sizeof(push0));
+    batch.barrier();
+
+    // Pass 1: dH accumulate + dW atomic scatter
+    SampledBceParams push1 = p;
+    push1.passType = 1;
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx1, 1, 1,
+                   &push1, sizeof(push1));
+
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufLDL, bufLStage, lBytes);
+    batch.copyBuffer(bufGHDL, bufGHStage, hBytes);
+    batch.copyBuffer(bufGWDL, bufGWStage, wBytes);
+
+    batch.submitDeferred();
+    batch.waitForCompletion();
+
+    pool.download(bufLStage, losses, lBytes);
+    pool.download(bufGHStage, gradHidden, hBytes);
+    pool.download(bufGWStage, gradTable, wBytes);
+
+    pool.release(bufHDL);  pool.release(bufWDL);  pool.release(bufIdDL);
+    pool.release(bufDsDL); pool.release(bufLDL);  pool.release(bufGHDL);
+    pool.release(bufGWDL);
+    pool.release(bufHStage);  pool.release(bufWStage); pool.release(bufIdStage);
+    pool.release(bufLStage);  pool.release(bufGHStage); pool.release(bufGWStage);
+}
+
+// ── NCE FUSED loss + dH + dW + db (corrected sampled-BCE) ────────────────
+// Adds the noise-distribution correction the SGNS head lacks. Same two-pass /
+// one-submit structure and CAS-add machinery as sampledBceFused, plus two
+// read-only (V,) inputs (logkq, bias) and a third CAS grad output (grad_bias).
+
+void nceFused(CommandBatch& batch, BufferPool& pool,
+              PipelineCache& cache,
+              const float* hidden, const float* table, const uint32_t* ids,
+              const float* logkq, const float* bias,
+              float* losses, float* gradHidden, float* gradTable,
+              float* gradBias, uint32_t vocabSize, const NceParams& p) {
+    const size_t hBytes  = size_t(p.nTokens) * p.dim * sizeof(float);
+    const size_t wBytes  = size_t(vocabSize) * p.dim * sizeof(float);
+    const size_t idBytes = size_t(p.nTokens) * p.nCand * sizeof(uint32_t);
+    const size_t dsBytes = size_t(p.nTokens) * p.nCand * sizeof(float);
+    const size_t lBytes  = size_t(p.nTokens) * sizeof(float);
+    const size_t vBytes  = size_t(vocabSize) * sizeof(float);  // logkq/bias/db
+
+    GrillyBuffer bufHDL   = pool.acquireDeviceLocal(hBytes);
+    GrillyBuffer bufWDL   = pool.acquireDeviceLocal(wBytes);
+    GrillyBuffer bufIdDL  = pool.acquireDeviceLocal(idBytes);
+    GrillyBuffer bufDsDL  = pool.acquireDeviceLocal(dsBytes);
+    GrillyBuffer bufLDL   = pool.acquireDeviceLocal(lBytes);
+    GrillyBuffer bufGHDL  = pool.acquireDeviceLocal(hBytes);
+    GrillyBuffer bufGWDL  = pool.acquireDeviceLocal(wBytes);
+    GrillyBuffer bufLKQDL = pool.acquireDeviceLocal(vBytes);
+    GrillyBuffer bufBDL   = pool.acquireDeviceLocal(vBytes);
+    GrillyBuffer bufGBDL  = pool.acquireDeviceLocal(vBytes);
+
+    GrillyBuffer bufHStage   = pool.acquire(hBytes);
+    GrillyBuffer bufWStage   = pool.acquire(wBytes);
+    GrillyBuffer bufIdStage  = pool.acquire(idBytes);
+    GrillyBuffer bufLKQStage = pool.acquire(vBytes);
+    GrillyBuffer bufBStage   = pool.acquire(vBytes);
+    GrillyBuffer bufLStage   = pool.acquireReadback(lBytes);
+    GrillyBuffer bufGHStage  = pool.acquireReadback(hBytes);
+    GrillyBuffer bufGWStage  = pool.acquireReadback(wBytes);
+    GrillyBuffer bufGBStage  = pool.acquireReadback(vBytes);
+
+    pool.upload(bufHStage, hidden, hBytes);
+    pool.upload(bufWStage, table, wBytes);
+    pool.upload(bufIdStage, reinterpret_cast<const float*>(ids), idBytes);
+    pool.upload(bufLKQStage, logkq, vBytes);
+    pool.upload(bufBStage, bias, vBytes);
+
+    PipelineEntry pipe = cache.getOrCreate("loss-nce-fused", 10,
+                                           sizeof(NceParams));
+
+    std::vector<VkDescriptorBufferInfo> bufInfos = {
+        {bufHDL.handle,   0, hBytes},
+        {bufWDL.handle,   0, wBytes},
+        {bufIdDL.handle,  0, idBytes},
+        {bufDsDL.handle,  0, dsBytes},
+        {bufLDL.handle,   0, lBytes},
+        {bufGHDL.handle,  0, hBytes},
+        {bufGWDL.handle,  0, wBytes},
+        {bufLKQDL.handle, 0, vBytes},
+        {bufBDL.handle,   0, vBytes},
+        {bufGBDL.handle,  0, vBytes},
+    };
+    VkDescriptorSet descSet = cache.allocDescriptorSet("loss-nce-fused",
+                                                        bufInfos);
+
+    const uint32_t gx0 = p.nTokens;
+    const uint32_t gx1 = (p.nTokens * p.dim + 255u) / 256u;
+
+    batch.begin();
+    batch.copyBuffer(bufHStage, bufHDL, hBytes);
+    batch.copyBuffer(bufWStage, bufWDL, wBytes);
+    batch.copyBuffer(bufIdStage, bufIdDL, idBytes);
+    batch.copyBuffer(bufLKQStage, bufLKQDL, vBytes);
+    batch.copyBuffer(bufBStage, bufBDL, vBytes);
+    batch.fillZero(bufGWDL, wBytes);
+    batch.fillZero(bufGBDL, vBytes);
+    batch.transferComputeBarrier();
+
+    NceParams push0 = p; push0.passType = 0;
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx0, 1, 1,
+                   &push0, sizeof(push0));
+    batch.barrier();
+
+    NceParams push1 = p; push1.passType = 1;
+    batch.dispatch(pipe.pipeline, pipe.layout, descSet, gx1, 1, 1,
+                   &push1, sizeof(push1));
+
+    batch.transferComputeBarrier();
+    batch.copyBuffer(bufLDL, bufLStage, lBytes);
+    batch.copyBuffer(bufGHDL, bufGHStage, hBytes);
+    batch.copyBuffer(bufGWDL, bufGWStage, wBytes);
+    batch.copyBuffer(bufGBDL, bufGBStage, vBytes);
+
+    batch.submitDeferred();
+    batch.waitForCompletion();
+
+    pool.download(bufLStage, losses, lBytes);
+    pool.download(bufGHStage, gradHidden, hBytes);
+    pool.download(bufGWStage, gradTable, wBytes);
+    pool.download(bufGBStage, gradBias, vBytes);
+
+    pool.release(bufHDL);  pool.release(bufWDL);  pool.release(bufIdDL);
+    pool.release(bufDsDL); pool.release(bufLDL);  pool.release(bufGHDL);
+    pool.release(bufGWDL); pool.release(bufLKQDL); pool.release(bufBDL);
+    pool.release(bufGBDL);
+    pool.release(bufHStage);   pool.release(bufWStage);  pool.release(bufIdStage);
+    pool.release(bufLKQStage); pool.release(bufBStage);  pool.release(bufLStage);
+    pool.release(bufGHStage);  pool.release(bufGWStage); pool.release(bufGBStage);
+}
+
 // ── MSE Loss ─────────────────────────────────────────────────────────────
 
 void mseLoss(CommandBatch& batch, BufferPool& pool,

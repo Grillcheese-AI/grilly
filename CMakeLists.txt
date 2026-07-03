@@ -198,6 +198,7 @@ add_library(grilly_core_lib STATIC
     cpp/src/autograd.cpp
     # ── Ops ──
     cpp/src/ops/linear.cpp
+    cpp/src/ops/ternary.cpp
     cpp/src/ops/activations.cpp
     cpp/src/ops/fused.cpp
     cpp/src/ops/batched_ops.cpp

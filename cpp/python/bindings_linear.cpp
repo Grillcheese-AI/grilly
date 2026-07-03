@@ -4,6 +4,7 @@
 
 #include "bindings_core.h"
 #include "grilly/ops/linear.h"
+#include "grilly/ops/ternary.h"
 
 void register_linear_ops(py::module_& m) {
     using namespace grilly::nn;
@@ -365,4 +366,49 @@ void register_linear_ops(py::module_& m) {
         py::arg("device"), py::arg("grad_output"), py::arg("input"),
         py::arg("weights"),
         "fp16-coopmat linear backward (fp32 in/out) for parity testing.");
+
+    // ── Ternary weight-only GEMM (BitNet b1.58), multiply-free ──────────
+    // activations (M, K) fp32; weights_packed (N, ceil(K/16)) uint32,
+    // 16 trits/word 2-bit; alpha = per-tensor scale. Returns (M, N) fp32.
+    m.def(
+        "ternary_gemm",
+        [](GrillyCoreContext& ctx, py::array_t<float> activations,
+           py::array_t<uint32_t> weights_packed, uint32_t K,
+           float alpha) -> py::array_t<float> {
+            auto aBuf = activations.request();
+            auto wBuf = weights_packed.request();
+            require_c_contiguous_float(aBuf);
+            if (aBuf.ndim != 2)
+                throw std::runtime_error("ternary_gemm: activations must be 2D (M, K)");
+            if (wBuf.ndim != 2)
+                throw std::runtime_error("ternary_gemm: weights_packed must be 2D (N, wordsPerRow)");
+            uint32_t M = static_cast<uint32_t>(aBuf.shape[0]);
+            uint32_t Kact = static_cast<uint32_t>(aBuf.shape[1]);
+            if (Kact != K)
+                throw std::runtime_error("ternary_gemm: activations K != K arg");
+            uint32_t N = static_cast<uint32_t>(wBuf.shape[0]);
+            uint32_t wordsPerRow = static_cast<uint32_t>(wBuf.shape[1]);
+            if (wordsPerRow != (K + 15u) / 16u)
+                throw std::runtime_error(
+                    "ternary_gemm: weights_packed cols != ceil(K/16)");
+
+            py::array_t<float> output({static_cast<py::ssize_t>(M),
+                                       static_cast<py::ssize_t>(N)});
+            auto oBuf = output.request();
+
+            grilly::ops::TernaryGemmParams p{M, K, N, alpha};
+            {
+                py::gil_scoped_release release;
+                grilly::ops::ternaryGemm(
+                    ctx.batch, ctx.pool, ctx.cache,
+                    static_cast<const float*>(aBuf.ptr),
+                    static_cast<const uint32_t*>(wBuf.ptr),
+                    static_cast<float*>(oBuf.ptr), wordsPerRow, p);
+            }
+            return output;
+        },
+        py::arg("device"), py::arg("activations"), py::arg("weights_packed"),
+        py::arg("K"), py::arg("alpha"),
+        "Multiply-free ternary GEMM: alpha * (A @ trit^T), trit in {-1,0,+1}, "
+        "weights 2-bit packed 16/word (BitNet b1.58 forward).");
 }
