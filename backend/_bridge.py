@@ -702,6 +702,94 @@ def softmax_backward(grad_output, softmax_output):
         return None
 
 
+def sampled_bce_fused(hidden, table, ids):
+    """GPU fused sampled-BCE head (softmax-free): per-token loss + grad_hidden
+    + grad_table in ONE submit. hidden (N,d) f32, table (V,d) f32,
+    ids (N,1+K) uint32 with col 0 = the true target.
+    Returns (losses, grad_hidden, grad_table) numpy arrays, or None on failure
+    (caller falls back to the numpy path)."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    if not hasattr(_core, "sampled_bce_fused"):
+        return None
+    try:
+        hidden = _ensure_f32_contiguous(hidden)
+        table = _ensure_f32_contiguous(table)
+        ids = np.ascontiguousarray(np.asarray(ids), dtype=np.uint32)
+        loss_t, gh_t, gw_t = _core.sampled_bce_fused(dev, hidden, table, ids)
+        return (np.asarray(loss_t.numpy()), np.asarray(gh_t.numpy()),
+                np.asarray(gw_t.numpy()))
+    except Exception as e:
+        _record_fallback("sampled_bce_fused", e)
+        return None
+
+
+def nce_fused(hidden, table, ids, logkq, bias, use_correction=True):
+    """GPU fused NCE head (corrected softmax-free): per-token loss + grad_hidden
+    + grad_table + grad_bias in ONE submit. hidden (N,d), table (V,d),
+    ids (N,1+K) uint32 col0=target, logkq (V,) = log(k*q_id), bias (V,) learned.
+    use_correction=False recovers the SGNS head. Returns
+    (losses, grad_hidden, grad_table, grad_bias) or None on failure."""
+    dev = _get_device()
+    if dev is None:
+        return None
+    if not hasattr(_core, "nce_fused"):
+        return None
+    try:
+        hidden = _ensure_f32_contiguous(hidden)
+        table = _ensure_f32_contiguous(table)
+        logkq = _ensure_f32_contiguous(logkq)
+        bias = _ensure_f32_contiguous(bias)
+        ids = np.ascontiguousarray(np.asarray(ids), dtype=np.uint32)
+        l_t, gh_t, gw_t, gb_t = _core.nce_fused(
+            dev, hidden, table, ids, logkq, bias, bool(use_correction))
+        return (np.asarray(l_t.numpy()), np.asarray(gh_t.numpy()),
+                np.asarray(gw_t.numpy()), np.asarray(gb_t.numpy()))
+    except Exception as e:
+        _record_fallback("nce_fused", e)
+        return None
+
+
+def pack_ternary(w):
+    """Quantize fp32 weights (N, K) to BitNet b1.58 and 2-bit pack for the
+    ternary-gemm kernel. Returns (packed uint32 (N, ceil(K/16)), alpha float).
+
+      alpha = mean|W|;  trit = clip(round(W/alpha), -1, 1) in {-1,0,+1}
+      2-bit code: 0->0, +1->1, -1->2, packed 16 trits/uint32 (LSB-first).
+
+    This is the host seam: swap to 5-trits/8-bit for true 1.58-bit later
+    without touching the kernel's accumulation. Matches cubby ffn.ternarize_ste
+    (alpha = mean|W|, same round/clip) so trained latent weights pack directly.
+    """
+    w = np.asarray(w, dtype=np.float32)
+    N, K = w.shape
+    alpha = float(np.abs(w).mean()) + 1e-5
+    trit = np.clip(np.round(w / alpha), -1.0, 1.0).astype(np.int32)  # {-1,0,1}
+    code = np.where(trit > 0, 1, np.where(trit < 0, 2, 0)).astype(np.uint32)
+    words_per_row = (K + 15) // 16
+    packed = np.zeros((N, words_per_row), dtype=np.uint32)
+    for k in range(K):
+        packed[:, k // 16] |= (code[:, k] & 0x3) << ((k % 16) * 2)
+    return packed, alpha
+
+
+def ternary_gemm(activations, weights_packed, K, alpha):
+    """GPU multiply-free ternary GEMM: alpha * (A @ trit^T). activations (M,K)
+    fp32, weights_packed (N, ceil(K/16)) uint32 from pack_ternary. Returns
+    (M, N) fp32, or None on failure (caller falls back to fp32 matmul)."""
+    dev = _get_device()
+    if dev is None or not hasattr(_core, "ternary_gemm"):
+        return None
+    try:
+        a = _ensure_f32_contiguous(activations)
+        wp = np.ascontiguousarray(np.asarray(weights_packed), dtype=np.uint32)
+        return np.asarray(_core.ternary_gemm(dev, a, wp, int(K), float(alpha)))
+    except Exception as e:
+        _record_fallback("ternary_gemm", e)
+        return None
+
+
 def mf_softmax(x, dim=-1):
     """GPU multiplication-free softmax (ReLU-normalized). Returns None on failure."""
     dev = _get_device()
