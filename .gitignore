@@ -26,3 +26,8 @@ __pycache__
 __pycache__/__init__.cpython-312.pyc
 __pycache__/_version.cpython-312.pyc
 __pycache__
+functional/__pycache__/snn.cpython-312.pyc
+/optim/__pycache__
+/third_party/pytorch
+/third_party
+/torch_api/__pycache__
