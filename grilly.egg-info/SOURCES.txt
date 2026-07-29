@@ -13,6 +13,8 @@ LICENSE
 MANIFEST.in
 Makefile
 README.md
+RESIDENT_THROUGHPUT_PLAN.md
+SCALING_PLAN.md
 SUPPORTED_DEVICES.md
 TODO.md
 __init__.py
@@ -26,7 +28,6 @@ grilly_core_lib.pdb
 main.py
 mkdocs.yml
 pyproject.toml
-pytest_out.txt
 rebuild.ps1
 rufferrors.txt
 test_backward_ce.py
@@ -41,6 +42,7 @@ torch_api_example.py
 uv.lock
 ./__init__.py
 ./_version.py
+./grilly_core.cp312-win_amd64.pyd
 ./main.py
 ./test_backward_ce.py
 ./test_backward_chain.py
@@ -86,7 +88,10 @@ uv.lock
 ./shaders/attention-output.glsl
 ./shaders/attention-prosody-modulation.glsl
 ./shaders/attention-q-similarity.glsl
+./shaders/attention-qkv-merge.glsl
+./shaders/attention-qkv-split.glsl
 ./shaders/attention-scores.glsl
+./shaders/attention-transpose-bhsd-bshd.glsl
 ./shaders/avgpool2d-backward.glsl
 ./shaders/avgpool2d-forward.glsl
 ./shaders/bandit-solve.glsl
@@ -101,6 +106,8 @@ uv.lock
 ./shaders/bridge-temporal-weights.glsl
 ./shaders/capsule-project.glsl
 ./shaders/cast-f32-f16.glsl
+./shaders/chunked-sw-attention-backward.glsl
+./shaders/chunked-sw-attention.glsl
 ./shaders/circular-shift.glsl
 ./shaders/contrastive-gradient.glsl
 ./shaders/contrastive-loss.glsl
@@ -213,6 +220,7 @@ uv.lock
 ./shaders/loss-cross-entropy.glsl
 ./shaders/loss-fn-bce.glsl
 ./shaders/loss-mse.glsl
+./shaders/loss-policy-grad-fused.glsl
 ./shaders/lsq-stochastic-quant.glsl
 ./shaders/lstm-cell-forward.glsl
 ./shaders/maxpool-2x2.glsl
@@ -360,7 +368,10 @@ uv.lock
 ./shaders/spv/attention-output.spv
 ./shaders/spv/attention-prosody-modulation.spv
 ./shaders/spv/attention-q-similarity.spv
+./shaders/spv/attention-qkv-merge.spv
+./shaders/spv/attention-qkv-split.spv
 ./shaders/spv/attention-scores.spv
+./shaders/spv/attention-transpose-bhsd-bshd.spv
 ./shaders/spv/avgpool2d-backward-new.spv
 ./shaders/spv/avgpool2d-backward.spv
 ./shaders/spv/avgpool2d-forward.spv
@@ -376,6 +387,8 @@ uv.lock
 ./shaders/spv/bridge-temporal-weights.spv
 ./shaders/spv/capsule-project.spv
 ./shaders/spv/cast-f32-f16.spv
+./shaders/spv/chunked-sw-attention-backward.spv
+./shaders/spv/chunked-sw-attention.spv
 ./shaders/spv/circular-shift.spv
 ./shaders/spv/contrastive-gradient.spv
 ./shaders/spv/contrastive-loss.spv
@@ -488,6 +501,7 @@ uv.lock
 ./shaders/spv/loss-cross-entropy.spv
 ./shaders/spv/loss-fn-bce.spv
 ./shaders/spv/loss-mse.spv
+./shaders/spv/loss-policy-grad-fused.spv
 ./shaders/spv/lsq-stochastic-quant.spv
 ./shaders/spv/lstm-cell-forward.spv
 ./shaders/spv/maxpool-2x2.spv
@@ -1098,7 +1112,10 @@ shaders/attention-output-t5.glsl
 shaders/attention-output.glsl
 shaders/attention-prosody-modulation.glsl
 shaders/attention-q-similarity.glsl
+shaders/attention-qkv-merge.glsl
+shaders/attention-qkv-split.glsl
 shaders/attention-scores.glsl
+shaders/attention-transpose-bhsd-bshd.glsl
 shaders/avgpool2d-backward.glsl
 shaders/avgpool2d-forward.glsl
 shaders/bandit-solve.glsl
@@ -1113,6 +1130,8 @@ shaders/bridge-spike-to-continuous.glsl
 shaders/bridge-temporal-weights.glsl
 shaders/capsule-project.glsl
 shaders/cast-f32-f16.glsl
+shaders/chunked-sw-attention-backward.glsl
+shaders/chunked-sw-attention.glsl
 shaders/circular-shift.glsl
 shaders/contrastive-gradient.glsl
 shaders/contrastive-loss.glsl
@@ -1225,6 +1244,7 @@ shaders/loss-cosine.glsl
 shaders/loss-cross-entropy.glsl
 shaders/loss-fn-bce.glsl
 shaders/loss-mse.glsl
+shaders/loss-policy-grad-fused.glsl
 shaders/lsq-stochastic-quant.glsl
 shaders/lstm-cell-forward.glsl
 shaders/maxpool-2x2.glsl
@@ -1374,7 +1394,10 @@ shaders/spv/attention-output-t5.spv
 shaders/spv/attention-output.spv
 shaders/spv/attention-prosody-modulation.spv
 shaders/spv/attention-q-similarity.spv
+shaders/spv/attention-qkv-merge.spv
+shaders/spv/attention-qkv-split.spv
 shaders/spv/attention-scores.spv
+shaders/spv/attention-transpose-bhsd-bshd.spv
 shaders/spv/avgpool2d-backward-new.spv
 shaders/spv/avgpool2d-backward.spv
 shaders/spv/avgpool2d-forward.spv
@@ -1390,6 +1413,8 @@ shaders/spv/bridge-spike-to-continuous.spv
 shaders/spv/bridge-temporal-weights.spv
 shaders/spv/capsule-project.spv
 shaders/spv/cast-f32-f16.spv
+shaders/spv/chunked-sw-attention-backward.spv
+shaders/spv/chunked-sw-attention.spv
 shaders/spv/circular-shift.spv
 shaders/spv/contrastive-gradient.spv
 shaders/spv/contrastive-loss.spv
@@ -1502,6 +1527,7 @@ shaders/spv/loss-cosine.spv
 shaders/spv/loss-cross-entropy.spv
 shaders/spv/loss-fn-bce.spv
 shaders/spv/loss-mse.spv
+shaders/spv/loss-policy-grad-fused.spv
 shaders/spv/lsq-stochastic-quant.spv
 shaders/spv/lstm-cell-forward.spv
 shaders/spv/maxpool-2x2.spv
@@ -1606,7 +1632,6 @@ tests/test_attention.py
 tests/test_attention_long_sequence.py
 tests/test_autograd_cpu.py
 tests/test_backward.py
-tests/test_bandit_gpu.py
 tests/test_batch_embedder.py
 tests/test_batch_vsa_encoder.py
 tests/test_batchnorm2d.py
@@ -1644,7 +1669,6 @@ tests/test_integration_vulkan.py
 tests/test_learning.py
 tests/test_lora.py
 tests/test_loss_cpu.py
-tests/test_losses_gpu.py
 tests/test_lr_scheduler.py
 tests/test_lstm.py
 tests/test_memory_operations.py

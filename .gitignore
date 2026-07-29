@@ -39,3 +39,5 @@ torch_api/__pycache__/serialization.cpython-312.pyc
 grilly.egg-info/SOURCES.txt
 grilly.egg-info/requires.txt
 grilly.egg-info/PKG-INFO
+/torch_api
+/grilly.egg-info
